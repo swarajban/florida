@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typescript:
+    name: Scheduler + server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 26
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm typecheck
+      - run: pnpm test
+
+  floridakit-linux:
+    name: FloridaKit (Linux)
+    runs-on: ubuntu-latest
+    container: swift:6.4-bookworm
+    steps:
+      - uses: actions/checkout@v5
+      - run: swift --version
+      - run: swift build --build-tests
+        working-directory: apple/FloridaKit
+      - run: swift test
+        working-directory: apple/FloridaKit
+
+  apple:
+    name: Apple apps (Xcode)
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+      - run: brew install xcodegen
+      - run: xcodebuild -version
+      - run: xcodegen generate
+        working-directory: apple
+        env:
+          DEVELOPMENT_TEAM: ""
+      - name: Build Florida-macOS
+        run: >
+          xcodebuild build
+          -project Florida.xcodeproj
+          -scheme Florida-macOS
+          -destination 'platform=macOS'
+          -derivedDataPath DerivedData
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+          | xcbeautify --renderer github-actions
+        working-directory: apple
+      - name: Build Florida-iOS (simulator)
+        run: >
+          xcodebuild build
+          -project Florida.xcodeproj
+          -scheme Florida-iOS
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath DerivedData
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+          | xcbeautify --renderer github-actions
+        working-directory: apple
+      - name: FloridaKit tests (macOS)
+        run: swift test
+        working-directory: apple/FloridaKit

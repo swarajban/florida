@@ -1,0 +1,142 @@
+# @florida/server
+
+Hono + Drizzle API for Florida: stores schedules, projects and tasks, mirrors Google Calendar
+events, runs `@florida/scheduler` after every change, and serves the result to the apps.
+
+- Production: Node 26 on Fly, Neon Postgres via postgres.js.
+- Tests: the same app against PGlite (in-process Postgres), no network.
+
+## Local development
+
+```sh
+pnpm install
+pnpm build                                   # scheduler first; the server imports its dist
+cp server/.env.example server/.env           # fill in the values below
+pnpm --filter @florida/server test
+pnpm --filter @florida/server typecheck
+set -a; source server/.env; set +a
+pnpm --filter @florida/server exec tsx src/migrate.ts
+pnpm --filter @florida/server seed
+pnpm --filter @florida/server dev
+```
+
+After editing `src/db/schema.ts`, run `pnpm --filter @florida/server db:generate` and commit the
+new file under `server/drizzle/`.
+
+## Setup
+
+### 1. Neon
+
+Create a project at <https://neon.tech>. On the dashboard, copy the **pooled** connection string
+(the host contains `-pooler`) and use it as `DATABASE_URL`. The server sets `prepare: false`
+because the pooled endpoint runs PgBouncer in transaction mode.
+
+### 2. Google Cloud
+
+1. Create a project at <https://console.cloud.google.com>.
+2. **APIs & Services → Library**: enable **Google Calendar API**.
+3. **APIs & Services → OAuth consent screen**: fill in the app name and your email. Add the scope
+   `https://www.googleapis.com/auth/calendar`.
+4. **APIs & Services → Credentials → Create credentials → OAuth client ID**, type **Web
+   application**. Add the authorized redirect URI `${PUBLIC_URL}/auth/google/callback`, e.g.
+   `https://florida.fly.dev/auth/google/callback`. Copy the client ID and secret.
+
+Work account caveat: a Google Workspace organisation often blocks third-party apps that request
+calendar access. If the consent screen for your work account refuses, create the Cloud project
+*inside the workspace* (signed in as the work account) and set the consent screen's user type to
+**Internal**. Connecting a personal Gmail account to an Internal app is not possible, so you may
+end up with two OAuth clients; only one can be configured per deployment, so in that case run the
+external one and ask the workspace admin to allow-list it.
+
+### 3. Secrets
+
+```sh
+openssl rand -hex 32   # API_TOKEN
+openssl rand -hex 32   # TOKEN_ENCRYPTION_KEY
+```
+
+### 4. Deploy to Fly
+
+From the repository root (`fly.toml` lives there and points at `server/Dockerfile`):
+
+```sh
+fly launch --no-deploy --copy-config --name florida --region lax
+fly secrets set \
+  DATABASE_URL='postgres://...-pooler.../neondb?sslmode=require' \
+  API_TOKEN='...' \
+  TOKEN_ENCRYPTION_KEY='...' \
+  GOOGLE_CLIENT_ID='...' \
+  GOOGLE_CLIENT_SECRET='...' \
+  PUBLIC_URL='https://florida.fly.dev'
+fly deploy
+```
+
+`fly deploy` builds the image, runs `node server/dist/migrate.js` as the release command, and
+starts one always-on `shared-cpu-1x` machine with a `/health` check.
+
+### 5. Seed and connect calendars
+
+```sh
+fly ssh console -C "node server/dist/seed.js"
+```
+
+This creates the schedules `work` (Mon–Fri 09:00–12:00, 13:00–17:00 Pacific) and `personal`
+(Mon–Fri 18:00–21:00, Sat–Sun 10:00–18:00 Pacific) and the project `inbox`.
+
+Then open these in a browser, signing in with the matching Google account each time:
+
+```
+https://florida.fly.dev/auth/google/start?label=work&key=<API_TOKEN>
+https://florida.fly.dev/auth/google/start?label=personal&key=<API_TOKEN>
+```
+
+Each connection stores the encrypted refresh token, lists the account's calendars (owner/writer
+calendars are selected by default), does a full sync of the last 30 days / next 365 days, and
+registers a push channel at `${PUBLIC_URL}/webhooks/google`. Channels are renewed every 6 h;
+calendars are re-synced every 60 min as a fallback and the scheduler reruns every 15 min.
+
+## API
+
+All `/api/*` routes need `Authorization: Bearer <API_TOKEN>`.
+
+```sh
+export PUBLIC_URL=https://florida.fly.dev API_TOKEN=...
+
+# Everything (first sync). Later pass the returned cursor: /api/sync?since=<cursor>
+curl -s "$PUBLIC_URL/api/sync" -H "authorization: Bearer $API_TOKEN" | jq .
+
+# Create or replace a task (the id is client-generated), get its placements back
+curl -s -X PUT "$PUBLIC_URL/api/tasks/$(uuidgen | tr A-Z a-z)" \
+  -H "authorization: Bearer $API_TOKEN" -H 'content-type: application/json' \
+  -d '{
+    "projectId": "inbox",
+    "title": "Write the quarterly report",
+    "durationMinutes": 90,
+    "minChunkMinutes": 30,
+    "priority": "high",
+    "deadlineType": "soft",
+    "dueAt": "2026-11-13T00:00:00Z"
+  }' | jq .
+
+curl -s -X DELETE "$PUBLIC_URL/api/tasks/<id>" -H "authorization: Bearer $API_TOKEN"
+curl -s -X POST "$PUBLIC_URL/api/schedule/run" -H "authorization: Bearer $API_TOKEN" | jq .
+curl -s "$PUBLIC_URL/api/google/accounts" -H "authorization: Bearer $API_TOKEN" | jq .
+curl -s -X PATCH "$PUBLIC_URL/api/calendars/<id>" -H "authorization: Bearer $API_TOKEN" \
+  -H 'content-type: application/json' -d '{"selected": false}'
+curl -s -X POST "$PUBLIC_URL/api/google/sync" -H "authorization: Bearer $API_TOKEN" | jq .
+```
+
+| Route | Purpose |
+| --- | --- |
+| `GET /health` | Liveness, no auth, no database access. |
+| `GET /api/sync?since=` | `{ cursor, schedules, projects, tasks, events, placements }`. The first four hold rows with `updatedAt > since` (all rows without `since`), including soft-deleted tombstones; `placements` is always complete. |
+| `PUT/DELETE /api/tasks/:id`, `/api/projects/:id`, `/api/schedules/:id` | Upsert / soft-delete, then rerun the scheduler. Responses include `scheduling: { placements, unscheduled, late }`. |
+| `POST /api/schedule/run` | Rerun the scheduler. |
+| `GET /api/google/accounts` | Accounts and calendars (never tokens). |
+| `PATCH /api/calendars/:id` | `{ selected }` toggles whether a calendar blocks time. |
+| `POST /api/google/sync` | Sync every selected calendar now, then reschedule. |
+| `GET /auth/google/start?label=&key=` | Browser entry point for connecting an account. |
+| `POST /webhooks/google` | Google push notifications (validated by channel id + token). |
+
+Dates cross the wire as ISO 8601 strings. Events keep `updatedAt` as the server's write time so
+sync cursors never miss a change.

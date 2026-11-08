@@ -1,0 +1,18 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+
+# Apple
+apple/*.xcodeproj
+apple/*.xcworkspace
+apple/**/xcuserdata/
+apple/**/.build/
+apple/**/.swiftpm/
+apple/**/DerivedData/
+.DS_Store
+
+# Amp working files
+.amp/
