@@ -1,0 +1,323 @@
+import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+import Testing
+@testable import FloridaKit
+
+@Suite struct SyncClientTests {
+    let config = ServerConfig(baseURL: URL(string: "https://florida.example.test")!, token: "secret-token")
+
+    func client(_ db: AppDatabase, _ transport: FakeTransport) -> SyncClient {
+        SyncClient(database: db, config: config, transport: transport)
+    }
+
+    // MARK: 5. Happy path
+
+    @Test func syncPushesInOrderThenPulls() async throws {
+        let db = try AppDatabase.inMemory()
+        // A prior pull left a cursor behind; the next pull must send it back as `since`.
+        try db.apply(SyncResponse(cursor: "2026-11-08T09:00:00.000Z", projects: [Fixtures.project()]))
+
+        var t1 = Fixtures.task(id: "t1", title: "first")
+        try db.saveTask(t1, now: Fixtures.instant("2026-11-08T10:00:00Z"))
+        try db.saveProject(Fixtures.project(id: "p2", sortOrder: 2), now: Fixtures.instant("2026-11-08T10:01:00Z"))
+        try db.deleteTask(id: "t-gone", now: Fixtures.instant("2026-11-08T10:02:00Z"))
+        let pending = try db.pendingWrites()
+        #expect(pending.count == 3)
+        let storedTaskBody = try #require(pending[0].body)
+
+        // Server echoes t1 with normalized fields and a new placement table.
+        t1.updatedAt = Fixtures.instant("2026-11-08T10:00:00.123Z")
+        t1.notes = "server normalized"
+        let afterT1 = SchedulingResult(placements: [Fixtures.piece(taskId: "t1", start: "2026-11-09T17:00:00Z", end: "2026-11-09T18:00:00Z")])
+        let serverProject = Fixtures.project(id: "p2", sortOrder: 2)
+        let afterDelete = SchedulingResult(placements: [Fixtures.piece(taskId: "t1", start: "2026-11-09T18:00:00Z", end: "2026-11-09T19:00:00Z")])
+        let pulled = SyncResponse(
+            cursor: "2026-11-08T10:05:00.000Z",
+            tasks: [Fixtures.task(id: "from-server")],
+            placements: [Fixtures.placement(id: "srv", taskId: "t1", start: "2026-11-09T20:00:00Z", end: "2026-11-09T21:00:00Z")])
+
+        let transport = FakeTransport([
+            .ok(try Fixtures.putResponse("task", t1, scheduling: afterT1)),
+            .ok(try Fixtures.putResponse("project", serverProject)),
+            .ok(try Fixtures.deleteResponse(scheduling: afterDelete)),
+            try .ok(pulled),
+        ])
+
+        let pushed = try await client(db, transport).sync()
+        #expect(pushed == 3)
+
+        let requests = transport.requests
+        try #require(requests.count == 4)
+
+        #expect(requests[0].method == "PUT")
+        #expect(requests[0].path == "/api/tasks/t1")
+        #expect(requests[0].headers["Authorization"] == "Bearer secret-token")
+        #expect(requests[0].headers["Content-Type"] == "application/json")
+        #expect(requests[0].body == storedTaskBody)
+        let sentWrite = try JSONCoding.decoder.decode(TaskWrite.self, from: try #require(requests[0].body))
+        #expect(sentWrite.title == "first")
+
+        #expect(requests[1].method == "PUT")
+        #expect(requests[1].path == "/api/projects/p2")
+        #expect(requests[1].headers["Authorization"] == "Bearer secret-token")
+        let sentProject = try JSONCoding.decoder.decode(ProjectWrite.self, from: try #require(requests[1].body))
+        #expect(sentProject.sortOrder == 2)
+
+        #expect(requests[2].method == "DELETE")
+        #expect(requests[2].path == "/api/tasks/t-gone")
+        #expect(requests[2].body == nil)
+        #expect(requests[2].headers["Authorization"] == "Bearer secret-token")
+
+        #expect(requests[3].method == "GET")
+        #expect(requests[3].path == "/api/sync")
+        #expect(requests[3].query == ["since": "2026-11-08T09:00:00.000Z"])
+        #expect(requests[3].headers["Authorization"] == "Bearer secret-token")
+
+        // Server's copy of t1 won; pending queue drained; pull applied.
+        let localT1 = try #require(try db.task(id: "t1"))
+        #expect(localT1.notes == "server normalized")
+        #expect(localT1.updatedAt == Fixtures.instant("2026-11-08T10:00:00.123Z"))
+        #expect(try db.pendingWrites().isEmpty)
+        #expect(try db.task(id: "from-server") != nil)
+        #expect(try db.cursor() == "2026-11-08T10:05:00.000Z")
+        // The pull's placements are the final table (they replaced the ones from the PUT/DELETE responses).
+        #expect(try db.placements(in: Fixtures.allTime).map(\.id) == ["srv"])
+    }
+
+    @Test func pushAppliesReturnedSchedulingPlacements() async throws {
+        let db = try AppDatabase.inMemory()
+        try db.saveTask(Fixtures.task(id: "t1"), now: Fixtures.t0)
+        let scheduling = SchedulingResult(placements: [
+            Fixtures.piece(taskId: "t1", start: "2026-11-09T17:00:00Z", end: "2026-11-09T18:00:00Z"),
+            Fixtures.piece(taskId: "t1", start: "2026-11-10T17:00:00Z", end: "2026-11-10T18:00:00Z"),
+        ])
+        let transport = FakeTransport([.ok(try Fixtures.putResponse("task", Fixtures.task(id: "t1"), scheduling: scheduling))])
+
+        let pushed = try await client(db, transport).push()
+        #expect(pushed == 1)
+        let placements = try db.placements(in: Fixtures.allTime)
+        #expect(placements.count == 2)
+        #expect(placements.map(\.taskId) == ["t1", "t1"])
+        #expect(placements.map(\.startAt) == [Fixtures.instant("2026-11-09T17:00:00Z"), Fixtures.instant("2026-11-10T17:00:00Z")])
+        #expect(try db.pendingWrites().isEmpty)
+    }
+
+    @Test func pullWithoutCursorOmitsSince() async throws {
+        let db = try AppDatabase.inMemory()
+        let transport = FakeTransport([try .ok(SyncResponse(cursor: "first", tasks: [Fixtures.task(id: "t1")]))])
+        try await client(db, transport).pull()
+        let request = try #require(transport.requests.first)
+        #expect(request.path == "/api/sync")
+        #expect(request.query.isEmpty)
+        #expect(request.query["since"] == nil)
+        #expect(try db.cursor() == "first")
+        #expect(try db.task(id: "t1") != nil)
+    }
+
+    @Test func pushWithEmptyQueueSendsNothing() async throws {
+        let db = try AppDatabase.inMemory()
+        let transport = FakeTransport([])
+        let pushed = try await client(db, transport).push()
+        #expect(pushed == 0)
+        #expect(transport.requests.isEmpty)
+    }
+
+    // MARK: 6. Failure handling
+
+    @Test func fourHundredDropsWriteAndContinues() async throws {
+        let db = try AppDatabase.inMemory()
+        try db.saveTask(Fixtures.task(id: "bad"), now: Fixtures.t0)
+        try db.saveTask(Fixtures.task(id: "good"), now: Fixtures.t0)
+        let transport = FakeTransport([
+            .error(400, "unknown projectId inbox"),
+            .ok(try Fixtures.putResponse("task", Fixtures.task(id: "good"))),
+            try .ok(SyncResponse(cursor: "c")),
+        ])
+
+        let client = client(db, transport)
+        let pushed = try await client.sync()
+        #expect(pushed == 1)
+        #expect(transport.requests.map(\.path) == ["/api/tasks/bad", "/api/tasks/good", "/api/sync"])
+        #expect(try db.pendingWrites().isEmpty, "both the rejected and the accepted write leave the queue")
+
+        let rejected = await client.lastRejectedWrites
+        #expect(rejected.count == 1)
+        #expect(rejected.first?.write.entityId == "bad")
+        if case .http(let status, let body)? = rejected.first?.error {
+            #expect(status == 400)
+            #expect(body.contains("unknown projectId"))
+        } else {
+            Issue.record("expected .http error, got \(String(describing: rejected.first?.error))")
+        }
+
+        // The local row is still there (we don't roll back local state); only the queue entry is gone.
+        #expect(try db.task(id: "bad") != nil)
+    }
+
+    @Test func fiveHundredStopsAndKeepsRemainingRows() async throws {
+        let db = try AppDatabase.inMemory()
+        try db.saveTask(Fixtures.task(id: "a"), now: Fixtures.t0)
+        try db.saveTask(Fixtures.task(id: "b"), now: Fixtures.t0)
+        try db.saveTask(Fixtures.task(id: "c"), now: Fixtures.t0)
+        let transport = FakeTransport([
+            .ok(try Fixtures.putResponse("task", Fixtures.task(id: "a"))),
+            .error(500, "internal server error"),
+            // Must never be consumed.
+            .ok(try Fixtures.putResponse("task", Fixtures.task(id: "c"))),
+        ])
+
+        let client = client(db, transport)
+        await #expect(throws: SyncError.self) {
+            try await client.sync()
+        }
+        #expect(transport.requests.map(\.path) == ["/api/tasks/a", "/api/tasks/b"], "stops at the 500; no pull")
+        #expect(try db.pendingWrites().map(\.entityId) == ["b", "c"])
+        #expect(await client.lastRejectedWrites.isEmpty)
+    }
+
+    @Test func transportErrorStopsAndKeepsRows() async throws {
+        let db = try AppDatabase.inMemory()
+        try db.saveTask(Fixtures.task(id: "a"), now: Fixtures.t0)
+        let transport = FakeTransport([.failure(NetworkDown())])
+
+        do {
+            try await client(db, transport).sync()
+            Issue.record("expected a transport error")
+        } catch let error as SyncError {
+            guard case .transport(let underlying) = error else {
+                Issue.record("expected .transport, got \(error)")
+                return
+            }
+            #expect(underlying is NetworkDown)
+        }
+        #expect(try db.pendingWrites().map(\.entityId) == ["a"])
+    }
+
+    @Test func unauthorizedThrowsAndKeepsRows() async throws {
+        let db = try AppDatabase.inMemory()
+        try db.saveTask(Fixtures.task(id: "a"), now: Fixtures.t0)
+        try db.saveTask(Fixtures.task(id: "b"), now: Fixtures.t0)
+        let transport = FakeTransport([.error(401, "unauthorized")])
+
+        do {
+            try await client(db, transport).sync()
+            Issue.record("expected .unauthorized")
+        } catch let error as SyncError {
+            guard case .unauthorized = error else {
+                Issue.record("expected .unauthorized, got \(error)")
+                return
+            }
+        }
+        #expect(transport.requests.count == 1)
+        #expect(try db.pendingWrites().map(\.entityId) == ["a", "b"])
+    }
+
+    @Test func unauthorizedOnPullThrows() async throws {
+        let db = try AppDatabase.inMemory()
+        let transport = FakeTransport([.error(401, "unauthorized")])
+        do {
+            try await client(db, transport).pull()
+            Issue.record("expected .unauthorized")
+        } catch let error as SyncError {
+            guard case .unauthorized = error else {
+                Issue.record("expected .unauthorized, got \(error)")
+                return
+            }
+        }
+        #expect(try db.cursor() == nil)
+    }
+
+    @Test func malformedSuccessBodyIsADecodingError() async throws {
+        let db = try AppDatabase.inMemory()
+        try db.saveTask(Fixtures.task(id: "a"), now: Fixtures.t0)
+        let transport = FakeTransport([.json(status: 200, body: Data("not json".utf8))])
+        do {
+            _ = try await client(db, transport).push()
+            Issue.record("expected .decoding")
+        } catch let error as SyncError {
+            guard case .decoding = error else {
+                Issue.record("expected .decoding, got \(error)")
+                return
+            }
+        }
+        // The write stays queued: the server may well have accepted it, but we could not confirm.
+        #expect(try db.pendingWrites().map(\.entityId) == ["a"])
+    }
+
+    @Test func acceptedWriteDoesNotClobberNewerLocalEdit() async throws {
+        // A save that lands while the push is in flight must not be overwritten by the server's echo
+        // of the older version. We simulate this by saving again inside the fake transport's turn.
+        let db = try AppDatabase.inMemory()
+        var task = Fixtures.task(id: "t1", title: "v1")
+        try db.saveTask(task, now: Fixtures.t0)
+        let serverEcho = Fixtures.task(id: "t1", title: "v1")
+
+        final class SaveDuringPush: HTTPTransport, @unchecked Sendable {
+            let db: AppDatabase
+            let body: Data
+            init(db: AppDatabase, body: Data) { self.db = db; self.body = body }
+            func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+                var newer = Fixtures.task(id: "t1", title: "v2")
+                newer.updatedAt = Fixtures.instant("2026-11-08T12:00:00Z")
+                try db.saveTask(newer, now: Fixtures.instant("2026-11-08T12:00:00Z"))
+                return (body, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+            }
+        }
+        task.title = "v2"
+
+        let transport = SaveDuringPush(db: db, body: try Fixtures.putResponse("task", serverEcho))
+        let pushed = try await SyncClient(database: db, config: config, transport: transport).push()
+        #expect(pushed == 1)
+        #expect(try db.task(id: "t1")?.title == "v2", "the newer local edit survives")
+        let pending = try db.pendingWrites()
+        #expect(pending.count == 1, "the newer edit is still queued for the next push")
+        let body = try JSONCoding.decoder.decode(TaskWrite.self, from: try #require(pending.first?.body))
+        #expect(body.title == "v2")
+    }
+
+    // MARK: Scheduler endpoints
+
+    @Test func runSchedulerPostsAndAppliesPlacements() async throws {
+        let db = try AppDatabase.inMemory()
+        try db.apply(SyncResponse(cursor: "c", placements: [
+            Fixtures.placement(id: "old", taskId: "t1", start: "2026-11-09T17:00:00Z", end: "2026-11-09T18:00:00Z"),
+        ]))
+        let result = SchedulingResult(placements: [Fixtures.piece(taskId: "t1", start: "2026-11-11T09:00:00Z", end: "2026-11-11T10:00:00Z")])
+        let transport = FakeTransport([try .ok(result)])
+
+        try await client(db, transport).runScheduler()
+        let request = try #require(transport.requests.first)
+        #expect(request.method == "POST")
+        #expect(request.path == "/api/schedule/run")
+        #expect(request.headers["Authorization"] == "Bearer secret-token")
+        let placements = try db.placements(in: Fixtures.allTime)
+        #expect(placements.count == 1)
+        #expect(placements.first?.startAt == Fixtures.instant("2026-11-11T09:00:00Z"))
+        #expect(placements.first?.id != "old")
+    }
+
+    @Test func triggerGoogleSyncPostsAndAppliesPlacements() async throws {
+        let db = try AppDatabase.inMemory()
+        let result = SchedulingResult(placements: [Fixtures.piece(taskId: "t1", start: "2026-11-11T09:00:00Z", end: "2026-11-11T10:00:00Z")])
+        let transport = FakeTransport([try .ok(result)])
+
+        try await client(db, transport).triggerGoogleSync()
+        let request = try #require(transport.requests.first)
+        #expect(request.method == "POST")
+        #expect(request.path == "/api/google/sync")
+        #expect(try db.placements(in: Fixtures.allTime).map(\.taskId) == ["t1"])
+    }
+
+    // MARK: Token store
+
+    @Test func inMemoryTokenStoreRoundTrips() throws {
+        let store = InMemoryTokenStore()
+        #expect(try store.load() == nil)
+        try store.save(config)
+        #expect(try store.load() == config)
+        try store.clear()
+        #expect(try store.load() == nil)
+    }
+}
