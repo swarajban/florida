@@ -17,7 +17,7 @@ public enum SyncError: Error, Sendable {
 /// Pushes queued local writes to the server and pulls its changes into the `AppDatabase`.
 /// Being an actor, overlapping `sync()` calls run one after the other.
 public actor SyncClient {
-    private let database: AppDatabase
+    let database: AppDatabase
     private let config: ServerConfig
     private let transport: any HTTPTransport
 
@@ -126,7 +126,7 @@ public actor SyncClient {
 
     // MARK: - HTTP helpers
 
-    private func makeRequest(
+    func makeRequest(
         method: String, path: String, id: String? = nil, queryItems: [URLQueryItem] = [], body: Data? = nil
     ) -> URLRequest {
         var url = config.baseURL.appendingPathComponent(path)
@@ -157,7 +157,7 @@ public actor SyncClient {
     }
 
     /// Sends the request and decodes a 2xx body; maps 401 and other statuses to `SyncError`.
-    private func perform<T: Decodable>(_ request: URLRequest) async throws -> T {
+    func perform<T: Decodable>(_ request: URLRequest) async throws -> T {
         let (data, response) = try await send(request)
         switch response.statusCode {
         case 200..<300:

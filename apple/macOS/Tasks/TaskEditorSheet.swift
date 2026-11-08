@@ -1,0 +1,130 @@
+import FloridaKit
+import SwiftUI
+
+/// Edits every user-settable field of a task. Save writes locally and closes; nothing waits on
+/// the server.
+struct TaskEditorSheet: View {
+    @Environment(AppModel.self) private var model
+    @State private var draft: TaskItem
+    @State private var hasDue: Bool
+    @State private var dueAt: Date
+    @State private var hasStart: Bool
+    @State private var startAt: Date
+    @State private var hasPinnedStart: Bool
+    @State private var pinnedStart: Date
+    @FocusState private var isTitleFocused: Bool
+
+    init(task: TaskItem) {
+        let calendar = Calendar.autoupdatingCurrent
+        let today = calendar.startOfDay(for: Date())
+        let defaultDue = calendar.date(bySettingHour: 17, minute: 0, second: 0, of: today) ?? today
+        let nextHour = calendar.date(bySetting: .minute, value: 0, of: Date().addingTimeInterval(3600)) ?? Date()
+        _draft = State(initialValue: task)
+        _hasDue = State(initialValue: task.dueAt != nil)
+        _dueAt = State(initialValue: task.dueAt ?? defaultDue)
+        _hasStart = State(initialValue: task.startAt != nil)
+        _startAt = State(initialValue: task.startAt ?? today)
+        _hasPinnedStart = State(initialValue: task.pinnedStart != nil)
+        _pinnedStart = State(initialValue: task.pinnedStart ?? nextHour)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                TextField("Title", text: $draft.title)
+                    .focused($isTitleFocused)
+                TextField("Notes", text: notes, axis: .vertical)
+                    .lineLimit(3...8)
+                Picker("Project", selection: $draft.projectId) {
+                    ForEach(model.projects) { project in
+                        Text(project.name).tag(project.id)
+                    }
+                }
+                LabeledContent("Duration") {
+                    HStack {
+                        TextField("Minutes", value: $draft.durationMinutes, format: .number)
+                            .frame(width: 60)
+                            .multilineTextAlignment(.trailing)
+                        Stepper("Minutes", value: $draft.durationMinutes, in: 5...960, step: 5)
+                            .labelsHidden()
+                        Text(DateText.duration(minutes: draft.durationMinutes))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Picker("Priority", selection: $draft.priority) {
+                    ForEach(Priority.allCases, id: \.self) { priority in
+                        Text(priority.displayName).tag(priority)
+                    }
+                }
+                Picker("Deadline", selection: $draft.deadlineType) {
+                    ForEach(DeadlineType.allCases, id: \.self) { type in
+                        Text(type.displayName).tag(type)
+                    }
+                }
+                OptionalDateRow(title: "Due", isOn: $hasDue, date: $dueAt)
+                OptionalDateRow(title: "Not before", isOn: $hasStart, date: $startAt)
+                OptionalDateRow(title: "Pinned start", isOn: $hasPinnedStart, date: $pinnedStart)
+            }
+            .formStyle(.grouped)
+            Divider()
+            HStack {
+                Button("Cancel") {
+                    model.editorTask = nil
+                }
+                .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Save") {
+                    save()
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            .padding()
+        }
+        .frame(width: 480, height: 520)
+        .onAppear {
+            isTitleFocused = true
+        }
+    }
+
+    private var notes: Binding<String> {
+        Binding(
+            get: { draft.notes ?? "" },
+            set: { draft.notes = $0.isEmpty ? nil : $0 })
+    }
+
+    private func save() {
+        var task = draft
+        task.title = task.title.trimmingCharacters(in: .whitespaces)
+        task.durationMinutes = max(5, task.durationMinutes)
+        task.dueAt = hasDue ? dueAt : nil
+        task.startAt = hasStart ? startAt : nil
+        task.pinnedStart = hasPinnedStart ? pinnedStart : nil
+        if task.dueAt == nil {
+            task.deadlineType = .none
+        } else if task.deadlineType == .none {
+            task.deadlineType = .soft
+        }
+        model.save(task)
+        model.editorTask = nil
+    }
+}
+
+/// A checkbox that enables a date-and-time picker.
+struct OptionalDateRow: View {
+    let title: String
+    @Binding var isOn: Bool
+    @Binding var date: Date
+
+    var body: some View {
+        HStack {
+            Toggle(title, isOn: $isOn)
+                .toggleStyle(.checkbox)
+            Spacer()
+            DatePicker(title, selection: $date, displayedComponents: [.date, .hourAndMinute])
+                .labelsHidden()
+                .disabled(!isOn)
+        }
+    }
+}

@@ -1,0 +1,35 @@
+import SwiftUI
+
+/// The `g d` sheet: a graphical date picker that jumps the view.
+struct GoToDateView: View {
+    @Environment(AppModel.self) private var model
+    @State private var date = Date()
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Go to date")
+                .font(.headline)
+            DatePicker("Date", selection: $date, displayedComponents: .date)
+                .datePickerStyle(.graphical)
+                .labelsHidden()
+            HStack {
+                Button("Cancel") {
+                    model.isGoToDateOpen = false
+                }
+                .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Go") {
+                    model.goTo(day: date)
+                    model.isGoToDateOpen = false
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(20)
+        .frame(width: 320)
+        .onAppear {
+            date = model.selectedDay
+        }
+    }
+}

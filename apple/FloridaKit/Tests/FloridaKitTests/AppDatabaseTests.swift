@@ -321,6 +321,16 @@ import Testing
         #expect(agenda.events.map(\.id) == ["today"])
         #expect(agenda.placements.map(\.placement.id) == ["p2", "p1"])
         #expect(agenda.placements.map(\.task.title) == ["Call", "Write report"])
+
+        // The widgets' range query joins the same way; the orphan is dropped there too.
+        let twoDays = Fixtures.instant("2026-11-09T00:00:00Z")..<Fixtures.instant("2026-11-11T00:00:00Z")
+        #expect(try db.scheduledBlocks(in: twoDays).map(\.placement.id) == ["p2", "p1", "p3"])
+
+        // Grouping keeps every placement, orphans included, ordered by start within a task.
+        let byTask = try db.placementsByTask()
+        #expect(byTask["t1"]?.map(\.id) == ["p1", "p3"])
+        #expect(byTask["t2"]?.map(\.id) == ["p2"])
+        #expect(byTask["missing"]?.map(\.id) == ["p4"])
     }
 
     // MARK: Observation

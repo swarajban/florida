@@ -64,22 +64,24 @@ extension AppDatabase {
         try writer.read { db in try Self.events(db, in: range) }
     }
 
+    /// Placements overlapping `range` joined to their tasks, by start. Placements whose task is
+    /// missing locally are left out.
+    public func scheduledBlocks(in range: Range<Date>) throws -> [ScheduledBlock] {
+        try writer.read { db in try Self.scheduledBlocks(db, in: range) }
+    }
+
+    /// Every placement, grouped by task id and ordered by start within each task. The table only
+    /// holds the scheduler's horizon, so the task list can derive each task's scheduled time from
+    /// it without a date filter.
+    public func placementsByTask() throws -> [String: [Placement]] {
+        let placements = try writer.read { db in try Placement.order(Column("startAt")).fetchAll(db) }
+        return Dictionary(grouping: placements, by: \.taskId)
+    }
+
     /// Visible events and scheduled task blocks for the calendar day containing `day`.
     public func agenda(for day: Date, calendar: Calendar) throws -> DayAgenda {
-        let start = calendar.startOfDay(for: day)
-        let end = calendar.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
-        let range = start..<end
-        return try writer.read { db in
-            let events = try Self.events(db, in: range)
-            let placements = try Self.placements(db, in: range)
-            let taskIds = Set(placements.map(\.taskId))
-            let tasks = try TaskItem.filter(ids: taskIds).fetchAll(db)
-            let tasksById = Dictionary(uniqueKeysWithValues: tasks.map { ($0.id, $0) })
-            let blocks = placements.compactMap { placement in
-                tasksById[placement.taskId].map { ScheduledBlock(placement: placement, task: $0) }
-            }
-            return DayAgenda(day: start, events: events, placements: blocks)
-        }
+        let range = Self.dayRange(containing: day, calendar: calendar)
+        return try writer.read { db in try Self.agenda(db, in: range) }
     }
 
     /// The `since` cursor returned by the last applied `GET /api/sync`, if any.
@@ -91,12 +93,36 @@ extension AppDatabase {
         CASE priority WHEN 'asap' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END
         """
 
+    /// Start of the calendar day containing `day` up to the start of the next one.
+    static func dayRange(containing day: Date, calendar: Calendar) -> Range<Date> {
+        let start = calendar.startOfDay(for: day)
+        let end = calendar.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
+        return start..<end
+    }
+
     static func placements(_ db: Database, in range: Range<Date>) throws -> [Placement] {
         try Placement.fetchAll(db, sql: """
             SELECT * FROM placement
             WHERE startAt < ? AND endAt > ?
             ORDER BY startAt
             """, arguments: [range.upperBound, range.lowerBound])
+    }
+
+    static func scheduledBlocks(_ db: Database, in range: Range<Date>) throws -> [ScheduledBlock] {
+        let placements = try placements(db, in: range)
+        let tasks = try TaskItem.filter(ids: Set(placements.map(\.taskId))).fetchAll(db)
+        let tasksById = Dictionary(uniqueKeysWithValues: tasks.map { ($0.id, $0) })
+        return placements.compactMap { placement in
+            tasksById[placement.taskId].map { ScheduledBlock(placement: placement, task: $0) }
+        }
+    }
+
+    /// `range` must be one calendar day, as `dayRange(containing:calendar:)` returns it.
+    static func agenda(_ db: Database, in range: Range<Date>) throws -> DayAgenda {
+        DayAgenda(
+            day: range.lowerBound,
+            events: try events(db, in: range),
+            placements: try scheduledBlocks(db, in: range))
     }
 
     static func events(_ db: Database, in range: Range<Date>) throws -> [CalendarEvent] {

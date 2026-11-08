@@ -1,0 +1,62 @@
+import FloridaKit
+import Foundation
+
+/// Read-only access to the shared store for the timeline providers. The database is opened once
+/// per extension process; every loader returns nil when it cannot be opened or read, and the
+/// views show a placeholder for nil.
+enum WidgetStore {
+    static let database: AppDatabase? = try? AppDatabase(path: AppDatabase.defaultURL().path)
+    static let calendar = Calendar.autoupdatingCurrent
+
+    /// Timed events and task blocks overlapping `range`, by start. All-day events are left out
+    /// because they have no meaningful "next" time.
+    static func timedBlocks(in range: Range<Date>) -> [WidgetBlock]? {
+        guard let database else { return nil }
+        do {
+            let projects = try projectsById(database)
+            let events = try database.events(in: range)
+                .filter { !$0.allDay }
+                .map(WidgetBlock.init(event:))
+            let blocks = try database.scheduledBlocks(in: range)
+                .map { WidgetBlock(block: $0, project: projects[$0.task.projectId]) }
+            return (events + blocks).sorted(by: WidgetBlock.byStart)
+        } catch {
+            return nil
+        }
+    }
+
+    /// Everything on the calendar day containing `day`: all-day events first, then timed events
+    /// and task blocks by start.
+    static func agenda(for day: Date) -> [WidgetBlock]? {
+        guard let database else { return nil }
+        do {
+            let projects = try projectsById(database)
+            let agenda = try database.agenda(for: day, calendar: calendar)
+            let events = agenda.events.map(WidgetBlock.init(event:))
+            let blocks = agenda.placements.map { WidgetBlock(block: $0, project: projects[$0.task.projectId]) }
+            return (events + blocks).sorted(by: WidgetBlock.byStart)
+        } catch {
+            return nil
+        }
+    }
+
+    /// Open tasks in `openTasks()` order with their late flag, plus the total count.
+    static func openTasks(limit: Int) -> (count: Int, tasks: [WidgetTask])? {
+        guard let database else { return nil }
+        do {
+            let projects = try projectsById(database)
+            let tasks = try database.openTasks()
+            let placements = try database.placementsByTask()
+            let rows = tasks.prefix(limit).map { task in
+                WidgetTask(task: task, placements: placements[task.id] ?? [], project: projects[task.projectId])
+            }
+            return (tasks.count, rows)
+        } catch {
+            return nil
+        }
+    }
+
+    private static func projectsById(_ database: AppDatabase) throws -> [String: Project] {
+        Dictionary(uniqueKeysWithValues: try database.projects().map { ($0.id, $0) })
+    }
+}
