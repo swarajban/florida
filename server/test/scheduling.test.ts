@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { EventRow, ProjectRow, ScheduleRow, TaskRow } from '../src/db/schema.js'
+import type { EventRow, CategoryRow, ScheduleRow, TaskRow } from '../src/db/schema.js'
 import { buildSchedulerInput } from '../src/scheduling.js'
 
 const NOW = new Date('2026-11-09T17:00:00Z')
@@ -18,14 +18,14 @@ function scheduleRow(id: string, over: Partial<ScheduleRow> = {}): ScheduleRow {
   }
 }
 
-function projectRow(id: string, scheduleId: string, over: Partial<ProjectRow> = {}): ProjectRow {
+function categoryRow(id: string, scheduleId: string, over: Partial<CategoryRow> = {}): CategoryRow {
   return { id, name: id, color: null, scheduleId, sortOrder: 0, createdAt: T0, updatedAt: T0, deletedAt: null, ...over }
 }
 
-function taskRow(id: string, projectId: string, over: Partial<TaskRow> = {}): TaskRow {
+function taskRow(id: string, categoryId: string, over: Partial<TaskRow> = {}): TaskRow {
   return {
     id,
-    projectId,
+    categoryId,
     title: id,
     notes: null,
     durationMinutes: 60,
@@ -71,7 +71,7 @@ describe('buildSchedulerInput', () => {
   it('maps schedules, tasks and the horizon', () => {
     const input = buildSchedulerInput({
       ...base,
-      projects: [projectRow('inbox', 'work')],
+      categories: [categoryRow('inbox', 'work')],
       tasks: [
         taskRow('t1', 'inbox', {
           minChunkMinutes: 30,
@@ -102,10 +102,10 @@ describe('buildSchedulerInput', () => {
     ])
   })
 
-  it("falls back to the project's schedule and lets the task override win", () => {
+  it("falls back to the category's schedule and lets the task override win", () => {
     const input = buildSchedulerInput({
       ...base,
-      projects: [projectRow('inbox', 'work')],
+      categories: [categoryRow('inbox', 'work')],
       tasks: [taskRow('fallback', 'inbox'), taskRow('override', 'inbox', { scheduleId: 'personal' })],
       events: [],
     })
@@ -119,13 +119,13 @@ describe('buildSchedulerInput', () => {
     const input = buildSchedulerInput({
       ...base,
       schedules: [scheduleRow('work'), scheduleRow('old', { deletedAt: NOW })],
-      projects: [projectRow('inbox', 'work'), projectRow('archived', 'work', { deletedAt: NOW })],
+      categories: [categoryRow('inbox', 'work'), categoryRow('archived', 'work', { deletedAt: NOW })],
       tasks: [
         taskRow('open', 'inbox'),
         taskRow('deleted', 'inbox', { deletedAt: NOW }),
         taskRow('done', 'inbox', { completedAt: NOW }),
         taskRow('orphan', 'archived'),
-        taskRow('no-project', 'missing'),
+        taskRow('no-category', 'missing'),
       ],
       events: [],
     })
@@ -136,7 +136,7 @@ describe('buildSchedulerInput', () => {
   it('turns only live, timed, opaque, not-declined events inside the horizon into busy time', () => {
     const input = buildSchedulerInput({
       ...base,
-      projects: [],
+      categories: [],
       tasks: [],
       events: [
         eventRow('busy'),

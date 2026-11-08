@@ -13,7 +13,7 @@ export const schedules = pgTable('schedules', {
   deletedAt: ts('deleted_at'),
 })
 
-export const projects = pgTable('projects', {
+export const categories = pgTable('categories', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   color: text('color'),
@@ -30,9 +30,9 @@ export const tasks = pgTable(
   'tasks',
   {
     id: text('id').primaryKey(),
-    projectId: text('project_id')
+    categoryId: text('category_id')
       .notNull()
-      .references(() => projects.id),
+      .references(() => categories.id),
     title: text('title').notNull(),
     notes: text('notes'),
     durationMinutes: integer('duration_minutes').notNull(),
@@ -126,7 +126,7 @@ export const events = pgTable(
 )
 
 export type ScheduleRow = typeof schedules.$inferSelect
-export type ProjectRow = typeof projects.$inferSelect
+export type CategoryRow = typeof categories.$inferSelect
 export type TaskRow = typeof tasks.$inferSelect
 export type PlacementRow = typeof placements.$inferSelect
 export type GoogleAccountRow = typeof googleAccounts.$inferSelect

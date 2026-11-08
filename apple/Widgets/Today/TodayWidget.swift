@@ -127,7 +127,7 @@ struct TodayWidgetView: View {
     }
 }
 
-/// Time column, color bar, title; task blocks are tinted with their project color.
+/// Time column, color bar, title; task blocks are tinted with their category color.
 struct TodayRow: View {
     let block: WidgetBlock
     let now: Date

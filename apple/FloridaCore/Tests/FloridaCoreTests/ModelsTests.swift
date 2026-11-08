@@ -24,8 +24,8 @@ import Testing
           "schedules": [{"id":"work","name":"Work","timeZone":"America/Los_Angeles",
             "windows":[{"days":[1,2,3,4,5],"start":"09:00","end":"17:00"}],
             "createdAt":"2026-11-01T00:00:00.000Z","updatedAt":"2026-11-01T00:00:00.000Z","deletedAt":null}],
-          "projects": [],
-          "tasks": [{"id":"t1","projectId":"inbox","title":"Review","notes":null,"durationMinutes":60,
+          "categories": [],
+          "tasks": [{"id":"t1","categoryId":"inbox","title":"Review","notes":null,"durationMinutes":60,
             "minChunkMinutes":null,"priority":"high","deadlineType":"soft","dueAt":"2026-11-10T00:00:00.000Z",
             "startAt":null,"scheduleId":null,"pinnedStart":null,"completedMinutes":0,"completedAt":null,
             "createdAt":"2026-11-08T00:00:00.000Z","updatedAt":"2026-11-08T00:00:00.000Z","deletedAt":null}],
@@ -46,7 +46,7 @@ import Testing
 
     @Test func encodesTaskWriteWithNulls() throws {
         let task = TaskItem(
-            id: "t1", projectId: "inbox", title: "Review", durationMinutes: 60, priority: .asap,
+            id: "t1", categoryId: "inbox", title: "Review", durationMinutes: 60, priority: .asap,
             createdAt: Date(timeIntervalSince1970: 0), updatedAt: Date(timeIntervalSince1970: 0))
         let data = try JSONCoding.encoder.encode(TaskWrite(task))
         let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])

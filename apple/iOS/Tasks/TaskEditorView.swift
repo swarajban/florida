@@ -24,16 +24,16 @@ struct TaskEditorView: View {
                         .lineLimit(2...6)
                 }
 
-                Section("Project") {
-                    Picker("Project", selection: $draft.projectId) {
-                        ForEach(model.projects) { project in
+                Section("Category") {
+                    Picker("Category", selection: $draft.categoryId) {
+                        ForEach(model.categories) { category in
                             HStack(spacing: 8) {
                                 Circle()
-                                    .fill(Color.project(project))
+                                    .fill(Color.category(category))
                                     .frame(width: 10, height: 10)
-                                Text(project.name)
+                                Text(category.name)
                             }
-                            .tag(project.id)
+                            .tag(category.id)
                         }
                     }
                 }

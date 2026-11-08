@@ -5,7 +5,7 @@ import SwiftUI
 // app, so the few it needs are repeated here.
 
 extension Color {
-    /// Parses a CSS-style "#RRGGBB" (or "#RGB") string as stored in `Project.color`; nil for anything else.
+    /// Parses a CSS-style "#RRGGBB" (or "#RGB") string as stored in `Category.color`; nil for anything else.
     init?(hex: String) {
         var text = hex.trimmingCharacters(in: .whitespaces)
         if text.hasPrefix("#") {
@@ -23,7 +23,7 @@ extension Color {
 }
 
 extension WidgetBlock {
-    /// Project color for task blocks; a neutral secondary for events and colorless projects.
+    /// Category color for task blocks; a neutral secondary for events and colorless categories.
     var tint: Color {
         switch kind {
         case .event: return .secondary

@@ -162,7 +162,7 @@ describe('transport and auth', () => {
       'delete_task',
       'get_agenda',
       'get_task',
-      'list_projects',
+      'list_categories',
       'list_tasks',
       'run_scheduler',
       'update_task',
@@ -170,14 +170,14 @@ describe('transport and auth', () => {
     const create = tools.find((t) => t.name === 'create_task')
     expect(create?.inputSchema.type).toBe('object')
     expect(Object.keys(create?.inputSchema.properties ?? {})).toEqual(
-      expect.arrayContaining(['projectId', 'title', 'durationMinutes', 'priority', 'dueAt', 'id']),
+      expect.arrayContaining(['categoryId', 'title', 'durationMinutes', 'priority', 'dueAt', 'id']),
     )
   })
 
   it('reports invalid tool arguments as a tool error that names the field', async () => {
     // The SDK validates arguments against the zod shape and returns the failure as an isError
     // result (not a JSON-RPC error), so the model can read it and retry.
-    const result = await call('create_task', { projectId: 'inbox', title: 'x', durationMinutes: 0 })
+    const result = await call('create_task', { categoryId: 'inbox', title: 'x', durationMinutes: 0 })
     expect(result.isError).toBe(true)
     expect(result.content[0]?.text).toContain('durationMinutes')
     expect(result.structuredContent).toBeUndefined()
@@ -188,15 +188,15 @@ describe('task tools', () => {
   let createdId = ''
   const dueAt = at(upcomingMonday(), 17 * 60).toISOString()
 
-  it('list_projects returns the seeded project', async () => {
-    const { projects } = await data<{ projects: { id: string; scheduleId: string }[] }>('list_projects')
-    expect(projects).toEqual([expect.objectContaining({ id: 'inbox', scheduleId: 'work' })])
+  it('list_categories returns the seeded category', async () => {
+    const { categories } = await data<{ categories: { id: string; scheduleId: string }[] }>('list_categories')
+    expect(categories).toEqual([expect.objectContaining({ id: 'inbox', scheduleId: 'work' })])
   })
 
   it('create_task generates an id, derives the deadline type, schedules, and notifies clients', async () => {
     const before = notices
     const out = await data<{ task: TaskView; scheduling: { unscheduled: unknown[]; late: unknown[] } }>('create_task', {
-      projectId: 'inbox',
+      categoryId: 'inbox',
       title: 'Write the report',
       notes: 'bring the numbers',
       dueAt,
@@ -217,22 +217,22 @@ describe('task tools', () => {
   })
 
   it('create_task without dueAt defaults to no deadline and honours a client id', async () => {
-    const out = await data<{ task: TaskView }>('create_task', { id: 'mcp-fixed', projectId: 'inbox', title: 'Undated' })
+    const out = await data<{ task: TaskView }>('create_task', { id: 'mcp-fixed', categoryId: 'inbox', title: 'Undated' })
     expect(out.task).toMatchObject({ id: 'mcp-fixed', deadlineType: 'none', dueAt: null, completedMinutes: 0 })
   })
 
-  it('create_task rejects an unknown project as a tool error', async () => {
-    const result = await call('create_task', { projectId: 'nope', title: 'x' })
+  it('create_task rejects an unknown category as a tool error', async () => {
+    const result = await call('create_task', { categoryId: 'nope', title: 'x' })
     expect(result.isError).toBe(true)
-    expect(result.content[0]?.text).toBe('unknown projectId nope')
+    expect(result.content[0]?.text).toBe('unknown categoryId nope')
     expect(result.structuredContent).toBeUndefined()
   })
 
-  it('list_tasks orders dated tasks first, filters by project, and attaches placements', async () => {
+  it('list_tasks orders dated tasks first, filters by category, and attaches placements', async () => {
     const { tasks: all } = await data<{ tasks: TaskView[] }>('list_tasks')
     expect(all.map((t) => t.id)).toEqual([createdId, 'mcp-fixed'])
     expect(all[0]?.placements).toHaveLength(1)
-    const { tasks: none } = await data<{ tasks: TaskView[] }>('list_tasks', { projectId: 'other' })
+    const { tasks: none } = await data<{ tasks: TaskView[] }>('list_tasks', { categoryId: 'other' })
     expect(none).toEqual([])
   })
 
@@ -313,7 +313,7 @@ describe('get_agenda', () => {
       // Unselected calendar: never shown.
       { ...base, calendarId: 'cal-off', id: 'ev-off', googleId: 'g5', summary: 'Hidden', startAt: at(monday, 12 * 60), endAt: at(monday, 13 * 60), allDay: false },
     ])
-    await data('create_task', { id: 'pinned', projectId: 'inbox', title: 'Pinned block', durationMinutes: 60, pinnedStart: at(monday, 13 * 60).toISOString() })
+    await data('create_task', { id: 'pinned', categoryId: 'inbox', title: 'Pinned block', durationMinutes: 60, pinnedStart: at(monday, 13 * 60).toISOString() })
   })
 
   it('returns the zoned day: all-day events first, then timed events and task blocks', async () => {
@@ -376,9 +376,9 @@ describe('official client', () => {
       expect(client.getServerVersion()).toMatchObject({ name: 'florida' })
       const { tools } = await client.listTools()
       expect(tools.map((t) => t.name)).toContain('get_agenda')
-      const result = await client.callTool({ name: 'list_projects' })
+      const result = await client.callTool({ name: 'list_categories' })
       expect(result.isError).toBeFalsy()
-      expect((result.structuredContent as { projects: { id: string }[] }).projects.map((p) => p.id)).toEqual(['inbox'])
+      expect((result.structuredContent as { categories: { id: string }[] }).categories.map((p) => p.id)).toEqual(['inbox'])
     } finally {
       await client.close()
     }

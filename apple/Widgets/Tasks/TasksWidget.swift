@@ -15,9 +15,9 @@ struct TasksEntry: TimelineEntry {
         let samples: [(String, Priority)] = [("Reply to Jane", .asap), ("Draft Q4 plan", .high), ("Book flights", .medium)]
         let tasks = samples.map { title, priority in
             let task = TaskItem(
-                id: title, projectId: "", title: title, durationMinutes: 30, priority: priority,
+                id: title, categoryId: "", title: title, durationMinutes: 30, priority: priority,
                 deadlineType: .soft, dueAt: date.addingTimeInterval(86_400), createdAt: date, updatedAt: date)
-            return WidgetTask(task: task, placements: [], project: nil)
+            return WidgetTask(task: task, placements: [], category: nil)
         }
         return TasksEntry(date: date, openCount: 7, tasks: tasks, available: true)
     }

@@ -33,17 +33,17 @@ struct EventRow: View {
     }
 }
 
-/// A scheduled task block in the day timeline: time column, project color, title, pin glyph.
+/// A scheduled task block in the day timeline: time column, category color, title, pin glyph.
 struct BlockRow: View {
     let block: ScheduledBlock
-    let project: Project?
+    let category: Category?
     let now: Date
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             TimeColumn(start: block.placement.startAt, end: block.placement.endAt)
             RoundedRectangle(cornerRadius: 2)
-                .fill(Color.project(project))
+                .fill(Color.category(category))
                 .frame(width: 3)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
@@ -58,7 +58,7 @@ struct BlockRow: View {
                 HStack(spacing: 4) {
                     Image(systemName: block.task.priority.symbolName)
                         .foregroundStyle(block.task.priority.tint)
-                    Text(project?.name ?? "No project")
+                    Text(category?.name ?? "No category")
                     Text("·")
                     Text(Formatting.duration(minutes: block.task.durationMinutes))
                 }

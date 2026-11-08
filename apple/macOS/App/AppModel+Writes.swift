@@ -93,7 +93,7 @@ extension AppModel {
     }
 
     /// Creates a task from quick-add text. Returns false (with a status message) when nothing
-    /// could be created: no title, or no project in the store yet.
+    /// could be created: no title, or no category in the store yet.
     @discardableResult
     func createTask(from draft: QuickAddDraft) -> Bool {
         let title = draft.title.trimmingCharacters(in: .whitespaces)
@@ -101,14 +101,14 @@ extension AppModel {
             statusMessage = "Type a title for the task"
             return false
         }
-        guard let project = resolveProject(hint: draft.projectHint) else {
-            statusMessage = "No projects yet — sync with the server first"
+        guard let category = resolveCategory(hint: draft.categoryHint) else {
+            statusMessage = "No categories yet — sync with the server first"
             return false
         }
         let now = Date()
         let task = TaskItem(
             id: UUID().uuidString.lowercased(),
-            projectId: project.id,
+            categoryId: category.id,
             title: title,
             notes: draft.notes,
             durationMinutes: draft.durationMinutes ?? Self.defaultDurationMinutes,
@@ -124,23 +124,23 @@ extension AppModel {
         return true
     }
 
-    /// Matches a `#hint` to a project name case-insensitively, treating "-" and "_" as spaces:
-    /// exact match first, then prefix. Without a hint or a match: the project named "Inbox",
-    /// else the first project.
-    func resolveProject(hint: String?) -> Project? {
+    /// Matches a `#hint` to a category name case-insensitively, treating "-" and "_" as spaces:
+    /// exact match first, then prefix. Without a hint or a match: the category named "Inbox",
+    /// else the first category.
+    func resolveCategory(hint: String?) -> Category? {
         if let hint {
-            let wanted = Self.normalizedProjectName(hint)
-            if let exact = projects.first(where: { Self.normalizedProjectName($0.name) == wanted }) {
+            let wanted = Self.normalizedCategoryName(hint)
+            if let exact = categories.first(where: { Self.normalizedCategoryName($0.name) == wanted }) {
                 return exact
             }
-            if let prefix = projects.first(where: { Self.normalizedProjectName($0.name).hasPrefix(wanted) }) {
+            if let prefix = categories.first(where: { Self.normalizedCategoryName($0.name).hasPrefix(wanted) }) {
                 return prefix
             }
         }
-        return projects.first { $0.name.caseInsensitiveCompare("Inbox") == .orderedSame } ?? projects.first
+        return categories.first { $0.name.caseInsensitiveCompare("Inbox") == .orderedSame } ?? categories.first
     }
 
-    static func normalizedProjectName(_ name: String) -> String {
+    static func normalizedCategoryName(_ name: String) -> String {
         name.lowercased()
             .replacingOccurrences(of: "-", with: " ")
             .replacingOccurrences(of: "_", with: " ")

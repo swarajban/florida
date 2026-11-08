@@ -7,8 +7,8 @@ export interface ParseTaskContext {
   now: Date
   /** IANA zone the text should be interpreted in. */
   timeZone: string
-  /** Live projects; the parser picks `projectId` from these or returns null. */
-  projects: { id: string; name: string }[]
+  /** Live categories; the parser picks `categoryId` from these or returns null. */
+  categories: { id: string; name: string }[]
 }
 
 /** A task as Claude understood it; the client turns it into a `PUT /api/tasks/:id` body. */
@@ -22,7 +22,7 @@ export interface TaskDraft {
   dueAt: string | null
   startAt: string | null
   pinnedStart: string | null
-  projectId: string | null
+  categoryId: string | null
   /** One sentence on how the text was read, for the UI to show next to the draft. */
   rationale: string
 }
@@ -43,7 +43,7 @@ const draftSchema = z.object({
   dueAt: instant.nullable(),
   startAt: instant.nullable(),
   pinnedStart: instant.nullable(),
-  projectId: z.string().nullable(),
+  categoryId: z.string().nullable(),
   rationale: z.string(),
 })
 
@@ -60,7 +60,7 @@ export const TASK_DRAFT_JSON_SCHEMA: JsonSchema = {
     dueAt: { type: ['string', 'null'], description: 'ISO 8601 instant with offset, or null' },
     startAt: { type: ['string', 'null'], description: 'ISO 8601 instant before which the task must not start, or null' },
     pinnedStart: { type: ['string', 'null'], description: 'ISO 8601 instant when the task must happen exactly, or null' },
-    projectId: { type: ['string', 'null'], description: 'One of the given project ids, or null when none fits' },
+    categoryId: { type: ['string', 'null'], description: 'One of the given category ids, or null when none fits' },
     rationale: { type: 'string', description: 'One sentence explaining the interpretation' },
   },
   required: [
@@ -73,7 +73,7 @@ export const TASK_DRAFT_JSON_SCHEMA: JsonSchema = {
     'dueAt',
     'startAt',
     'pinnedStart',
-    'projectId',
+    'categoryId',
     'rationale',
   ],
   additionalProperties: false,
@@ -86,8 +86,8 @@ export function buildPrompt(text: string, ctx: ParseTaskContext): { system: stri
   const parts = localParts(ctx.now.getTime(), ctx.timeZone)
   const weekday = WEEKDAYS[weekdayOf(parts)] ?? 'unknown weekday'
   const local = `${parts.year}-${pad(parts.month)}-${pad(parts.day)} ${pad(parts.hour)}:${pad(parts.minute)}`
-  const projectList =
-    ctx.projects.length === 0 ? '(none)' : ctx.projects.map((p) => `- id "${p.id}": ${p.name}`).join('\n')
+  const categoryList =
+    ctx.categories.length === 0 ? '(none)' : ctx.categories.map((p) => `- id "${p.id}": ${p.name}`).join('\n')
 
   const system = [
     'You turn one line a user typed into a structured task for a personal auto-scheduling calendar.',
@@ -102,9 +102,9 @@ export function buildPrompt(text: string, ctx: ParseTaskContext): { system: stri
     '- Words like asap or urgent mean priority asap; otherwise default to medium unless the text says high or low.',
     '- Keep the title short and strip the parsed metadata from it; put leftover detail in notes.',
     '- Estimate durationMinutes when none is given (typical quick task 30, meeting prep 45, writing 90).',
-    '- Choose projectId only from the list below; null when nothing fits.',
-    'Projects:',
-    projectList,
+    '- Choose categoryId only from the list below; null when nothing fits.',
+    'Categories:',
+    categoryList,
   ].join('\n')
 
   return { system, user: text }
@@ -121,10 +121,10 @@ export class ClaudeTaskParser implements TaskParser {
     const prompt = buildPrompt(text, ctx)
     const raw = await requestJson(this.config, { ...prompt, schema: TASK_DRAFT_JSON_SCHEMA }, this.fetchImpl)
     const draft = draftSchema.parse(raw)
-    const knownProject = draft.projectId !== null && ctx.projects.some((p) => p.id === draft.projectId)
+    const knownCategory = draft.categoryId !== null && ctx.categories.some((p) => p.id === draft.categoryId)
     return {
       ...draft,
-      projectId: knownProject ? draft.projectId : null,
+      categoryId: knownCategory ? draft.categoryId : null,
       // A deadline type without a date (or vice versa) is contradictory; the date wins.
       deadlineType: draft.dueAt === null ? 'none' : draft.deadlineType === 'none' ? 'soft' : draft.deadlineType,
     }

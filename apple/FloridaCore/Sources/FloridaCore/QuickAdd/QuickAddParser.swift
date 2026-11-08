@@ -1,8 +1,8 @@
 import Foundation
 
 /// What one line of quick-add text said about a task. Every field except `title` is nil when the
-/// text did not mention it; the caller supplies its own defaults (inbox project, default duration,
-/// medium priority) and resolves `projectHint` against real projects when building a `TaskItem`.
+/// text did not mention it; the caller supplies its own defaults (inbox category, default duration,
+/// medium priority) and resolves `categoryHint` against real categories when building a `TaskItem`.
 public struct QuickAddDraft: Hashable, Sendable {
     public var title: String
     public var durationMinutes: Int?
@@ -14,15 +14,15 @@ public struct QuickAddDraft: Hashable, Sendable {
     public var startAt: Date?
     /// Fixed start from an explicit clock time without a by/due/after keyword: "at 3pm", "tue 10am".
     public var pinnedStart: Date?
-    /// Text after `#`, e.g. "work" or "personal-finances"; matching it to a project is the caller's job.
-    public var projectHint: String?
+    /// Text after `#`, e.g. "work" or "personal-finances"; matching it to a category is the caller's job.
+    public var categoryHint: String?
     /// Text after the first ` // ` or ` -- ` separator, untouched by the token grammar.
     public var notes: String?
 
     public init(
         title: String = "", durationMinutes: Int? = nil, priority: Priority? = nil,
         deadlineType: DeadlineType? = nil, dueAt: Date? = nil, startAt: Date? = nil,
-        pinnedStart: Date? = nil, projectHint: String? = nil, notes: String? = nil
+        pinnedStart: Date? = nil, categoryHint: String? = nil, notes: String? = nil
     ) {
         self.title = title
         self.durationMinutes = durationMinutes
@@ -31,7 +31,7 @@ public struct QuickAddDraft: Hashable, Sendable {
         self.dueAt = dueAt
         self.startAt = startAt
         self.pinnedStart = pinnedStart
-        self.projectHint = projectHint
+        self.categoryHint = categoryHint
         self.notes = notes
     }
 }
@@ -47,7 +47,7 @@ public struct QuickAddDraft: Hashable, Sendable {
 /// - Priority: `!asap` `!urgent` `!high` `!h` `!med` `!medium` `!m` `!low` `!l`, or `p1`…`p4`
 ///   (asap, high, medium, low). A bare `asap` / `urgent` as the first or last word of the title
 ///   also means asap; in the middle of a sentence it is left alone.
-/// - Project: `#slug` (letters, digits, `_`, `-`). The first one wins and is returned as `projectHint`.
+/// - Category: `#slug` (letters, digits, `_`, `-`). The first one wins and is returned as `categoryHint`.
 /// - Dates: `today` `eod` `tomorrow` `tmrw` `tmr` `eow` (this Friday), `mon`…`sunday` (the next one
 ///   strictly after today), `next week` (Monday after the coming Sunday), `next fri`, `11/20`,
 ///   `11/20/2026`, `2026-11-20`, `nov 20`, `nov 20th`, `20 nov`, `nov 20 2026`. Month/day dates
@@ -75,8 +75,8 @@ public enum QuickAddParser {
         while i < tokens.count {
             let word = scanner.words[i]
 
-            if draft.projectHint == nil, let slug = QuickAddScanner.projectSlug(tokens[i]) {
-                draft.projectHint = slug
+            if draft.categoryHint == nil, let slug = QuickAddScanner.categorySlug(tokens[i]) {
+                draft.categoryHint = slug
                 i += 1
                 continue
             }
@@ -131,7 +131,7 @@ public enum QuickAddParser {
             i += 1
         }
 
-        // "asap: reply to Jane", "reply to Jane asap" — but not "the asap project".
+        // "asap: reply to Jane", "reply to Jane asap" — but not "the asap category".
         if draft.priority == nil, let first = title.first, let last = title.last {
             if QuickAddScanner.isBareUrgency(first) {
                 title.removeFirst()
@@ -233,7 +233,7 @@ struct QuickAddScanner {
     /// Units accepted as their own token after a number ("90 min"); a lone "m" is too easy to hit.
     static let spelledMinuteUnits: Set<String> = ["min", "mins", "minute", "minutes"]
 
-    // MARK: - Notes, project, priority, title
+    // MARK: - Notes, category, priority, title
 
     /// Splits at the first standalone `//` or `--` token. Notes keep their original text, trimmed.
     static func splitNotes(_ text: String) -> (body: Substring, notes: String?) {
@@ -245,7 +245,7 @@ struct QuickAddScanner {
     }
 
     /// `#slug` with slug in `[A-Za-z0-9_-]+`; returns the slug as typed.
-    static func projectSlug(_ token: String) -> String? {
+    static func categorySlug(_ token: String) -> String? {
         guard token.hasPrefix("#") else { return nil }
         let slug = token.dropFirst()
         guard !slug.isEmpty,

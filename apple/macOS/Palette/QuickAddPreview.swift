@@ -5,7 +5,7 @@ import SwiftUI
 /// that will fill the gaps, so the user sees the task before pressing Return.
 struct QuickAddPreview: View {
     let draft: QuickAddDraft
-    let project: Project?
+    let category: Category?
     let calendar: Calendar
 
     private struct Chip: Identifiable {
@@ -18,7 +18,7 @@ struct QuickAddPreview: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if draft.title.isEmpty {
-                Text("Type a title; add 2h, !high, #project, by fri, at 3pm, after mon, // notes")
+                Text("Type a title; add 2h, !high, #category, by fri, at 3pm, after mon, // notes")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -58,10 +58,10 @@ struct QuickAddPreview: View {
         chips.append(Chip(
             id: "priority", symbol: (draft.priority ?? .medium).symbolName,
             text: (draft.priority ?? .medium).displayName, isDefault: draft.priority == nil))
-        if let project {
-            chips.append(Chip(id: "project", symbol: "folder", text: project.name, isDefault: draft.projectHint == nil))
-        } else if let hint = draft.projectHint {
-            chips.append(Chip(id: "project", symbol: "folder.badge.questionmark", text: "#\(hint)", isDefault: false))
+        if let category {
+            chips.append(Chip(id: "category", symbol: "folder", text: category.name, isDefault: draft.categoryHint == nil))
+        } else if let hint = draft.categoryHint {
+            chips.append(Chip(id: "category", symbol: "folder.badge.questionmark", text: "#\(hint)", isDefault: false))
         }
         if let dueAt = draft.dueAt {
             let kind = draft.deadlineType == .hard ? "Due" : "By"

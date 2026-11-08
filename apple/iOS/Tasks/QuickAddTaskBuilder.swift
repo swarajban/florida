@@ -1,37 +1,37 @@
 import FloridaKit
 import Foundation
 
-/// Turns a `QuickAddDraft` into a `TaskItem` with the app's defaults, and matches `#project`
-/// hints against the real projects.
+/// Turns a `QuickAddDraft` into a `TaskItem` with the app's defaults, and matches `#category`
+/// hints against the real categories.
 enum QuickAddTaskBuilder {
     static let defaultDurationMinutes = 30
 
-    /// The project a `#hint` names, or nil when none matches. Case-insensitive; hyphens and
+    /// The category a `#hint` names, or nil when none matches. Case-insensitive; hyphens and
     /// underscores count as spaces; an exact name wins over a prefix match.
-    static func matchProject(hint: String, in projects: [Project]) -> Project? {
+    static func matchCategory(hint: String, in categories: [Category]) -> Category? {
         let needle = normalize(hint)
         guard !needle.isEmpty else { return nil }
-        if let exact = projects.first(where: { normalize($0.name) == needle }) {
+        if let exact = categories.first(where: { normalize($0.name) == needle }) {
             return exact
         }
-        return projects.first { normalize($0.name).hasPrefix(needle) }
+        return categories.first { normalize($0.name).hasPrefix(needle) }
     }
 
-    /// `matchProject` when the hint matches; otherwise the project named "Inbox", otherwise the
-    /// first project; nil only when there are no projects at all.
-    static func resolveProject(hint: String?, in projects: [Project]) -> Project? {
-        if let hint, let match = matchProject(hint: hint, in: projects) {
+    /// `matchCategory` when the hint matches; otherwise the category named "Inbox", otherwise the
+    /// first category; nil only when there are no categories at all.
+    static func resolveCategory(hint: String?, in categories: [Category]) -> Category? {
+        if let hint, let match = matchCategory(hint: hint, in: categories) {
             return match
         }
-        return projects.first { normalize($0.name) == "inbox" } ?? projects.first
+        return categories.first { normalize($0.name) == "inbox" } ?? categories.first
     }
 
     /// A new task from the draft: 30 minutes and medium priority unless the text said otherwise,
     /// a deadline only when a date was parsed, a client-generated lowercase UUID.
-    static func makeTask(from draft: QuickAddDraft, project: Project, now: Date) -> TaskItem {
+    static func makeTask(from draft: QuickAddDraft, category: Category, now: Date) -> TaskItem {
         TaskItem(
             id: UUID().uuidString.lowercased(),
-            projectId: project.id,
+            categoryId: category.id,
             title: draft.title,
             notes: draft.notes,
             durationMinutes: draft.durationMinutes ?? defaultDurationMinutes,

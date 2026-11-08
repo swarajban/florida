@@ -10,8 +10,8 @@ extension Schedule: @retroactive FetchableRecord, @retroactive PersistableRecord
     public static let databaseTableName = "schedule"
 }
 
-extension Project: @retroactive FetchableRecord, @retroactive PersistableRecord {
-    public static let databaseTableName = "project"
+extension Category: @retroactive FetchableRecord, @retroactive PersistableRecord {
+    public static let databaseTableName = "category"
 }
 
 extension TaskItem: @retroactive FetchableRecord, @retroactive PersistableRecord {
@@ -38,7 +38,7 @@ extension CalendarInfo: @retroactive FetchableRecord, @retroactive PersistableRe
 /// (entity, entityId); a later write replaces an earlier one.
 public struct PendingWrite: Codable, Hashable, Sendable, FetchableRecord, MutablePersistableRecord {
     public enum Entity: String, Codable, Hashable, Sendable {
-        case task, project, schedule
+        case task, category, schedule
     }
 
     public enum Op: String, Codable, Hashable, Sendable {
@@ -52,7 +52,7 @@ public struct PendingWrite: Codable, Hashable, Sendable, FetchableRecord, Mutabl
     public var entity: Entity
     public var entityId: String
     public var op: Op
-    /// JSON of `TaskWrite` / `ProjectWrite` / `ScheduleWrite` for `put`; nil for `delete`.
+    /// JSON of `TaskWrite` / `CategoryWrite` / `ScheduleWrite` for `put`; nil for `delete`.
     public var body: Data?
     public var createdAt: Date
 

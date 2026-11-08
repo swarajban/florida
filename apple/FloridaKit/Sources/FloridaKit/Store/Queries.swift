@@ -11,10 +11,10 @@ extension AppDatabase {
         }
     }
 
-    /// Live projects, by `sortOrder` then name.
-    public func projects() throws -> [Project] {
+    /// Live categories, by `sortOrder` then name.
+    public func categories() throws -> [Category] {
         try writer.read { db in
-            try Project.filter(Column("deletedAt") == nil).order(Column("sortOrder"), Column("name")).fetchAll(db)
+            try Category.filter(Column("deletedAt") == nil).order(Column("sortOrder"), Column("name")).fetchAll(db)
         }
     }
 
@@ -38,14 +38,14 @@ extension AppDatabase {
         }
     }
 
-    /// Live tasks of one project (completed ones included), in the same order as `openTasks()`.
-    public func tasks(inProject projectId: String) throws -> [TaskItem] {
+    /// Live tasks of one category (completed ones included), in the same order as `openTasks()`.
+    public func tasks(inCategory categoryId: String) throws -> [TaskItem] {
         try writer.read { db in
             try TaskItem.fetchAll(db, sql: """
                 SELECT * FROM task
-                WHERE deletedAt IS NULL AND projectId = ?
+                WHERE deletedAt IS NULL AND categoryId = ?
                 ORDER BY \(Self.priorityRankSQL), dueAt IS NULL, dueAt, createdAt
-                """, arguments: [projectId])
+                """, arguments: [categoryId])
         }
     }
 
@@ -182,20 +182,20 @@ extension AppDatabase {
         try saveTask(task, now: now)
     }
 
-    public func saveProject(_ project: Project, now: Date = Date()) throws {
-        var project = project
-        project.updatedAt = now
-        let body = try JSONCoding.encoder.encode(ProjectWrite(project))
+    public func saveCategory(_ category: Category, now: Date = Date()) throws {
+        var category = category
+        category.updatedAt = now
+        let body = try JSONCoding.encoder.encode(CategoryWrite(category))
         try writer.write { db in
-            try project.save(db)
-            try Self.enqueue(db, entity: .project, id: project.id, op: .put, body: body, now: now)
+            try category.save(db)
+            try Self.enqueue(db, entity: .category, id: category.id, op: .put, body: body, now: now)
         }
     }
 
-    public func deleteProject(id: String, now: Date = Date()) throws {
+    public func deleteCategory(id: String, now: Date = Date()) throws {
         try writer.write { db in
-            try db.execute(sql: "UPDATE project SET deletedAt = ?, updatedAt = ? WHERE id = ?", arguments: [now, now, id])
-            try Self.enqueue(db, entity: .project, id: id, op: .delete, body: nil, now: now)
+            try db.execute(sql: "UPDATE category SET deletedAt = ?, updatedAt = ? WHERE id = ?", arguments: [now, now, id])
+            try Self.enqueue(db, entity: .category, id: id, op: .delete, body: nil, now: now)
         }
     }
 
@@ -230,7 +230,7 @@ extension AppDatabase {
 
 extension AppDatabase {
     /// Merges a `GET /api/sync` response: upserts changed rows, drops tombstoned rows, replaces
-    /// the placement, account and calendar tables, and stores the cursor. Tasks, projects and
+    /// the placement, account and calendar tables, and stores the cursor. Tasks, categories and
     /// schedules with a queued local write are left alone; the local version is newer and will be pushed.
     public func apply(_ response: SyncResponse) throws {
         try writer.write { db in
@@ -243,11 +243,11 @@ extension AppDatabase {
                     try schedule.save(db)
                 }
             }
-            for project in response.projects where !pending.contains(.init(entity: .project, id: project.id)) {
-                if project.deletedAt != nil {
-                    try Project.deleteOne(db, id: project.id)
+            for category in response.categories where !pending.contains(.init(entity: .category, id: category.id)) {
+                if category.deletedAt != nil {
+                    try Category.deleteOne(db, id: category.id)
                 } else {
-                    try project.save(db)
+                    try category.save(db)
                 }
             }
             for task in response.tasks where !pending.contains(.init(entity: .task, id: task.id)) {

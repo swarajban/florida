@@ -4,14 +4,14 @@ import type { Interval, Schedule, SchedulerInput, SchedulerResult, Task } from '
 import { and, eq, getTableColumns, isNull, sql } from 'drizzle-orm'
 import type { Config } from './config.js'
 import type { Db } from './db/client.js'
-import { calendars, events, placements, projects, schedules, tasks } from './db/schema.js'
-import type { EventRow, ProjectRow, ScheduleRow, TaskRow } from './db/schema.js'
+import { calendars, events, placements, categories, schedules, tasks } from './db/schema.js'
+import type { EventRow, CategoryRow, ScheduleRow, TaskRow } from './db/schema.js'
 
 export interface SchedulerSources {
   now: Date
   horizonDays: number
   schedules: ScheduleRow[]
-  projects: ProjectRow[]
+  categories: CategoryRow[]
   tasks: TaskRow[]
   events: EventRow[]
 }
@@ -19,8 +19,8 @@ export interface SchedulerSources {
 /**
  * Maps database rows to scheduler input. Pure.
  *
- * A task uses its own `scheduleId` when set, otherwise its project's. Tasks that are deleted,
- * completed, or belong to a deleted project are skipped. Busy time is every live, timed, opaque,
+ * A task uses its own `scheduleId` when set, otherwise its category's. Tasks that are deleted,
+ * completed, or belong to a deleted category are skipped. Busy time is every live, timed, opaque,
  * not-declined event that overlaps [now, now + horizon).
  */
 export function buildSchedulerInput(src: SchedulerSources): SchedulerInput {
@@ -31,18 +31,18 @@ export function buildSchedulerInput(src: SchedulerSources): SchedulerInput {
     .filter((s) => s.deletedAt === null)
     .map((s) => ({ id: s.id, timeZone: s.timeZone, windows: s.windows }))
 
-  const projectSchedule = new Map(
-    src.projects.filter((p) => p.deletedAt === null).map((p) => [p.id, p.scheduleId] as const),
+  const categorySchedule = new Map(
+    src.categories.filter((p) => p.deletedAt === null).map((p) => [p.id, p.scheduleId] as const),
   )
 
   const openTasks: Task[] = []
   for (const t of src.tasks) {
     if (t.deletedAt !== null || t.completedAt !== null) continue
-    const projectScheduleId = projectSchedule.get(t.projectId)
-    if (projectScheduleId === undefined) continue
+    const categoryScheduleId = categorySchedule.get(t.categoryId)
+    if (categoryScheduleId === undefined) continue
     const task: Task = {
       id: t.id,
-      scheduleId: t.scheduleId ?? projectScheduleId,
+      scheduleId: t.scheduleId ?? categoryScheduleId,
       durationMinutes: t.durationMinutes,
       priority: t.priority,
       deadlineType: t.deadlineType,
@@ -93,7 +93,7 @@ export async function runScheduling(
     await tx.execute(sql.raw(SCHEDULER_LOCK_SQL))
 
     const scheduleRows = await tx.select().from(schedules).where(isNull(schedules.deletedAt))
-    const projectRows = await tx.select().from(projects).where(isNull(projects.deletedAt))
+    const categoryRows = await tx.select().from(categories).where(isNull(categories.deletedAt))
     const taskRows = await tx
       .select()
       .from(tasks)
@@ -109,7 +109,7 @@ export async function runScheduling(
         now,
         horizonDays: config.HORIZON_DAYS,
         schedules: scheduleRows,
-        projects: projectRows,
+        categories: categoryRows,
         tasks: taskRows,
         events: eventRows,
       }),

@@ -25,7 +25,7 @@ struct CommandPaletteView: View {
             Divider()
             switch model.palette.mode {
             case .quickAdd:
-                QuickAddPreview(draft: model.palette.draft, project: model.paletteProject, calendar: model.calendar)
+                QuickAddPreview(draft: model.palette.draft, category: model.paletteCategory, calendar: model.calendar)
             case .command:
                 PaletteResultList(count: model.palette.commands.count, selectedIndex: model.palette.selectedIndex) { index in
                     let command = model.palette.commands[index]

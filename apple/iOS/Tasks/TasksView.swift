@@ -1,7 +1,7 @@
 import FloridaKit
 import SwiftUI
 
-/// The Tasks tab: quick-add field on top, then open tasks grouped by project. Swipe right to
+/// The Tasks tab: quick-add field on top, then open tasks grouped by category. Swipe right to
 /// complete, left to delete, tap to edit, pull to sync.
 struct TasksView: View {
     @Environment(AppModel.self) private var model
@@ -12,7 +12,7 @@ struct TasksView: View {
         NavigationStack {
             List {
                 Section {
-                    QuickAddField(text: $quickAddText, projects: model.projects, calendar: model.calendar) { draft in
+                    QuickAddField(text: $quickAddText, categories: model.categories, calendar: model.calendar) { draft in
                         model.createTask(from: draft)
                     }
                     if model.needsSetup {
@@ -56,7 +56,7 @@ struct TasksView: View {
                     } header: {
                         HStack(spacing: 6) {
                             Circle()
-                                .fill(Color.project(section.project))
+                                .fill(Color.category(section.category))
                                 .frame(width: 10, height: 10)
                             Text(section.title)
                             Spacer()
@@ -77,26 +77,26 @@ struct TasksView: View {
         }
     }
 
-    /// Open tasks grouped by project in project order; tasks of an unknown project last.
+    /// Open tasks grouped by category in category order; tasks of an unknown category last.
     private var sections: [TaskSection] {
-        let grouped = Dictionary(grouping: model.openTasks, by: \.projectId)
-        var sections = model.projects.compactMap { project in
-            grouped[project.id].map { TaskSection(id: project.id, project: project, tasks: $0) }
+        let grouped = Dictionary(grouping: model.openTasks, by: \.categoryId)
+        var sections = model.categories.compactMap { category in
+            grouped[category.id].map { TaskSection(id: category.id, category: category, tasks: $0) }
         }
-        let known = Set(model.projects.map(\.id))
-        let orphans = model.openTasks.filter { !known.contains($0.projectId) }
+        let known = Set(model.categories.map(\.id))
+        let orphans = model.openTasks.filter { !known.contains($0.categoryId) }
         if !orphans.isEmpty {
-            sections.append(TaskSection(id: "no-project", project: nil, tasks: orphans))
+            sections.append(TaskSection(id: "no-category", category: nil, tasks: orphans))
         }
         return sections
     }
 }
 
-/// The open tasks of one project, in `openTasks()` order.
+/// The open tasks of one category, in `openTasks()` order.
 struct TaskSection: Identifiable {
     let id: String
-    let project: Project?
+    let category: Category?
     let tasks: [TaskItem]
 
-    var title: String { project?.name ?? "No project" }
+    var title: String { category?.name ?? "No category" }
 }

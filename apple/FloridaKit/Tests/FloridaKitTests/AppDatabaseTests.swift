@@ -11,7 +11,7 @@ import Testing
         let tables = try db.writer.read { db in
             try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
         }
-        for expected in ["schedule", "project", "task", "placement", "event", "googleAccount", "calendar", "syncState", "pendingWrite"] {
+        for expected in ["schedule", "category", "task", "placement", "event", "googleAccount", "calendar", "syncState", "pendingWrite"] {
             #expect(tables.contains(expected), "missing table \(expected)")
         }
 
@@ -50,8 +50,8 @@ import Testing
         #expect(FileManager.default.fileExists(atPath: path))
         let journalMode = try db.writer.read { db in try String.fetchOne(db, sql: "PRAGMA journal_mode") }
         #expect(journalMode?.lowercased() == "wal")
-        try db.saveProject(Fixtures.project(), now: Fixtures.t0)
-        #expect(try db.projects().count == 1)
+        try db.saveCategory(Fixtures.category(), now: Fixtures.t0)
+        #expect(try db.categories().count == 1)
     }
 
     // MARK: 2. apply(SyncResponse)
@@ -61,7 +61,7 @@ import Testing
         let first = SyncResponse(
             cursor: "2026-11-08T10:00:00.000Z",
             schedules: [Fixtures.schedule()],
-            projects: [Fixtures.project()],
+            categories: [Fixtures.category()],
             tasks: [Fixtures.task(id: "t1"), Fixtures.task(id: "t2")],
             events: [Fixtures.event(id: "e1", start: "2026-11-09T10:00:00Z", end: "2026-11-09T11:00:00Z")],
             placements: [Fixtures.placement(id: "p1", taskId: "t1", start: "2026-11-09T17:00:00Z", end: "2026-11-09T18:00:00Z")],
@@ -70,7 +70,7 @@ import Testing
         try db.apply(first)
 
         #expect(try db.schedules().map(\.id) == ["work"])
-        #expect(try db.projects().map(\.id) == ["inbox"])
+        #expect(try db.categories().map(\.id) == ["inbox"])
         #expect(try db.openTasks().map(\.id) == ["t1", "t2"])
         #expect(try db.events(in: Fixtures.allTime).map(\.id) == ["e1"])
         #expect(try db.placements(in: Fixtures.allTime).map(\.id) == ["p1"])
@@ -100,14 +100,14 @@ import Testing
         #expect(try db.calendars().map(\.id) == ["cal"])
         #expect(try db.cursor() == "2026-11-08T12:00:00.000Z")
 
-        // Schedules and projects were absent from the second diff and must survive.
+        // Schedules and categories were absent from the second diff and must survive.
         #expect(try db.schedules().count == 1)
-        #expect(try db.projects().count == 1)
+        #expect(try db.categories().count == 1)
     }
 
     @Test func applySyncResponseSkipsRowsWithPendingLocalWrites() throws {
         let db = try AppDatabase.inMemory()
-        try db.apply(SyncResponse(cursor: "c1", projects: [Fixtures.project()], tasks: [Fixtures.task(id: "t1"), Fixtures.task(id: "t2")]))
+        try db.apply(SyncResponse(cursor: "c1", categories: [Fixtures.category()], tasks: [Fixtures.task(id: "t1"), Fixtures.task(id: "t2")]))
 
         // Local edit to t1 not yet pushed; local delete of t2 not yet pushed.
         var local = try #require(try db.task(id: "t1"))
@@ -172,7 +172,7 @@ import Testing
             "medium-soon", "medium-later", "medium-nodue",
             "low-nodue",
         ])
-        #expect(try db.tasks(inProject: "inbox").map(\.id).contains("done"))
+        #expect(try db.tasks(inCategory: "inbox").map(\.id).contains("done"))
     }
 
     @Test func eventsFilterVisibilityAndRangeBoundaries() throws {
@@ -275,23 +275,23 @@ import Testing
         #expect(pending.first?.op == .put)
     }
 
-    @Test func projectAndScheduleWritesQueueAndCollapse() throws {
+    @Test func categoryAndScheduleWritesQueueAndCollapse() throws {
         let db = try AppDatabase.inMemory()
         try db.saveSchedule(Fixtures.schedule(id: "s1"), now: Fixtures.t0)
-        try db.saveProject(Fixtures.project(id: "p1", scheduleId: "s1"), now: Fixtures.t0)
-        try db.saveProject(Fixtures.project(id: "p1", scheduleId: "s1", sortOrder: 5), now: Fixtures.t0)
+        try db.saveCategory(Fixtures.category(id: "p1", scheduleId: "s1"), now: Fixtures.t0)
+        try db.saveCategory(Fixtures.category(id: "p1", scheduleId: "s1", sortOrder: 5), now: Fixtures.t0)
         try db.deleteSchedule(id: "s1", now: Fixtures.t0)
 
         let pending = try db.pendingWrites()
-        #expect(pending.map { "\($0.entity.rawValue):\($0.entityId):\($0.op.rawValue)" } == ["project:p1:put", "schedule:s1:delete"])
-        #expect(try db.projects().first?.sortOrder == 5)
+        #expect(pending.map { "\($0.entity.rawValue):\($0.entityId):\($0.op.rawValue)" } == ["category:p1:put", "schedule:s1:delete"])
+        #expect(try db.categories().first?.sortOrder == 5)
         #expect(try db.schedules().isEmpty, "deleted schedules are hidden from schedules()")
-        let body = try JSONCoding.decoder.decode(ProjectWrite.self, from: try #require(pending.first?.body))
+        let body = try JSONCoding.decoder.decode(CategoryWrite.self, from: try #require(pending.first?.body))
         #expect(body.sortOrder == 5)
 
-        try db.deleteProject(id: "p1", now: Fixtures.t0)
-        #expect(try db.projects().isEmpty)
-        #expect(try db.pendingWrites().filter { $0.entity == .project }.map(\.op) == [.delete])
+        try db.deleteCategory(id: "p1", now: Fixtures.t0)
+        #expect(try db.categories().isEmpty)
+        #expect(try db.pendingWrites().filter { $0.entity == .category }.map(\.op) == [.delete])
     }
 
     // MARK: 7. Agenda
@@ -300,7 +300,7 @@ import Testing
         let db = try AppDatabase.inMemory()
         try db.apply(SyncResponse(
             cursor: "c",
-            projects: [Fixtures.project()],
+            categories: [Fixtures.category()],
             tasks: [Fixtures.task(id: "t1", title: "Write report"), Fixtures.task(id: "t2", title: "Call")],
             events: [
                 Fixtures.event(id: "today", start: "2026-11-09T15:00:00Z", end: "2026-11-09T16:00:00Z"),

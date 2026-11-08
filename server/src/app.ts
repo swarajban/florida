@@ -13,7 +13,7 @@ import { ChangeBus } from './changes.js'
 import type { Config } from './config.js'
 import type { Db } from './db/client.js'
 import { defaultTimeZone, scheduleExists } from './db/queries.js'
-import { calendars, events, googleAccounts, placements, projects, schedules, tasks } from './db/schema.js'
+import { calendars, events, googleAccounts, placements, categories, schedules, tasks } from './db/schema.js'
 import { authorizationUrl, exchangeCode } from './google/client.js'
 import type { CalendarSyncService } from './google/sync.js'
 import { mountMcp } from './mcp.js'
@@ -61,7 +61,7 @@ const publicCalendarColumns = {
 const OAUTH_STATE_TTL = 10 * 60_000
 const LABEL_RE = /^[a-z][a-z0-9-]{0,31}$/
 
-const projectBody = z.object({
+const categoryBody = z.object({
   name: z.string().min(1),
   color: z.string().nullish(),
   scheduleId: z.string().min(1),
@@ -148,7 +148,7 @@ export function createApp(deps: AppDeps): Hono {
     const changedAfter = (column: PgColumn) => (since === undefined ? undefined : gt(column, since))
 
     const scheduleRows = await db.select().from(schedules).where(changedAfter(schedules.updatedAt))
-    const projectRows = await db.select().from(projects).where(changedAfter(projects.updatedAt))
+    const categoryRows = await db.select().from(categories).where(changedAfter(categories.updatedAt))
     const taskRows = await db.select().from(tasks).where(changedAfter(tasks.updatedAt))
     const eventRows = await db.select().from(events).where(changedAfter(events.updatedAt))
     // Small tables without tombstones: always sent in full so clients can replace them wholesale.
@@ -159,7 +159,7 @@ export function createApp(deps: AppDeps): Hono {
     return c.json({
       cursor: cursor.toISOString(),
       schedules: scheduleRows,
-      projects: projectRows,
+      categories: categoryRows,
       tasks: taskRows,
       events: eventRows,
       placements: placementRows,
@@ -202,11 +202,11 @@ export function createApp(deps: AppDeps): Hono {
     return c.json({ scheduling })
   })
 
-  // ---- Projects ---------------------------------------------------------------------------------
+  // ---- Categories ---------------------------------------------------------------------------------
 
-  app.put('/api/projects/:id', async (c) => {
+  app.put('/api/categories/:id', async (c) => {
     const id = c.req.param('id')
-    const body = projectBody.parse(await c.req.json())
+    const body = categoryBody.parse(await c.req.json())
     if (!(await scheduleExists(db, body.scheduleId))) throw badRequest(`unknown scheduleId ${body.scheduleId}`)
     const fields = {
       name: body.name,
@@ -216,24 +216,24 @@ export function createApp(deps: AppDeps): Hono {
       updatedAt: new Date(),
       deletedAt: null,
     }
-    const [project] = await db
-      .insert(projects)
+    const [category] = await db
+      .insert(categories)
       .values({ id, ...fields })
-      .onConflictDoUpdate({ target: projects.id, set: fields })
+      .onConflictDoUpdate({ target: categories.id, set: fields })
       .returning()
     const scheduling = await reschedule()
-    return c.json({ project, scheduling })
+    return c.json({ category, scheduling })
   })
 
-  app.delete('/api/projects/:id', async (c) => {
+  app.delete('/api/categories/:id', async (c) => {
     const id = c.req.param('id')
     const now = new Date()
     const deleted = await db
-      .update(projects)
+      .update(categories)
       .set({ deletedAt: now, updatedAt: now })
-      .where(eq(projects.id, id))
-      .returning({ id: projects.id })
-    if (deleted.length === 0) throw notFound(`project ${id}`)
+      .where(eq(categories.id, id))
+      .returning({ id: categories.id })
+    if (deleted.length === 0) throw notFound(`category ${id}`)
     const scheduling = await reschedule()
     return c.json({ scheduling })
   })
@@ -281,15 +281,15 @@ export function createApp(deps: AppDeps): Hono {
   app.post('/api/ai/parse-task', async (c) => {
     if (deps.ai === undefined) throw new HTTPException(503, { message: 'ai is not configured (set ANTHROPIC_API_KEY)' })
     const body = parseTaskBody.parse(await c.req.json())
-    const projectRows = await db
-      .select({ id: projects.id, name: projects.name })
-      .from(projects)
-      .where(isNull(projects.deletedAt))
-      .orderBy(projects.sortOrder, projects.name)
+    const categoryRows = await db
+      .select({ id: categories.id, name: categories.name })
+      .from(categories)
+      .where(isNull(categories.deletedAt))
+      .orderBy(categories.sortOrder, categories.name)
     const draft = await deps.ai.parse(body.text, {
       now: body.now === undefined ? new Date() : new Date(body.now),
       timeZone: body.timeZone ?? (await defaultTimeZone(db)),
-      projects: projectRows,
+      categories: categoryRows,
     })
     return c.json({ draft })
   })

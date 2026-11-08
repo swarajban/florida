@@ -79,7 +79,7 @@ struct AgendaView: View {
                     case .item(.event(let event)):
                         eventRow(event)
                     case .item(.block(let block)):
-                        BlockRow(block: block, project: model.project(id: block.task.projectId), now: now)
+                        BlockRow(block: block, category: model.category(id: block.task.categoryId), now: now)
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 editingTask = block.task

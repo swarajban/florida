@@ -5,7 +5,7 @@ import SwiftUI
 /// keystroke and shows what it understood as chips; return submits the draft.
 struct QuickAddField: View {
     @Binding var text: String
-    let projects: [Project]
+    let categories: [Category]
     let calendar: Calendar
     let onSubmit: (QuickAddDraft) -> Void
 
@@ -32,7 +32,7 @@ struct QuickAddField: View {
             }
             if !text.isEmpty {
                 let draft = QuickAddParser.parse(text, now: Date(), calendar: calendar)
-                let chips = QuickAddChip.chips(for: draft, projects: projects, calendar: calendar)
+                let chips = QuickAddChip.chips(for: draft, categories: categories, calendar: calendar)
                 if !chips.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
@@ -67,7 +67,7 @@ struct QuickAddChip: Identifiable, Hashable {
     let text: String
     var tint: Color = .secondary
 
-    static func chips(for draft: QuickAddDraft, projects: [Project], calendar: Calendar) -> [QuickAddChip] {
+    static func chips(for draft: QuickAddDraft, categories: [Category], calendar: Calendar) -> [QuickAddChip] {
         let now = Date()
         var chips: [QuickAddChip] = []
         if let minutes = draft.durationMinutes {
@@ -77,11 +77,11 @@ struct QuickAddChip: Identifiable, Hashable {
             chips.append(QuickAddChip(
                 id: "priority", symbol: priority.symbolName, text: priority.displayName, tint: priority.tint))
         }
-        if let hint = draft.projectHint {
-            if let project = QuickAddTaskBuilder.matchProject(hint: hint, in: projects) {
-                chips.append(QuickAddChip(id: "project", symbol: "folder.fill", text: project.name, tint: Color.project(project)))
+        if let hint = draft.categoryHint {
+            if let category = QuickAddTaskBuilder.matchCategory(hint: hint, in: categories) {
+                chips.append(QuickAddChip(id: "category", symbol: "folder.fill", text: category.name, tint: Color.category(category)))
             } else {
-                chips.append(QuickAddChip(id: "project", symbol: "questionmark.folder", text: "#\(hint) → Inbox"))
+                chips.append(QuickAddChip(id: "category", symbol: "questionmark.folder", text: "#\(hint) → Inbox"))
             }
         }
         if let dueAt = draft.dueAt {

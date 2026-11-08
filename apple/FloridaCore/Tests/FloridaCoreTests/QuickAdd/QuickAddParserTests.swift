@@ -24,11 +24,11 @@ private func parse(_ text: String, now: Date = sundayMorning, calendar: Calendar
 }
 
 @Suite struct QuickAddParserTests {
-    @Test func fullLineWithDurationProjectDeadlineAndPriority() {
+    @Test func fullLineWithDurationCategoryDeadlineAndPriority() {
         let draft = parse("Write design doc 2h #work by fri !high")
         #expect(draft.title == "Write design doc")
         #expect(draft.durationMinutes == 120)
-        #expect(draft.projectHint == "work")
+        #expect(draft.categoryHint == "work")
         #expect(draft.priority == .high)
         #expect(draft.deadlineType == .soft)
         #expect(draft.dueAt == local(2026, 11, 13, 17, 0))
@@ -85,8 +85,8 @@ private func parse(_ text: String, now: Date = sundayMorning, calendar: Calendar
     }
 
     @Test func asapInsideSentenceIsNotPriority() {
-        let draft = parse("Read the asap project brief")
-        #expect(draft.title == "Read the asap project brief")
+        let draft = parse("Read the asap category brief")
+        #expect(draft.title == "Read the asap category brief")
         #expect(draft.priority == nil)
     }
 
@@ -106,7 +106,7 @@ private func parse(_ text: String, now: Date = sundayMorning, calendar: Calendar
         let draft = parse("reply to Jane urgent #work")
         #expect(draft.title == "reply to Jane")
         #expect(draft.priority == .asap)
-        #expect(draft.projectHint == "work")
+        #expect(draft.categoryHint == "work")
     }
 
     @Test func explicitPriorityBeatsBareWord() {
@@ -131,12 +131,12 @@ private func parse(_ text: String, now: Date = sundayMorning, calendar: Calendar
         #expect(draft.dueAt == nil)
     }
 
-    @Test func hoursAndMinutesWithLowPriorityAndHyphenatedProject() {
+    @Test func hoursAndMinutesWithLowPriorityAndHyphenatedCategory() {
         let draft = parse("Fix flaky test 1h30m !low #work-infra")
         #expect(draft.title == "Fix flaky test")
         #expect(draft.durationMinutes == 90)
         #expect(draft.priority == .low)
-        #expect(draft.projectHint == "work-infra")
+        #expect(draft.categoryHint == "work-infra")
     }
 
     @Test func dueClockWithoutDateIsTodayWhenStillAhead() {
@@ -267,15 +267,15 @@ private func parse(_ text: String, now: Date = sundayMorning, calendar: Calendar
 
     @Test func laterDuplicateTokensStayInTitle() {
         let draft = parse("Plan #work #q4 !high !low")
-        #expect(draft.projectHint == "work")
+        #expect(draft.categoryHint == "work")
         #expect(draft.priority == .high)
         #expect(draft.title == "Plan #q4 !low")
     }
 
-    @Test func projectHintKeepsCaseAndRejectsOtherCharacters() {
-        #expect(parse("x #Personal_Finances").projectHint == "Personal_Finances")
-        #expect(parse("x #1").projectHint == "1")
-        #expect(parse("Issue #work!").projectHint == nil)
+    @Test func categoryHintKeepsCaseAndRejectsOtherCharacters() {
+        #expect(parse("x #Personal_Finances").categoryHint == "Personal_Finances")
+        #expect(parse("x #1").categoryHint == "1")
+        #expect(parse("Issue #work!").categoryHint == nil)
         #expect(parse("Issue #work!").title == "Issue #work!")
     }
 

@@ -1,6 +1,6 @@
 # @florida/server
 
-Hono + Drizzle API for Florida: stores schedules, projects and tasks, mirrors Google Calendar
+Hono + Drizzle API for Florida: stores schedules, categories and tasks, mirrors Google Calendar
 events, runs `@florida/scheduler` after every change, and serves the result to the apps.
 
 - Production: Node 26 on Fly, Neon Postgres via postgres.js.
@@ -86,7 +86,7 @@ fly ssh console -C "node server/dist/seed.js"
 ```
 
 This creates the schedules `work` (Mon–Fri 09:00–12:00, 13:00–17:00 Pacific) and `personal`
-(Mon–Fri 18:00–21:00, Sat–Sun 10:00–18:00 Pacific) and the project `inbox`.
+(Mon–Fri 18:00–21:00, Sat–Sun 10:00–18:00 Pacific) and the category `inbox`.
 
 Then open these in a browser, signing in with the matching Google account each time:
 
@@ -114,7 +114,7 @@ curl -s "$PUBLIC_URL/api/sync" -H "authorization: Bearer $API_TOKEN" | jq .
 curl -s -X PUT "$PUBLIC_URL/api/tasks/$(uuidgen | tr A-Z a-z)" \
   -H "authorization: Bearer $API_TOKEN" -H 'content-type: application/json' \
   -d '{
-    "projectId": "inbox",
+    "categoryId": "inbox",
     "title": "Write the quarterly report",
     "durationMinutes": 90,
     "minChunkMinutes": 30,
@@ -134,11 +134,11 @@ curl -s -X POST "$PUBLIC_URL/api/google/sync" -H "authorization: Bearer $API_TOK
 | Route | Purpose |
 | --- | --- |
 | `GET /health` | Liveness, no auth, no database access. |
-| `GET /api/sync?since=` | `{ cursor, schedules, projects, tasks, events, placements, accounts, calendars }`. The first four hold rows with `updatedAt > since` (all rows without `since`), including soft-deleted tombstones; `placements`, `accounts` and `calendars` are always complete (and never contain tokens). |
+| `GET /api/sync?since=` | `{ cursor, schedules, categories, tasks, events, placements, accounts, calendars }`. The first four hold rows with `updatedAt > since` (all rows without `since`), including soft-deleted tombstones; `placements`, `accounts` and `calendars` are always complete (and never contain tokens). |
 | `GET /api/events` | Server-sent events: `connected` on open, then one `changed` event after every scheduler run or calendar sync. Clients respond by calling `/api/sync` with their cursor. Keep-alive comment every 25 s. |
-| `PUT/DELETE /api/tasks/:id`, `/api/projects/:id`, `/api/schedules/:id` | Upsert / soft-delete, then rerun the scheduler. Responses include `scheduling: { placements, unscheduled, late }`. |
+| `PUT/DELETE /api/tasks/:id`, `/api/categories/:id`, `/api/schedules/:id` | Upsert / soft-delete, then rerun the scheduler. Responses include `scheduling: { placements, unscheduled, late }`. |
 | `POST /api/schedule/run` | Rerun the scheduler. |
-| `POST /api/ai/parse-task` | `{ text, now?, timeZone? }` → `{ draft }`: Claude turns one line of text into a task draft (`title, notes, durationMinutes, minChunkMinutes, priority, deadlineType, dueAt, startAt, pinnedStart, projectId, rationale`). The client reviews the draft and then `PUT`s the task itself. `timeZone` defaults to the first schedule's zone. 503 without `ANTHROPIC_API_KEY`; 502 when the model call fails. |
+| `POST /api/ai/parse-task` | `{ text, now?, timeZone? }` → `{ draft }`: Claude turns one line of text into a task draft (`title, notes, durationMinutes, minChunkMinutes, priority, deadlineType, dueAt, startAt, pinnedStart, categoryId, rationale`). The client reviews the draft and then `PUT`s the task itself. `timeZone` defaults to the first schedule's zone. 503 without `ANTHROPIC_API_KEY`; 502 when the model call fails. |
 | `POST /mcp` | Model Context Protocol endpoint for agents (same bearer token). See below. |
 | `GET /api/google/accounts` | Accounts and calendars (never tokens). |
 | `PATCH /api/calendars/:id` | `{ selected }` toggles whether a calendar blocks time. |
@@ -173,16 +173,16 @@ Client configuration (Claude Code, Amp, Cursor and friends accept this shape):
 
 | Tool | Does |
 | --- | --- |
-| `list_projects` | Live projects with their `scheduleId`. |
-| `list_tasks` | Open tasks (soonest due first) with their scheduled blocks; `projectId?`, `includeCompleted?`, `limit?`. |
+| `list_categories` | Live categories with their `scheduleId`. |
+| `list_tasks` | Open tasks (soonest due first) with their scheduled blocks; `categoryId?`, `includeCompleted?`, `limit?`. |
 | `get_task` | One task with its blocks. |
-| `create_task` | `projectId`, `title`, and any task field; `id` defaults to a UUID, `durationMinutes` to 30, `priority` to `medium`, `deadlineType` to `soft` when `dueAt` is set, else `none`. Reschedules; returns the task's blocks plus `unscheduled`/`late`. |
+| `create_task` | `categoryId`, `title`, and any task field; `id` defaults to a UUID, `durationMinutes` to 30, `priority` to `medium`, `deadlineType` to `soft` when `dueAt` is set, else `none`. Reschedules; returns the task's blocks plus `unscheduled`/`late`. |
 | `update_task` | `id` plus any task fields; omitted fields stay, `null` clears. Reschedules. |
 | `complete_task` / `delete_task` | Mark done (credits the full duration) / tombstone. Reschedule. |
 | `get_agenda` | `date?` (YYYY-MM-DD) and `timeZone?`: that day's events from selected calendars (all-day first) and planned task blocks with titles. Defaults to today in the first schedule's zone. |
 | `run_scheduler` | Rerun and return every placement. |
 
-Bad references (`unknown projectId x`, `task x not found`) and invalid arguments come back as
+Bad references (`unknown categoryId x`, `task x not found`) and invalid arguments come back as
 tool errors (`isError: true`) with a readable message, so the model can correct itself.
 
 ```sh

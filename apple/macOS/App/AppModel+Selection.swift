@@ -1,28 +1,28 @@
 import FloridaKit
 import Foundation
 
-/// The open tasks of one project, in the task pane's display order.
-struct ProjectTaskGroup: Identifiable, Hashable {
+/// The open tasks of one category, in the task pane's display order.
+struct CategoryTaskGroup: Identifiable, Hashable {
     let id: String
     let name: String
-    /// Nil for tasks whose project is not in the store (yet).
-    let project: Project?
+    /// Nil for tasks whose category is not in the store (yet).
+    let category: Category?
     let tasks: [TaskItem]
 }
 
 extension AppModel {
-    /// Open tasks grouped by project in project order; tasks keep `openTasks`' priority order.
-    var taskGroups: [ProjectTaskGroup] {
-        var byProject = Dictionary(grouping: openTasks, by: \.projectId)
-        var groups: [ProjectTaskGroup] = []
-        for project in projects {
-            if let tasks = byProject.removeValue(forKey: project.id) {
-                groups.append(ProjectTaskGroup(id: project.id, name: project.name, project: project, tasks: tasks))
+    /// Open tasks grouped by category in category order; tasks keep `openTasks`' priority order.
+    var taskGroups: [CategoryTaskGroup] {
+        var byCategory = Dictionary(grouping: openTasks, by: \.categoryId)
+        var groups: [CategoryTaskGroup] = []
+        for category in categories {
+            if let tasks = byCategory.removeValue(forKey: category.id) {
+                groups.append(CategoryTaskGroup(id: category.id, name: category.name, category: category, tasks: tasks))
             }
         }
-        let orphans = openTasks.filter { byProject[$0.projectId] != nil }
+        let orphans = openTasks.filter { byCategory[$0.categoryId] != nil }
         if !orphans.isEmpty {
-            groups.append(ProjectTaskGroup(id: "orphans", name: "Other", project: nil, tasks: orphans))
+            groups.append(CategoryTaskGroup(id: "orphans", name: "Other", category: nil, tasks: orphans))
         }
         return groups
     }

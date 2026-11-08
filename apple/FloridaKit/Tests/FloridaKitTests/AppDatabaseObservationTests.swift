@@ -64,17 +64,17 @@ import Testing
         #expect(renamed?.placements.map(\.task.title) == ["Send report"])
     }
 
-    @Test func placementsProjectsAndPendingCountObserveTheirTables() async throws {
+    @Test func placementsCategoriesAndPendingCountObserveTheirTables() async throws {
         let db = try AppDatabase.inMemory()
         var placements = db.observePlacements().makeAsyncIterator()
-        var projects = db.observeProjects().makeAsyncIterator()
+        var categories = db.observeCategories().makeAsyncIterator()
         var pending = db.observePendingWriteCount().makeAsyncIterator()
         #expect(try await placements.next() == [])
-        #expect(try await projects.next() == [])
+        #expect(try await categories.next() == [])
         #expect(try await pending.next() == 0)
 
-        try db.saveProject(Fixtures.project(id: "p1"), now: Fixtures.t0)
-        #expect(try await projects.next()?.map(\.id) == ["p1"])
+        try db.saveCategory(Fixtures.category(id: "p1"), now: Fixtures.t0)
+        #expect(try await categories.next()?.map(\.id) == ["p1"])
         #expect(try await pending.next() == 1)
 
         try db.apply(SchedulingResult(placements: [

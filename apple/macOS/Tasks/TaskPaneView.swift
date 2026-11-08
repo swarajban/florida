@@ -1,7 +1,7 @@
 import FloridaKit
 import SwiftUI
 
-/// The right-hand task list: open tasks grouped by project. Keeps the selected row scrolled
+/// The right-hand task list: open tasks grouped by category. Keeps the selected row scrolled
 /// into view as `j` / `k` move it.
 struct TaskPaneView: View {
     @Environment(AppModel.self) private var model
@@ -42,7 +42,7 @@ struct TaskPaneView: View {
                                     let item = ItemID.task(task.id)
                                     TaskRowView(
                                         task: task, state: model.scheduleState(for: task),
-                                        tint: group.project?.tint ?? .defaultProject,
+                                        tint: group.category?.tint ?? .defaultCategory,
                                         isSelected: model.selection == item, isFocused: model.focus == .tasks,
                                         calendar: model.calendar)
                                     .id(item)
@@ -78,12 +78,12 @@ struct TaskPaneView: View {
 }
 
 struct TaskGroupHeader: View {
-    let group: ProjectTaskGroup
+    let group: CategoryTaskGroup
 
     var body: some View {
         HStack(spacing: 6) {
             Circle()
-                .fill(group.project?.tint ?? .defaultProject)
+                .fill(group.category?.tint ?? .defaultCategory)
                 .frame(width: 8, height: 8)
             Text(group.name)
                 .font(.subheadline.weight(.semibold))

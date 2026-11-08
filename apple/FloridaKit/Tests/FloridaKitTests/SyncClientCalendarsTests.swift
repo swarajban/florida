@@ -12,7 +12,7 @@ import Testing
         let db = try AppDatabase.inMemory()
         try db.apply(SyncResponse(
             cursor: "c1",
-            projects: [Fixtures.project()],
+            categories: [Fixtures.category()],
             tasks: [Fixtures.task(id: "t1")],
             placements: [Fixtures.placement(id: "old", taskId: "t1", start: "2026-11-09T17:00:00Z", end: "2026-11-09T18:00:00Z")],
             accounts: [Fixtures.account()],

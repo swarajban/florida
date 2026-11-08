@@ -69,7 +69,7 @@ public final class AppDatabase: Sendable {
                 t.column("deletedAt", .datetime)
             }
 
-            try db.create(table: "project") { t in
+            try db.create(table: "category") { t in
                 t.primaryKey("id", .text)
                 t.column("name", .text).notNull()
                 t.column("color", .text)
@@ -82,7 +82,7 @@ public final class AppDatabase: Sendable {
 
             try db.create(table: "task") { t in
                 t.primaryKey("id", .text)
-                t.column("projectId", .text).notNull()
+                t.column("categoryId", .text).notNull()
                 t.column("title", .text).notNull()
                 t.column("notes", .text)
                 t.column("durationMinutes", .integer).notNull()
@@ -99,7 +99,7 @@ public final class AppDatabase: Sendable {
                 t.column("updatedAt", .datetime).notNull()
                 t.column("deletedAt", .datetime)
             }
-            try db.create(indexOn: "task", columns: ["projectId"])
+            try db.create(indexOn: "task", columns: ["categoryId"])
             try db.create(indexOn: "task", columns: ["completedAt"])
 
             try db.create(table: "placement") { t in

@@ -60,7 +60,7 @@ the change, and sync it; the widgets only read.
 ### macOS (`Florida-macOS`)
 
 One window: the calendar grid (day, 3-day, week, or month) with a task pane
-grouped by project, and a status bar with sync state. Every action has a key;
+grouped by category, and a status bar with sync state. Every action has a key;
 press `?` for the full list (it is `Keymap.default` in FloridaCore). The main
 ones:
 
@@ -76,7 +76,7 @@ ones:
 | `o`, `⇧⌘C`, `⌘R`, `esc` | open in Google Calendar, copy link, sync now, cancel |
 
 Quick add parses natural language locally (`QuickAddParser`): "infosec review
-2h by fri high #work" sets duration, due date, priority, and project; the
+2h by fri high #work" sets duration, due date, priority, and category; the
 palette shows the parsed chips before you press return. Double-clicking an
 empty slot opens quick add prefilled with that time as a pinned start.
 
@@ -88,7 +88,7 @@ server's `/api/events` stream and also syncs every 60 s.
 
 Three tabs. **Agenda**: a week strip over the day's all-day events, timed
 events, and scheduled task blocks; swipe to change day, pull to refresh.
-**Tasks**: sections per project, a quick-add field with the same parser and
+**Tasks**: sections per category, a quick-add field with the same parser and
 chips as the Mac app, swipe to complete or delete, tap to edit. **Settings**:
 server URL and token, sync now, run the scheduler, refresh Google calendars,
 and the connected accounts with their calendars. The app syncs on launch, when

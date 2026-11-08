@@ -2,7 +2,7 @@ import { pathToFileURL } from 'node:url'
 import type { ScheduleWindow } from '@florida/scheduler'
 import { createDb } from './db/client.js'
 import type { Db } from './db/client.js'
-import { projects, schedules } from './db/schema.js'
+import { categories, schedules } from './db/schema.js'
 
 const LA = 'America/Los_Angeles'
 const WEEKDAYS = [1, 2, 3, 4, 5]
@@ -28,9 +28,9 @@ const SEED_SCHEDULES: { id: string; name: string; timeZone: string; windows: Sch
   },
 ]
 
-const SEED_PROJECTS = [{ id: 'inbox', name: 'Inbox', scheduleId: 'work', sortOrder: 0 }]
+const SEED_CATEGORIES = [{ id: 'inbox', name: 'Inbox', scheduleId: 'work', sortOrder: 0 }]
 
-/** Upserts the default schedules and project. Safe to run repeatedly. */
+/** Upserts the default schedules and category. Safe to run repeatedly. */
 export async function seed(db: Db): Promise<void> {
   const now = new Date()
   for (const s of SEED_SCHEDULES) {
@@ -40,12 +40,12 @@ export async function seed(db: Db): Promise<void> {
       .values({ id: s.id, ...fields })
       .onConflictDoUpdate({ target: schedules.id, set: fields })
   }
-  for (const p of SEED_PROJECTS) {
+  for (const p of SEED_CATEGORIES) {
     const fields = { name: p.name, scheduleId: p.scheduleId, sortOrder: p.sortOrder, updatedAt: now, deletedAt: null }
     await db
-      .insert(projects)
+      .insert(categories)
       .values({ id: p.id, ...fields })
-      .onConflictDoUpdate({ target: projects.id, set: fields })
+      .onConflictDoUpdate({ target: categories.id, set: fields })
   }
 }
 
@@ -59,7 +59,7 @@ if (isMain) {
   const { db, close } = createDb(url)
   try {
     await seed(db)
-    console.log(`[seed] upserted ${SEED_SCHEDULES.length} schedules and ${SEED_PROJECTS.length} project`)
+    console.log(`[seed] upserted ${SEED_SCHEDULES.length} schedules and ${SEED_CATEGORIES.length} category`)
   } finally {
     await close()
   }

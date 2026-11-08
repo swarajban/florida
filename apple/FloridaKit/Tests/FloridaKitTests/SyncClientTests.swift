@@ -17,11 +17,11 @@ import Testing
     @Test func syncPushesInOrderThenPulls() async throws {
         let db = try AppDatabase.inMemory()
         // A prior pull left a cursor behind; the next pull must send it back as `since`.
-        try db.apply(SyncResponse(cursor: "2026-11-08T09:00:00.000Z", projects: [Fixtures.project()]))
+        try db.apply(SyncResponse(cursor: "2026-11-08T09:00:00.000Z", categories: [Fixtures.category()]))
 
         var t1 = Fixtures.task(id: "t1", title: "first")
         try db.saveTask(t1, now: Fixtures.instant("2026-11-08T10:00:00Z"))
-        try db.saveProject(Fixtures.project(id: "p2", sortOrder: 2), now: Fixtures.instant("2026-11-08T10:01:00Z"))
+        try db.saveCategory(Fixtures.category(id: "p2", sortOrder: 2), now: Fixtures.instant("2026-11-08T10:01:00Z"))
         try db.deleteTask(id: "t-gone", now: Fixtures.instant("2026-11-08T10:02:00Z"))
         let pending = try db.pendingWrites()
         #expect(pending.count == 3)
@@ -31,7 +31,7 @@ import Testing
         t1.updatedAt = Fixtures.instant("2026-11-08T10:00:00.123Z")
         t1.notes = "server normalized"
         let afterT1 = SchedulingResult(placements: [Fixtures.piece(taskId: "t1", start: "2026-11-09T17:00:00Z", end: "2026-11-09T18:00:00Z")])
-        let serverProject = Fixtures.project(id: "p2", sortOrder: 2)
+        let serverCategory = Fixtures.category(id: "p2", sortOrder: 2)
         let afterDelete = SchedulingResult(placements: [Fixtures.piece(taskId: "t1", start: "2026-11-09T18:00:00Z", end: "2026-11-09T19:00:00Z")])
         let pulled = SyncResponse(
             cursor: "2026-11-08T10:05:00.000Z",
@@ -40,7 +40,7 @@ import Testing
 
         let transport = FakeTransport([
             .ok(try Fixtures.putResponse("task", t1, scheduling: afterT1)),
-            .ok(try Fixtures.putResponse("project", serverProject)),
+            .ok(try Fixtures.putResponse("category", serverCategory)),
             .ok(try Fixtures.deleteResponse(scheduling: afterDelete)),
             try .ok(pulled),
         ])
@@ -60,10 +60,10 @@ import Testing
         #expect(sentWrite.title == "first")
 
         #expect(requests[1].method == "PUT")
-        #expect(requests[1].path == "/api/projects/p2")
+        #expect(requests[1].path == "/api/categories/p2")
         #expect(requests[1].headers["Authorization"] == "Bearer secret-token")
-        let sentProject = try JSONCoding.decoder.decode(ProjectWrite.self, from: try #require(requests[1].body))
-        #expect(sentProject.sortOrder == 2)
+        let sentCategory = try JSONCoding.decoder.decode(CategoryWrite.self, from: try #require(requests[1].body))
+        #expect(sentCategory.sortOrder == 2)
 
         #expect(requests[2].method == "DELETE")
         #expect(requests[2].path == "/api/tasks/t-gone")
@@ -131,7 +131,7 @@ import Testing
         try db.saveTask(Fixtures.task(id: "bad"), now: Fixtures.t0)
         try db.saveTask(Fixtures.task(id: "good"), now: Fixtures.t0)
         let transport = FakeTransport([
-            .error(400, "unknown projectId inbox"),
+            .error(400, "unknown categoryId inbox"),
             .ok(try Fixtures.putResponse("task", Fixtures.task(id: "good"))),
             try .ok(SyncResponse(cursor: "c")),
         ])
@@ -147,7 +147,7 @@ import Testing
         #expect(rejected.first?.write.entityId == "bad")
         if case .http(let status, let body)? = rejected.first?.error {
             #expect(status == 400)
-            #expect(body.contains("unknown projectId"))
+            #expect(body.contains("unknown categoryId"))
         } else {
             Issue.record("expected .http error, got \(String(describing: rejected.first?.error))")
         }

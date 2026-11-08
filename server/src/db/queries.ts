@@ -1,13 +1,13 @@
 import { and, eq, isNull } from 'drizzle-orm'
 import type { Db } from './client.js'
-import { projects, schedules } from './schema.js'
+import { categories, schedules } from './schema.js'
 
-/** True when a live (not soft-deleted) project has this id. */
-export async function projectExists(db: Db, id: string): Promise<boolean> {
+/** True when a live (not soft-deleted) category has this id. */
+export async function categoryExists(db: Db, id: string): Promise<boolean> {
   const rows = await db
-    .select({ id: projects.id })
-    .from(projects)
-    .where(and(eq(projects.id, id), isNull(projects.deletedAt)))
+    .select({ id: categories.id })
+    .from(categories)
+    .where(and(eq(categories.id, id), isNull(categories.deletedAt)))
     .limit(1)
   return rows.length > 0
 }

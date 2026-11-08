@@ -38,9 +38,9 @@ extension AppModel {
         }
     }
 
-    /// The project a quick-add draft would land in, for the chips.
-    var paletteProject: Project? {
-        resolveProject(hint: palette.draft.projectHint)
+    /// The category a quick-add draft would land in, for the chips.
+    var paletteCategory: Category? {
+        resolveCategory(hint: palette.draft.categoryHint)
     }
 
     /// Return in the palette: create the task, run the highlighted command, or reveal the result.
@@ -68,7 +68,7 @@ extension AppModel {
         let tasks = openTasks.map { task in
             SearchResult(
                 id: .task(task.id), title: task.title,
-                subtitle: (projectsById[task.projectId]?.name ?? "Task") + " · " + scheduleState(for: task).label(calendar: calendar),
+                subtitle: (categoriesById[task.categoryId]?.name ?? "Task") + " · " + scheduleState(for: task).label(calendar: calendar),
                 day: placementsByTask[task.id]?.first?.startAt)
         }
         let events = events.map { event in

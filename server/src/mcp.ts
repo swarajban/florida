@@ -10,7 +10,7 @@ import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import type { Db } from './db/client.js'
 import { defaultTimeZone } from './db/queries.js'
-import { calendars, events, placements, projects, tasks } from './db/schema.js'
+import { calendars, events, placements, categories, tasks } from './db/schema.js'
 import type { PlacementRow, TaskRow } from './db/schema.js'
 import {
   completeTask,
@@ -34,10 +34,10 @@ export interface McpDeps {
 const SERVER_INFO = { name: 'florida', version: '0.1.0' }
 
 const INSTRUCTIONS = [
-  'Florida is a single-user task planner and calendar. Tasks belong to projects; every project has a',
+  'Florida is a single-user task planner and calendar. Tasks belong to categories; every category has a',
   'schedule (working hours in an IANA time zone). After each change the scheduler places open tasks',
   'into free time around calendar events and returns placements: suggested work blocks, not calendar',
-  'events. Call list_projects first to learn the project ids, get_agenda to see one day of calendar',
+  'events. Call list_categories first to learn the category ids, get_agenda to see one day of calendar',
   'events plus planned task blocks, and list_tasks for what is open. Instants are ISO 8601 strings.',
 ].join(' ')
 
@@ -52,20 +52,20 @@ export function buildMcpServer(deps: McpDeps): McpServer {
   const server = new McpServer(SERVER_INFO, { instructions: INSTRUCTIONS })
 
   server.registerTool(
-    'list_projects',
+    'list_categories',
     {
-      title: 'List projects',
-      description: 'Lists live projects with the schedule each one uses.',
+      title: 'List categories',
+      description: 'Lists live categories with the schedule each one uses.',
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     () =>
       run(async () => {
         const rows = await db
           .select()
-          .from(projects)
-          .where(isNull(projects.deletedAt))
-          .orderBy(projects.sortOrder, projects.name)
-        return ok({ projects: rows })
+          .from(categories)
+          .where(isNull(categories.deletedAt))
+          .orderBy(categories.sortOrder, categories.name)
+        return ok({ categories: rows })
       }),
   )
 
@@ -76,17 +76,17 @@ export function buildMcpServer(deps: McpDeps): McpServer {
       description:
         'Lists open tasks (soonest due first, undated last) with their scheduled blocks. Completed tasks are excluded unless includeCompleted is true.',
       inputSchema: {
-        projectId: z.string().min(1).optional().describe('Only tasks in this project'),
+        categoryId: z.string().min(1).optional().describe('Only tasks in this category'),
         includeCompleted: z.boolean().default(false),
         limit: z.number().int().min(1).max(200).default(50),
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    ({ projectId, includeCompleted, limit }) =>
+    ({ categoryId, includeCompleted, limit }) =>
       run(async () => {
         const conditions = [isNull(tasks.deletedAt)]
         if (!includeCompleted) conditions.push(isNull(tasks.completedAt))
-        if (projectId !== undefined) conditions.push(eq(tasks.projectId, projectId))
+        if (categoryId !== undefined) conditions.push(eq(tasks.categoryId, categoryId))
         const rows = await db
           .select()
           .from(tasks)
@@ -245,7 +245,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
           .select({
             taskId: placements.taskId,
             title: tasks.title,
-            projectId: tasks.projectId,
+            categoryId: tasks.categoryId,
             priority: tasks.priority,
             startAt: placements.startAt,
             endAt: placements.endAt,

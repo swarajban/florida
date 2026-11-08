@@ -24,7 +24,7 @@ final class AppModel {
 
     /// Local midnight of the day the Agenda tab shows.
     private(set) var selectedDay: Date
-    private(set) var projects: [Project] = []
+    private(set) var categories: [Category] = []
     private(set) var openTasks: [TaskItem] = []
     /// Every scheduler placement, grouped by task; drives the "scheduled at" line of task rows.
     private(set) var placementsByTask: [String: [Placement]] = [:]
@@ -115,21 +115,21 @@ final class AppModel {
         select(day: Date())
     }
 
-    func project(id: String) -> Project? {
-        projects.first { $0.id == id }
+    func category(id: String) -> Category? {
+        categories.first { $0.id == id }
     }
 
     // MARK: - Local writes
 
     /// Creates a task from quick-add text with the app's defaults (30 minutes, medium priority,
-    /// the hinted project or Inbox). Returns nil, with `lastError` set, when there is no project yet.
+    /// the hinted category or Inbox). Returns nil, with `lastError` set, when there is no category yet.
     @discardableResult
     func createTask(from draft: QuickAddDraft) -> TaskItem? {
-        guard let project = QuickAddTaskBuilder.resolveProject(hint: draft.projectHint, in: projects) else {
-            lastError = "No projects yet. Connect to the server in Settings and sync first."
+        guard let category = QuickAddTaskBuilder.resolveCategory(hint: draft.categoryHint, in: categories) else {
+            lastError = "No categories yet. Connect to the server in Settings and sync first."
             return nil
         }
-        let task = QuickAddTaskBuilder.makeTask(from: draft, project: project, now: Date())
+        let task = QuickAddTaskBuilder.makeTask(from: draft, category: category, now: Date())
         save(task)
         return task
     }
@@ -172,11 +172,11 @@ final class AppModel {
         guard let database else { return }
         observers.append(Task { [weak self] in
             do {
-                for try await projects in database.observeProjects() {
-                    self?.projects = projects
+                for try await categories in database.observeCategories() {
+                    self?.categories = categories
                 }
             } catch {
-                self?.lastError = "Could not read projects: \(error.localizedDescription)"
+                self?.lastError = "Could not read categories: \(error.localizedDescription)"
             }
         })
         observers.append(Task { [weak self] in

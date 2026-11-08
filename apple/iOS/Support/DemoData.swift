@@ -3,7 +3,7 @@ import FloridaKit
 import Foundation
 
 /// Sample data for screenshot runs (`-demoData YES`): two Google accounts with four calendars,
-/// four projects, a day of meetings around scheduled task blocks, and more blocks tomorrow. All
+/// four categories, a day of meetings around scheduled task blocks, and more blocks tomorrow. All
 /// times are relative to `now`, so the Agenda tab's "today" is always populated.
 enum DemoData {
     static func syncResponse(now: Date, calendar: Calendar) -> SyncResponse {
@@ -13,11 +13,11 @@ enum DemoData {
             return calendar.date(bySettingHour: hour, minute: minute, second: 0, of: day) ?? day
         }
         func task(
-            _ id: String, _ projectId: String, _ title: String, minutes: Int, priority: Priority,
+            _ id: String, _ categoryId: String, _ title: String, minutes: Int, priority: Priority,
             due: Date? = nil, hard: Bool = false, notes: String? = nil
         ) -> TaskItem {
             TaskItem(
-                id: id, projectId: projectId, title: title, notes: notes, durationMinutes: minutes,
+                id: id, categoryId: categoryId, title: title, notes: notes, durationMinutes: minutes,
                 priority: priority, deadlineType: due == nil ? .none : (hard ? .hard : .soft), dueAt: due,
                 createdAt: now, updatedAt: now)
         }
@@ -54,11 +54,11 @@ enum DemoData {
                     ],
                     createdAt: now, updatedAt: now),
             ],
-            projects: [
-                Project(id: inbox, name: "Inbox", scheduleId: workHours, sortOrder: 0, createdAt: now, updatedAt: now),
-                Project(id: engineering, name: "Work Engineering", color: "#4F46E5", scheduleId: workHours, sortOrder: 1, createdAt: now, updatedAt: now),
-                Project(id: infosec, name: "Work Infosec", color: "#DC2626", scheduleId: workHours, sortOrder: 2, createdAt: now, updatedAt: now),
-                Project(id: finance, name: "Personal Finance", color: "#059669", scheduleId: evenings, sortOrder: 3, createdAt: now, updatedAt: now),
+            categories: [
+                Category(id: inbox, name: "Inbox", scheduleId: workHours, sortOrder: 0, createdAt: now, updatedAt: now),
+                Category(id: engineering, name: "Work Engineering", color: "#4F46E5", scheduleId: workHours, sortOrder: 1, createdAt: now, updatedAt: now),
+                Category(id: infosec, name: "Work Infosec", color: "#DC2626", scheduleId: workHours, sortOrder: 2, createdAt: now, updatedAt: now),
+                Category(id: finance, name: "Personal Finance", color: "#059669", scheduleId: evenings, sortOrder: 3, createdAt: now, updatedAt: now),
             ],
             tasks: [
                 task("demo-task-keys", infosec, "Rotate AWS access keys", minutes: 45, priority: .asap, due: at(1, 12), hard: true),

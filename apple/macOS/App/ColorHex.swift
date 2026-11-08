@@ -27,14 +27,14 @@ extension Color {
         self.init(red: red, green: green, blue: blue)
     }
 
-    /// Tint for projects without a color: the "#4F46E5" indigo the models document as the default.
-    static let defaultProject = Color(hex: "#4F46E5") ?? .indigo
+    /// Tint for categories without a color: the "#4F46E5" indigo the models document as the default.
+    static let defaultCategory = Color(hex: "#4F46E5") ?? .indigo
     /// Tint for Google calendars without a color.
     static let defaultCalendar = Color(hex: "#3B82F6") ?? .blue
 }
 
-extension Project {
-    var tint: Color { color.flatMap(Color.init(hex:)) ?? .defaultProject }
+extension Category {
+    var tint: Color { color.flatMap(Color.init(hex:)) ?? .defaultCategory }
 }
 
 extension CalendarInfo {

@@ -35,9 +35,9 @@ struct TaskEditorSheet: View {
                     .focused($isTitleFocused)
                 TextField("Notes", text: notes, axis: .vertical)
                     .lineLimit(3...8)
-                Picker("Project", selection: $draft.projectId) {
-                    ForEach(model.projects) { project in
-                        Text(project.name).tag(project.id)
+                Picker("Category", selection: $draft.categoryId) {
+                    ForEach(model.categories) { category in
+                        Text(category.name).tag(category.id)
                     }
                 }
                 LabeledContent("Duration") {

@@ -4,7 +4,7 @@ import Observation
 
 /// The macOS app's single source of truth, isolated to the main actor.
 ///
-/// Everything the views draw comes from `AppDatabase` live queries (projects, open tasks,
+/// Everything the views draw comes from `AppDatabase` live queries (categories, open tasks,
 /// placements, events in the loaded range, accounts, calendars, pending writes) or is UI state
 /// kept here. Writes go to the store first and a background sync follows, so no view ever waits
 /// on the network. Navigation, selection, commands, writes, sync, the palette and keyboard
@@ -23,7 +23,7 @@ final class AppModel {
 
     // MARK: Store mirrors
 
-    private(set) var projects: [Project] = []
+    private(set) var categories: [Category] = []
     private(set) var openTasks: [TaskItem] = []
     private(set) var placements: [Placement] = []
     private(set) var events: [CalendarEvent] = []
@@ -31,7 +31,7 @@ final class AppModel {
     private(set) var calendars: [CalendarInfo] = []
     private(set) var pendingWriteCount = 0
     private(set) var tasksById: [String: TaskItem] = [:]
-    private(set) var projectsById: [String: Project] = [:]
+    private(set) var categoriesById: [String: Category] = [:]
     private(set) var calendarsById: [String: CalendarInfo] = [:]
     /// Each task's placements, by start.
     private(set) var placementsByTask: [String: [Placement]] = [:]
@@ -130,16 +130,16 @@ final class AppModel {
     func rebuildLayout() {
         gridLayout = GridLayout.build(
             days: visibleDays, events: events, placements: placements, tasksById: tasksById,
-            projectsById: projectsById, calendarsById: calendarsById, calendar: calendar)
+            categoriesById: categoriesById, calendarsById: calendarsById, calendar: calendar)
     }
 
     // MARK: Live queries
 
     private func startObserving(_ database: AppDatabase) {
         observers = [
-            observe(database.observeProjects()) { model, projects in
-                model.projects = projects
-                model.projectsById = Dictionary(projects.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            observe(database.observeCategories()) { model, categories in
+                model.categories = categories
+                model.categoriesById = Dictionary(categories.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
                 model.rebuildLayout()
             },
             observe(database.observeOpenTasks()) { model, tasks in

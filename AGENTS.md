@@ -24,6 +24,7 @@ pnpm --filter @florida/server db:generate   # after editing server/src/db/schema
 ## Conventions
 
 - TypeScript: ESM, relative imports end in `.js`, named exports, 2-space indent, single quotes, no semicolons, trailing commas. Strict settings from `tsconfig.base.json` (`exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`) apply everywhere.
+- Tasks are grouped by `categories` (name, color, and the schedule whose hours apply), not Motion-style projects. The Swift type is `Category`, not `Label`, because SwiftUI has a `Label` view (same reason `Task` is `TaskItem`).
 - Dates cross the wire as ISO 8601 strings; the database stores `timestamptz`. Wall-clock schedule windows are "HH:MM" in the schedule's IANA time zone.
 - Derived data is recomputed, not stored, except `placements` (server-side scheduler output, replaced wholesale on each run) which other consumers need.
 - Every mutable table has `updated_at` and a `deleted_at` tombstone; sync is `updated_at > since`.

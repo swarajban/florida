@@ -95,7 +95,7 @@ public actor SyncClient {
         let collection: String
         switch write.entity {
         case .task: collection = "api/tasks"
-        case .project: collection = "api/projects"
+        case .category: collection = "api/categories"
         case .schedule: collection = "api/schedules"
         }
         switch write.op {
@@ -112,9 +112,9 @@ public actor SyncClient {
         case (.task, .put):
             let response = try decode(TaskWriteResponse.self, from: data)
             try database.completePendingWrite(write, record: response.task, scheduling: response.scheduling, computedAt: now)
-        case (.project, .put):
-            let response = try decode(ProjectWriteResponse.self, from: data)
-            try database.completePendingWrite(write, record: response.project, scheduling: response.scheduling, computedAt: now)
+        case (.category, .put):
+            let response = try decode(CategoryWriteResponse.self, from: data)
+            try database.completePendingWrite(write, record: response.category, scheduling: response.scheduling, computedAt: now)
         case (.schedule, .put):
             let response = try decode(ScheduleWriteResponse.self, from: data)
             try database.completePendingWrite(write, record: response.schedule, scheduling: response.scheduling, computedAt: now)

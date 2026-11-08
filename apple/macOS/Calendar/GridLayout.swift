@@ -66,7 +66,7 @@ struct GridLayout {
 
     static func build(
         days: [Date], events: [CalendarEvent], placements: [Placement], tasksById: [String: TaskItem],
-        projectsById: [String: Project], calendarsById: [String: CalendarInfo], calendar: Calendar
+        categoriesById: [String: Category], calendarsById: [String: CalendarInfo], calendar: Calendar
     ) -> GridLayout {
         var layout = GridLayout()
         layout.days = days
@@ -97,7 +97,7 @@ struct GridLayout {
             sources[placement.id] = Source(
                 item: .task(task.id), kind: .task(pinned: placement.pinned), start: placement.startAt,
                 end: placement.endAt, title: task.title,
-                tint: projectsById[task.projectId]?.tint ?? .defaultProject)
+                tint: categoriesById[task.categoryId]?.tint ?? .defaultCategory)
             timed.append(LayoutItem(id: placement.id, start: placement.startAt, end: placement.endAt))
         }
 

@@ -13,7 +13,7 @@ struct WidgetBlock: Hashable, Sendable, Identifiable {
     var start: Date
     var end: Date
     var allDay: Bool
-    /// The task's project color as "#RRGGBB"; nil for events and projects without a color.
+    /// The task's category color as "#RRGGBB"; nil for events and categories without a color.
     var colorHex: String?
     var pinned: Bool
     var location: String?
@@ -34,14 +34,14 @@ struct WidgetBlock: Hashable, Sendable, Identifiable {
         location = event.location
     }
 
-    init(block: ScheduledBlock, project: Project?) {
+    init(block: ScheduledBlock, category: Category?) {
         id = "block-\(block.placement.id)"
         kind = .task
         title = block.task.title
         start = block.placement.startAt
         end = block.placement.endAt
         allDay = false
-        colorHex = project?.color
+        colorHex = category?.color
         pinned = block.placement.pinned
         location = nil
     }
@@ -69,7 +69,7 @@ struct WidgetTask: Hashable, Sendable, Identifiable {
     var late: Bool
     var colorHex: String?
 
-    init(task: TaskItem, placements: [Placement], project: Project?) {
+    init(task: TaskItem, placements: [Placement], category: Category?) {
         id = task.id
         title = task.title
         priority = task.priority
@@ -80,6 +80,6 @@ struct WidgetTask: Hashable, Sendable, Identifiable {
         } else {
             late = false
         }
-        colorHex = project?.color
+        colorHex = category?.color
     }
 }

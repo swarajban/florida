@@ -14,7 +14,7 @@ const NOW = new Date('2026-11-08T17:00:00Z') // Sunday 09:00 in Los Angeles
 const ctx: ParseTaskContext = {
   now: NOW,
   timeZone: 'America/Los_Angeles',
-  projects: [
+  categories: [
     { id: 'inbox', name: 'Inbox' },
     { id: 'work-eng', name: 'Work engineering' },
   ],
@@ -30,7 +30,7 @@ const modelDraft: TaskDraft = {
   dueAt: '2026-11-13T17:00:00-08:00',
   startAt: null,
   pinnedStart: null,
-  projectId: 'work-eng',
+  categoryId: 'work-eng',
   rationale: 'Friday deadline, two hours, high priority, engineering work.',
 }
 
@@ -59,7 +59,7 @@ const messageWith = (json: unknown) => ({
 })
 
 describe('buildPrompt', () => {
-  it('states the local time, zone and project ids', () => {
+  it('states the local time, zone and category ids', () => {
     const { system, user } = buildPrompt('Write design doc 2h by fri', ctx)
     expect(user).toBe('Write design doc 2h by fri')
     expect(system).toContain('Current local time: 2026-11-08 09:00 (Sunday), time zone America/Los_Angeles')
@@ -68,8 +68,8 @@ describe('buildPrompt', () => {
     expect(system).toContain('- id "work-eng": Work engineering')
   })
 
-  it('says when there are no projects', () => {
-    expect(buildPrompt('x', { ...ctx, projects: [] }).system).toContain('Projects:\n(none)')
+  it('says when there are no categories', () => {
+    expect(buildPrompt('x', { ...ctx, categories: [] }).system).toContain('Categories:\n(none)')
   })
 })
 
@@ -103,12 +103,12 @@ describe('ClaudeTaskParser', () => {
     expect(body.output_config.format.schema).toEqual(TASK_DRAFT_JSON_SCHEMA)
   })
 
-  it('drops an unknown projectId and reconciles deadlineType with dueAt', async () => {
+  it('drops an unknown categoryId and reconciles deadlineType with dueAt', async () => {
     const api = fakeApi({
-      body: messageWith({ ...modelDraft, projectId: 'made-up', deadlineType: 'none' }),
+      body: messageWith({ ...modelDraft, categoryId: 'made-up', deadlineType: 'none' }),
     })
     const draft = await new ClaudeTaskParser(config, api.fetch).parse('x', ctx)
-    expect(draft.projectId).toBeNull()
+    expect(draft.categoryId).toBeNull()
     expect(draft.deadlineType).toBe('soft')
 
     const noDate = fakeApi({ body: messageWith({ ...modelDraft, dueAt: null, deadlineType: 'hard' }) })
@@ -187,7 +187,7 @@ describe('POST /api/ai/parse-task', () => {
     expect(await res.json()).toEqual({ error: 'ai is not configured (set ANTHROPIC_API_KEY)' })
   })
 
-  it('passes live projects, the client clock and zone, and returns the draft', async () => {
+  it('passes live categories, the client clock and zone, and returns the draft', async () => {
     const res = await withAi.request('/api/ai/parse-task', {
       method: 'POST',
       headers: AUTH,
@@ -199,7 +199,7 @@ describe('POST /api/ai/parse-task', () => {
     expect(seen[0]!.text).toBe('Call mom 30m tomorrow')
     expect(seen[0]!.ctx.now.toISOString()).toBe(NOW.toISOString())
     expect(seen[0]!.ctx.timeZone).toBe('Asia/Kolkata')
-    expect(seen[0]!.ctx.projects).toEqual([{ id: 'inbox', name: 'Inbox' }])
+    expect(seen[0]!.ctx.categories).toEqual([{ id: 'inbox', name: 'Inbox' }])
   })
 
   it("defaults the zone to the first schedule's and validates the body", async () => {

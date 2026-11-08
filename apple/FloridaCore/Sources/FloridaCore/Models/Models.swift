@@ -66,7 +66,7 @@ public struct Schedule: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
-public struct Project: Codable, Hashable, Sendable, Identifiable {
+public struct Category: Codable, Hashable, Sendable, Identifiable {
     public var id: String
     public var name: String
     /// CSS-style hex color such as "#4F46E5", or nil for the default.
@@ -95,7 +95,7 @@ public struct Project: Codable, Hashable, Sendable, Identifiable {
 /// A to-do. Named `TaskItem` because `Task` is Swift's concurrency type.
 public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
     public var id: String
-    public var projectId: String
+    public var categoryId: String
     public var title: String
     public var notes: String?
     public var durationMinutes: Int
@@ -105,7 +105,7 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
     public var deadlineType: DeadlineType
     public var dueAt: Date?
     public var startAt: Date?
-    /// Overrides the project's schedule when set.
+    /// Overrides the category's schedule when set.
     public var scheduleId: String?
     /// When set the task is fixed at this instant as one block.
     public var pinnedStart: Date?
@@ -116,14 +116,14 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
     public var deletedAt: Date?
 
     public init(
-        id: String, projectId: String, title: String, notes: String? = nil, durationMinutes: Int,
+        id: String, categoryId: String, title: String, notes: String? = nil, durationMinutes: Int,
         minChunkMinutes: Int? = nil, priority: Priority = .medium, deadlineType: DeadlineType = .none,
         dueAt: Date? = nil, startAt: Date? = nil, scheduleId: String? = nil, pinnedStart: Date? = nil,
         completedMinutes: Int = 0, completedAt: Date? = nil, createdAt: Date, updatedAt: Date,
         deletedAt: Date? = nil
     ) {
         self.id = id
-        self.projectId = projectId
+        self.categoryId = categoryId
         self.title = title
         self.notes = notes
         self.durationMinutes = durationMinutes
@@ -257,14 +257,14 @@ public struct CalendarInfo: Codable, Hashable, Sendable, Identifiable {
 
 // MARK: - API payloads
 
-/// `GET /api/sync?since=` response. `schedules`, `projects`, `tasks` and `events` contain rows changed
+/// `GET /api/sync?since=` response. `schedules`, `categories`, `tasks` and `events` contain rows changed
 /// after `since`, including tombstones (`deletedAt` set). `placements`, `accounts` and `calendars`
 /// are always the complete tables and are meant to be replaced wholesale.
 public struct SyncResponse: Codable, Sendable {
     /// Server time when the diff was taken; pass back as the next `since`.
     public var cursor: String
     public var schedules: [Schedule]
-    public var projects: [Project]
+    public var categories: [Category]
     public var tasks: [TaskItem]
     public var events: [CalendarEvent]
     public var placements: [Placement]
@@ -272,13 +272,13 @@ public struct SyncResponse: Codable, Sendable {
     public var calendars: [CalendarInfo]
 
     public init(
-        cursor: String, schedules: [Schedule] = [], projects: [Project] = [], tasks: [TaskItem] = [],
+        cursor: String, schedules: [Schedule] = [], categories: [Category] = [], tasks: [TaskItem] = [],
         events: [CalendarEvent] = [], placements: [Placement] = [], accounts: [GoogleAccount] = [],
         calendars: [CalendarInfo] = []
     ) {
         self.cursor = cursor
         self.schedules = schedules
-        self.projects = projects
+        self.categories = categories
         self.tasks = tasks
         self.events = events
         self.placements = placements
@@ -348,7 +348,7 @@ public struct SchedulingResult: Codable, Hashable, Sendable {
 
 /// Body of `PUT /api/tasks/:id`.
 public struct TaskWrite: Codable, Hashable, Sendable {
-    public var projectId: String
+    public var categoryId: String
     public var title: String
     public var notes: String?
     public var durationMinutes: Int
@@ -363,7 +363,7 @@ public struct TaskWrite: Codable, Hashable, Sendable {
     public var completedAt: Date?
 
     public init(_ task: TaskItem) {
-        projectId = task.projectId
+        categoryId = task.categoryId
         title = task.title
         notes = task.notes
         durationMinutes = task.durationMinutes
@@ -379,18 +379,18 @@ public struct TaskWrite: Codable, Hashable, Sendable {
     }
 }
 
-/// Body of `PUT /api/projects/:id`.
-public struct ProjectWrite: Codable, Hashable, Sendable {
+/// Body of `PUT /api/categories/:id`.
+public struct CategoryWrite: Codable, Hashable, Sendable {
     public var name: String
     public var color: String?
     public var scheduleId: String
     public var sortOrder: Int
 
-    public init(_ project: Project) {
-        name = project.name
-        color = project.color
-        scheduleId = project.scheduleId
-        sortOrder = project.sortOrder
+    public init(_ category: Category) {
+        name = category.name
+        color = category.color
+        scheduleId = category.scheduleId
+        sortOrder = category.sortOrder
     }
 }
 
@@ -413,9 +413,9 @@ public struct TaskWriteResponse: Codable, Sendable {
     public var scheduling: SchedulingResult
 }
 
-/// Response of `PUT /api/projects/:id`.
-public struct ProjectWriteResponse: Codable, Sendable {
-    public var project: Project
+/// Response of `PUT /api/categories/:id`.
+public struct CategoryWriteResponse: Codable, Sendable {
+    public var category: Category
     public var scheduling: SchedulingResult
 }
 

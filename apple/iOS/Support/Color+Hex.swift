@@ -2,7 +2,7 @@ import FloridaKit
 import SwiftUI
 
 extension Color {
-    /// Parses a CSS-style "#RRGGBB" (or "#RGB") string as stored in `Project.color` and
+    /// Parses a CSS-style "#RRGGBB" (or "#RGB") string as stored in `Category.color` and
     /// `CalendarInfo.color`; nil for anything else.
     init?(hex: String) {
         var text = hex.trimmingCharacters(in: .whitespaces)
@@ -19,8 +19,8 @@ extension Color {
             blue: Double(value & 0xFF) / 255)
     }
 
-    /// The project's color, or the accent color when it has none or it is malformed.
-    static func project(_ project: Project?) -> Color {
-        project?.color.flatMap(Color.init(hex:)) ?? .accentColor
+    /// The category's color, or the accent color when it has none or it is malformed.
+    static func category(_ category: Category?) -> Color {
+        category?.color.flatMap(Color.init(hex:)) ?? .accentColor
     }
 }

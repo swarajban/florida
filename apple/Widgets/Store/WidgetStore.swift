@@ -13,12 +13,12 @@ enum WidgetStore {
     static func timedBlocks(in range: Range<Date>) -> [WidgetBlock]? {
         guard let database else { return nil }
         do {
-            let projects = try projectsById(database)
+            let categories = try categoriesById(database)
             let events = try database.events(in: range)
                 .filter { !$0.allDay }
                 .map(WidgetBlock.init(event:))
             let blocks = try database.scheduledBlocks(in: range)
-                .map { WidgetBlock(block: $0, project: projects[$0.task.projectId]) }
+                .map { WidgetBlock(block: $0, category: categories[$0.task.categoryId]) }
             return (events + blocks).sorted(by: WidgetBlock.byStart)
         } catch {
             return nil
@@ -30,10 +30,10 @@ enum WidgetStore {
     static func agenda(for day: Date) -> [WidgetBlock]? {
         guard let database else { return nil }
         do {
-            let projects = try projectsById(database)
+            let categories = try categoriesById(database)
             let agenda = try database.agenda(for: day, calendar: calendar)
             let events = agenda.events.map(WidgetBlock.init(event:))
-            let blocks = agenda.placements.map { WidgetBlock(block: $0, project: projects[$0.task.projectId]) }
+            let blocks = agenda.placements.map { WidgetBlock(block: $0, category: categories[$0.task.categoryId]) }
             return (events + blocks).sorted(by: WidgetBlock.byStart)
         } catch {
             return nil
@@ -44,11 +44,11 @@ enum WidgetStore {
     static func openTasks(limit: Int) -> (count: Int, tasks: [WidgetTask])? {
         guard let database else { return nil }
         do {
-            let projects = try projectsById(database)
+            let categories = try categoriesById(database)
             let tasks = try database.openTasks()
             let placements = try database.placementsByTask()
             let rows = tasks.prefix(limit).map { task in
-                WidgetTask(task: task, placements: placements[task.id] ?? [], project: projects[task.projectId])
+                WidgetTask(task: task, placements: placements[task.id] ?? [], category: categories[task.categoryId])
             }
             return (tasks.count, rows)
         } catch {
@@ -56,7 +56,7 @@ enum WidgetStore {
         }
     }
 
-    private static func projectsById(_ database: AppDatabase) throws -> [String: Project] {
-        Dictionary(uniqueKeysWithValues: try database.projects().map { ($0.id, $0) })
+    private static func categoriesById(_ database: AppDatabase) throws -> [String: Category] {
+        Dictionary(uniqueKeysWithValues: try database.categories().map { ($0.id, $0) })
     }
 }

@@ -57,7 +57,7 @@ function inWorkWindow(iso: string): boolean {
 }
 
 const taskBody = {
-  projectId: 'inbox',
+  categoryId: 'inbox',
   title: 'Write the report',
   durationMinutes: 60,
   priority: 'high',
@@ -94,10 +94,10 @@ describe('tasks, sync and tombstones', () => {
     expect(body.issues.map((i) => i.path.join('.')).sort()).toEqual(['durationMinutes', 'priority'])
   })
 
-  it('returns 400 for an unknown project', async () => {
-    const res = await api('/api/tasks/bad', { method: 'PUT', json: { ...taskBody, projectId: 'nope' } })
+  it('returns 400 for an unknown category', async () => {
+    const res = await api('/api/tasks/bad', { method: 'PUT', json: { ...taskBody, categoryId: 'nope' } })
     expect(res.status).toBe(400)
-    expect(await res.json()).toEqual({ error: 'unknown projectId nope' })
+    expect(await res.json()).toEqual({ error: 'unknown categoryId nope' })
   })
 
   it('upserts a task and places it inside the work window', async () => {
@@ -124,7 +124,7 @@ describe('tasks, sync and tombstones', () => {
     const body = (await res.json()) as {
       cursor: string
       schedules: { id: string }[]
-      projects: { id: string }[]
+      categories: { id: string }[]
       tasks: { id: string; deletedAt: string | null }[]
       events: unknown[]
       placements: { taskId: string }[]
@@ -133,7 +133,7 @@ describe('tasks, sync and tombstones', () => {
     }
     expect(new Date(body.cursor).toISOString()).toBe(body.cursor)
     expect(body.schedules.map((s) => s.id).sort()).toEqual(['personal', 'work'])
-    expect(body.projects.map((p) => p.id)).toEqual(['inbox'])
+    expect(body.categories.map((p) => p.id)).toEqual(['inbox'])
     expect(body.tasks).toEqual([expect.objectContaining({ id: 't1', deletedAt: null })])
     expect(body.events).toEqual([])
     expect(body.placements.map((p) => p.taskId)).toEqual(['t1'])
@@ -147,7 +147,7 @@ describe('tasks, sync and tombstones', () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as Record<string, unknown[]>
     expect(body.schedules).toEqual([])
-    expect(body.projects).toEqual([])
+    expect(body.categories).toEqual([])
     expect(body.tasks).toEqual([])
     expect(body.events).toEqual([])
     expect(body.placements).toHaveLength(1)
@@ -173,7 +173,7 @@ describe('tasks, sync and tombstones', () => {
     expect((await api('/api/tasks/never-existed', { method: 'DELETE' })).status).toBe(404)
   })
 
-  it('upserts schedules and projects, and tombstones schedules', async () => {
+  it('upserts schedules and categories, and tombstones schedules', async () => {
     const sched = await api('/api/schedules/deep', {
       method: 'PUT',
       json: { name: 'Deep work', timeZone: 'America/Los_Angeles', windows: [{ days: [2, 4], start: '08:00', end: '11:00' }] },
@@ -185,10 +185,10 @@ describe('tasks, sync and tombstones', () => {
     })
     expect(badTz.status).toBe(400)
 
-    const proj = await api('/api/projects/side', { method: 'PUT', json: { name: 'Side', scheduleId: 'deep', color: '#ff0' } })
+    const proj = await api('/api/categories/side', { method: 'PUT', json: { name: 'Side', scheduleId: 'deep', color: '#ff0' } })
     expect(proj.status).toBe(200)
-    const projBody = (await proj.json()) as { project: { scheduleId: string; sortOrder: number } }
-    expect(projBody.project).toMatchObject({ scheduleId: 'deep', sortOrder: 0 })
+    const catBody = (await proj.json()) as { category: { scheduleId: string; sortOrder: number } }
+    expect(catBody.category).toMatchObject({ scheduleId: 'deep', sortOrder: 0 })
 
     const cursor = ((await (await api('/api/sync')).json()) as { cursor: string }).cursor
     expect((await api('/api/schedules/deep', { method: 'DELETE' })).status).toBe(200)

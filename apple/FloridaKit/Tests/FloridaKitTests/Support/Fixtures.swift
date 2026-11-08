@@ -26,16 +26,16 @@ enum Fixtures {
         Schedule(id: id, name: id.capitalized, timeZone: "America/Los_Angeles", windows: windows, createdAt: t0, updatedAt: t0)
     }
 
-    static func project(id: String = "inbox", scheduleId: String = "work", sortOrder: Int = 0) -> Project {
-        Project(id: id, name: id.capitalized, scheduleId: scheduleId, sortOrder: sortOrder, createdAt: t0, updatedAt: t0)
+    static func category(id: String = "inbox", scheduleId: String = "work", sortOrder: Int = 0) -> Category {
+        Category(id: id, name: id.capitalized, scheduleId: scheduleId, sortOrder: sortOrder, createdAt: t0, updatedAt: t0)
     }
 
     static func task(
-        id: String, projectId: String = "inbox", title: String? = nil, priority: Priority = .medium,
+        id: String, categoryId: String = "inbox", title: String? = nil, priority: Priority = .medium,
         dueAt: Date? = nil, completedAt: Date? = nil, createdAt: Date = t0, deletedAt: Date? = nil
     ) -> TaskItem {
         TaskItem(
-            id: id, projectId: projectId, title: title ?? id, durationMinutes: 60, priority: priority,
+            id: id, categoryId: categoryId, title: title ?? id, durationMinutes: 60, priority: priority,
             deadlineType: dueAt == nil ? .none : .soft, dueAt: dueAt, completedAt: completedAt,
             createdAt: createdAt, updatedAt: createdAt, deletedAt: deletedAt)
     }
@@ -68,7 +68,7 @@ enum Fixtures {
 
     // MARK: Response bodies the server would send
 
-    /// `{<key>: <record>, "scheduling": <scheduling>}`, i.e. a `TaskWriteResponse` / `ProjectWriteResponse` /
+    /// `{<key>: <record>, "scheduling": <scheduling>}`, i.e. a `TaskWriteResponse` / `CategoryWriteResponse` /
     /// `ScheduleWriteResponse`. Built through JSONSerialization because those types have no public initializer.
     static func putResponse(_ key: String, _ record: some Encodable, scheduling: SchedulingResult = SchedulingResult()) throws -> Data {
         let recordJSON = try JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(record))

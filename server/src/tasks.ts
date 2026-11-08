@@ -1,7 +1,7 @@
 import { and, eq, isNull } from 'drizzle-orm'
 import { z } from 'zod'
 import type { Db } from './db/client.js'
-import { projectExists, scheduleExists } from './db/queries.js'
+import { categoryExists, scheduleExists } from './db/queries.js'
 import { tasks } from './db/schema.js'
 import type { TaskRow } from './db/schema.js'
 import { badRequest, isoInstant, notFound, toDate } from './validation.js'
@@ -11,7 +11,7 @@ export const deadlineType = z.enum(['hard', 'soft', 'none'])
 
 /** Full task body as accepted by `PUT /api/tasks/:id` and the MCP tools. */
 export const taskBody = z.object({
-  projectId: z.string().min(1),
+  categoryId: z.string().min(1),
   title: z.string().min(1),
   notes: z.string().nullish(),
   durationMinutes: z.number().int().min(1),
@@ -33,12 +33,12 @@ export type TaskPatch = z.infer<typeof taskPatch>
 
 /** Creates or replaces a task. Undeletes a tombstoned id. Throws 400 for unknown references. */
 export async function upsertTask(db: Db, id: string, body: TaskBody, now: Date = new Date()): Promise<TaskRow> {
-  if (!(await projectExists(db, body.projectId))) throw badRequest(`unknown projectId ${body.projectId}`)
+  if (!(await categoryExists(db, body.categoryId))) throw badRequest(`unknown categoryId ${body.categoryId}`)
   if (body.scheduleId != null && !(await scheduleExists(db, body.scheduleId))) {
     throw badRequest(`unknown scheduleId ${body.scheduleId}`)
   }
   const fields = {
-    projectId: body.projectId,
+    categoryId: body.categoryId,
     title: body.title,
     notes: body.notes ?? null,
     durationMinutes: body.durationMinutes,
@@ -86,7 +86,7 @@ export async function patchTask(db: Db, id: string, patch: TaskPatch, now: Date 
   const keep = <T>(next: T | undefined, stored: T): T => (next === undefined ? stored : next)
   const iso = (d: Date | null): string | null => (d === null ? null : d.toISOString())
   const body: TaskBody = {
-    projectId: keep(patch.projectId, current.projectId),
+    categoryId: keep(patch.categoryId, current.categoryId),
     title: keep(patch.title, current.title),
     notes: keep(patch.notes, current.notes),
     durationMinutes: keep(patch.durationMinutes, current.durationMinutes),
