@@ -1,0 +1,237 @@
+name: iOS
+
+# build:      compiles the iOS app and its widgets for the simulator on every change under
+#             apple/ (no signing), then screenshots each tab with demo data.
+# testflight: archives, signs and uploads to TestFlight on pushes to main and on manual runs.
+#             Needs the App Store Connect secrets described in apple/README.md.
+on:
+  push:
+    paths:
+      - "apple/**"
+      - ".github/workflows/ios.yml"
+  pull_request:
+    paths:
+      - "apple/**"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  # Superseded branch builds are cancelled, but never a main run: it may be mid-upload to
+  # TestFlight. Main runs queue instead.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  # Also set in apple/project.yml (the widget extension is $BUNDLE_ID.widgets).
+  BUNDLE_ID: com.swarajban.florida
+
+jobs:
+  build:
+    name: Build (simulator)
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Generate Xcode project
+        working-directory: apple
+        env:
+          DEVELOPMENT_TEAM: ""
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Pick simulator
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          import json, sys
+          devices = json.load(sys.stdin)['devices']
+          ios = sorted((k for k in devices if 'iOS' in k), key=lambda k: [int(p) for p in k.split('iOS-')[-1].split('-')])
+          phones = [d for d in devices[ios[-1]] if d['name'].startswith('iPhone') and 'Pro' in d['name'] and 'Max' not in d['name']] or [d for d in devices[ios[-1]] if d['name'].startswith('iPhone')]
+          print(phones[0]['udid'])
+          ")
+          echo "Using simulator $UDID"
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+
+      - name: Build
+        working-directory: apple
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Florida.xcodeproj \
+            -scheme Florida-iOS \
+            -configuration Debug \
+            -destination "id=$UDID" \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            | tee build.log | xcbeautify --renderer github-actions
+
+      - name: Screenshots
+        working-directory: apple
+        run: |
+          # -demoData seeds an in-memory store (apple/iOS/Support/DemoData.swift), so no personal
+          # data or server is involved; -uiTab picks the tab. Both are Debug-only launch arguments.
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100 --cellularBars 4 || true
+          xcrun simctl install "$UDID" build/Build/Products/Debug-iphonesimulator/Florida.app
+          mkdir -p screenshots
+          shoot() {
+            name=$1; tab=$2
+            xcrun simctl terminate "$UDID" "$BUNDLE_ID" 2>/dev/null || true
+            xcrun simctl launch "$UDID" "$BUNDLE_ID" -demoData YES -uiTab "$tab"
+            sleep 8
+            xcrun simctl io "$UDID" screenshot "screenshots/$name.png"
+          }
+          # The first launch is slow (dyld cache); take it twice.
+          shoot 01-agenda agenda
+          shoot 01-agenda agenda
+          shoot 02-tasks tasks
+          shoot 03-settings settings
+          xcrun simctl ui "$UDID" appearance dark
+          shoot 04-agenda-dark agenda
+          shoot 05-tasks-dark tasks
+          # A blank screenshot is either a slow launch or a crash; make crashes loud.
+          crashes=$(ls ~/Library/Logs/DiagnosticReports/ 2>/dev/null | grep -i florida || true)
+          if [ -n "$crashes" ]; then
+            echo "::error::Florida crashed in the simulator: $crashes"
+            for f in $crashes; do head -80 ~/Library/Logs/DiagnosticReports/"$f"; done
+            exit 1
+          fi
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: apple/screenshots/*.png
+          if-no-files-found: ignore
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: apple/build.log
+          if-no-files-found: ignore
+
+  testflight:
+    name: Upload to TestFlight
+    needs: build
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
+      # Not secret (it is in every signed app). The default is the team virtus ships under.
+      TEAM_ID: ${{ secrets.APPLE_TEAM_ID || '8G7N7547R6' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check secrets
+        run: |
+          missing=""
+          for v in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8 TEAM_ID; do
+            [ -z "${!v}" ] && missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing secrets:$missing — see apple/README.md"
+            exit 1
+          fi
+
+      - name: Install App Store Connect API key
+        run: |
+          KEY_PATH="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
+          # Accept the .p8 either pasted as-is or base64-encoded.
+          if printf '%s' "$ASC_KEY_P8" | grep -q "BEGIN PRIVATE KEY"; then
+            printf '%s\n' "$ASC_KEY_P8" > "$KEY_PATH"
+          else
+            printf '%s' "$ASC_KEY_P8" | base64 --decode > "$KEY_PATH"
+          fi
+          echo "KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
+
+      - name: Generate Xcode project
+        working-directory: apple
+        env:
+          DEVELOPMENT_TEAM: ${{ env.TEAM_ID }}
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Verify App Store Connect API key
+        run: |
+          python3 -m pip install --quiet --break-system-packages pyjwt cryptography 2>/dev/null || python3 -m pip install --quiet pyjwt cryptography
+          python3 - <<'PY'
+          import json, os, sys, time, urllib.request, urllib.error
+          import jwt
+          key_id, issuer = os.environ["ASC_KEY_ID"].strip(), os.environ["ASC_ISSUER_ID"].strip()
+          pem = open(os.environ["KEY_PATH"]).read()
+          print(f"Key ID length {len(key_id)} (expect 10), issuer length {len(issuer)} (expect 36, a UUID)")
+          print(f"p8 has BEGIN line: {'BEGIN PRIVATE KEY' in pem}, END line: {'END PRIVATE KEY' in pem}, {len(pem)} chars")
+          try:
+              token = jwt.encode({"iss": issuer, "iat": int(time.time()), "exp": int(time.time()) + 600, "aud": "appstoreconnect-v1"},
+                                 pem, algorithm="ES256", headers={"kid": key_id, "typ": "JWT"})
+          except Exception as e:
+              print(f"::error::Could not load the .p8 private key: {e}"); sys.exit(1)
+          bundle = os.environ["BUNDLE_ID"]
+          req = urllib.request.Request(f"https://api.appstoreconnect.apple.com/v1/apps?filter[bundleId]={bundle}",
+                                       headers={"Authorization": f"Bearer {token}"})
+          try:
+              data = json.load(urllib.request.urlopen(req))
+          except urllib.error.HTTPError as e:
+              print(f"::error::App Store Connect rejected the key: HTTP {e.code} {e.read().decode()[:500]}"); sys.exit(1)
+          apps = data.get("data", [])
+          if not apps:
+              print(f"::error::Key works, but no App Store Connect app uses bundle ID {bundle}. Create it under Apps > New App."); sys.exit(1)
+          print(f"Key OK. Found app '{apps[0]['attributes']['name']}' for {bundle}.")
+          PY
+
+      - name: Archive
+        working-directory: apple
+        run: |
+          set -o pipefail
+          # Archive unsigned: the export step signs with Apple's cloud-managed distribution
+          # certificate, so no development profile (which would need a registered device) or
+          # local certificate is ever created. The bundle ids stay as project.yml sets them: the
+          # app and the widget extension need different ones, so no command-line override.
+          # Monotonic build number; run_attempt keeps re-runs unique.
+          BUILD_NUMBER=$(( GITHUB_RUN_NUMBER * 10 + GITHUB_RUN_ATTEMPT ))
+          echo "Build number: $BUILD_NUMBER"
+          xcodebuild archive \
+            -project Florida.xcodeproj \
+            -scheme Florida-iOS \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Florida.xcarchive" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGNING_ALLOWED=NO \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            | tee archive.log | xcbeautify --renderer github-actions
+
+      - name: Export and upload to TestFlight
+        working-directory: apple
+        run: |
+          set -o pipefail
+          plutil -insert teamID -string "$TEAM_ID" ExportOptions.plist
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/Florida.xcarchive" \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            2>&1 | tee export.log
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcode-logs
+          path: apple/*.log
+          if-no-files-found: ignore
+
+      - name: Clean up key
+        if: always()
+        run: rm -f "$KEY_PATH"

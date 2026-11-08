@@ -52,25 +52,17 @@ jobs:
         working-directory: apple
         env:
           DEVELOPMENT_TEAM: ""
+      # The iOS app and widgets are built (and shipped) by ios.yml.
       - name: Build Florida-macOS
-        run: >
-          xcodebuild build
-          -project Florida.xcodeproj
-          -scheme Florida-macOS
-          -destination 'platform=macOS'
-          -derivedDataPath DerivedData
-          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
-          | xcbeautify --renderer github-actions
-        working-directory: apple
-      - name: Build Florida-iOS (simulator)
-        run: >
-          xcodebuild build
-          -project Florida.xcodeproj
-          -scheme Florida-iOS
-          -destination 'generic/platform=iOS Simulator'
-          -derivedDataPath DerivedData
-          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
-          | xcbeautify --renderer github-actions
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Florida.xcodeproj \
+            -scheme Florida-macOS \
+            -destination 'platform=macOS' \
+            -derivedDataPath DerivedData \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            | xcbeautify --renderer github-actions
         working-directory: apple
       - name: FloridaCore tests (macOS)
         run: swift test

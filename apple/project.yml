@@ -12,6 +12,10 @@ settings:
     SWIFT_VERSION: "6.0"
     DEVELOPMENT_TEAM: "${DEVELOPMENT_TEAM}"
     CODE_SIGN_STYLE: Automatic
+    # CFBundleShortVersionString / CFBundleVersion of every target. The TestFlight workflow
+    # overrides CURRENT_PROJECT_VERSION with a monotonic build number.
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
 
 packages:
   FloridaCore:
@@ -48,10 +52,18 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.swarajban.florida
+        PRODUCT_NAME: Florida
+        # iPhone only: iPad would also require every orientation (or UIRequiresFullScreen).
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: iOS/Info.plist
       properties:
         CFBundleDisplayName: Florida
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Only HTTPS; skips the export-compliance questions on every TestFlight build.
+        ITSAppUsesNonExemptEncryption: false
         UILaunchScreen: {}
         UIBackgroundModes: [remote-notification]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
@@ -70,10 +82,13 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.swarajban.florida.widgets
+        TARGETED_DEVICE_FAMILY: "1"
     info:
       path: Widgets/Info.plist
       properties:
         CFBundleDisplayName: Florida Widgets
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     entitlements:
@@ -90,10 +105,13 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.swarajban.florida.mac
+        PRODUCT_NAME: Florida
     info:
       path: macOS/Info.plist
       properties:
         CFBundleDisplayName: Florida
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
     entitlements:
       path: macOS/Florida.entitlements

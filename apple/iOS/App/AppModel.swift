@@ -60,13 +60,34 @@ final class AppModel {
         var openedDatabase: AppDatabase?
         var openError: String?
         do {
-            openedDatabase = try AppDatabase(path: AppDatabase.defaultURL().path(percentEncoded: false))
+            openedDatabase = try Self.openStore()
         } catch {
             openError = "Could not open the local store: \(error.localizedDescription)"
         }
         database = openedDatabase
         storeError = openError
 
+        if LaunchOptions.demoData {
+            #if DEBUG
+            configureForDemo()
+            #endif
+        } else {
+            loadServerConfig()
+        }
+
+        startObserving()
+    }
+
+    /// The shared store in the App Group container, or a private in-memory one for demo runs.
+    private static func openStore() throws -> AppDatabase {
+        if LaunchOptions.demoData {
+            return try AppDatabase.inMemory()
+        }
+        return try AppDatabase(path: AppDatabase.defaultURL().path(percentEncoded: false))
+    }
+
+    /// Reads the server settings from the keychain and, when there are some, creates the sync client.
+    private func loadServerConfig() {
         do {
             serverConfig = try tokenStore.load()
         } catch {
@@ -75,8 +96,6 @@ final class AppModel {
         if let serverConfig, let database {
             syncClient = SyncClient(database: database, config: serverConfig)
         }
-
-        startObserving()
     }
 
     // MARK: - Day selection

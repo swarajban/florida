@@ -108,6 +108,79 @@ app (`florida://agenda`, `florida://tasks`):
 - **Tasks** (small, medium): open tasks in scheduler order with the open count;
   late tasks in red.
 
+## Building and shipping from GitHub Actions (no Mac needed)
+
+Two workflows build the Apple code:
+
+- `.github/workflows/ci.yml` (job **Apple apps**) builds `Florida-macOS` and
+  runs the package tests on a macOS runner on every push and pull request.
+- `.github/workflows/ios.yml` runs on changes under `apple/`. Its **build** job
+  compiles `Florida-iOS` (with the widgets) for the simulator, then launches
+  the app with `-demoData YES -uiTab <agenda|tasks|settings>` and uploads
+  screenshots of each tab, light and dark, as the `screenshots` artifact. On
+  pushes to `main`, or when started by hand (**Actions → iOS → Run workflow**),
+  the **testflight** job also archives the app, signs it, and uploads it to
+  TestFlight.
+
+The demo launch arguments are Debug-only (`iOS/Support/LaunchOptions.swift`):
+`-demoData YES` swaps the shared store for an in-memory one seeded from
+`iOS/Support/DemoData.swift` and skips the server setup, so screenshots never
+contain personal data and never reach a server. They work the same way from
+Xcode's scheme editor (Run → Arguments).
+
+### One-time TestFlight setup
+
+1. **Apple Developer Program:** a paid membership.
+2. **Register the identifiers** at
+   [developer.apple.com → Identifiers](https://developer.apple.com/account/resources/identifiers/list):
+   an **App Group** `group.com.swarajban.florida`, then two **App IDs**,
+   `com.swarajban.florida` (capabilities: App Groups with that group, Push
+   Notifications) and `com.swarajban.florida.widgets` (App Groups). Xcode's
+   cloud signing (`-allowProvisioningUpdates`) can usually create and update
+   these itself; registering them first just removes one failure mode.
+3. **Create the app record:** [App Store Connect → Apps](https://appstoreconnect.apple.com/apps)
+   → **+ → New App**, iOS, any free name, bundle ID `com.swarajban.florida`,
+   any SKU. The widget extension needs no record of its own.
+4. **Create an API key:** [Users and Access → Integrations → App Store Connect API](https://appstoreconnect.apple.com/access/integrations/api)
+   → **Team Keys** → generate a key with the **Admin** role (cloud signing
+   creates certificates and profiles, which needs Admin). Download the `.p8`
+   (only possible once) and note the **Key ID** and **Issuer ID**.
+5. **Add repository secrets** (GitHub → Settings → Secrets and variables →
+   Actions):
+
+   | Secret | Value |
+   | --- | --- |
+   | `APP_STORE_CONNECT_KEY_ID` | Key ID from step 4: 10 characters, the part between `AuthKey_` and `.p8` in the file name |
+   | `APP_STORE_CONNECT_ISSUER_ID` | Issuer ID from step 4 (a UUID) |
+   | `APP_STORE_CONNECT_KEY_P8` | Full contents of the `.p8` file, `BEGIN/END PRIVATE KEY` lines included (base64 also accepted) |
+   | `APPLE_TEAM_ID` | Optional. Defaults to `8G7N7547R6` in `ios.yml`; set it if the app should ship under another team |
+
+6. **Run the workflow** (**Actions → iOS → Run workflow**). The workflow checks
+   the key against the App Store Connect API before archiving, so credential
+   problems show Apple's own error. After the upload, the build takes 5–15
+   minutes to process.
+7. **Install it:** in App Store Connect open the app → **TestFlight → Internal
+   Testing**, create a group and add yourself, then accept the invite in the
+   TestFlight app. Internal builds skip Beta App Review, and
+   `ITSAppUsesNonExemptEncryption` is already `false` in `project.yml`, so
+   there is no export-compliance prompt. Every push to `main` that touches
+   `apple/` ships a new build; builds stay installable for 90 days.
+
+### Versions and signing
+
+`MARKETING_VERSION` (`1.0`) and `CURRENT_PROJECT_VERSION` in `project.yml` feed
+`CFBundleShortVersionString` and `CFBundleVersion` of every target. The
+workflow overrides the build number with `run_number * 10 + run_attempt`, so
+each upload is unique and both the app and the widget extension carry the same
+one, as App Store Connect requires. Bump `MARKETING_VERSION` by hand when the
+version should change.
+
+The archive is built unsigned. The export step signs it with Apple's
+cloud-managed distribution certificate through the API key, so no development
+profile, registered device, or local certificate is needed. The app icon is
+the single 1024×1024 image in `iOS/Assets.xcassets/AppIcon.appiconset`, which
+App Store Connect requires for every upload.
+
 ## FloridaCore and FloridaKit
 
 `FloridaCore` (`FloridaCore/Package.swift`) holds everything that is pure

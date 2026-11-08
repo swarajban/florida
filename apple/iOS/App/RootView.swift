@@ -5,7 +5,7 @@ import SwiftUI
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
-    @State private var selectedTab: AppTab = .agenda
+    @State private var selectedTab: AppTab = LaunchOptions.initialTab ?? .agenda
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -21,7 +21,7 @@ struct RootView: View {
                 .badge(model.lastError == nil ? 0 : 1)
         }
         .onAppear {
-            if model.needsSetup {
+            if model.needsSetup, LaunchOptions.initialTab == nil {
                 selectedTab = .settings
             }
         }

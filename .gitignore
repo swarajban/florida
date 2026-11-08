@@ -12,6 +12,10 @@ apple/**/xcuserdata/
 apple/**/.build/
 apple/**/.swiftpm/
 apple/**/DerivedData/
+# Written by .github/workflows/ios.yml when run locally
+apple/build/
+apple/screenshots/
+apple/*.log
 .DS_Store
 
 # Amp working files
