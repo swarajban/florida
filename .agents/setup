@@ -42,6 +42,25 @@ for profile in "$HOME/.bash_profile" "$HOME/.profile"; do
   fi
 done
 
+step "Deploy CLIs: flyctl and neonctl"
+# Both authenticate from the environment: FLY_API_TOKEN and NEON_API_KEY are Amp project secrets.
+if [ ! -x "$HOME/.fly/bin/fly" ]; then
+  curl -fsSL https://fly.io/install.sh | sh
+else
+  echo "flyctl already installed"
+fi
+marker="# florida: fly cli"
+for profile in "$HOME/.bash_profile" "$HOME/.profile"; do
+  if ! grep -Fqx "$marker" "$profile" 2>/dev/null; then
+    printf '\n%s\nexport PATH="$HOME/.fly/bin:$PATH"\n' "$marker" >> "$profile"
+  fi
+done
+if ! command -v neonctl >/dev/null 2>&1; then
+  npm install -g neonctl
+else
+  echo "neonctl already installed"
+fi
+
 step "pnpm workspace dependencies"
 pnpm install --frozen-lockfile
 
