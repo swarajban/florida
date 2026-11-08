@@ -39,7 +39,7 @@ extension AppModel {
     }
 
     /// The category a quick-add draft would land in, for the chips.
-    var paletteCategory: Category? {
+    var paletteCategory: TaskCategory? {
         resolveCategory(hint: palette.draft.categoryHint)
     }
 

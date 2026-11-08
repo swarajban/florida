@@ -5,7 +5,7 @@ import SwiftUI
 /// that will fill the gaps, so the user sees the task before pressing Return.
 struct QuickAddPreview: View {
     let draft: QuickAddDraft
-    let category: Category?
+    let category: TaskCategory?
     let calendar: Calendar
 
     private struct Chip: Identifiable {

@@ -12,9 +12,9 @@ extension AppDatabase {
     }
 
     /// Live categories, by `sortOrder` then name.
-    public func categories() throws -> [Category] {
+    public func categories() throws -> [TaskCategory] {
         try writer.read { db in
-            try Category.filter(Column("deletedAt") == nil).order(Column("sortOrder"), Column("name")).fetchAll(db)
+            try TaskCategory.filter(Column("deletedAt") == nil).order(Column("sortOrder"), Column("name")).fetchAll(db)
         }
     }
 
@@ -182,7 +182,7 @@ extension AppDatabase {
         try saveTask(task, now: now)
     }
 
-    public func saveCategory(_ category: Category, now: Date = Date()) throws {
+    public func saveCategory(_ category: TaskCategory, now: Date = Date()) throws {
         var category = category
         category.updatedAt = now
         let body = try JSONCoding.encoder.encode(CategoryWrite(category))
@@ -245,7 +245,7 @@ extension AppDatabase {
             }
             for category in response.categories where !pending.contains(.init(entity: .category, id: category.id)) {
                 if category.deletedAt != nil {
-                    try Category.deleteOne(db, id: category.id)
+                    try TaskCategory.deleteOne(db, id: category.id)
                 } else {
                     try category.save(db)
                 }

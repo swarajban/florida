@@ -34,7 +34,7 @@ struct WidgetBlock: Hashable, Sendable, Identifiable {
         location = event.location
     }
 
-    init(block: ScheduledBlock, category: Category?) {
+    init(block: ScheduledBlock, category: TaskCategory?) {
         id = "block-\(block.placement.id)"
         kind = .task
         title = block.task.title
@@ -69,7 +69,7 @@ struct WidgetTask: Hashable, Sendable, Identifiable {
     var late: Bool
     var colorHex: String?
 
-    init(task: TaskItem, placements: [Placement], category: Category?) {
+    init(task: TaskItem, placements: [Placement], category: TaskCategory?) {
         id = task.id
         title = task.title
         priority = task.priority

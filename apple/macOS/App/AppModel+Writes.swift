@@ -127,7 +127,7 @@ extension AppModel {
     /// Matches a `#hint` to a category name case-insensitively, treating "-" and "_" as spaces:
     /// exact match first, then prefix. Without a hint or a match: the category named "Inbox",
     /// else the first category.
-    func resolveCategory(hint: String?) -> Category? {
+    func resolveCategory(hint: String?) -> TaskCategory? {
         if let hint {
             let wanted = Self.normalizedCategoryName(hint)
             if let exact = categories.first(where: { Self.normalizedCategoryName($0.name) == wanted }) {

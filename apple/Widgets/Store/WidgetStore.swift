@@ -56,7 +56,7 @@ enum WidgetStore {
         }
     }
 
-    private static func categoriesById(_ database: AppDatabase) throws -> [String: Category] {
+    private static func categoriesById(_ database: AppDatabase) throws -> [String: TaskCategory] {
         Dictionary(uniqueKeysWithValues: try database.categories().map { ($0.id, $0) })
     }
 }

@@ -23,7 +23,7 @@ final class AppModel {
 
     // MARK: Store mirrors
 
-    private(set) var categories: [Category] = []
+    private(set) var categories: [TaskCategory] = []
     private(set) var openTasks: [TaskItem] = []
     private(set) var placements: [Placement] = []
     private(set) var events: [CalendarEvent] = []
@@ -31,7 +31,7 @@ final class AppModel {
     private(set) var calendars: [CalendarInfo] = []
     private(set) var pendingWriteCount = 0
     private(set) var tasksById: [String: TaskItem] = [:]
-    private(set) var categoriesById: [String: Category] = [:]
+    private(set) var categoriesById: [String: TaskCategory] = [:]
     private(set) var calendarsById: [String: CalendarInfo] = [:]
     /// Each task's placements, by start.
     private(set) var placementsByTask: [String: [Placement]] = [:]

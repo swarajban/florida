@@ -26,8 +26,8 @@ enum Fixtures {
         Schedule(id: id, name: id.capitalized, timeZone: "America/Los_Angeles", windows: windows, createdAt: t0, updatedAt: t0)
     }
 
-    static func category(id: String = "inbox", scheduleId: String = "work", sortOrder: Int = 0) -> Category {
-        Category(id: id, name: id.capitalized, scheduleId: scheduleId, sortOrder: sortOrder, createdAt: t0, updatedAt: t0)
+    static func category(id: String = "inbox", scheduleId: String = "work", sortOrder: Int = 0) -> TaskCategory {
+        TaskCategory(id: id, name: id.capitalized, scheduleId: scheduleId, sortOrder: sortOrder, createdAt: t0, updatedAt: t0)
     }
 
     static func task(

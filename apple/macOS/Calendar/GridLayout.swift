@@ -66,7 +66,7 @@ struct GridLayout {
 
     static func build(
         days: [Date], events: [CalendarEvent], placements: [Placement], tasksById: [String: TaskItem],
-        categoriesById: [String: Category], calendarsById: [String: CalendarInfo], calendar: Calendar
+        categoriesById: [String: TaskCategory], calendarsById: [String: CalendarInfo], calendar: Calendar
     ) -> GridLayout {
         var layout = GridLayout()
         layout.days = days

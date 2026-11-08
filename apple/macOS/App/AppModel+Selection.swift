@@ -6,7 +6,7 @@ struct CategoryTaskGroup: Identifiable, Hashable {
     let id: String
     let name: String
     /// Nil for tasks whose category is not in the store (yet).
-    let category: Category?
+    let category: TaskCategory?
     let tasks: [TaskItem]
 }
 

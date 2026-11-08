@@ -5,7 +5,7 @@ import SwiftUI
 /// keystroke and shows what it understood as chips; return submits the draft.
 struct QuickAddField: View {
     @Binding var text: String
-    let categories: [Category]
+    let categories: [TaskCategory]
     let calendar: Calendar
     let onSubmit: (QuickAddDraft) -> Void
 
@@ -67,7 +67,7 @@ struct QuickAddChip: Identifiable, Hashable {
     let text: String
     var tint: Color = .secondary
 
-    static func chips(for draft: QuickAddDraft, categories: [Category], calendar: Calendar) -> [QuickAddChip] {
+    static func chips(for draft: QuickAddDraft, categories: [TaskCategory], calendar: Calendar) -> [QuickAddChip] {
         let now = Date()
         var chips: [QuickAddChip] = []
         if let minutes = draft.durationMinutes {

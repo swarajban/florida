@@ -36,7 +36,7 @@ struct EventRow: View {
 /// A scheduled task block in the day timeline: time column, category color, title, pin glyph.
 struct BlockRow: View {
     let block: ScheduledBlock
-    let category: Category?
+    let category: TaskCategory?
     let now: Date
 
     var body: some View {

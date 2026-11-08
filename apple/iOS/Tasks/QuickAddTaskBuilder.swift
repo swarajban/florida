@@ -8,7 +8,7 @@ enum QuickAddTaskBuilder {
 
     /// The category a `#hint` names, or nil when none matches. Case-insensitive; hyphens and
     /// underscores count as spaces; an exact name wins over a prefix match.
-    static func matchCategory(hint: String, in categories: [Category]) -> Category? {
+    static func matchCategory(hint: String, in categories: [TaskCategory]) -> TaskCategory? {
         let needle = normalize(hint)
         guard !needle.isEmpty else { return nil }
         if let exact = categories.first(where: { normalize($0.name) == needle }) {
@@ -19,7 +19,7 @@ enum QuickAddTaskBuilder {
 
     /// `matchCategory` when the hint matches; otherwise the category named "Inbox", otherwise the
     /// first category; nil only when there are no categories at all.
-    static func resolveCategory(hint: String?, in categories: [Category]) -> Category? {
+    static func resolveCategory(hint: String?, in categories: [TaskCategory]) -> TaskCategory? {
         if let hint, let match = matchCategory(hint: hint, in: categories) {
             return match
         }
@@ -28,7 +28,7 @@ enum QuickAddTaskBuilder {
 
     /// A new task from the draft: 30 minutes and medium priority unless the text said otherwise,
     /// a deadline only when a date was parsed, a client-generated lowercase UUID.
-    static func makeTask(from draft: QuickAddDraft, category: Category, now: Date) -> TaskItem {
+    static func makeTask(from draft: QuickAddDraft, category: TaskCategory, now: Date) -> TaskItem {
         TaskItem(
             id: UUID().uuidString.lowercased(),
             categoryId: category.id,

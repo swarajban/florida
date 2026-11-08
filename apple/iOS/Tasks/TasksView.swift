@@ -95,7 +95,7 @@ struct TasksView: View {
 /// The open tasks of one category, in `openTasks()` order.
 struct TaskSection: Identifiable {
     let id: String
-    let category: Category?
+    let category: TaskCategory?
     let tasks: [TaskItem]
 
     var title: String { category?.name ?? "No category" }

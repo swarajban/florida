@@ -7,9 +7,9 @@ import GRDB
 
 extension AppDatabase {
     /// Live categories, by `sortOrder` then name; the same rows as `categories()`.
-    public func observeCategories() -> AsyncValueObservation<[Category]> {
+    public func observeCategories() -> AsyncValueObservation<[TaskCategory]> {
         observe { db in
-            try Category.filter(Column("deletedAt") == nil).order(Column("sortOrder"), Column("name")).fetchAll(db)
+            try TaskCategory.filter(Column("deletedAt") == nil).order(Column("sortOrder"), Column("name")).fetchAll(db)
         }
     }
 

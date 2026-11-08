@@ -10,7 +10,7 @@ extension Schedule: @retroactive FetchableRecord, @retroactive PersistableRecord
     public static let databaseTableName = "schedule"
 }
 
-extension Category: @retroactive FetchableRecord, @retroactive PersistableRecord {
+extension TaskCategory: @retroactive FetchableRecord, @retroactive PersistableRecord {
     public static let databaseTableName = "category"
 }
 

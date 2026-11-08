@@ -55,10 +55,10 @@ enum DemoData {
                     createdAt: now, updatedAt: now),
             ],
             categories: [
-                Category(id: inbox, name: "Inbox", scheduleId: workHours, sortOrder: 0, createdAt: now, updatedAt: now),
-                Category(id: engineering, name: "Work Engineering", color: "#4F46E5", scheduleId: workHours, sortOrder: 1, createdAt: now, updatedAt: now),
-                Category(id: infosec, name: "Work Infosec", color: "#DC2626", scheduleId: workHours, sortOrder: 2, createdAt: now, updatedAt: now),
-                Category(id: finance, name: "Personal Finance", color: "#059669", scheduleId: evenings, sortOrder: 3, createdAt: now, updatedAt: now),
+                TaskCategory(id: inbox, name: "Inbox", scheduleId: workHours, sortOrder: 0, createdAt: now, updatedAt: now),
+                TaskCategory(id: engineering, name: "Work Engineering", color: "#4F46E5", scheduleId: workHours, sortOrder: 1, createdAt: now, updatedAt: now),
+                TaskCategory(id: infosec, name: "Work Infosec", color: "#DC2626", scheduleId: workHours, sortOrder: 2, createdAt: now, updatedAt: now),
+                TaskCategory(id: finance, name: "Personal Finance", color: "#059669", scheduleId: evenings, sortOrder: 3, createdAt: now, updatedAt: now),
             ],
             tasks: [
                 task("demo-task-keys", infosec, "Rotate AWS access keys", minutes: 45, priority: .asap, due: at(1, 12), hard: true),

@@ -24,7 +24,7 @@ final class AppModel {
 
     /// Local midnight of the day the Agenda tab shows.
     private(set) var selectedDay: Date
-    private(set) var categories: [Category] = []
+    private(set) var categories: [TaskCategory] = []
     private(set) var openTasks: [TaskItem] = []
     /// Every scheduler placement, grouped by task; drives the "scheduled at" line of task rows.
     private(set) var placementsByTask: [String: [Placement]] = [:]
@@ -115,7 +115,7 @@ final class AppModel {
         select(day: Date())
     }
 
-    func category(id: String) -> Category? {
+    func category(id: String) -> TaskCategory? {
         categories.first { $0.id == id }
     }
 

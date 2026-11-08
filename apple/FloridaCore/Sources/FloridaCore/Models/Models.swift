@@ -66,7 +66,7 @@ public struct Schedule: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
-public struct Category: Codable, Hashable, Sendable, Identifiable {
+public struct TaskCategory: Codable, Hashable, Sendable, Identifiable {
     public var id: String
     public var name: String
     /// CSS-style hex color such as "#4F46E5", or nil for the default.
@@ -264,7 +264,7 @@ public struct SyncResponse: Codable, Sendable {
     /// Server time when the diff was taken; pass back as the next `since`.
     public var cursor: String
     public var schedules: [Schedule]
-    public var categories: [Category]
+    public var categories: [TaskCategory]
     public var tasks: [TaskItem]
     public var events: [CalendarEvent]
     public var placements: [Placement]
@@ -272,7 +272,7 @@ public struct SyncResponse: Codable, Sendable {
     public var calendars: [CalendarInfo]
 
     public init(
-        cursor: String, schedules: [Schedule] = [], categories: [Category] = [], tasks: [TaskItem] = [],
+        cursor: String, schedules: [Schedule] = [], categories: [TaskCategory] = [], tasks: [TaskItem] = [],
         events: [CalendarEvent] = [], placements: [Placement] = [], accounts: [GoogleAccount] = [],
         calendars: [CalendarInfo] = []
     ) {
@@ -386,7 +386,7 @@ public struct CategoryWrite: Codable, Hashable, Sendable {
     public var scheduleId: String
     public var sortOrder: Int
 
-    public init(_ category: Category) {
+    public init(_ category: TaskCategory) {
         name = category.name
         color = category.color
         scheduleId = category.scheduleId
@@ -415,7 +415,7 @@ public struct TaskWriteResponse: Codable, Sendable {
 
 /// Response of `PUT /api/categories/:id`.
 public struct CategoryWriteResponse: Codable, Sendable {
-    public var category: Category
+    public var category: TaskCategory
     public var scheduling: SchedulingResult
 }
 

@@ -33,7 +33,7 @@ extension Color {
     static let defaultCalendar = Color(hex: "#3B82F6") ?? .blue
 }
 
-extension Category {
+extension TaskCategory {
     var tint: Color { color.flatMap(Color.init(hex:)) ?? .defaultCategory }
 }
 
