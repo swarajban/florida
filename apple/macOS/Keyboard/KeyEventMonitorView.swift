@@ -19,6 +19,9 @@ struct KeyEventMonitorView: NSViewRepresentable {
     }
 }
 
+/// The monitor lives exactly as long as the view is in a window: `NSView` is main-actor isolated
+/// and `deinit` is not, so Swift 6 forbids touching `monitor` there; `viewDidMoveToWindow` runs
+/// on the main actor at both ends of the view's life in a window.
 final class KeyMonitorHostView: NSView {
     private var monitor: Any?
     private let box = MonitorBox()
@@ -26,6 +29,19 @@ final class KeyMonitorHostView: NSView {
     func install(model: AppModel) {
         box.model = model
         box.view = self
+        if window != nil { startMonitoring() }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil {
+            stopMonitoring()
+        } else {
+            startMonitoring()
+        }
+    }
+
+    private func startMonitoring() {
         guard monitor == nil else { return }
         let box = box
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
@@ -37,12 +53,11 @@ final class KeyMonitorHostView: NSView {
         }
     }
 
-    deinit {
+    private func stopMonitoring() {
         if let monitor {
-            MainActor.assumeIsolated {
-                NSEvent.removeMonitor(monitor)
-            }
+            NSEvent.removeMonitor(monitor)
         }
+        monitor = nil
     }
 }
 
