@@ -21,21 +21,11 @@ struct AllDayStripView: View {
                         .foregroundStyle(.secondary)
                         .frame(width: gutterWidth - 8, height: Self.rowHeight, alignment: .trailing)
                     ForEach(layout.allDayBlocks) { block in
-                        let isSelected = model.selection == block.item
-                        Text(block.title)
-                            .font(.caption)
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                            .padding(.horizontal, 6)
-                            .frame(
-                                width: max(CGFloat(block.endDayIndex - block.startDayIndex + 1) * columnWidth - 4, 4),
-                                height: Self.rowHeight - 4,
-                                alignment: .leading)
-                            .background(block.tint.opacity(block.start < Date() ? 0.6 : 0.9), in: RoundedRectangle(cornerRadius: 4))
-                            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.primary, lineWidth: isSelected ? 2 : 0))
-                            .offset(
-                                x: gutterWidth + CGFloat(block.startDayIndex) * columnWidth + 2,
-                                y: CGFloat(block.row) * Self.rowHeight + 2)
+                        AllDayBar(
+                            block: block,
+                            columnWidth: columnWidth,
+                            gutterWidth: gutterWidth,
+                            isSelected: model.selection == block.item)
                             .onTapGesture(count: 2) {
                                 model.select(block.item, in: .calendar)
                                 model.editSelection()
@@ -49,5 +39,35 @@ struct AllDayStripView: View {
             .frame(height: CGFloat(layout.allDayRowCount) * Self.rowHeight + 2)
             Divider()
         }
+    }
+}
+
+/// One all-day bar. Its geometry is computed up front in plain `let`s: the same chain inlined in
+/// the `ForEach` closure made the type checker give up ("unable to type-check this expression in
+/// reasonable time").
+private struct AllDayBar: View {
+    let block: GridLayout.AllDayBlock
+    let columnWidth: CGFloat
+    let gutterWidth: CGFloat
+    let isSelected: Bool
+
+    var body: some View {
+        let spannedDays = CGFloat(block.endDayIndex - block.startDayIndex + 1)
+        let width: CGFloat = max(spannedDays * columnWidth - 4, 4)
+        let height: CGFloat = AllDayStripView.rowHeight - 4
+        let x: CGFloat = gutterWidth + CGFloat(block.startDayIndex) * columnWidth + 2
+        let y: CGFloat = CGFloat(block.row) * AllDayStripView.rowHeight + 2
+        let opacity: Double = block.start < Date() ? 0.6 : 0.9
+        let shape = RoundedRectangle(cornerRadius: 4)
+
+        Text(block.title)
+            .font(.caption)
+            .foregroundStyle(.white)
+            .lineLimit(1)
+            .padding(.horizontal, 6)
+            .frame(width: width, height: height, alignment: .leading)
+            .background(block.tint.opacity(opacity), in: shape)
+            .overlay(shape.strokeBorder(Color.primary, lineWidth: isSelected ? 2 : 0))
+            .offset(x: x, y: y)
     }
 }

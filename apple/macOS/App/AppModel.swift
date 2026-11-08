@@ -118,8 +118,10 @@ final class AppModel {
         let visible = visibleRange
         let covered = loadedRange.map { $0.lowerBound <= visible.lowerBound && visible.upperBound <= $0.upperBound } ?? false
         if !covered {
-            loadedRange = DateNavigation.shift(visible.lowerBound, by: -28, calendar: calendar)
-                ..<DateNavigation.shift(visible.upperBound, by: 28, calendar: calendar)
+            // One line: a leading `..<` on a continuation line parses as the prefix operator.
+            let lower = DateNavigation.shift(visible.lowerBound, by: -28, calendar: calendar)
+            let upper = DateNavigation.shift(visible.upperBound, by: 28, calendar: calendar)
+            loadedRange = lower..<upper
             restartEventsObserver()
         }
         rebuildLayout()
