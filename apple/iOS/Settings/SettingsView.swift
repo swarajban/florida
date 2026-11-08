@@ -1,8 +1,8 @@
 import FloridaKit
 import SwiftUI
 
-/// The Settings tab: server connection, sync controls and status, and the read-only list of
-/// connected Google accounts and their calendars.
+/// The Settings tab: server connection, sync controls and status, and the connected Google
+/// accounts with a toggle per calendar.
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @State private var serverURL = ""
@@ -86,7 +86,7 @@ struct SettingsView: View {
                         } header: {
                             Text(account.email)
                         } footer: {
-                            Text("Label: \(account.label)")
+                            Text("Label: \(account.label). Calendars that are off are hidden from the agenda and ignored when scheduling.")
                         }
                     }
                 }
@@ -116,30 +116,32 @@ struct SettingsView: View {
     }
 }
 
-/// One Google calendar: color, name, whether its events are mirrored.
+/// One Google calendar: color, name, and a toggle for whether its events are mirrored. The toggle
+/// flips the local flag at once and tells the server in the background.
 private struct CalendarRow: View {
+    @Environment(AppModel.self) private var model
     let calendar: CalendarInfo
 
     var body: some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(calendar.color.flatMap(Color.init(hex:)) ?? .secondary)
-                .frame(width: 10, height: 10)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(calendar.summary)
-                Text(calendar.accessRole)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if calendar.selected {
-                Image(systemName: "checkmark")
-                    .foregroundStyle(.tint)
-            } else {
-                Text("Hidden")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        Toggle(isOn: isSelected) {
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(calendar.color.flatMap(Color.init(hex:)) ?? .secondary)
+                    .frame(width: 10, height: 10)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(calendar.summary)
+                    Text(calendar.accessRole)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
+        .disabled(model.needsSetup)
+    }
+
+    private var isSelected: Binding<Bool> {
+        Binding(
+            get: { calendar.selected },
+            set: { model.setCalendarSelected(id: calendar.id, selected: $0) })
     }
 }

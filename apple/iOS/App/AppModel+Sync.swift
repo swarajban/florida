@@ -52,6 +52,31 @@ extension AppModel {
         runServerAction { try await $0.triggerGoogleSync() }
     }
 
+    /// Shows or hides a Google calendar: flips the local flag at once so the agenda updates, then
+    /// `PATCH /api/calendars/:id` and a sync so the server's reschedule comes back. The sync runs
+    /// after the PATCH on purpose: a pull that lands first would restore the old flag.
+    func setCalendarSelected(id: String, selected: Bool) {
+        guard let database else { return }
+        do {
+            try database.setCalendarSelected(id: id, selected: selected)
+        } catch {
+            lastError = "Could not update the calendar: \(error.localizedDescription)"
+            return
+        }
+        guard let syncClient else { return }
+        Task { [weak self] in
+            self?.activeOperations += 1
+            defer { self?.activeOperations -= 1 }
+            do {
+                try await syncClient.setCalendarSelected(id: id, selected: selected)
+                self?.lastError = nil
+            } catch {
+                self?.lastError = Self.describe(error)
+            }
+            await self?.syncNow()
+        }
+    }
+
     /// Stores the server settings in the keychain, swaps the sync client, and syncs.
     func saveServerConfig(_ config: ServerConfig) {
         do {
