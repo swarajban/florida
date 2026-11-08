@@ -15,6 +15,7 @@ import type { Config } from './config.js'
 import type { Db } from './db/client.js'
 import { defaultTimeZone, scheduleExists } from './db/queries.js'
 import { calendars, events, googleAccounts, placements, categories, schedules, tasks } from './db/schema.js'
+import type { GoogleAccountRow } from './db/schema.js'
 import { authorizationUrl, exchangeCode } from './google/client.js'
 import type { CalendarSyncService } from './google/sync.js'
 import { mountMcp } from './mcp.js'
@@ -368,10 +369,11 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
 
     const tokens = await exchangeCode(oauth, code)
     const account = await sync.connectAccount(entry.label, tokens)
-    await reschedule()
+    void runAccountSync(account)
     return c.html(
       page(
-        `Connected <strong>${escapeHtml(account.email)}</strong> as <code>${escapeHtml(account.label)}</code>. You can close this tab.`,
+        `Connected <strong>${escapeHtml(account.email)}</strong> as <code>${escapeHtml(account.label)}</code>. ` +
+          'Its calendars are syncing in the background and appear in the apps as each one finishes. You can close this tab.',
       ),
     )
   })
@@ -421,6 +423,16 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
       await reschedule()
     } catch (err) {
       console.error(`[webhook] sync of calendar ${calendarId} failed:`, err)
+    }
+  }
+
+  /** First sync of a just-connected account: minutes of work, so it runs after the OAuth page is sent. */
+  async function runAccountSync(account: GoogleAccountRow): Promise<void> {
+    try {
+      await sync.syncAccount(account)
+      await reschedule()
+    } catch (err) {
+      console.error(`[google] initial sync of ${account.email} failed:`, err)
     }
   }
 

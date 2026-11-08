@@ -14,7 +14,7 @@ import {
   stopChannel,
   watchEvents,
 } from './client.js'
-import type { ListEventsParams, OAuthConfig, Tokens } from './client.js'
+import type { GoogleCalendarListEntry, ListEventsParams, OAuthConfig, Tokens } from './client.js'
 
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
@@ -29,12 +29,26 @@ const WATCH_RENEWAL_LEAD = DAY
 /** What the HTTP layer and jobs need from calendar sync. `GoogleSync` implements it; tests inject fakes. */
 export interface CalendarSyncService {
   connectAccount(label: string, tokens: Tokens): Promise<GoogleAccountRow>
+  syncAccount(account: GoogleAccountRow): Promise<void>
   syncCalendar(calendar: CalendarRow): Promise<void>
   syncAll(): Promise<void>
   ensureAllWatches(): Promise<void>
 }
 
 type SyncConfig = Pick<Config, 'GOOGLE_CLIENT_ID' | 'GOOGLE_CLIENT_SECRET' | 'PUBLIC_URL' | 'TOKEN_ENCRYPTION_KEY'>
+
+/**
+ * Which calendars a newly connected account syncs before the user has picked any: its own primary
+ * calendar and the group calendars it can write to. Another person's primary calendar shows up
+ * with `accessRole: 'owner'` too when they shared it with "make changes and manage sharing", so
+ * the role alone would pull in every coworker's calendar. Holiday, subscription, and resource
+ * calendars are not the user's own time.
+ */
+export function selectedByDefault(entry: GoogleCalendarListEntry): boolean {
+  if (entry.primary === true) return true
+  const writable = entry.accessRole === 'owner' || entry.accessRole === 'writer'
+  return writable && entry.id.endsWith('@group.calendar.google.com')
+}
 
 export class GoogleSync implements CalendarSyncService {
   private readonly oauth: OAuthConfig
@@ -65,8 +79,9 @@ export class GoogleSync implements CalendarSyncService {
   }
 
   /**
-   * Stores a freshly authorized account (keyed by the primary calendar's id, which is the email),
-   * upserts its calendar list, then syncs and watches every selected calendar.
+   * Stores a freshly authorized account (keyed by the primary calendar's id, which is the email)
+   * and upserts its calendar list. Returns before any events are fetched: callers run
+   * `syncAccount` afterwards, off the request path, because a first sync can take minutes.
    */
   async connectAccount(label: string, tokens: Tokens): Promise<GoogleAccountRow> {
     if (tokens.refreshToken === undefined) {
@@ -107,23 +122,27 @@ export class GoogleSync implements CalendarSyncService {
           id: randomUUID(),
           accountId: account.id,
           googleId: entry.id,
-          selected: entry.accessRole === 'owner' || entry.accessRole === 'writer',
+          selected: selectedByDefault(entry),
           createdAt: now,
           ...calendarFields,
         })
         // `selected` is intentionally not in `set`: reconnecting keeps the user's choice.
         .onConflictDoUpdate({ target: [calendars.accountId, calendars.googleId], set: calendarFields })
     }
+    return account
+  }
 
+  /** Syncs, then watches, every selected calendar of one account, the primary calendar first. */
+  async syncAccount(account: GoogleAccountRow): Promise<void> {
     const selected = await this.db
       .select()
       .from(calendars)
       .where(and(eq(calendars.accountId, account.id), eq(calendars.selected, true)))
+    selected.sort((a, b) => Number(b.googleId === account.email) - Number(a.googleId === account.email))
     for (const calendar of selected) {
       await this.guarded(`sync ${calendar.googleId}`, () => this.syncCalendar(calendar))
       await this.guarded(`watch ${calendar.googleId}`, () => this.ensureWatch(calendar))
     }
-    return account
   }
 
   /**

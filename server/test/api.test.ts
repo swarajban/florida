@@ -1,7 +1,7 @@
 import { setTimeout as sleep } from 'node:timers/promises'
 import { localParts, weekdayOf } from '@florida/scheduler'
 import type { Hono } from 'hono'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../src/app.js'
 import { ChangeBus } from '../src/changes.js'
 import type { Db } from '../src/db/client.js'
@@ -350,6 +350,34 @@ describe('google', () => {
 
     const bad = await app.request('/auth/google/callback?code=abc&state=not-issued')
     expect(bad.status).toBe(400)
+  })
+
+  it('answers /auth/google/callback once the account is stored and runs its first sync in the background', async () => {
+    const start = await app.request(`/auth/google/start?label=work&key=${config.API_TOKEN}`)
+    const state = new URL(start.headers.get('location') ?? '').searchParams.get('state') ?? ''
+    vi.stubGlobal('fetch', async () => Response.json({ access_token: 'access', refresh_token: 'refresh', expires_in: 3600 }))
+    let finishSync!: () => void
+    fake.syncAccountGate = new Promise<void>((resolve) => {
+      finishSync = resolve
+    })
+    const rescheduled = new Promise<void>((resolve) => {
+      const unsubscribe = changes.subscribe(() => {
+        unsubscribe()
+        resolve()
+      })
+    })
+    try {
+      // The sync is still blocked on the gate here, so a response proves it is not on the request path.
+      const res = await app.request(`/auth/google/callback?code=abc&state=${state}`)
+      expect(res.status).toBe(200)
+      expect(await res.text()).toContain('work@example.com')
+      expect(fake.syncAccountCalls.map((a) => a.label)).toEqual(['work'])
+      expect((await app.request(`/auth/google/callback?code=abc&state=${state}`)).status).toBe(400)
+    } finally {
+      vi.unstubAllGlobals()
+      finishSync()
+    }
+    await rescheduled
   })
 })
 

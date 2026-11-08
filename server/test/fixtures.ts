@@ -17,9 +17,26 @@ export const testConfig: Config = {
 /** Records sync calls instead of talking to Google. */
 export class FakeSync implements CalendarSyncService {
   syncCalendarCalls: CalendarRow[] = []
+  syncAccountCalls: GoogleAccountRow[] = []
+  /** When set, `syncAccount` waits on it, so a test can observe what happens while a first sync is still running. */
+  syncAccountGate: Promise<void> | undefined
   syncAllCalls = 0
-  async connectAccount(): Promise<GoogleAccountRow> {
-    throw new Error('not used in tests')
+  async connectAccount(label: string): Promise<GoogleAccountRow> {
+    const now = new Date()
+    return {
+      id: `account-${label}`,
+      email: `${label}@example.com`,
+      label,
+      refreshTokenEnc: 'enc',
+      accessToken: null,
+      accessTokenExpiresAt: null,
+      createdAt: now,
+      updatedAt: now,
+    }
+  }
+  async syncAccount(account: GoogleAccountRow): Promise<void> {
+    this.syncAccountCalls.push(account)
+    await this.syncAccountGate
   }
   async syncCalendar(calendar: CalendarRow): Promise<void> {
     this.syncCalendarCalls.push(calendar)
