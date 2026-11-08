@@ -22,6 +22,7 @@ const config: Config = {
   PUBLIC_URL: 'https://florida.test',
   PORT: 8080,
   HORIZON_DAYS: 28,
+  ANTHROPIC_MODEL: 'claude-test-1',
 }
 
 class FakeSync implements CalendarSyncService {

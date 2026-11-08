@@ -6,6 +6,8 @@ import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import { HTTPException } from 'hono/http-exception'
 import { ZodError, z } from 'zod'
+import { ClaudeError } from './ai/claude.js'
+import type { TaskParser } from './ai/parse-task.js'
 import { ChangeBus } from './changes.js'
 import type { Config } from './config.js'
 import type { Db } from './db/client.js'
@@ -20,6 +22,8 @@ export interface AppDeps {
   reschedule: () => Promise<SchedulerResult>
   /** Receives a notice after every scheduler run the app triggers; streamed by `/api/events`. */
   changes?: ChangeBus
+  /** Natural-language task parsing (Claude). When absent, `/api/ai/*` answers 503. */
+  ai?: TaskParser
   /** Delay before a webhook-triggered calendar sync runs; pings within it coalesce. Default 2 s. */
   webhookDebounceMs?: number
   /** Interval between SSE keep-alive comments. Default 25 s. */
@@ -96,6 +100,14 @@ const scheduleBody = z.object({
 
 const calendarPatch = z.object({ selected: z.boolean() })
 
+const parseTaskBody = z.object({
+  text: z.string().trim().min(1).max(2000),
+  /** Client's current time; defaults to the server clock. */
+  now: isoInstant.optional(),
+  /** Client's time zone; defaults to the first live schedule's zone, then UTC. */
+  timeZone: z.string().refine(isTimeZone, 'unknown IANA time zone').optional(),
+})
+
 export function createApp(deps: AppDeps): Hono {
   const { db, config, sync } = deps
   const changes = deps.changes ?? new ChangeBus()
@@ -119,6 +131,10 @@ export function createApp(deps: AppDeps): Hono {
   app.onError((err, c) => {
     if (err instanceof ZodError) return c.json({ error: 'validation failed', issues: err.issues }, 400)
     if (err instanceof HTTPException) return c.json({ error: err.message }, err.status)
+    if (err instanceof ClaudeError) {
+      console.error(`[ai] ${c.req.method} ${c.req.path} failed:`, err.message)
+      return c.json({ error: `ai request failed: ${err.message}` }, 502)
+    }
     console.error(`[http] ${c.req.method} ${c.req.path} failed:`, err)
     return c.json({ error: 'internal server error' }, 500)
   })
@@ -301,6 +317,36 @@ export function createApp(deps: AppDeps): Hono {
   })
 
   app.post('/api/schedule/run', async (c) => c.json(await reschedule()))
+
+  // ---- AI ---------------------------------------------------------------------------------------
+
+  // Turns free text into a task draft. The client reviews it and then PUTs the task itself, so a
+  // slow or wrong model answer never blocks or corrupts the local-first write path.
+  app.post('/api/ai/parse-task', async (c) => {
+    if (deps.ai === undefined) throw new HTTPException(503, { message: 'ai is not configured (set ANTHROPIC_API_KEY)' })
+    const body = parseTaskBody.parse(await c.req.json())
+    const projectRows = await db
+      .select({ id: projects.id, name: projects.name })
+      .from(projects)
+      .where(isNull(projects.deletedAt))
+      .orderBy(projects.sortOrder, projects.name)
+    let timeZone = body.timeZone
+    if (timeZone === undefined) {
+      const [schedule] = await db
+        .select({ timeZone: schedules.timeZone })
+        .from(schedules)
+        .where(isNull(schedules.deletedAt))
+        .orderBy(schedules.createdAt)
+        .limit(1)
+      timeZone = schedule?.timeZone ?? 'UTC'
+    }
+    const draft = await deps.ai.parse(body.text, {
+      now: body.now === undefined ? new Date() : new Date(body.now),
+      timeZone,
+      projects: projectRows,
+    })
+    return c.json({ draft })
+  })
 
   // ---- Google -----------------------------------------------------------------------------------
 

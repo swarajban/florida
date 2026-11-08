@@ -55,6 +55,10 @@ openssl rand -hex 32   # API_TOKEN
 openssl rand -hex 32   # TOKEN_ENCRYPTION_KEY
 ```
 
+Optional: an Anthropic API key (`ANTHROPIC_API_KEY`) enables `POST /api/ai/parse-task`; the model
+defaults to `claude-haiku-5-5` (`ANTHROPIC_MODEL`). Without the key the rest of the server works
+unchanged and the AI route answers 503.
+
 ### 4. Deploy to Fly
 
 From the repository root (`fly.toml` lives there and points at `server/Dockerfile`):
@@ -67,7 +71,8 @@ fly secrets set \
   TOKEN_ENCRYPTION_KEY='...' \
   GOOGLE_CLIENT_ID='...' \
   GOOGLE_CLIENT_SECRET='...' \
-  PUBLIC_URL='https://florida.fly.dev'
+  PUBLIC_URL='https://florida.fly.dev' \
+  ANTHROPIC_API_KEY='...'
 fly deploy
 ```
 
@@ -133,6 +138,7 @@ curl -s -X POST "$PUBLIC_URL/api/google/sync" -H "authorization: Bearer $API_TOK
 | `GET /api/events` | Server-sent events: `connected` on open, then one `changed` event after every scheduler run or calendar sync. Clients respond by calling `/api/sync` with their cursor. Keep-alive comment every 25 s. |
 | `PUT/DELETE /api/tasks/:id`, `/api/projects/:id`, `/api/schedules/:id` | Upsert / soft-delete, then rerun the scheduler. Responses include `scheduling: { placements, unscheduled, late }`. |
 | `POST /api/schedule/run` | Rerun the scheduler. |
+| `POST /api/ai/parse-task` | `{ text, now?, timeZone? }` → `{ draft }`: Claude turns one line of text into a task draft (`title, notes, durationMinutes, minChunkMinutes, priority, deadlineType, dueAt, startAt, pinnedStart, projectId, rationale`). The client reviews the draft and then `PUT`s the task itself. `timeZone` defaults to the first schedule's zone. 503 without `ANTHROPIC_API_KEY`; 502 when the model call fails. |
 | `GET /api/google/accounts` | Accounts and calendars (never tokens). |
 | `PATCH /api/calendars/:id` | `{ selected }` toggles whether a calendar blocks time. |
 | `POST /api/google/sync` | Sync every selected calendar now, then reschedule. |

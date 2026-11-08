@@ -1,4 +1,5 @@
 import { serve } from '@hono/node-server'
+import { ClaudeTaskParser } from './ai/parse-task.js'
 import { createApp } from './app.js'
 import { ChangeBus } from './changes.js'
 import { loadConfig } from './config.js'
@@ -12,7 +13,12 @@ const { db, close } = createDb(config.DATABASE_URL)
 const sync = new GoogleSync(db, config)
 const changes = new ChangeBus()
 const reschedule = () => runScheduling(db, config)
-const app = createApp({ db, config, sync, reschedule, changes })
+const ai =
+  config.ANTHROPIC_API_KEY === undefined
+    ? undefined
+    : new ClaudeTaskParser({ apiKey: config.ANTHROPIC_API_KEY, model: config.ANTHROPIC_MODEL })
+const app = createApp({ db, config, sync, reschedule, changes, ...(ai === undefined ? {} : { ai }) })
+if (ai === undefined) console.log('[server] ANTHROPIC_API_KEY not set; /api/ai/* disabled')
 
 const server = serve({ fetch: app.fetch, port: config.PORT }, (info) => {
   console.log(`[server] listening on port ${info.port}, public URL ${config.PUBLIC_URL}`)

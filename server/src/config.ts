@@ -13,6 +13,9 @@ const envSchema = z.object({
     .regex(/^https?:\/\/[^/\s]+$/, 'must be an origin like https://florida.fly.dev with no trailing slash'),
   PORT: z.coerce.number().int().positive().default(8080),
   HORIZON_DAYS: z.coerce.number().int().positive().default(28),
+  /** Optional: enables POST /api/ai/parse-task. */
+  ANTHROPIC_API_KEY: z.string().min(1).optional(),
+  ANTHROPIC_MODEL: z.string().min(1).default('claude-haiku-5-5'),
 })
 
 export type Config = z.infer<typeof envSchema>
