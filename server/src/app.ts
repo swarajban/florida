@@ -4,6 +4,7 @@ import { eq, gt, isNull } from 'drizzle-orm'
 import type { PgColumn } from 'drizzle-orm/pg-core'
 import { Hono } from 'hono'
 import type { MiddlewareHandler } from 'hono'
+import { html } from 'hono/html'
 import { streamSSE } from 'hono/streaming'
 import { HTTPException } from 'hono/http-exception'
 import { ZodError, z } from 'zod'
@@ -126,6 +127,21 @@ export function createApp(deps: AppDeps): Hono {
   })
 
   app.get('/health', (c) => c.json({ ok: true }))
+
+  // Google delivers calendar push notifications only to a domain verified in Search Console; the
+  // HTML-tag method looks for this meta tag on the site root.
+  app.get('/', (c) => {
+    const verification = config.GOOGLE_SITE_VERIFICATION
+    return c.html(html`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Florida</title>
+${verification === undefined ? '' : html`<meta name="google-site-verification" content="${verification}">`}
+</head>
+<body>Florida sync server. Apps use <code>/api</code>, agents use <code>/mcp</code>.</body>
+</html>`)
+  })
 
   const requireToken: MiddlewareHandler = async (c, next) => {
     const header = c.req.header('authorization') ?? ''

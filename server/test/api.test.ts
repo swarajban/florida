@@ -71,6 +71,23 @@ describe('health and auth', () => {
     expect(await res.json()).toEqual({ ok: true })
   })
 
+  it('serves the Search Console verification tag on / only when configured', async () => {
+    const plain = await app.request('/')
+    expect(plain.status).toBe(200)
+    expect(await plain.text()).not.toContain('google-site-verification')
+
+    const verified = createApp({
+      db,
+      config: { ...config, GOOGLE_SITE_VERIFICATION: 'abc_123-XYZ' },
+      sync: fake,
+      reschedule: () => runScheduling(db, config),
+    })
+    const res = await verified.request('/')
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('text/html')
+    expect(await res.text()).toContain('<meta name="google-site-verification" content="abc_123-XYZ">')
+  })
+
   it('rejects /api requests without a valid bearer token', async () => {
     expect((await app.request('/api/sync')).status).toBe(401)
     expect((await app.request('/api/sync', { headers: { authorization: 'Bearer nope' } })).status).toBe(401)

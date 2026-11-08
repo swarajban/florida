@@ -64,7 +64,7 @@ unchanged and the AI route answers 503.
 From the repository root (`fly.toml` lives there and points at `server/Dockerfile`):
 
 ```sh
-fly launch --no-deploy --copy-config --name florida --region lax
+fly launch --no-deploy --copy-config --name florida-swaraj --region lax
 fly secrets set \
   DATABASE_URL='postgres://...-pooler.../neondb?sslmode=require' \
   API_TOKEN='...' \
@@ -73,11 +73,13 @@ fly secrets set \
   GOOGLE_CLIENT_SECRET='...' \
   PUBLIC_URL='https://florida-swaraj.fly.dev' \
   ANTHROPIC_API_KEY='...'
-fly deploy
+fly deploy --ha=false
 ```
 
 `fly deploy` builds the image, runs `node server/dist/migrate.js` as the release command, and
-starts one always-on `shared-cpu-1x` machine with a `/health` check.
+starts one always-on `shared-cpu-1x` machine with a `/health` check. `--ha=false` matters on the
+first deploy only: without it Fly launches a second machine, which doubles the bill and runs the
+sync and scheduler jobs twice (`fly scale count 1` undoes that).
 
 ### 5. Seed and connect calendars
 
@@ -99,6 +101,21 @@ Each connection stores the encrypted refresh token, lists the account's calendar
 calendars are selected by default), does a full sync of the last 30 days / next 365 days, and
 registers a push channel at `${PUBLIC_URL}/webhooks/google`. Channels are renewed every 6 h;
 calendars are re-synced every 60 min as a fallback and the scheduler reruns every 15 min.
+
+### 6. Let Google deliver push notifications
+
+Google only posts calendar notifications to a domain you have verified; until then the watch
+registration fails (logged as `[google] watch … failed`) and changes arrive with the hourly poll.
+One-time setup:
+
+1. In [Search Console](https://search.google.com/search-console), add a **URL prefix** property
+   for `https://florida-swaraj.fly.dev/`, choose the **HTML tag** method, and copy the tag's
+   `content` value.
+2. `fly secrets set GOOGLE_SITE_VERIFICATION=<value>`: the server serves that tag on `/`. Then
+   click **Verify** in Search Console.
+3. In the Cloud console, **APIs & Services → Domain verification → Add domain** and enter
+   `florida-swaraj.fly.dev`. Channels are registered on the next watch pass (startup, then every
+   6 h); the redeploy from step 2 triggers one.
 
 ## API
 

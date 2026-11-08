@@ -13,6 +13,11 @@ const envSchema = z.object({
     .regex(/^https?:\/\/[^/\s]+$/, 'must be an origin like https://florida-swaraj.fly.dev with no trailing slash'),
   PORT: z.coerce.number().int().positive().default(8080),
   HORIZON_DAYS: z.coerce.number().int().positive().default(28),
+  /**
+   * Optional: the `content` value of Search Console's HTML-tag verification, served on `/` so
+   * Google accepts `PUBLIC_URL` as a push-notification (webhook) domain.
+   */
+  GOOGLE_SITE_VERIFICATION: z.string().min(1).optional(),
   /** Optional: enables POST /api/ai/parse-task. */
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
   ANTHROPIC_MODEL: z.string().min(1).default('claude-haiku-5-5'),
