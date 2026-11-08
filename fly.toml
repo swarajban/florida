@@ -1,5 +1,5 @@
 # fly.toml for the Florida API server. Build context is this directory (the repo root).
-app = "florida"
+app = "florida-swaraj"
 primary_region = "lax"
 
 [build]

@@ -8,5 +8,5 @@ public enum Florida {
     public static let appGroup = "group.com.swarajban.florida"
 
     /// Sync server used when no other server has been configured.
-    public static let defaultServerURL = URL(string: "https://florida.fly.dev")!
+    public static let defaultServerURL = URL(string: "https://florida-swaraj.fly.dev")!
 }

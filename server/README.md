@@ -39,7 +39,7 @@ because the pooled endpoint runs PgBouncer in transaction mode.
    `https://www.googleapis.com/auth/calendar`.
 4. **APIs & Services → Credentials → Create credentials → OAuth client ID**, type **Web
    application**. Add the authorized redirect URI `${PUBLIC_URL}/auth/google/callback`, e.g.
-   `https://florida.fly.dev/auth/google/callback`. Copy the client ID and secret.
+   `https://florida-swaraj.fly.dev/auth/google/callback`. Copy the client ID and secret.
 
 Work account caveat: a Google Workspace organisation often blocks third-party apps that request
 calendar access. If the consent screen for your work account refuses, create the Cloud project
@@ -71,7 +71,7 @@ fly secrets set \
   TOKEN_ENCRYPTION_KEY='...' \
   GOOGLE_CLIENT_ID='...' \
   GOOGLE_CLIENT_SECRET='...' \
-  PUBLIC_URL='https://florida.fly.dev' \
+  PUBLIC_URL='https://florida-swaraj.fly.dev' \
   ANTHROPIC_API_KEY='...'
 fly deploy
 ```
@@ -91,8 +91,8 @@ This creates the schedules `work` (Mon–Fri 09:00–12:00, 13:00–17:00 Pacifi
 Then open these in a browser, signing in with the matching Google account each time:
 
 ```
-https://florida.fly.dev/auth/google/start?label=work&key=<API_TOKEN>
-https://florida.fly.dev/auth/google/start?label=personal&key=<API_TOKEN>
+https://florida-swaraj.fly.dev/auth/google/start?label=work&key=<API_TOKEN>
+https://florida-swaraj.fly.dev/auth/google/start?label=personal&key=<API_TOKEN>
 ```
 
 Each connection stores the encrypted refresh token, lists the account's calendars (owner/writer
@@ -105,7 +105,7 @@ calendars are re-synced every 60 min as a fallback and the scheduler reruns ever
 All `/api/*` routes need `Authorization: Bearer <API_TOKEN>`.
 
 ```sh
-export PUBLIC_URL=https://florida.fly.dev API_TOKEN=...
+export PUBLIC_URL=https://florida-swaraj.fly.dev API_TOKEN=...
 
 # Everything (first sync). Later pass the returned cursor: /api/sync?since=<cursor>
 curl -s "$PUBLIC_URL/api/sync" -H "authorization: Bearer $API_TOKEN" | jq .
@@ -164,7 +164,7 @@ Client configuration (Claude Code, Amp, Cursor and friends accept this shape):
   "mcpServers": {
     "florida": {
       "type": "http",
-      "url": "https://florida.fly.dev/mcp",
+      "url": "https://florida-swaraj.fly.dev/mcp",
       "headers": { "Authorization": "Bearer <API_TOKEN>" }
     }
   }

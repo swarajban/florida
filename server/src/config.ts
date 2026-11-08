@@ -10,7 +10,7 @@ const envSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().min(1),
   PUBLIC_URL: z
     .string()
-    .regex(/^https?:\/\/[^/\s]+$/, 'must be an origin like https://florida.fly.dev with no trailing slash'),
+    .regex(/^https?:\/\/[^/\s]+$/, 'must be an origin like https://florida-swaraj.fly.dev with no trailing slash'),
   PORT: z.coerce.number().int().positive().default(8080),
   HORIZON_DAYS: z.coerce.number().int().positive().default(28),
   /** Optional: enables POST /api/ai/parse-task. */
