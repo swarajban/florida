@@ -16,6 +16,7 @@
   "dependencies": {
     "@florida/scheduler": "workspace:*",
     "@hono/node-server": "^2.1.6",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.17",
     "postgres": "^4.1.0",

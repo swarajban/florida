@@ -139,6 +139,7 @@ curl -s -X POST "$PUBLIC_URL/api/google/sync" -H "authorization: Bearer $API_TOK
 | `PUT/DELETE /api/tasks/:id`, `/api/projects/:id`, `/api/schedules/:id` | Upsert / soft-delete, then rerun the scheduler. Responses include `scheduling: { placements, unscheduled, late }`. |
 | `POST /api/schedule/run` | Rerun the scheduler. |
 | `POST /api/ai/parse-task` | `{ text, now?, timeZone? }` → `{ draft }`: Claude turns one line of text into a task draft (`title, notes, durationMinutes, minChunkMinutes, priority, deadlineType, dueAt, startAt, pinnedStart, projectId, rationale`). The client reviews the draft and then `PUT`s the task itself. `timeZone` defaults to the first schedule's zone. 503 without `ANTHROPIC_API_KEY`; 502 when the model call fails. |
+| `POST /mcp` | Model Context Protocol endpoint for agents (same bearer token). See below. |
 | `GET /api/google/accounts` | Accounts and calendars (never tokens). |
 | `PATCH /api/calendars/:id` | `{ selected }` toggles whether a calendar blocks time. |
 | `POST /api/google/sync` | Sync every selected calendar now, then reschedule. |
@@ -147,3 +148,46 @@ curl -s -X POST "$PUBLIC_URL/api/google/sync" -H "authorization: Bearer $API_TOK
 
 Dates cross the wire as ISO 8601 strings. Events keep `updatedAt` as the server's write time so
 sync cursors never miss a change.
+
+## MCP
+
+`POST /mcp` speaks [MCP](https://modelcontextprotocol.io) over Streamable HTTP in stateless JSON
+mode: no sessions, no SSE stream, one JSON-RPC response per request (`GET`/`DELETE /mcp` answer
+405). It needs the same `Authorization: Bearer <API_TOKEN>` header as `/api/*`, and every tool
+runs against the same store and scheduler as the apps, so a change made by an agent reaches the
+apps through `/api/events` like any other.
+
+Client configuration (Claude Code, Amp, Cursor and friends accept this shape):
+
+```json
+{
+  "mcpServers": {
+    "florida": {
+      "type": "http",
+      "url": "https://florida.fly.dev/mcp",
+      "headers": { "Authorization": "Bearer <API_TOKEN>" }
+    }
+  }
+}
+```
+
+| Tool | Does |
+| --- | --- |
+| `list_projects` | Live projects with their `scheduleId`. |
+| `list_tasks` | Open tasks (soonest due first) with their scheduled blocks; `projectId?`, `includeCompleted?`, `limit?`. |
+| `get_task` | One task with its blocks. |
+| `create_task` | `projectId`, `title`, and any task field; `id` defaults to a UUID, `durationMinutes` to 30, `priority` to `medium`, `deadlineType` to `soft` when `dueAt` is set, else `none`. Reschedules; returns the task's blocks plus `unscheduled`/`late`. |
+| `update_task` | `id` plus any task fields; omitted fields stay, `null` clears. Reschedules. |
+| `complete_task` / `delete_task` | Mark done (credits the full duration) / tombstone. Reschedule. |
+| `get_agenda` | `date?` (YYYY-MM-DD) and `timeZone?`: that day's events from selected calendars (all-day first) and planned task blocks with titles. Defaults to today in the first schedule's zone. |
+| `run_scheduler` | Rerun and return every placement. |
+
+Bad references (`unknown projectId x`, `task x not found`) and invalid arguments come back as
+tool errors (`isError: true`) with a readable message, so the model can correct itself.
+
+```sh
+# Smoke test without a client
+curl -s "$PUBLIC_URL/mcp" -H "authorization: Bearer $API_TOKEN" \
+  -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_agenda","arguments":{}}}' | jq .
+```

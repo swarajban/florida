@@ -4,41 +4,12 @@ import type { Hono } from 'hono'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from '../src/app.js'
 import { ChangeBus } from '../src/changes.js'
-import type { Config } from '../src/config.js'
 import type { Db } from '../src/db/client.js'
 import { calendars, googleAccounts } from '../src/db/schema.js'
-import type { CalendarRow, GoogleAccountRow } from '../src/db/schema.js'
-import type { CalendarSyncService } from '../src/google/sync.js'
 import { runScheduling } from '../src/scheduling.js'
 import { seed } from '../src/seed.js'
 import { createTestDb } from './db.js'
-
-const config: Config = {
-  DATABASE_URL: 'postgres://unused',
-  API_TOKEN: 'test-token-0123456789abcdef',
-  TOKEN_ENCRYPTION_KEY: '00'.repeat(32),
-  GOOGLE_CLIENT_ID: 'client-id',
-  GOOGLE_CLIENT_SECRET: 'client-secret',
-  PUBLIC_URL: 'https://florida.test',
-  PORT: 8080,
-  HORIZON_DAYS: 28,
-  ANTHROPIC_MODEL: 'claude-test-1',
-}
-
-class FakeSync implements CalendarSyncService {
-  syncCalendarCalls: CalendarRow[] = []
-  syncAllCalls = 0
-  async connectAccount(): Promise<GoogleAccountRow> {
-    throw new Error('not used in tests')
-  }
-  async syncCalendar(calendar: CalendarRow): Promise<void> {
-    this.syncCalendarCalls.push(calendar)
-  }
-  async syncAll(): Promise<void> {
-    this.syncAllCalls += 1
-  }
-  async ensureAllWatches(): Promise<void> {}
-}
+import { FakeSync, testConfig as config } from './fixtures.js'
 
 const WEBHOOK_DEBOUNCE_MS = 20
 

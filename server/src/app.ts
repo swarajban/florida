@@ -1,8 +1,9 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { SchedulerResult } from '@florida/scheduler'
-import { and, eq, gt, isNull } from 'drizzle-orm'
+import { eq, gt, isNull } from 'drizzle-orm'
 import type { PgColumn } from 'drizzle-orm/pg-core'
 import { Hono } from 'hono'
+import type { MiddlewareHandler } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import { HTTPException } from 'hono/http-exception'
 import { ZodError, z } from 'zod'
@@ -11,9 +12,13 @@ import type { TaskParser } from './ai/parse-task.js'
 import { ChangeBus } from './changes.js'
 import type { Config } from './config.js'
 import type { Db } from './db/client.js'
+import { defaultTimeZone, scheduleExists } from './db/queries.js'
 import { calendars, events, googleAccounts, placements, projects, schedules, tasks } from './db/schema.js'
 import { authorizationUrl, exchangeCode } from './google/client.js'
 import type { CalendarSyncService } from './google/sync.js'
+import { mountMcp } from './mcp.js'
+import { softDeleteTask, taskBody, upsertTask } from './tasks.js'
+import { badRequest, clock, isoInstant, notFound, timeZone } from './validation.js'
 
 export interface AppDeps {
   db: Db
@@ -56,25 +61,6 @@ const publicCalendarColumns = {
 const OAUTH_STATE_TTL = 10 * 60_000
 const LABEL_RE = /^[a-z][a-z0-9-]{0,31}$/
 
-const isoInstant = z.iso.datetime({ offset: true })
-const clock = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'expected HH:MM')
-
-const taskBody = z.object({
-  projectId: z.string().min(1),
-  title: z.string().min(1),
-  notes: z.string().nullish(),
-  durationMinutes: z.number().int().min(1),
-  minChunkMinutes: z.number().int().min(1).nullish(),
-  priority: z.enum(['asap', 'high', 'medium', 'low']),
-  deadlineType: z.enum(['hard', 'soft', 'none']),
-  dueAt: isoInstant.nullish(),
-  startAt: isoInstant.nullish(),
-  scheduleId: z.string().min(1).nullish(),
-  pinnedStart: isoInstant.nullish(),
-  completedMinutes: z.number().int().min(0).nullish(),
-  completedAt: isoInstant.nullish(),
-})
-
 const projectBody = z.object({
   name: z.string().min(1),
   color: z.string().nullish(),
@@ -84,7 +70,7 @@ const projectBody = z.object({
 
 const scheduleBody = z.object({
   name: z.string().min(1),
-  timeZone: z.string().refine(isTimeZone, 'unknown IANA time zone'),
+  timeZone,
   windows: z
     .array(
       z
@@ -105,7 +91,7 @@ const parseTaskBody = z.object({
   /** Client's current time; defaults to the server clock. */
   now: isoInstant.optional(),
   /** Client's time zone; defaults to the first live schedule's zone, then UTC. */
-  timeZone: z.string().refine(isTimeZone, 'unknown IANA time zone').optional(),
+  timeZone: timeZone.optional(),
 })
 
 export function createApp(deps: AppDeps): Hono {
@@ -141,12 +127,17 @@ export function createApp(deps: AppDeps): Hono {
 
   app.get('/health', (c) => c.json({ ok: true }))
 
-  app.use('/api/*', async (c, next) => {
+  const requireToken: MiddlewareHandler = async (c, next) => {
     const header = c.req.header('authorization') ?? ''
     const token = header.startsWith('Bearer ') ? header.slice('Bearer '.length) : ''
     if (token === '' || !safeEqual(token, config.API_TOKEN)) return c.json({ error: 'unauthorized' }, 401)
     await next()
-  })
+  }
+  app.use('/api/*', requireToken)
+  app.use('/mcp', requireToken)
+
+  // Model Context Protocol endpoint for agents; the same token, the same store, the same scheduler.
+  mountMcp(app, { db, reschedule })
 
   // ---- Sync -------------------------------------------------------------------------------------
 
@@ -200,48 +191,13 @@ export function createApp(deps: AppDeps): Hono {
   // ---- Tasks ------------------------------------------------------------------------------------
 
   app.put('/api/tasks/:id', async (c) => {
-    const id = c.req.param('id')
-    const body = taskBody.parse(await c.req.json())
-    if (!(await projectExists(body.projectId))) throw badRequest(`unknown projectId ${body.projectId}`)
-    if (body.scheduleId != null && !(await scheduleExists(body.scheduleId))) {
-      throw badRequest(`unknown scheduleId ${body.scheduleId}`)
-    }
-    const now = new Date()
-    const fields = {
-      projectId: body.projectId,
-      title: body.title,
-      notes: body.notes ?? null,
-      durationMinutes: body.durationMinutes,
-      minChunkMinutes: body.minChunkMinutes ?? null,
-      priority: body.priority,
-      deadlineType: body.deadlineType,
-      dueAt: toDate(body.dueAt),
-      startAt: toDate(body.startAt),
-      scheduleId: body.scheduleId ?? null,
-      pinnedStart: toDate(body.pinnedStart),
-      completedMinutes: body.completedMinutes ?? 0,
-      completedAt: toDate(body.completedAt),
-      updatedAt: now,
-      deletedAt: null,
-    }
-    const [task] = await db
-      .insert(tasks)
-      .values({ id, ...fields })
-      .onConflictDoUpdate({ target: tasks.id, set: fields })
-      .returning()
+    const task = await upsertTask(db, c.req.param('id'), taskBody.parse(await c.req.json()))
     const scheduling = await reschedule()
     return c.json({ task, scheduling })
   })
 
   app.delete('/api/tasks/:id', async (c) => {
-    const id = c.req.param('id')
-    const now = new Date()
-    const deleted = await db
-      .update(tasks)
-      .set({ deletedAt: now, updatedAt: now })
-      .where(eq(tasks.id, id))
-      .returning({ id: tasks.id })
-    if (deleted.length === 0) throw notFound(`task ${id}`)
+    await softDeleteTask(db, c.req.param('id'))
     const scheduling = await reschedule()
     return c.json({ scheduling })
   })
@@ -251,7 +207,7 @@ export function createApp(deps: AppDeps): Hono {
   app.put('/api/projects/:id', async (c) => {
     const id = c.req.param('id')
     const body = projectBody.parse(await c.req.json())
-    if (!(await scheduleExists(body.scheduleId))) throw badRequest(`unknown scheduleId ${body.scheduleId}`)
+    if (!(await scheduleExists(db, body.scheduleId))) throw badRequest(`unknown scheduleId ${body.scheduleId}`)
     const fields = {
       name: body.name,
       color: body.color ?? null,
@@ -330,19 +286,9 @@ export function createApp(deps: AppDeps): Hono {
       .from(projects)
       .where(isNull(projects.deletedAt))
       .orderBy(projects.sortOrder, projects.name)
-    let timeZone = body.timeZone
-    if (timeZone === undefined) {
-      const [schedule] = await db
-        .select({ timeZone: schedules.timeZone })
-        .from(schedules)
-        .where(isNull(schedules.deletedAt))
-        .orderBy(schedules.createdAt)
-        .limit(1)
-      timeZone = schedule?.timeZone ?? 'UTC'
-    }
     const draft = await deps.ai.parse(body.text, {
       now: body.now === undefined ? new Date() : new Date(body.now),
-      timeZone,
+      timeZone: body.timeZone ?? (await defaultTimeZone(db)),
       projects: projectRows,
     })
     return c.json({ draft })
@@ -462,24 +408,6 @@ export function createApp(deps: AppDeps): Hono {
     }
   }
 
-  async function projectExists(id: string): Promise<boolean> {
-    const rows = await db
-      .select({ id: projects.id })
-      .from(projects)
-      .where(and(eq(projects.id, id), isNull(projects.deletedAt)))
-      .limit(1)
-    return rows.length > 0
-  }
-
-  async function scheduleExists(id: string): Promise<boolean> {
-    const rows = await db
-      .select({ id: schedules.id })
-      .from(schedules)
-      .where(and(eq(schedules.id, id), isNull(schedules.deletedAt)))
-      .limit(1)
-    return rows.length > 0
-  }
-
   return app
 }
 
@@ -487,27 +415,6 @@ function safeEqual(a: string, b: string): boolean {
   const left = Buffer.from(a)
   const right = Buffer.from(b)
   return left.length === right.length && timingSafeEqual(left, right)
-}
-
-function toDate(iso: string | null | undefined): Date | null {
-  return iso == null ? null : new Date(iso)
-}
-
-function isTimeZone(tz: string): boolean {
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz })
-    return true
-  } catch {
-    return false
-  }
-}
-
-function badRequest(message: string): HTTPException {
-  return new HTTPException(400, { message })
-}
-
-function notFound(what: string): HTTPException {
-  return new HTTPException(404, { message: `${what} not found` })
 }
 
 function page(body: string): string {
