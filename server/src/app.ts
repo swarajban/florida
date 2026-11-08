@@ -3,8 +3,10 @@ import type { SchedulerResult } from '@florida/scheduler'
 import { and, eq, gt, isNull } from 'drizzle-orm'
 import type { PgColumn } from 'drizzle-orm/pg-core'
 import { Hono } from 'hono'
+import { streamSSE } from 'hono/streaming'
 import { HTTPException } from 'hono/http-exception'
 import { ZodError, z } from 'zod'
+import { ChangeBus } from './changes.js'
 import type { Config } from './config.js'
 import type { Db } from './db/client.js'
 import { calendars, events, googleAccounts, placements, projects, schedules, tasks } from './db/schema.js'
@@ -16,8 +18,35 @@ export interface AppDeps {
   config: Config
   sync: CalendarSyncService
   reschedule: () => Promise<SchedulerResult>
+  /** Receives a notice after every scheduler run the app triggers; streamed by `/api/events`. */
+  changes?: ChangeBus
   /** Delay before a webhook-triggered calendar sync runs; pings within it coalesce. Default 2 s. */
   webhookDebounceMs?: number
+  /** Interval between SSE keep-alive comments. Default 25 s. */
+  sseHeartbeatMs?: number
+}
+
+/** Columns of `google_accounts` that may leave the server (never the tokens). */
+const publicAccountColumns = {
+  id: googleAccounts.id,
+  email: googleAccounts.email,
+  label: googleAccounts.label,
+  createdAt: googleAccounts.createdAt,
+  updatedAt: googleAccounts.updatedAt,
+}
+
+/** Columns of `calendars` that clients need; sync tokens and channel secrets stay server-side. */
+const publicCalendarColumns = {
+  id: calendars.id,
+  accountId: calendars.accountId,
+  googleId: calendars.googleId,
+  summary: calendars.summary,
+  color: calendars.color,
+  accessRole: calendars.accessRole,
+  selected: calendars.selected,
+  lastSyncedAt: calendars.lastSyncedAt,
+  channelExpiresAt: calendars.channelExpiresAt,
+  updatedAt: calendars.updatedAt,
 }
 
 const OAUTH_STATE_TTL = 10 * 60_000
@@ -68,8 +97,15 @@ const scheduleBody = z.object({
 const calendarPatch = z.object({ selected: z.boolean() })
 
 export function createApp(deps: AppDeps): Hono {
-  const { db, config, sync, reschedule } = deps
+  const { db, config, sync } = deps
+  const changes = deps.changes ?? new ChangeBus()
   const webhookDebounceMs = deps.webhookDebounceMs ?? 2_000
+  const sseHeartbeatMs = deps.sseHeartbeatMs ?? 25_000
+  const reschedule = async (): Promise<SchedulerResult> => {
+    const result = await deps.reschedule()
+    changes.publish()
+    return result
+  }
   const oauth = {
     clientId: config.GOOGLE_CLIENT_ID,
     clientSecret: config.GOOGLE_CLIENT_SECRET,
@@ -108,7 +144,10 @@ export function createApp(deps: AppDeps): Hono {
     const projectRows = await db.select().from(projects).where(changedAfter(projects.updatedAt))
     const taskRows = await db.select().from(tasks).where(changedAfter(tasks.updatedAt))
     const eventRows = await db.select().from(events).where(changedAfter(events.updatedAt))
+    // Small tables without tombstones: always sent in full so clients can replace them wholesale.
     const placementRows = await db.select().from(placements)
+    const accountRows = await db.select(publicAccountColumns).from(googleAccounts)
+    const calendarRows = await db.select(publicCalendarColumns).from(calendars)
 
     return c.json({
       cursor: cursor.toISOString(),
@@ -117,8 +156,30 @@ export function createApp(deps: AppDeps): Hono {
       tasks: taskRows,
       events: eventRows,
       placements: placementRows,
+      accounts: accountRows,
+      calendars: calendarRows,
     })
   })
+
+  // Server-sent events: one `changed` event per scheduler run or calendar sync. Clients react by
+  // calling GET /api/sync with their stored cursor. Keep-alive comments defeat idle proxy timeouts.
+  app.get('/api/events', (c) =>
+    streamSSE(c, async (stream) => {
+      const aborted = new Promise<void>((resolve) => stream.onAbort(resolve))
+      await stream.writeSSE({ event: 'connected', data: JSON.stringify({ at: new Date().toISOString() }) })
+      const unsubscribe = changes.subscribe((notice) => {
+        stream.writeSSE({ event: 'changed', data: JSON.stringify(notice) }).catch(() => {})
+      })
+      const heartbeat = setInterval(() => stream.write(': ping\n\n').catch(() => {}), sseHeartbeatMs)
+      heartbeat.unref()
+      try {
+        await aborted
+      } finally {
+        unsubscribe()
+        clearInterval(heartbeat)
+      }
+    }),
+  )
 
   // ---- Tasks ------------------------------------------------------------------------------------
 
@@ -244,28 +305,8 @@ export function createApp(deps: AppDeps): Hono {
   // ---- Google -----------------------------------------------------------------------------------
 
   app.get('/api/google/accounts', async (c) => {
-    const accountRows = await db
-      .select({
-        id: googleAccounts.id,
-        email: googleAccounts.email,
-        label: googleAccounts.label,
-        createdAt: googleAccounts.createdAt,
-        updatedAt: googleAccounts.updatedAt,
-      })
-      .from(googleAccounts)
-    const calendarRows = await db
-      .select({
-        id: calendars.id,
-        accountId: calendars.accountId,
-        googleId: calendars.googleId,
-        summary: calendars.summary,
-        color: calendars.color,
-        accessRole: calendars.accessRole,
-        selected: calendars.selected,
-        lastSyncedAt: calendars.lastSyncedAt,
-        channelExpiresAt: calendars.channelExpiresAt,
-      })
-      .from(calendars)
+    const accountRows = await db.select(publicAccountColumns).from(googleAccounts)
+    const calendarRows = await db.select(publicCalendarColumns).from(calendars)
     const accounts = accountRows.map((account) => ({
       ...account,
       calendars: calendarRows.filter((cal) => cal.accountId === account.id),

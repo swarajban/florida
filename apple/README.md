@@ -26,7 +26,8 @@ with it.
 | Path | What it is |
 | --- | --- |
 | `project.yml` | XcodeGen spec: targets, Info.plist and entitlements contents, build settings |
-| `FloridaKit/` | Local Swift package shared by all three targets: models, local SQLite store (GRDB), sync client, keyboard engine |
+| `FloridaCore/` | Local Swift package, no dependencies: models, quick-add parser, keyboard engine, calendar layout math. Builds and tests on Linux |
+| `FloridaKit/` | Local Swift package shared by all three targets: local SQLite store (GRDB), sync client, token store. Re-exports FloridaCore |
 | `iOS/` | iOS app target (`Florida-iOS`) |
 | `macOS/` | macOS app target (`Florida-macOS`) |
 | `Widgets/` | iOS WidgetKit extension (`FloridaWidgets`) |
@@ -50,10 +51,17 @@ If you fork this for your own account, change the bundle id prefix, the three
 `FloridaKit.swift`), and register the app group under your team in the Apple
 Developer portal; automatic signing handles the rest.
 
-## FloridaKit
+## FloridaCore and FloridaKit
 
-`FloridaKit` is a local Swift package (`FloridaKit/Package.swift`) that the iOS
-app, the macOS app, and the widgets all depend on. It declares a dependency on
-[GRDB.swift](https://github.com/groue/GRDB.swift) for the local SQLite store.
-Its unit tests live in `FloridaKit/Tests/FloridaKitTests` and run with the
-package's test target (`swift test` from `FloridaKit/`, or via Xcode).
+`FloridaCore` (`FloridaCore/Package.swift`) holds everything that is pure
+logic: the models that mirror the server's JSON, the quick-add parser, the
+keyboard-shortcut engine, and the day-grid layout math. It has no dependencies
+and no I/O, so it builds and tests anywhere Swift runs.
+
+`FloridaKit` (`FloridaKit/Package.swift`) is what the iOS app, the macOS app,
+and the widgets import. It depends on `FloridaCore` (re-exported, so one
+`import FloridaKit` is enough) and on
+[GRDB.swift](https://github.com/groue/GRDB.swift) for the local SQLite store
+in the App Group container, plus the sync client that talks to the server.
+
+Both packages test with `swift test` from their directory (or via Xcode).

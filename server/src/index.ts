@@ -1,5 +1,6 @@
 import { serve } from '@hono/node-server'
 import { createApp } from './app.js'
+import { ChangeBus } from './changes.js'
 import { loadConfig } from './config.js'
 import { createDb } from './db/client.js'
 import { GoogleSync } from './google/sync.js'
@@ -9,13 +10,14 @@ import { runScheduling } from './scheduling.js'
 const config = loadConfig()
 const { db, close } = createDb(config.DATABASE_URL)
 const sync = new GoogleSync(db, config)
+const changes = new ChangeBus()
 const reschedule = () => runScheduling(db, config)
-const app = createApp({ db, config, sync, reschedule })
+const app = createApp({ db, config, sync, reschedule, changes })
 
 const server = serve({ fetch: app.fetch, port: config.PORT }, (info) => {
   console.log(`[server] listening on port ${info.port}, public URL ${config.PUBLIC_URL}`)
 })
-const stopJobs = startJobs({ sync, reschedule })
+const stopJobs = startJobs({ sync, reschedule, changes })
 
 let shuttingDown = false
 function shutdown(signal: string): void {

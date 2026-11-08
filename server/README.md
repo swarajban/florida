@@ -129,7 +129,8 @@ curl -s -X POST "$PUBLIC_URL/api/google/sync" -H "authorization: Bearer $API_TOK
 | Route | Purpose |
 | --- | --- |
 | `GET /health` | Liveness, no auth, no database access. |
-| `GET /api/sync?since=` | `{ cursor, schedules, projects, tasks, events, placements }`. The first four hold rows with `updatedAt > since` (all rows without `since`), including soft-deleted tombstones; `placements` is always complete. |
+| `GET /api/sync?since=` | `{ cursor, schedules, projects, tasks, events, placements, accounts, calendars }`. The first four hold rows with `updatedAt > since` (all rows without `since`), including soft-deleted tombstones; `placements`, `accounts` and `calendars` are always complete (and never contain tokens). |
+| `GET /api/events` | Server-sent events: `connected` on open, then one `changed` event after every scheduler run or calendar sync. Clients respond by calling `/api/sync` with their cursor. Keep-alive comment every 25 s. |
 | `PUT/DELETE /api/tasks/:id`, `/api/projects/:id`, `/api/schedules/:id` | Upsert / soft-delete, then rerun the scheduler. Responses include `scheduling: { placements, unscheduled, late }`. |
 | `POST /api/schedule/run` | Rerun the scheduler. |
 | `GET /api/google/accounts` | Accounts and calendars (never tokens). |

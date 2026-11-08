@@ -1,9 +1,12 @@
 import type { SchedulerResult } from '@florida/scheduler'
+import type { ChangeBus } from './changes.js'
 import type { CalendarSyncService } from './google/sync.js'
 
 export interface JobDeps {
   sync: Pick<CalendarSyncService, 'syncAll' | 'ensureAllWatches'>
   reschedule: () => Promise<SchedulerResult>
+  /** Notified after every scheduler run so `/api/events` subscribers pull. */
+  changes?: Pick<ChangeBus, 'publish'>
 }
 
 const MINUTE = 60_000
@@ -36,9 +39,14 @@ export function startJobs(deps: JobDeps): () => void {
     }
   }
 
+  const reschedule = async (): Promise<void> => {
+    await deps.reschedule()
+    deps.changes?.publish()
+  }
+
   const syncAndReschedule = async (): Promise<void> => {
     await deps.sync.syncAll()
-    await deps.reschedule()
+    await reschedule()
   }
 
   const timers: NodeJS.Timeout[] = [
@@ -50,7 +58,7 @@ export function startJobs(deps: JobDeps): () => void {
     }, STARTUP_DELAY),
     setInterval(() => void run('watches', () => deps.sync.ensureAllWatches()), WATCH_INTERVAL),
     setInterval(() => void run('sync', syncAndReschedule), SYNC_INTERVAL),
-    setInterval(() => void run('reschedule', () => deps.reschedule().then(() => undefined)), RESCHEDULE_INTERVAL),
+    setInterval(() => void run('reschedule', reschedule), RESCHEDULE_INTERVAL),
   ]
 
   return () => {

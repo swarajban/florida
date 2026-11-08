@@ -3,6 +3,7 @@ import { localParts, weekdayOf } from '@florida/scheduler'
 import type { Hono } from 'hono'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from '../src/app.js'
+import { ChangeBus } from '../src/changes.js'
 import type { Config } from '../src/config.js'
 import type { Db } from '../src/db/client.js'
 import { calendars, googleAccounts } from '../src/db/schema.js'
@@ -44,16 +45,19 @@ let db: Db
 let close: () => Promise<void>
 let app: Hono
 let fake: FakeSync
+let changes: ChangeBus
 
 beforeAll(async () => {
   ;({ db, close } = await createTestDb())
   await seed(db)
   fake = new FakeSync()
+  changes = new ChangeBus()
   app = createApp({
     db,
     config,
     sync: fake,
     reschedule: () => runScheduling(db, config),
+    changes,
     webhookDebounceMs: WEBHOOK_DEBOUNCE_MS,
   })
 })
@@ -152,6 +156,8 @@ describe('tasks, sync and tombstones', () => {
       tasks: { id: string; deletedAt: string | null }[]
       events: unknown[]
       placements: { taskId: string }[]
+      accounts: unknown[]
+      calendars: unknown[]
     }
     expect(new Date(body.cursor).toISOString()).toBe(body.cursor)
     expect(body.schedules.map((s) => s.id).sort()).toEqual(['personal', 'work'])
@@ -159,6 +165,8 @@ describe('tasks, sync and tombstones', () => {
     expect(body.tasks).toEqual([expect.objectContaining({ id: 't1', deletedAt: null })])
     expect(body.events).toEqual([])
     expect(body.placements.map((p) => p.taskId)).toEqual(['t1'])
+    expect(body.accounts).toEqual([])
+    expect(body.calendars).toEqual([])
     cursorAfterCreate = body.cursor
   })
 
@@ -300,6 +308,27 @@ describe('google', () => {
     ])
   })
 
+  it('GET /api/sync always includes the full accounts and calendars tables without tokens', async () => {
+    const cursor = ((await (await api('/api/sync')).json()) as { cursor: string }).cursor
+    const res = await api(`/api/sync?since=${encodeURIComponent(cursor)}`)
+    expect(res.status).toBe(200)
+    const text = await res.text()
+    expect(text).not.toContain('should-never-leak')
+    expect(text).not.toContain('opaque')
+    expect(text).not.toContain('correct-channel-token')
+    const body = JSON.parse(text) as {
+      tasks: unknown[]
+      accounts: { id: string; email: string; label: string; updatedAt: string }[]
+      calendars: { id: string; accountId: string; googleId: string; selected: boolean; updatedAt: string }[]
+    }
+    expect(body.tasks).toEqual([])
+    expect(body.accounts).toEqual([expect.objectContaining({ id: 'acc-1', email: 'me@example.com', label: 'work' })])
+    expect(body.calendars).toEqual([
+      expect.objectContaining({ id: 'cal-1', accountId: 'acc-1', googleId: 'me@example.com', selected: true }),
+    ])
+    expect(new Date(body.accounts[0]!.updatedAt).toISOString()).toBe(body.accounts[0]!.updatedAt)
+  })
+
   it('toggles calendar selection', async () => {
     const res = await api('/api/calendars/cal-1', { method: 'PATCH', json: { selected: false } })
     expect(res.status).toBe(200)
@@ -332,5 +361,52 @@ describe('google', () => {
 
     const bad = await app.request('/auth/google/callback?code=abc&state=not-issued')
     expect(bad.status).toBe(400)
+  })
+})
+
+describe('change events', () => {
+  /** Reads SSE frames from a response body until `count` frames have arrived. */
+  async function readFrames(reader: ReadableStreamDefaultReader<Uint8Array>, count: number): Promise<string[]> {
+    const decoder = new TextDecoder()
+    let buffer = ''
+    const frames: string[] = []
+    while (frames.length < count) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      let end = buffer.indexOf('\n\n')
+      while (end !== -1) {
+        frames.push(buffer.slice(0, end))
+        buffer = buffer.slice(end + 2)
+        end = buffer.indexOf('\n\n')
+      }
+    }
+    return frames
+  }
+
+  it('streams a connected event, then a changed event after every scheduler run', async () => {
+    const res = await api('/api/events')
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('text/event-stream')
+    const reader = res.body!.getReader()
+    try {
+      const [connected] = await readFrames(reader, 1)
+      expect(connected).toMatch(/^event: connected\ndata: \{"at":"/)
+      expect(changes.size).toBe(1)
+
+      expect((await api('/api/schedule/run', { method: 'POST' })).status).toBe(200)
+      const [changed] = await readFrames(reader, 1)
+      expect(changed).toMatch(/^event: changed\ndata: \{"at":"/)
+      const notice = JSON.parse(changed!.split('\ndata: ')[1]!) as { at: string }
+      expect(new Date(notice.at).toISOString()).toBe(notice.at)
+    } finally {
+      await reader.cancel()
+    }
+    await sleep(20)
+    expect(changes.size).toBe(0)
+  })
+
+  it('requires the bearer token like every other /api route', async () => {
+    expect((await app.request('/api/events')).status).toBe(401)
   })
 })

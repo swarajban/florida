@@ -6,7 +6,10 @@ Single-user personal calendar + auto-scheduled tasks (Motion replacement). Speed
 
 - `packages/scheduler/` — `@florida/scheduler`. Pure TypeScript, zero dependencies, no I/O. Must stay portable (no Node-only APIs) so it can later run on-device in JavaScriptCore. Every behavior change needs a test in `test/`.
 - `server/` — `@florida/server`. Hono + Drizzle (postgres.js in production, PGlite in tests), Google Calendar sync, jobs. Deployed to Fly from `server/Dockerfile`; `fly.toml` is at the repo root.
-- `apple/` — XcodeGen spec (`project.yml`), Swift package `FloridaKit`, and the `iOS/`, `Widgets/`, `macOS/` target sources. Cannot be built on Linux; generate and build on a Mac or a macOS CI runner.
+- `apple/` — XcodeGen spec (`project.yml`), two local Swift packages, and the `iOS/`, `Widgets/`, `macOS/` target sources.
+  - `apple/FloridaCore/` — dependency-free models (wire-compatible with the server JSON), quick-add parser, keyboard engine, calendar layout math. Pure logic, no I/O.
+  - `apple/FloridaKit/` — GRDB/SQLite store, sync client, token store; re-exports FloridaCore. Depends on GRDB 7.
+  - Both packages build and test on Linux (`swift build --build-tests && swift test` inside each; Swift 6.4 via swiftly in orbs). The app targets (SwiftUI/AppKit/WidgetKit) need Xcode: generate and build on a Mac or the `macos-26` CI job.
 
 ## Commands
 
@@ -25,4 +28,5 @@ pnpm --filter @florida/server db:generate   # after editing server/src/db/schema
 - Derived data is recomputed, not stored, except `placements` (server-side scheduler output, replaced wholesale on each run) which other consumers need.
 - Every mutable table has `updated_at` and a `deleted_at` tombstone; sync is `updated_at > since`.
 - Do not add dependencies to `packages/scheduler`. Add server dependencies with `pnpm add` inside `server/`.
-- Swift: 4-space indent, SwiftUI, Swift 6 language mode. Keep platform-specific code behind `#if os(...)` inside `FloridaKit` or in the per-target folders.
+- Swift: 4-space indent, SwiftUI, Swift 6 language mode, swift-testing (`import Testing`) for new tests. Nothing in `FloridaCore` or `FloridaKit` may import SwiftUI/AppKit/UIKit; Darwin-only APIs go behind `#if canImport(...)`. Platform UI lives in the per-target folders.
+- Swift models in `FloridaCore/Sources/FloridaCore/Models/Models.swift` mirror `server/src/db/schema.ts` and the `server/src/app.ts` bodies field for field; change both sides together.

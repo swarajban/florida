@@ -25,13 +25,17 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
 
-  floridakit-linux:
-    name: FloridaKit (Linux)
+  swift-linux:
+    name: FloridaCore + FloridaKit (Linux)
     runs-on: ubuntu-latest
     container: swift:6.4-bookworm
     steps:
       - uses: actions/checkout@v5
       - run: swift --version
+      - run: swift build --build-tests
+        working-directory: apple/FloridaCore
+      - run: swift test
+        working-directory: apple/FloridaCore
       - run: swift build --build-tests
         working-directory: apple/FloridaKit
       - run: swift test
@@ -68,6 +72,9 @@ jobs:
           CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
           | xcbeautify --renderer github-actions
         working-directory: apple
+      - name: FloridaCore tests (macOS)
+        run: swift test
+        working-directory: apple/FloridaCore
       - name: FloridaKit tests (macOS)
         run: swift test
         working-directory: apple/FloridaKit
