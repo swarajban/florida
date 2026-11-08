@@ -100,7 +100,7 @@ struct NowMarker: View {
             Text(now, style: .time)
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.red)
-                .frame(width: 64, alignment: .trailing)
+                .frame(width: TimeColumn.width, alignment: .trailing)
             Circle()
                 .fill(.red)
                 .frame(width: 7, height: 7)
@@ -114,7 +114,10 @@ struct NowMarker: View {
 }
 
 /// Start over end, right-aligned, in a fixed-width column so titles line up.
-private struct TimeColumn: View {
+/// Wide enough for "10:15 AM" at the default text size; larger sizes shrink rather than wrap.
+struct TimeColumn: View {
+    static let width: CGFloat = 76
+
     let start: Date?
     let end: Date?
 
@@ -130,6 +133,8 @@ private struct TimeColumn: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .frame(width: 64, alignment: .trailing)
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
+        .frame(width: Self.width, alignment: .trailing)
     }
 }
