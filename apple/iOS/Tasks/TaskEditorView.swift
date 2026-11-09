@@ -98,6 +98,10 @@ struct TaskEditorView: View {
                     Text("A pinned task is placed at exactly that time as one block; otherwise the scheduler picks the time.")
                 }
 
+                TaskRecurrenceSection(
+                    recurrence: $draft.recurrence, anchorDate: draft.dueAt ?? draft.startAt,
+                    defaultTimeZone: recurrenceTimeZone, wasRecurring: original.recurrence != nil)
+
                 if !isNew {
                     Section {
                         if draft.completedAt == nil {
@@ -118,13 +122,20 @@ struct TaskEditorView: View {
                         Button(role: .destructive) {
                             confirmingDelete = true
                         } label: {
-                            Label("Delete task", systemImage: "trash")
+                            Label(original.recurrence == nil ? "Delete task" : "Delete and stop repeating", systemImage: "trash")
                         }
                         // On the button, so the dialog opens anchored to it.
-                        .confirmationDialog("Delete this task?", isPresented: $confirmingDelete, titleVisibility: .visible) {
-                            Button("Delete", role: .destructive) {
+                        .confirmationDialog(
+                            original.recurrence == nil ? "Delete this task?" : "Delete this occurrence and stop repeating?",
+                            isPresented: $confirmingDelete, titleVisibility: .visible
+                        ) {
+                            Button(original.recurrence == nil ? "Delete" : "Delete and Stop Repeating", role: .destructive) {
                                 model.delete(original)
                                 dismiss()
+                            }
+                        } message: {
+                            if original.recurrence != nil {
+                                Text("This and future unfinished occurrences will be removed. Completed history is kept.")
                             }
                         }
                     }
@@ -142,7 +153,7 @@ struct TaskEditorView: View {
                     Button(isNew ? "Add" : "Save") {
                         save()
                     }
-                    .disabled(trimmedTitle.isEmpty)
+                    .disabled(trimmedTitle.isEmpty || recurrenceValidationMessage != nil)
                 }
             }
             .onAppear {
@@ -202,6 +213,17 @@ struct TaskEditorView: View {
         draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var recurrenceTimeZone: String {
+        let scheduleId = draft.scheduleId ?? model.categories.first(where: { $0.id == draft.categoryId })?.scheduleId
+        return model.schedules.first(where: { $0.id == scheduleId })?.timeZone ?? model.calendar.timeZone.identifier
+    }
+
+    private var recurrenceValidationMessage: String? {
+        original.recurrence == nil
+            ? draft.recurrence?.validationMessage(asNewSeriesAt: Date())
+            : draft.recurrence?.validationMessage
+    }
+
     /// Tomorrow at 17:00, matching the quick-add parser's default clock for deadlines.
     private var defaultDueDate: Date {
         let calendar = model.calendar
@@ -220,8 +242,9 @@ struct TaskEditorView: View {
     /// Saves pending edits, then completes through the model so the haptic, bloom and Undo
     /// toast match a swipe.
     private func completeFromEditor() {
+        guard recurrenceValidationMessage == nil else { return }
+        var task = preparedTask
         if draft != original {
-            var task = draft
             task.title = trimmedTitle.isEmpty ? original.title : trimmedTitle
             do {
                 try model.save(task)
@@ -230,18 +253,26 @@ struct TaskEditorView: View {
                 return
             }
         }
-        model.complete(draft)
+        model.complete(task)
         dismiss()
     }
 
-    private func save() {
+    private var preparedTask: TaskItem {
         var task = draft
         task.title = trimmedTitle
-        if task.deadlineType == .none {
+        if task.deadlineType == .none && task.recurrence == nil {
             task.dueAt = nil
         }
+        if original.recurrence == nil && task.recurrence != nil {
+            task.prepareToEnableRecurrence()
+        }
+        return task
+    }
+
+    private func save() {
+        guard recurrenceValidationMessage == nil else { return }
         do {
-            try model.save(task)
+            try model.save(preparedTask)
             dismiss()
         } catch {
             saveError = error.localizedDescription

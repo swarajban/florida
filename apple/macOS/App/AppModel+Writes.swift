@@ -31,6 +31,15 @@ extension AppModel {
             statusMessage = selectedEvent == nil ? "Select a task first" : "Events are managed in Google Calendar"
             return
         }
+        if task.recurrence != nil {
+            recurringTaskToDelete = task
+            return
+        }
+        deleteTask(task)
+    }
+
+    /// Called directly only after confirming a recurring delete's scope.
+    func deleteTask(_ task: TaskItem) {
         guard let database else { return }
         let next = neighbor(of: .task(task.id))
         do {

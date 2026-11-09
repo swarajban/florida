@@ -33,6 +33,7 @@ private struct TaskActionsModifier: ViewModifier {
     let targets: TaskActionTargets
     let onEdit: (() -> Void)?
     let allowsDelete: Bool
+    @State private var confirmingRecurringDelete = false
 
     func body(content: Content) -> some View {
         content
@@ -53,7 +54,7 @@ private struct TaskActionsModifier: ViewModifier {
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                 if allowsDelete {
                     Button(role: .destructive) {
-                        model.delete(task)
+                        requestDelete()
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }
@@ -102,11 +103,27 @@ private struct TaskActionsModifier: ViewModifier {
                 }
                 if allowsDelete {
                     Button(role: .destructive) {
-                        model.delete(task)
+                        requestDelete()
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }
                 }
             }
+            .confirmationDialog(
+                "Delete this occurrence and stop repeating?", isPresented: $confirmingRecurringDelete,
+                titleVisibility: .visible
+            ) {
+                Button("Delete and Stop Repeating", role: .destructive) { model.delete(task) }
+            } message: {
+                Text("This and future unfinished occurrences will be removed. Completed history is kept.")
+            }
+    }
+
+    private func requestDelete() {
+        if task.recurrence != nil {
+            confirmingRecurringDelete = true
+        } else {
+            model.delete(task)
+        }
     }
 }

@@ -68,6 +68,8 @@ final class AppModel {
     var isHelpOpen = false
     /// The task open in the editor sheet; nil when the sheet is closed.
     var editorTask: TaskItem?
+    /// Recurring deletes always explain the series-wide effect, including keyboard deletes.
+    var recurringTaskToDelete: TaskItem?
     /// Text the new-task editor should send to the AI parser when it opens (quick add's ⌘↩).
     var editorAIText: String?
     /// The event whose detail popover is open.

@@ -202,6 +202,17 @@ public final class AppDatabase: Sendable {
             try db.execute(sql: "DELETE FROM syncState WHERE key = 'cursor'")
         }
 
+        migrator.registerMigration("v3") { db in
+            try db.alter(table: "task") { t in
+                t.add(column: "recurrence", .text)
+                t.add(column: "recurrenceSeriesId", .text)
+                t.add(column: "recurrenceDate", .text)
+                t.add(column: "recurrenceRevision", .text)
+            }
+            // Existing tasks need their series metadata even if they have not changed recently.
+            try db.execute(sql: "DELETE FROM syncState WHERE key = 'cursor'")
+        }
+
         return migrator
     }
 }

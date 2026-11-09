@@ -41,6 +41,7 @@ import Testing
         #expect(response.schedules.first?.windows.first?.days == [1, 2, 3, 4, 5])
         #expect(response.tasks.first?.priority == .high)
         #expect(response.tasks.first?.isOpen == true)
+        #expect(response.tasks.first?.recurrenceRevision == nil, "older servers omit the revision")
         #expect(response.placements.first?.endAt.timeIntervalSince(response.placements[0].startAt) == 3600)
     }
 
@@ -52,7 +53,12 @@ import Testing
         let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         #expect(object["priority"] as? String == "asap")
         #expect(object["durationMinutes"] as? Int == 60)
-        #expect(object["dueAt"] == nil || object["dueAt"] is NSNull)
+        #expect(object["recurrence"] is NSNull, "nil explicitly disables recurrence")
+        #expect(object["expectedRecurrenceRevision"] is NSNull, "nil is an explicit concurrency baseline")
+        #expect(object["recurrenceRevision"] == nil)
+        for key in ["notes", "minChunkMinutes", "dueAt", "startAt", "scheduleId", "pinnedStart", "completedAt"] {
+            #expect(object[key] == nil, "other nullable fields retain their omission behavior: \(key)")
+        }
     }
 
     @Test func priorityOrdersAsapFirst() {

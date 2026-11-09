@@ -211,4 +211,6 @@ struct RejectedChange: Identifiable, Hashable {
     var status: Int
     var message: String
     var at: Date
+    /// Original task intent, including PATCH omissions and its revision precondition.
+    var body: Data? = nil
 }

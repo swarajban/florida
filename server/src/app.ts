@@ -21,7 +21,7 @@ import { eventBody, softDeleteEvent, upsertEvent } from './events.js'
 import { GoogleApiError, GoogleTokenError, authorizationUrl, exchangeCode } from './google/client.js'
 import type { CalendarSyncService } from './google/sync.js'
 import { mountMcp } from './mcp.js'
-import { softDeleteTask, taskBody, upsertTask } from './tasks.js'
+import { lockTaskRecurrences, moveRecurringTaskCategory, patchTask, softDeleteTask, taskBody, taskPatch, upsertTask } from './tasks.js'
 import { badRequest, clock, isoInstant, notFound, timeZone } from './validation.js'
 
 export interface AppDeps {
@@ -263,6 +263,12 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
     return c.json({ task, scheduling })
   })
 
+  app.patch('/api/tasks/:id', async (c) => {
+    const task = await patchTask(db, c.req.param('id'), taskPatch.parse(await c.req.json()))
+    const scheduling = await reschedule()
+    return c.json({ task, scheduling })
+  })
+
   app.delete('/api/tasks/:id', async (c) => {
     await softDeleteTask(db, c.req.param('id'))
     const scheduling = await reschedule()
@@ -303,6 +309,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
     if (id === INBOX_CATEGORY_ID) throw badRequest('the inbox category cannot be deleted')
     const now = new Date()
     const deleted = await db.transaction(async (tx) => {
+      await lockTaskRecurrences(tx)
       const rows = await tx
         .update(categories)
         .set({ deletedAt: now, updatedAt: now })
@@ -320,6 +327,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
         .update(tasks)
         .set({ categoryId: INBOX_CATEGORY_ID, updatedAt: now })
         .where(and(eq(tasks.categoryId, id), isNull(tasks.deletedAt)))
+      await moveRecurringTaskCategory(tx, id, INBOX_CATEGORY_ID, now)
       return true
     })
     if (!deleted) throw notFound(`category ${id}`)

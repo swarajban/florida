@@ -150,6 +150,8 @@ public actor SyncClient {
         switch write.op {
         case .put:
             return api.makeRequest(method: "PUT", path: collection, id: write.entityId, body: write.body)
+        case .patch:
+            return api.makeRequest(method: "PATCH", path: collection, id: write.entityId, body: write.body)
         case .delete:
             return api.makeRequest(method: "DELETE", path: collection, id: write.entityId)
         }
@@ -158,16 +160,16 @@ public actor SyncClient {
     private func applyAccepted(_ write: PendingWrite, data: Data) throws {
         let now = Date()
         switch (write.entity, write.op) {
-        case (.task, .put):
+        case (.task, .put), (.task, .patch):
             let response = try api.decode(TaskWriteResponse.self, from: data)
             try database.completePendingWrite(write, record: response.task, scheduling: response.scheduling, computedAt: now)
-        case (.category, .put):
+        case (.category, .put), (.category, .patch):
             let response = try api.decode(CategoryWriteResponse.self, from: data)
             try database.completePendingWrite(write, record: response.category, scheduling: response.scheduling, computedAt: now)
-        case (.schedule, .put):
+        case (.schedule, .put), (.schedule, .patch):
             let response = try api.decode(ScheduleWriteResponse.self, from: data)
             try database.completePendingWrite(write, record: response.schedule, scheduling: response.scheduling, computedAt: now)
-        case (.event, .put):
+        case (.event, .put), (.event, .patch):
             let response = try api.decode(EventWriteResponse.self, from: data)
             try database.completePendingWrite(write, record: response.event, scheduling: response.scheduling, computedAt: now)
         case (_, .delete):

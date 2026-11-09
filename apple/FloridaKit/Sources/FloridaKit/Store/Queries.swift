@@ -176,16 +176,98 @@ extension AppDatabase {
         }
     }
 
-    /// Upserts the task with `updatedAt = now` and queues a `put` for the server, replacing any
-    /// earlier queued write for the same task.
+    /// Saves immediately and queues only changed user fields for an existing task. Creation and
+    /// restoration use PUT; later edits merge into that PUT until it has been accepted.
     public func saveTask(_ task: TaskItem, now: Date = Date()) throws {
-        var task = task
-        task.updatedAt = now
-        let body = try JSONCoding.encoder.encode(TaskWrite(task))
         try writer.write { db in
-            try task.save(db)
-            try Self.enqueue(db, entity: .task, id: task.id, op: .put, body: body, now: now)
+            try Self.saveTask(task, in: db, now: now)
         }
+    }
+
+    private static func saveTask(_ task: TaskItem, in db: Database, now: Date) throws {
+        let previous = try TaskItem.fetchOne(db, id: task.id)
+        let pending = try PendingWrite.filter(Column("entity") == "task" && Column("entityId") == task.id).fetchOne(db)
+        var local = task
+        if previous?.deletedAt != nil || pending?.op == .delete || (previous == nil && task.recurrenceRevision != nil) {
+            // Undo restores only this task. Sending the cached rule would instead look like a
+            // stale attempt to restart the series after the delete rotated its revision.
+            local.recurrence = nil
+        }
+        let fullBody = try JSONCoding.encoder.encode(TaskWrite(local))
+        let full = try taskWriteObject(fullBody)
+        let op: PendingWrite.Op
+        let body: Data
+        if let previous, previous.deletedAt == nil, pending?.op != .delete {
+            var changes = taskChanges(from: previous, to: local, full: full)
+            guard !changes.isEmpty else { return }
+            // Completion/progress never edits the template and needs no recurrence precondition.
+            if changes.keys.contains(where: { $0 != "completedAt" && $0 != "completedMinutes" }) {
+                changes["expectedRecurrenceRevision"] = full["expectedRecurrenceRevision"]
+            }
+            var merged: [String: Any] = [:]
+            if let pendingBody = pending?.body {
+                merged = try taskWriteObject(pendingBody)
+            }
+            // Retain the original edit's baseline, including an explicit null. Replacing it with
+            // a later edit's revision could silently turn a stale rule/template edit into a valid one.
+            if let baseline = merged["expectedRecurrenceRevision"] {
+                changes["expectedRecurrenceRevision"] = baseline
+            }
+            merged.merge(changes) { _, new in new }
+            op = pending?.op == .put ? .put : .patch
+            body = try JSONSerialization.data(withJSONObject: merged, options: [.sortedKeys])
+        } else {
+            op = .put
+            body = fullBody
+        }
+        local.updatedAt = now
+        if let previous {
+            // Editors and undo own user fields, never server metadata.
+            local.recurrenceSeriesId = previous.recurrenceSeriesId
+            local.recurrenceDate = previous.recurrenceDate
+            local.recurrenceRevision = previous.recurrenceRevision
+        }
+        try local.save(db)
+        try enqueue(db, entity: .task, id: task.id, op: op, body: body, now: now)
+    }
+
+    private static func taskWriteObject(_ data: Data) throws -> [String: Any] {
+        guard let fields = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw DecodingError.typeMismatch([String: Any].self, .init(codingPath: [], debugDescription: "Task write must be a JSON object."))
+        }
+        return fields
+    }
+
+    /// Omitted means untouched; NSNull means intentionally cleared. Comparing dates through GRDB
+    /// uses SQLite's millisecond precision, so saving an unrounded editor snapshot cannot turn
+    /// completion into a spurious template/timing edit.
+    private static func taskChanges(from before: TaskItem, to after: TaskItem, full: [String: Any]) -> [String: Any] {
+        var changes: [String: Any] = [:]
+        func track<Value: Equatable>(_ key: String, _ path: KeyPath<TaskItem, Value>) {
+            if before[keyPath: path] != after[keyPath: path] {
+                changes[key] = full[key] ?? NSNull()
+            }
+        }
+        func trackDate(_ key: String, _ path: KeyPath<TaskItem, Date?>) {
+            if before[keyPath: path]?.databaseValue != after[keyPath: path]?.databaseValue {
+                changes[key] = full[key] ?? NSNull()
+            }
+        }
+        track("categoryId", \.categoryId)
+        track("title", \.title)
+        track("notes", \.notes)
+        track("durationMinutes", \.durationMinutes)
+        track("minChunkMinutes", \.minChunkMinutes)
+        track("priority", \.priority)
+        track("deadlineType", \.deadlineType)
+        trackDate("dueAt", \.dueAt)
+        trackDate("startAt", \.startAt)
+        track("scheduleId", \.scheduleId)
+        trackDate("pinnedStart", \.pinnedStart)
+        track("completedMinutes", \.completedMinutes)
+        trackDate("completedAt", \.completedAt)
+        track("recurrence", \.recurrence)
+        return changes
     }
 
     /// Marks the task deleted locally and queues a `delete`, replacing any queued `put`.
@@ -198,17 +280,21 @@ extension AppDatabase {
 
     /// Marks the task complete at `at` (its remaining minutes count as done).
     public func completeTask(id: String, at completedAt: Date = Date()) throws {
-        guard var task = try task(id: id) else { return }
-        task.completedAt = completedAt
-        task.completedMinutes = task.durationMinutes
-        try saveTask(task, now: completedAt)
+        try writer.write { db in
+            guard var task = try TaskItem.fetchOne(db, id: id) else { return }
+            task.completedAt = completedAt
+            task.completedMinutes = task.durationMinutes
+            try Self.saveTask(task, in: db, now: completedAt)
+        }
     }
 
     public func reopenTask(id: String, now: Date = Date()) throws {
-        guard var task = try task(id: id) else { return }
-        task.completedAt = nil
-        task.completedMinutes = 0
-        try saveTask(task, now: now)
+        try writer.write { db in
+            guard var task = try TaskItem.fetchOne(db, id: id) else { return }
+            task.completedAt = nil
+            task.completedMinutes = 0
+            try Self.saveTask(task, in: db, now: now)
+        }
     }
 
     /// Upserts the event with `updatedAt = now` and queues a `put` for the server, replacing any
@@ -388,6 +474,17 @@ extension AppDatabase {
     public func removePendingWrite(seq: Int64) throws {
         try writer.write { db in
             _ = try PendingWrite.deleteOne(db, key: seq)
+        }
+    }
+
+    /// Retries the original refused request, not a new snapshot of the reconciled row. In
+    /// particular a PATCH retains its omissions and original revision precondition, and a failed
+    /// creation stays a PUT even though its local row still exists. Newer queued intent wins.
+    /// The row stays reconciled until the server accepts the retry.
+    public func requeue(_ write: PendingWrite, now: Date = Date()) throws {
+        try writer.write { db in
+            guard !(try Self.pendingEntityIds(db).contains(.init(entity: write.entity, id: write.entityId))) else { return }
+            try Self.enqueue(db, entity: write.entity, id: write.entityId, op: write.op, body: write.body, now: now)
         }
     }
 

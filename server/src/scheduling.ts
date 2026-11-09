@@ -6,6 +6,7 @@ import type { Config } from './config.js'
 import type { Db } from './db/client.js'
 import { calendars, events, placements, categories, schedules, tasks, unscheduled } from './db/schema.js'
 import type { EventRow, CategoryRow, PlacementRow, ScheduleRow, TaskRow } from './db/schema.js'
+import { materializeRecurringTasks } from './tasks.js'
 
 export interface SchedulerSources {
   now: Date
@@ -106,6 +107,7 @@ export async function runScheduling(
   return db.transaction(async (tx) => {
     // Without this a slow run that read stale tasks could commit after (and overwrite) a newer one.
     await tx.execute(sql.raw(SCHEDULER_LOCK_SQL))
+    await materializeRecurringTasks(tx, now, config.HORIZON_DAYS)
 
     const scheduleRows = await tx.select().from(schedules).where(isNull(schedules.deletedAt))
     const categoryRows = await tx.select().from(categories).where(isNull(categories.deletedAt))

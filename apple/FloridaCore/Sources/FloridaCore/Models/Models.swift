@@ -117,6 +117,12 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
     public var pinnedStart: Date?
     public var completedMinutes: Int
     public var completedAt: Date?
+    public var recurrence: TaskRecurrence?
+    /// Server-owned series membership and logical occurrence date (YYYY-MM-DD).
+    public var recurrenceSeriesId: String?
+    public var recurrenceDate: String?
+    /// Server-owned concurrency token for the recurrence rule and template.
+    public var recurrenceRevision: String?
     public var createdAt: Date
     public var updatedAt: Date
     public var deletedAt: Date?
@@ -126,7 +132,8 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
         minChunkMinutes: Int? = nil, priority: Priority = .medium, deadlineType: DeadlineType = .none,
         dueAt: Date? = nil, startAt: Date? = nil, scheduleId: String? = nil, pinnedStart: Date? = nil,
         completedMinutes: Int = 0, completedAt: Date? = nil, createdAt: Date, updatedAt: Date,
-        deletedAt: Date? = nil
+        deletedAt: Date? = nil, recurrence: TaskRecurrence? = nil,
+        recurrenceSeriesId: String? = nil, recurrenceDate: String? = nil, recurrenceRevision: String? = nil
     ) {
         self.id = id
         self.categoryId = categoryId
@@ -142,6 +149,10 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
         self.pinnedStart = pinnedStart
         self.completedMinutes = completedMinutes
         self.completedAt = completedAt
+        self.recurrence = recurrence
+        self.recurrenceSeriesId = recurrenceSeriesId
+        self.recurrenceDate = recurrenceDate
+        self.recurrenceRevision = recurrenceRevision
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.deletedAt = deletedAt
@@ -560,6 +571,9 @@ public struct TaskWrite: Codable, Hashable, Sendable {
     public var pinnedStart: Date?
     public var completedMinutes: Int
     public var completedAt: Date?
+    public var recurrence: TaskRecurrence?
+    /// The revision the user edited, including nil when the task was not in a series.
+    public var expectedRecurrenceRevision: String?
 
     public init(_ task: TaskItem) {
         categoryId = task.categoryId
@@ -575,6 +589,28 @@ public struct TaskWrite: Codable, Hashable, Sendable {
         pinnedStart = task.pinnedStart
         completedMinutes = task.completedMinutes
         completedAt = task.completedAt
+        recurrence = task.recurrence
+        expectedRecurrenceRevision = task.recurrenceRevision
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(categoryId, forKey: .categoryId)
+        try container.encode(title, forKey: .title)
+        try container.encodeIfPresent(notes, forKey: .notes)
+        try container.encode(durationMinutes, forKey: .durationMinutes)
+        try container.encodeIfPresent(minChunkMinutes, forKey: .minChunkMinutes)
+        try container.encode(priority, forKey: .priority)
+        try container.encode(deadlineType, forKey: .deadlineType)
+        try container.encodeIfPresent(dueAt, forKey: .dueAt)
+        try container.encodeIfPresent(startAt, forKey: .startAt)
+        try container.encodeIfPresent(scheduleId, forKey: .scheduleId)
+        try container.encodeIfPresent(pinnedStart, forKey: .pinnedStart)
+        try container.encode(completedMinutes, forKey: .completedMinutes)
+        try container.encodeIfPresent(completedAt, forKey: .completedAt)
+        // Unlike the other optional fields, nil explicitly stops an existing series.
+        try container.encode(recurrence, forKey: .recurrence)
+        try container.encode(expectedRecurrenceRevision, forKey: .expectedRecurrenceRevision)
     }
 }
 

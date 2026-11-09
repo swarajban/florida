@@ -290,6 +290,25 @@ describe('task tools', () => {
     expect(scheduling.placements.map((p) => p.taskId)).toEqual([createdId])
     expect(scheduling.unscheduled).toEqual([])
   })
+
+  it('creates custom recurring tasks, completes one occurrence, and stops repeats through update_task', async () => {
+    const recurrence = { frequency: 'week', interval: 2, timeZone: LA, startDate: ymd(upcomingMonday()), weekdays: [1, 4] }
+    const { task } = await data<{ task: TaskView & { recurrenceSeriesId: string; recurrence: object } }>('create_task', {
+      categoryId: 'work', title: 'Recurring review', recurrence,
+    })
+    expect(task.recurrence).toEqual(recurrence)
+    const { task: done } = await data<{ task: TaskView }>('complete_task', { id: task.id })
+    expect(done.completedAt).not.toBeNull()
+    const { tasks: open } = await data<{ tasks: (TaskView & { recurrenceSeriesId: string | null })[] }>('list_tasks')
+    const next = open.find((candidate) => candidate.recurrenceSeriesId === task.recurrenceSeriesId)
+    expect(next).toBeDefined()
+    const { task: standalone } = await data<{ task: TaskView & { recurrence: null } }>('update_task', { id: next!.id, recurrence: null })
+    expect(standalone.recurrence).toBeNull()
+    const { tasks: remaining } = await data<{ tasks: (TaskView & { recurrenceSeriesId: string | null })[] }>('list_tasks')
+    expect(remaining.filter((candidate) => candidate.recurrenceSeriesId === task.recurrenceSeriesId)).toEqual([])
+    await data('delete_task', { id: standalone.id })
+    await data('delete_task', { id: task.id })
+  })
 })
 
 describe('get_agenda', () => {

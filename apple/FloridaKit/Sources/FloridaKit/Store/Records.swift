@@ -39,14 +39,14 @@ extension CalendarInfo: @retroactive FetchableRecord, @retroactive PersistableRe
 }
 
 /// A local write that has not been pushed to the server yet. The queue holds at most one row per
-/// (entity, entityId); a later write replaces an earlier one.
+/// (entity, entityId); later task edits merge their intent into the earlier write.
 public struct PendingWrite: Codable, Hashable, Sendable, FetchableRecord, MutablePersistableRecord {
     public enum Entity: String, Codable, Hashable, Sendable {
         case task, category, schedule, event
     }
 
     public enum Op: String, Codable, Hashable, Sendable {
-        case put, delete
+        case put, patch, delete
     }
 
     public static let databaseTableName = "pendingWrite"
@@ -56,7 +56,8 @@ public struct PendingWrite: Codable, Hashable, Sendable, FetchableRecord, Mutabl
     public var entity: Entity
     public var entityId: String
     public var op: Op
-    /// JSON of `TaskWrite` / `CategoryWrite` / `ScheduleWrite` / `EventWrite` for `put`; nil for `delete`.
+    /// Full write JSON for `put`, changed task fields (including explicit nulls) for `patch`;
+    /// nil for `delete`.
     public var body: Data?
     public var createdAt: Date
 

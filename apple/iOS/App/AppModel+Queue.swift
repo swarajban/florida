@@ -25,7 +25,7 @@ extension AppModel {
             rejectedChanges.append(RejectedChange(
                 id: "\(write.entity.rawValue)-\(write.entityId)-\(now.timeIntervalSince1970)",
                 entity: write.entity, entityId: write.entityId, op: write.op,
-                status: rejection.status, message: rejection.message, at: now))
+                status: rejection.status, message: rejection.message, at: now, body: write.body))
         }
     }
 
@@ -53,26 +53,27 @@ extension AppModel {
         }
     }
 
-    /// Queues the refused change again from the local row (or the delete again) and syncs.
+    /// Retries the original task intent, never a full snapshot of the reconciled row. Other
+    /// entities retain their existing retry behavior.
     func retry(_ change: RejectedChange) {
         let ok = write { database in
             switch (change.entity, change.op) {
-            case (.task, .put):
-                guard let task = try database.task(id: change.entityId) else { throw LocalWriteError("The task is gone.") }
-                try database.saveTask(task)
+            case (.task, .put), (.task, .patch):
+                try database.requeue(PendingWrite(
+                    entity: .task, entityId: change.entityId, op: change.op, body: change.body, createdAt: change.at))
             case (.task, .delete):
                 try database.deleteTask(id: change.entityId)
-            case (.category, .put):
+            case (.category, .put), (.category, .patch):
                 guard let category = self.category(id: change.entityId) else { throw LocalWriteError("The category is gone.") }
                 try database.saveCategory(category)
             case (.category, .delete):
                 try database.deleteCategory(id: change.entityId)
-            case (.schedule, .put):
+            case (.schedule, .put), (.schedule, .patch):
                 guard let schedule = self.schedule(id: change.entityId) else { throw LocalWriteError("The schedule is gone.") }
                 try database.saveSchedule(schedule)
             case (.schedule, .delete):
                 try database.deleteSchedule(id: change.entityId)
-            case (.event, .put):
+            case (.event, .put), (.event, .patch):
                 guard let event = try database.event(id: change.entityId) else { throw LocalWriteError("The event is gone.") }
                 try database.saveEvent(event)
             case (.event, .delete):

@@ -14,6 +14,7 @@ struct TaskEditorSheet: View {
     @State private var startAt: Date
     @State private var hasPinnedStart: Bool
     @State private var pinnedStart: Date
+    private let original: TaskItem
     /// Not in the store yet: titled "New task", shows the AI section, and saves as "Added".
     let isNew: Bool
     @FocusState private var isTitleFocused: Bool
@@ -30,6 +31,7 @@ struct TaskEditorSheet: View {
         _startAt = State(initialValue: task.startAt ?? today)
         _hasPinnedStart = State(initialValue: task.pinnedStart != nil)
         _pinnedStart = State(initialValue: task.pinnedStart ?? nextHour)
+        original = task
         self.isNew = isNew
     }
 
@@ -74,6 +76,10 @@ struct TaskEditorSheet: View {
                     OptionalDateRow(title: "Not before", isOn: $hasStart, date: $startAt)
                     OptionalDateRow(title: "Pinned start", isOn: $hasPinnedStart, date: $pinnedStart)
                 }
+                TaskRecurrenceSection(
+                    recurrence: $draft.recurrence,
+                    anchorDate: hasDue ? dueAt : (hasStart ? startAt : nil),
+                    defaultTimeZone: recurrenceTimeZone, wasRecurring: original.recurrence != nil)
             }
             .formStyle(.grouped)
             Divider()
@@ -88,11 +94,11 @@ struct TaskEditorSheet: View {
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
-                .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty || recurrenceValidationMessage != nil)
             }
             .padding()
         }
-        .frame(width: 520, height: isNew ? 700 : 540)
+        .frame(width: 560, height: 720)
         .onAppear {
             isTitleFocused = !isNew || model.editorAIText == nil
         }
@@ -102,6 +108,17 @@ struct TaskEditorSheet: View {
         Binding(
             get: { draft.notes ?? "" },
             set: { draft.notes = $0.isEmpty ? nil : $0 })
+    }
+
+    private var recurrenceTimeZone: String {
+        let scheduleId = draft.scheduleId ?? model.categoriesById[draft.categoryId]?.scheduleId
+        return model.schedules.first(where: { $0.id == scheduleId })?.timeZone ?? model.calendar.timeZone.identifier
+    }
+
+    private var recurrenceValidationMessage: String? {
+        original.recurrence == nil
+            ? draft.recurrence?.validationMessage(asNewSeriesAt: Date())
+            : draft.recurrence?.validationMessage
     }
 
     /// Fills the form from an AI-parsed draft; unknown categories fall back to Inbox.
@@ -125,6 +142,7 @@ struct TaskEditorSheet: View {
     }
 
     private func save() {
+        guard recurrenceValidationMessage == nil else { return }
         var task = draft
         task.title = task.title.trimmingCharacters(in: .whitespaces)
         task.durationMinutes = max(5, task.durationMinutes)
@@ -135,6 +153,9 @@ struct TaskEditorSheet: View {
             task.deadlineType = .none
         } else if task.deadlineType == .none {
             task.deadlineType = .soft
+        }
+        if original.recurrence == nil && task.recurrence != nil {
+            task.prepareToEnableRecurrence()
         }
         let label = isNew ? "Added \(AppModel.quoted(task.title))" : "Edited \(AppModel.quoted(task.title))"
         guard model.save(task, undoLabel: label) else { return }

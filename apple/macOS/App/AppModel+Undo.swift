@@ -65,6 +65,9 @@ extension UndoEntry.FieldChange {
         track(\.pinnedStart, isStillApplied: sameInstant)
         track(\.completedMinutes)
         track(\.completedAt, isStillApplied: sameInstant)
+        track(\.recurrence)
+        // Series membership and occurrence date belong to the server. Undo leaves the latest
+        // metadata intact, just as completing/reopening an occurrence does.
         track(\.deletedAt) { ($0 == nil) == ($1 == nil) }
         return changes
     }

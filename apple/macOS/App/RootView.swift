@@ -34,6 +34,21 @@ struct RootView: View {
         .sheet(item: $model.doneForNow) { request in
             DoneForNowSheet(request: request)
         }
+        .confirmationDialog(
+            "Delete this occurrence and stop repeating?",
+            isPresented: Binding(
+                get: { model.recurringTaskToDelete != nil },
+                set: { if !$0 { model.recurringTaskToDelete = nil } }),
+            titleVisibility: .visible, presenting: model.recurringTaskToDelete
+        ) { task in
+            Button("Delete and Stop Repeating", role: .destructive) {
+                model.deleteTask(task)
+                model.recurringTaskToDelete = nil
+            }
+            Button("Cancel", role: .cancel) { model.recurringTaskToDelete = nil }
+        } message: { _ in
+            Text("This and future unfinished occurrences will be removed. Completed history is kept.")
+        }
         .onChange(of: model.settingsRequest) {
             openSettings()
         }

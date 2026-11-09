@@ -158,6 +158,7 @@ curl -s -X POST "$PUBLIC_URL/api/google/resync" -H "authorization: Bearer $API_T
 | `GET /api/sync?since=` | `{ cursor, schedules, categories, tasks, events, placements, unscheduled, accounts, calendars }`. The first four hold rows with `updatedAt > since` (all rows without `since`), including soft-deleted tombstones; `events` holds only selected calendars' events plus tombstones. `placements`, `unscheduled` (`{ taskId, reason, unplacedMinutes, computedAt }`), `accounts` and `calendars` are always complete (and never contain tokens). Events carry `description`, `conferenceUrl`, `attendees`, `organizer`, `eventType`, `recurringEventId` and `icalUid`. |
 | `GET /api/events` | Server-sent events: `connected` on open, then one `changed` event after every scheduler run or calendar sync. Clients respond by calling `/api/sync` with their cursor. Keep-alive comment every 25 s. |
 | `PUT/DELETE /api/tasks/:id`, `/api/categories/:id`, `/api/schedules/:id` | Upsert / soft-delete, then rerun the scheduler. Responses include `scheduling: { placements, unscheduled, late }`. The `inbox` category cannot be deleted or renamed (400); deleting another category first moves its tasks to `inbox`. |
+| `PATCH /api/tasks/:id` | Change only supplied task fields; omitted fields stay current and `null` clears nullable fields. Returns `{ task, scheduling }`; unknown or tombstoned tasks are 404. Completion/reopen sends only `completedAt` and `completedMinutes`, never a cached series template. |
 | `GET /api/tasks/:id`, `/api/categories/:id`, `/api/schedules/:id`, `/api/events/:id` | The row exactly as `/api/sync` sends it, tombstones included; 404 only for an id that never existed. |
 | `PUT /api/events/:id` | `{ calendarId, summary, location, description, startAt, endAt, allDay, responseStatus }` → `{ event, scheduling }`. An unknown id creates the event on Google in `calendarId` (our calendar id; it must be selected and `owner`/`writer`, else 403) and keeps `:id` as the row id; a live row is patched on Google with only the changed fields, and a changed `responseStatus` re-sends Google's attendee list with the user's own entry updated (`sendUpdates=all`) unless Google already holds that answer. A UUID `:id` is also the event's id on Google, so a retried create cannot make a second event. All-day events use UTC-midnight `startAt`/`endAt` (end exclusive; anything else is 400). 400 on validation, 404 for a tombstone. Google's own 400 and 403 pass through with its message and leave the row untouched; its 404/410 (the event was deleted since the last sync) tombstone the row and answer 404 so a refetch sees the tombstone; quota, outages and a revoked refresh token are 502 (retry later). |
 | `DELETE /api/events/:id` | Deletes the event on Google (already gone counts as deleted), tombstones the row, reschedules → `{ scheduling }`. 404 for an unknown id; Google's 403 passes through and leaves the row live. |
@@ -174,6 +175,57 @@ curl -s -X POST "$PUBLIC_URL/api/google/resync" -H "authorization: Bearer $API_T
 
 Dates cross the wire as ISO 8601 strings. Events keep `updatedAt` as the server's write time so
 sync cursors never miss a change.
+
+### Recurring tasks
+
+`PUT/PATCH /api/tasks/:id` and MCP `create_task` / `update_task` accept `recurrence`:
+
+```json
+{
+  "frequency": "week",
+  "interval": 2,
+  "timeZone": "America/Los_Angeles",
+  "startDate": "2026-11-09",
+  "weekdays": [1, 4],
+  "endDate": null
+}
+```
+
+- `frequency`: `day`, `week`, or `month`. `interval` is 1–999: every 3 days, every 2 weeks,
+  every 3 months, or every 12 months for yearly repeats.
+- Weekly `weekdays` use Sunday = 0 through Saturday = 6. Omit them to use the start date's
+  weekday. Multi-week intervals are anchored to the Monday-based week containing `startDate`.
+- Monthly `dayOfMonth` is 1–31; omit it to use the start date's day. Short months clamp to
+  their last day without moving the following month's date.
+- `startDate` and optional inclusive `endDate` are calendar dates, not UTC instants.
+  Wall-clock times follow `timeZone`, including daylight-saving changes.
+- Each occurrence is a separate task. The server keeps a private series template and
+  materializes upcoming tasks on every scheduler run (including startup and the 15-minute job).
+  If the next date is outside the horizon it is still visible as a task. There is no historical
+  backfill after downtime or when creating a backdated rule.
+- Without explicit timestamps, an occurrence becomes available at local midnight and is due
+  at the end of that date with a soft deadline. Explicit start/due/pinned times retain their
+  local clock and calendar-day offsets from the occurrence date.
+- Task rows include `recurrence`, `recurrenceSeriesId`, `recurrenceDate`, and `recurrenceRevision`.
+  The last three are server-owned. No new sync collection is required.
+- Cached template/rule edits send the row's `recurrenceRevision` as `expectedRecurrenceRevision`
+  (including explicit `null` before the task has ever repeated). A stale revision returns 409
+  without changing the task or series. The revision survives stopping/detaching so a stale full
+  snapshot cannot re-enable repeats. Deliberate re-enabling uses the latest revision.
+  Targeted PATCH/MCP edits without this precondition explicitly act on the latest row instead.
+- Native clients queue only changed fields for existing tasks and preserve the original revision
+  while coalescing offline edits. Completion/reopen PATCHes carry only progress fields and can
+  apply after another device edits or stops the series, without overwriting its rule or template.
+- Completion affects only that occurrence. Template/rule edits apply to the selected task
+  and future unfinished occurrences; completed history and earlier occurrences stay unchanged.
+  The selected occurrence remains in place if its date no longer matches an edited rule.
+- Send `recurrence: null` to stop the series, keep the selected task as a one-off, and tombstone
+  future unfinished occurrences. `DELETE` also deletes the selected task. Earlier unfinished
+  tasks become one-offs; other completed occurrences are retained. Omitted `recurrence` preserves
+  the rule for older shipped clients. Restoring a task from a stopped series restores only that
+  task as a one-off; native deletion undo explicitly sends `recurrence: null`, so it works with
+  the pre-delete revision and is safe to retry. Detaching a stopped occurrence rotates its
+  revision, so retrying a cached non-null rule cannot re-enable repeats.
 
 ## MCP
 

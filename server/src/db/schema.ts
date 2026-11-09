@@ -1,5 +1,7 @@
 import type { DeadlineType, Priority, ScheduleWindow, UnscheduledReason } from '@florida/scheduler'
+import { sql } from 'drizzle-orm'
 import { boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core'
+import type { RecurrenceRule, RecurringTaskTemplate } from '../recurrence.js'
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' })
 
@@ -26,6 +28,18 @@ export const categories = pgTable('categories', {
   deletedAt: ts('deleted_at'),
 })
 
+/** Templates survive completed occurrences. Only actual occurrences are synced as tasks. */
+export const taskRecurrences = pgTable('task_recurrences', {
+  id: text('id').primaryKey(),
+  revision: text('revision').notNull().default(sql`gen_random_uuid()::text`),
+  rule: jsonb('rule').$type<RecurrenceRule>().notNull(),
+  template: jsonb('template').$type<RecurringTaskTemplate>().notNull(),
+  fromDate: text('from_date').notNull(),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+  deletedAt: ts('deleted_at'),
+})
+
 export const tasks = pgTable(
   'tasks',
   {
@@ -43,13 +57,21 @@ export const tasks = pgTable(
     startAt: ts('start_at'),
     scheduleId: text('schedule_id').references(() => schedules.id),
     pinnedStart: ts('pinned_start'),
+    recurrence: jsonb('recurrence').$type<RecurrenceRule>(),
+    recurrenceSeriesId: text('recurrence_series_id').references(() => taskRecurrences.id),
+    recurrenceDate: text('recurrence_date'),
+    // Retained after detaching from a stopped series, so stale snapshots cannot enable it again.
+    recurrenceRevision: text('recurrence_revision'),
     completedMinutes: integer('completed_minutes').notNull().default(0),
     completedAt: ts('completed_at'),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
     deletedAt: ts('deleted_at'),
   },
-  (t) => [index('tasks_updated_at_idx').on(t.updatedAt)],
+  (t) => [
+    index('tasks_updated_at_idx').on(t.updatedAt),
+    uniqueIndex('tasks_recurrence_date_idx').on(t.recurrenceSeriesId, t.recurrenceDate),
+  ],
 )
 
 /** Scheduler output. Derived data: replaced wholesale on every run. */

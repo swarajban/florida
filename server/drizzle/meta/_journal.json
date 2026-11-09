@@ -15,6 +15,20 @@
       "when": 1794199671340,
       "tag": "0001_fast_marvel_apes",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794237134604,
+      "tag": "0002_chief_karma",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794243417938,
+      "tag": "0003_shallow_saracen",
+      "breakpoints": true
     }
   ]
 }

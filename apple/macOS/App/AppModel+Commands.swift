@@ -9,7 +9,7 @@ extension AppModel {
     /// a sheet holds a draft, and a menu shortcut such as ⌘1 writing underneath it would be
     /// overwritten by the stale draft when the sheet saves.
     var isSheetOpen: Bool {
-        editorTask != nil || isGoToDateOpen || isNewCategoryOpen || doneForNow != nil
+        editorTask != nil || isGoToDateOpen || isNewCategoryOpen || doneForNow != nil || recurringTaskToDelete != nil
     }
 
     /// Asks `RootView` to open the Settings window on `tab`.
@@ -107,6 +107,8 @@ extension AppModel {
             isHelpOpen = false
         } else if eventDetailID != nil {
             eventDetailID = nil
+        } else if recurringTaskToDelete != nil {
+            recurringTaskToDelete = nil
         } else if editorTask != nil {
             editorTask = nil
         } else if isGoToDateOpen {

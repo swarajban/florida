@@ -39,6 +39,11 @@ const INSTRUCTIONS = [
   'into free time around calendar events and returns placements: suggested work blocks, not calendar',
   'events. Call list_categories first to learn the category ids, get_agenda to see one day of calendar',
   'events plus planned task blocks, and list_tasks for what is open. Instants are ISO 8601 strings.',
+  'Tasks accept recurrence: daily, weekly (selected weekdays), or monthly (day of month), each with',
+  'an interval, IANA timeZone, startDate, and optional inclusive endDate. Each occurrence completes',
+  'independently. Editing a recurring task changes this and future unfinished occurrences; setting',
+  'recurrence to null stops repeats and keeps this task. Deleting a recurring task stops the series',
+  'and deletes this and future unfinished occurrences. Completed history is preserved.',
 ].join(' ')
 
 const taskId = z.string().min(1).describe('Task id')
@@ -118,7 +123,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
     {
       title: 'Create task',
       description:
-        'Creates a task and reschedules. Returns the task with its scheduled blocks plus any tasks the scheduler could not place or expects to be late.',
+        'Creates a one-off or recurring task and reschedules. Recurrence generates separate upcoming tasks, not just a new task after completion. Returns the task with its scheduled blocks plus scheduling issues.',
       inputSchema: {
         ...taskBody.shape,
         id: z.string().min(1).optional().describe('Client-chosen id; a UUID is generated when omitted'),
@@ -145,7 +150,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
     {
       title: 'Update task',
       description:
-        'Changes the given fields of a task and reschedules. Omitted fields keep their value; pass null to clear a nullable field.',
+        'Changes the given fields and reschedules. Omitted fields keep their value; null clears. For recurring tasks, template/rule edits apply to this and future unfinished occurrences; recurrence: null stops future repeats and keeps this task.',
       inputSchema: { id: taskId, ...taskPatch.shape },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
@@ -161,7 +166,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
     'complete_task',
     {
       title: 'Complete task',
-      description: 'Marks a task done now and reschedules the rest.',
+      description: 'Marks just this occurrence done now and reschedules the rest. Recurring tasks keep repeating.',
       inputSchema: { id: taskId },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
@@ -177,7 +182,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
     'delete_task',
     {
       title: 'Delete task',
-      description: 'Deletes a task (recoverable tombstone) and reschedules the rest.',
+      description: 'Deletes a task (tombstone) and reschedules. For a recurring task, also stops repeats and deletes future unfinished occurrences; other completed occurrences remain.',
       inputSchema: { id: taskId },
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },

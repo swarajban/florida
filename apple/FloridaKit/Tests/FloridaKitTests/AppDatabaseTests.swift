@@ -35,7 +35,7 @@ import Testing
         #expect(decoded == windows)
     }
 
-    @Test func v1StoreMigratesToV2KeepingItsRows() throws {
+    @Test func v1StoreMigratesKeepingItsRows() throws {
         let queue = try DatabaseQueue()
         try AppDatabase.migrator.migrate(queue, upTo: "v1")
         try queue.write { db in
@@ -55,7 +55,7 @@ import Testing
 
         let db = try AppDatabase(writer: queue)
         let applied = try queue.read { db in try AppDatabase.migrator.appliedMigrations(db) }
-        #expect(applied == ["v1", "v2"])
+        #expect(applied == ["v1", "v2", "v3"])
 
         let event = try #require(try db.events(in: Fixtures.allTime, calendar: Fixtures.utc).first)
         #expect(event.id == "e1" && event.summary == "Standup")
@@ -423,7 +423,7 @@ import Testing
 
         let pending = try db.pendingWrites()
         #expect(pending.count == 1)
-        #expect(pending.first?.op == .put)
+        #expect(pending.first?.op == .patch)
     }
 
     @Test func categoryAndScheduleWritesQueueAndCollapse() throws {

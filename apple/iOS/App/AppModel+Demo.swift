@@ -22,7 +22,9 @@ extension AppModel {
             // pushed in demo runs) and one the server refused.
             if LaunchOptions.initialTab == .settings {
                 if let task = try database.task(id: "demo-task-roadmap") {
-                    try database.saveTask(task)
+                    try database.requeue(PendingWrite(
+                        entity: .task, entityId: task.id, op: .put,
+                        body: JSONCoding.encoder.encode(TaskWrite(task)), createdAt: Date()))
                 }
                 rejectedChanges = [RejectedChange(
                     id: "demo-rejected", entity: .task, entityId: "demo-task-funds", op: .put,

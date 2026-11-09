@@ -178,7 +178,7 @@ import Testing
         let db = try AppDatabase.inMemory()
         try db.apply(SyncResponse(cursor: "c0", tasks: [Fixtures.task(id: "never"), Fixtures.task(id: "tombstoned")]))
         try db.deleteTask(id: "never", now: Fixtures.t0)
-        try db.saveTask(Fixtures.task(id: "tombstoned"), now: Fixtures.t0)
+        try db.saveTask(Fixtures.task(id: "tombstoned", title: "local edit"), now: Fixtures.t0)
         let transport = FakeTransport([
             .error(404, "task never not found"),
             .error(404, "task never not found"),
@@ -190,7 +190,7 @@ import Testing
         let client = client(db, transport)
         #expect(try await client.sync() == 0)
         #expect(transport.requests.map { "\($0.method) \($0.path)" } == [
-            "DELETE /api/tasks/never", "GET /api/tasks/never", "PUT /api/tasks/tombstoned", "GET /api/tasks/tombstoned", "GET /api/sync",
+            "DELETE /api/tasks/never", "GET /api/tasks/never", "PATCH /api/tasks/tombstoned", "GET /api/tasks/tombstoned", "GET /api/sync",
         ])
         // The local tombstone of a row the server never had goes, as does the row the server has tombstoned.
         #expect(try db.task(id: "never") == nil)
@@ -219,6 +219,15 @@ import Testing
         #expect(rejected.map(\.write.entityId) == ["new"])
         #expect(rejected.first?.status == 400)
         #expect(rejected.first?.message == "unknown categoryId gone")
+
+        // Retrying a creation cannot use saveTask's diff: its unchanged local row still exists.
+        let original = try #require(rejected.first?.write)
+        try db.requeue(original, now: Fixtures.t0)
+        let retryTransport = FakeTransport([.ok(try Fixtures.putResponse("task", Fixtures.task(id: "new", title: "call dentist")))])
+        #expect(try await self.client(db, retryTransport).push() == 1)
+        #expect(retryTransport.requests.first?.method == "PUT")
+        #expect(retryTransport.requests.first?.body == original.body)
+        #expect(try db.pendingWrites().isEmpty)
     }
 
     @Test func rejectedDeleteOfTheInboxRestoresIt() async throws {
@@ -433,11 +442,15 @@ import Testing
         #expect(try db.pendingWrites().map(\.entityId) == ["a"])
     }
 
-    @Test func acceptedWriteDoesNotClobberNewerLocalEdit() async throws {
+    @Test(arguments: [false, true])
+    func acceptedWriteDoesNotClobberNewerLocalEdit(_ existing: Bool) async throws {
         // A save that lands while the push is in flight must not be overwritten by the server's echo
         // of the older version. We simulate this by saving again inside the fake transport's turn.
         let db = try AppDatabase.inMemory()
-        var task = Fixtures.task(id: "t1", title: "v1")
+        if existing {
+            try db.apply(SyncResponse(cursor: "c", tasks: [Fixtures.task(id: "t1", title: "baseline")]))
+        }
+        let task = Fixtures.task(id: "t1", title: "v1")
         try db.saveTask(task, now: Fixtures.t0)
         let serverEcho = Fixtures.task(id: "t1", title: "v1")
 
@@ -452,16 +465,17 @@ import Testing
                 return (body, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
             }
         }
-        task.title = "v2"
-
         let transport = SaveDuringPush(db: db, body: try Fixtures.putResponse("task", serverEcho))
         let pushed = try await SyncClient(database: db, config: config, transport: transport).push()
         #expect(pushed == 1)
         #expect(try db.task(id: "t1")?.title == "v2", "the newer local edit survives")
         let pending = try db.pendingWrites()
         #expect(pending.count == 1, "the newer edit is still queued for the next push")
-        let body = try JSONCoding.decoder.decode(TaskWrite.self, from: try #require(pending.first?.body))
-        #expect(body.title == "v2")
+        #expect(pending.first?.op == (existing ? .patch : .put))
+        let data = try #require(pending.first?.body)
+        let body = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(body["title"] as? String == "v2")
+        if existing { #expect(Set(body.keys) == ["title", "expectedRecurrenceRevision"]) }
     }
 
     // MARK: Events
