@@ -10,6 +10,18 @@ struct CommandPaletteView: View {
     var body: some View {
         @Bindable var model = model
         VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                FloridaMark()
+                    .frame(width: 15, height: 15)
+                Text("Florida")
+                Spacer()
+                Text("esc to close")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(FloridaStyle.panel)
             HStack(spacing: 10) {
                 Image(systemName: icon)
                     .foregroundStyle(.secondary)
@@ -88,9 +100,10 @@ struct CommandPaletteView: View {
             }
         }
         .frame(width: 600)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.1)))
-        .shadow(color: .black.opacity(0.25), radius: 24, y: 8)
+        .background(FloridaStyle.paper, in: RoundedRectangle(cornerRadius: 10))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(FloridaStyle.rule))
+        .shadow(color: .black.opacity(0.16), radius: 18, y: 8)
         .onAppear {
             isFieldFocused = true
         }
@@ -141,7 +154,7 @@ struct PaletteResultList<Row: View>: View {
                             row(index)
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 6)
-                                .background(index == selectedIndex ? Color.accentColor.opacity(0.18) : .clear)
+                                .background(index == selectedIndex ? FloridaStyle.ink.opacity(0.08) : .clear)
                                 .contentShape(Rectangle())
                                 .id(index)
                                 .onTapGesture {

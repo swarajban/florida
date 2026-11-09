@@ -38,6 +38,9 @@ schemes:
         Florida-macOS: all
     run:
       config: Debug
+    test:
+      config: Debug
+      targets: [Florida-macOSUITests]
     archive:
       config: Release
 
@@ -45,7 +48,10 @@ targets:
   Florida-iOS:
     type: application
     platform: iOS
-    sources: [iOS]
+    sources:
+      - iOS
+      - Design/FloridaStyle.swift
+      - Design/Assets.xcassets
     dependencies:
       - package: FloridaKit
       - target: FloridaWidgets
@@ -99,13 +105,18 @@ targets:
   Florida-macOS:
     type: application
     platform: macOS
-    sources: [macOS]
+    sources:
+      - macOS
+      - Design/FloridaStyle.swift
+      - Design/Assets.xcassets
+      - iOS/Support/DemoData.swift
     dependencies:
       - package: FloridaKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.swarajban.florida.mac
         PRODUCT_NAME: Florida
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: macOS/Info.plist
       properties:
@@ -119,3 +130,14 @@ targets:
         com.apple.security.app-sandbox: true
         com.apple.security.network.client: true
         com.apple.security.application-groups: [group.com.swarajban.florida]
+
+  Florida-macOSUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources: [macOSUITests]
+    dependencies:
+      - target: Florida-macOS
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.swarajban.florida.mac.uitests

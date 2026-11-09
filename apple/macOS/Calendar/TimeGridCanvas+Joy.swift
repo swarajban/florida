@@ -62,7 +62,7 @@ extension TimeGridCanvas {
         let fraction = min(1, max(0, now.timeIntervalSince(block.start) / total))
         var filled = rect
         filled.size.width = rect.width * CGFloat(fraction)
-        let color = block.isTask ? block.tint.opacity(0.22) : Color.white.opacity(0.16)
+        let color = block.tint.opacity(0.12)
         context.fill(Path(filled), with: .color(color))
     }
 

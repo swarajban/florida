@@ -60,9 +60,9 @@ struct MonthCellView: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(day.formatted(.dateTime.day()))
                 .font(.caption.weight(isToday ? .bold : .regular))
-                .foregroundStyle(isToday ? Color.white : (inMonth ? Color.primary : Color.secondary))
+                .foregroundStyle(isToday ? FloridaStyle.paper : (inMonth ? FloridaStyle.ink : Color.secondary))
                 .frame(width: 20, height: 20)
-                .background(isToday ? Color.accentColor : .clear, in: Circle())
+                .background(isToday ? FloridaStyle.ink : .clear, in: Circle())
             ForEach(allDay.prefix(MonthGridView.maxLinesPerCell)) { block in
                 line(item: block.item, day: day, text: block.title, tint: block.tint, filled: true)
             }
@@ -78,7 +78,7 @@ struct MonthCellView: View {
         }
         .padding(4)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(isSelectedDay ? Color.accentColor.opacity(0.08) : (inMonth ? Color.clear : Color.primary.opacity(0.02)))
+        .background(isSelectedDay ? FloridaStyle.ink.opacity(0.05) : (inMonth ? Color.clear : Color.primary.opacity(0.02)))
         .overlay(alignment: .trailing) {
             Divider()
         }
@@ -109,7 +109,7 @@ struct MonthCellView: View {
         }
         .padding(.horizontal, 3)
         .padding(.vertical, 1)
-        .background(isSelected ? Color.accentColor.opacity(0.2) : .clear, in: RoundedRectangle(cornerRadius: 3))
+        .background(isSelected ? FloridaStyle.ink.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 3))
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
             model.select(item, in: .calendar)

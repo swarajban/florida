@@ -64,6 +64,32 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             | xcbeautify --renderer github-actions
         working-directory: apple
+      - name: macOS UI smoke test and screenshots
+        working-directory: apple
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project Florida.xcodeproj \
+            -scheme Florida-macOS \
+            -destination 'platform=macOS' \
+            -derivedDataPath DerivedData \
+            -resultBundlePath mac-ui.xcresult \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM="" \
+            | xcbeautify --renderer github-actions
+      - name: Export macOS screenshots
+        if: always()
+        working-directory: apple
+        run: |
+          if [ -d mac-ui.xcresult ]; then
+            xcrun xcresulttool export attachments --path mac-ui.xcresult --output-path mac-screenshots
+          fi
+      - name: Upload macOS screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-screenshots
+          path: apple/mac-screenshots/
+          if-no-files-found: ignore
       - name: FloridaCore tests (macOS)
         run: swift test
         working-directory: apple/FloridaCore

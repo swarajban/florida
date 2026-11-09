@@ -142,6 +142,25 @@ final class AppModel {
         guard !isStarted else { return }
         isStarted = true
         observeLocale()
+        #if DEBUG
+        // Native UI checks use the same disposable fixture as iOS. No keychain, disk store,
+        // AI client or sync client is opened, even if seeding the test store fails.
+        if UserDefaults.standard.bool(forKey: "demoData") {
+            do {
+                let database = try AppDatabase.inMemory()
+                try database.apply(DemoData.syncResponse(now: Date(), calendar: calendar))
+                self.database = database
+                config = ServerConfig(token: "demo")
+                viewMode = .threeDays
+                startObserving(database)
+                rangeDidChange()
+                startClock()
+            } catch {
+                startupError = "Could not open the demo store: \(error.localizedDescription)"
+            }
+            return
+        }
+        #endif
         do {
             let database = try AppDatabase(path: AppDatabase.defaultURL().path(percentEncoded: false))
             self.database = database

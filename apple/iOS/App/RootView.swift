@@ -20,6 +20,7 @@ struct RootView: View {
                 .tag(AppTab.settings)
                 .badge((model.storeError == nil && model.lastError == nil ? 0 : 1) + model.rejectedChanges.count)
         }
+        .tint(FloridaStyle.ink)
         .onAppear {
             if model.needsSetup, LaunchOptions.initialTab == nil {
                 selectedTab = .settings

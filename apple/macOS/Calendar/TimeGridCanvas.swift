@@ -45,7 +45,7 @@ struct TimeGridCanvas: View {
         for (index, day) in layout.days.enumerated() {
             let rect = geometry.columnRect(forDay: index)
             if calendar.isDate(day, inSameDayAs: now) {
-                context.fill(Path(rect), with: .color(Color.accentColor.opacity(0.05)))
+                context.fill(Path(rect), with: .color(FloridaStyle.ink.opacity(0.025)))
             } else if calendar.isDate(day, inSameDayAs: selectedDay) {
                 context.fill(Path(rect), with: .color(Color.primary.opacity(0.03)))
             }
@@ -53,7 +53,7 @@ struct TimeGridCanvas: View {
     }
 
     private func drawHourLines(in context: inout GraphicsContext, geometry: GridGeometry) {
-        let lineColor = Color(nsColor: .separatorColor)
+        let lineColor = FloridaStyle.rule
         for (minute, label) in hourLabels {
             let y = grid.y(forMinute: minute)
             var line = Path()
@@ -76,7 +76,7 @@ struct TimeGridCanvas: View {
     }
 
     private func drawDaySeparators(in context: inout GraphicsContext, geometry: GridGeometry) {
-        let lineColor = Color(nsColor: .separatorColor)
+        let lineColor = FloridaStyle.rule
         for index in 0...max(layout.days.count, 0) {
             let x = geometry.x(forDay: index)
             var line = Path()
@@ -102,22 +102,24 @@ struct TimeGridCanvas: View {
 
     private func draw(_ block: GridLayout.Block, in context: inout GraphicsContext, geometry: GridGeometry) {
         let rect = animatedRect(for: block, geometry: geometry)
-        let shape = Path(roundedRect: rect, cornerRadius: 4)
-        let alpha: Double = block.end < now ? 0.45 : 1
-        let textColor: Color
+        let shape = Path(roundedRect: rect, cornerRadius: 5)
+        let alpha: Double = block.end < now ? 0.6 : 1
+        // Arbitrary calendar colors (including yellow) are not safe text colors in both themes.
+        // Keep their identity in the fill/rim; ink stays readable on every subtle fill.
+        let textColor = FloridaStyle.ink.opacity(alpha)
         switch block.kind {
         case .event:
-            context.fill(shape, with: .color(block.tint.opacity(0.85 * alpha)))
+            context.fill(shape, with: .color(block.tint.opacity(0.12 * alpha)))
+            context.stroke(shape, with: .color(block.tint.opacity(0.5 * alpha)), lineWidth: 1)
             if let rim = block.rim {
-                context.stroke(shape, with: .color(rim.opacity(alpha)), lineWidth: 1)
+                let accountEdge = CGRect(x: rect.minX, y: rect.minY + 3, width: 2, height: max(0, rect.height - 6))
+                context.fill(Path(roundedRect: accountEdge, cornerRadius: 1), with: .color(rim.opacity(alpha)))
             }
-            textColor = .white.opacity(alpha)
         case .task(let pinned):
-            context.fill(shape, with: .color(block.tint.opacity(0.16 * alpha)))
+            context.fill(shape, with: .color(block.tint.opacity(0.04 * alpha)))
             context.stroke(
-                shape, with: .color(block.tint.opacity(alpha)),
+                shape, with: .color(block.tint.opacity(0.6 * alpha)),
                 style: StrokeStyle(lineWidth: 1, dash: pinned ? [] : [3, 2]))
-            textColor = block.tint.opacity(alpha)
         }
 
         var inner = context
@@ -153,13 +155,13 @@ struct TimeGridCanvas: View {
         guard let selection else { return }
         if case .gap(let id) = selection, let gap = layout.gap(id: id) {
             let ring = Path(roundedRect: geometry.rect(for: gap).insetBy(dx: -1.5, dy: -1.5), cornerRadius: 5.5)
-            context.stroke(ring, with: .color(Color.accentColor), lineWidth: 2)
+            context.stroke(ring, with: .color(FloridaStyle.ink), lineWidth: 2)
             return
         }
         for blocks in layout.blocksByDay {
             for block in blocks where block.item == selection {
                 let ring = Path(roundedRect: animatedRect(for: block, geometry: geometry).insetBy(dx: -1.5, dy: -1.5), cornerRadius: 5.5)
-                context.stroke(ring, with: .color(Color.accentColor), lineWidth: 2)
+                context.stroke(ring, with: .color(FloridaStyle.ink), lineWidth: 2)
             }
         }
     }

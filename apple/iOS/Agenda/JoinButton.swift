@@ -39,8 +39,10 @@ struct JoinButton: View {
             Label(EventTiming.joinTitle(start: start, now: now), systemImage: "video.fill")
                 .font(.headline.monospacedDigit())
                 .frame(maxWidth: .infinity)
+                .foregroundStyle(FloridaStyle.paper)
         }
         .buttonStyle(.borderedProminent)
+        .tint(FloridaStyle.ink)
         .controlSize(.large)
         .accessibilityLabel(accessibilityTitle(now: now))
     }

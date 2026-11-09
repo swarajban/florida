@@ -24,8 +24,8 @@ struct WeekStrip: View {
             }
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(.bar)
+        .padding(.vertical, 10)
+        .background(FloridaStyle.paper)
         .simultaneousGesture(
             DragGesture(minimumDistance: 24)
                 .onEnded { value in
@@ -36,8 +36,7 @@ struct WeekStrip: View {
     }
 }
 
-/// Weekday initial over the day number; a filled circle marks the selected day and the accent
-/// color marks today.
+/// Weekday initial over the day number; an ink circle marks selection and a dot marks today.
 private struct DayCell: View {
     let day: Date
     let isSelected: Bool
@@ -51,23 +50,23 @@ private struct DayCell: View {
                 .foregroundStyle(.secondary)
             Text("\(calendar.component(.day, from: day))")
                 .font(.body.weight(isToday ? .bold : .regular))
-                .foregroundStyle(numberStyle)
+                .foregroundStyle(isSelected ? FloridaStyle.paper : FloridaStyle.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
                 .frame(width: 34, height: 34)
                 .background {
                     if isSelected {
-                        Circle().fill(isToday ? Color.accentColor : Color.primary)
+                        Circle().fill(FloridaStyle.ink)
                     }
                 }
+            Circle()
+                .fill(isToday ? FloridaStyle.ink : .clear)
+                .frame(width: 3, height: 3)
         }
         .padding(.vertical, 2)
-    }
-
-    /// White on the accent circle, the window background on the primary circle, accent for an
-    /// unselected today, primary otherwise.
-    private var numberStyle: AnyShapeStyle {
-        if isSelected {
-            return isToday ? AnyShapeStyle(Color.white) : AnyShapeStyle(BackgroundStyle())
-        }
-        return isToday ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.primary)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(day.formatted(.dateTime.weekday(.wide).month(.wide).day()))
+        .accessibilityValue(isToday ? "Today" : "")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }

@@ -30,6 +30,7 @@ struct TasksView: View {
                             parsedTaskId = request.id
                             editor = request
                         })
+                        .listRowBackground(FloridaStyle.panel)
                     SyncErrorBanner()
                     if model.needsSetup {
                         Label("Not connected. Add the server URL and token in Settings.", systemImage: "exclamationmark.triangle")
@@ -59,8 +60,14 @@ struct TasksView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(FloridaStyle.paper)
             .navigationTitle("Tasks")
+            .toolbarBackground(FloridaStyle.paper, for: .navigationBar)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    FloridaWordmark(height: 26)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         editor = TaskEditorRequest(task: model.newTaskTemplate(), isNew: true)

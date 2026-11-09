@@ -38,8 +38,8 @@ struct QuickAddPreview: View {
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(
-                            chip.isDefault ? Color.primary.opacity(0.05) : Color.accentColor.opacity(0.15),
-                            in: Capsule())
+                            chip.isDefault ? FloridaStyle.panel : FloridaStyle.ink.opacity(0.08),
+                            in: RoundedRectangle(cornerRadius: 4))
                 }
             }
             if let unknownHint {

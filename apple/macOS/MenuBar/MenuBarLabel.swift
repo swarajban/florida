@@ -5,7 +5,11 @@ struct MenuBarLabel: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        Text(model.menuBarTitle)
-            .monospacedDigit()
+        HStack(spacing: 6) {
+            FloridaMark()
+                .frame(width: 12, height: 12)
+            Text(model.menuBarTitle)
+                .monospacedDigit()
+        }
     }
 }

@@ -32,6 +32,8 @@ struct TaskSectionHeader: View {
                 }
             }
         }
+        .font(.subheadline.weight(.medium))
+        .textCase(nil)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
     }

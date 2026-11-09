@@ -13,10 +13,10 @@ struct TaskPaneView: View {
         VStack(spacing: 0) {
             HStack {
                 Text("Tasks")
-                    .font(.headline)
+                    .font(.title3.weight(.medium))
                 if model.focus == .tasks {
                     Circle()
-                        .fill(Color.accentColor)
+                        .fill(FloridaStyle.ink)
                         .frame(width: 6, height: 6)
                 }
                 Spacer()
@@ -67,6 +67,7 @@ struct TaskPaneView: View {
             }
         }
         .frame(width: Self.width)
+        .background(FloridaStyle.panel)
     }
 
     private func row(_ task: TaskItem, in group: CategoryTaskGroup) -> some View {
@@ -134,7 +135,7 @@ struct TaskGroupHeader: View {
         }
         .foregroundStyle(isEmpty ? Color.secondary : Color.primary)
         .padding(.horizontal, 12)
-        .padding(.vertical, isEmpty ? 3 : 6)
-        .background(.bar)
+        .padding(.vertical, isEmpty ? 6 : 9)
+        .background(FloridaStyle.panel)
     }
 }

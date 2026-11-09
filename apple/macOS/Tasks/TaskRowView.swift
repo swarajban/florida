@@ -68,13 +68,13 @@ struct TaskRowView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.vertical, 9)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? Color.accentColor.opacity(isFocused ? 0.14 : 0.08) : .clear))
+                .fill(isSelected ? FloridaStyle.ink.opacity(isFocused ? 0.08 : 0.04) : .clear))
         .overlay(
             RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(Color.accentColor, lineWidth: isSelected && isFocused ? 1.5 : 0))
+                .strokeBorder(FloridaStyle.ink, lineWidth: isSelected && isFocused ? 1.5 : 0))
         .overlay(alignment: .leading) {
             if isUntriaged {
                 RoundedRectangle(cornerRadius: 1)

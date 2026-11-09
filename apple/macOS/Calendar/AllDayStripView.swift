@@ -78,17 +78,18 @@ private struct AllDayBar: View {
 
     var body: some View {
         let frame = Self.frame(for: block, columnWidth: columnWidth, gutterWidth: gutterWidth)
-        let opacity: Double = isPast ? 0.6 : 0.9
+        let opacity: Double = isPast ? 0.6 : 1
         let shape = RoundedRectangle(cornerRadius: 4)
 
         Text(block.title)
             .font(.caption)
-            .foregroundStyle(.white)
+            .foregroundStyle(FloridaStyle.ink.opacity(opacity))
             .lineLimit(1)
             .padding(.horizontal, 6)
             .frame(width: frame.width, height: frame.height, alignment: .leading)
-            .background(block.tint.opacity(opacity), in: shape)
-            .overlay(shape.strokeBorder(Color.primary, lineWidth: isSelected ? 2 : 0))
+            .background(block.tint.opacity(0.12 * opacity), in: shape)
+            .overlay(shape.strokeBorder(block.tint.opacity(0.4 * opacity), lineWidth: 1))
+            .overlay(shape.strokeBorder(FloridaStyle.ink, lineWidth: isSelected ? 2 : 0))
             .offset(x: frame.minX, y: frame.minY)
     }
 }

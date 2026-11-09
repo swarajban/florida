@@ -28,8 +28,10 @@ with it.
 | `project.yml` | XcodeGen spec: targets, Info.plist and entitlements contents, build settings |
 | `FloridaCore/` | Local Swift package, no dependencies: models, quick-add parser, keyboard engine, calendar layout math. Builds and tests on Linux |
 | `FloridaKit/` | Local Swift package shared by all three targets: local SQLite store (GRDB), sync client, token store. Re-exports FloridaCore |
+| `Design/` | Shared app identity, semantic light/dark surfaces, vector masters and asset generator; see its README |
 | `iOS/` | iOS app target (`Florida-iOS`) |
 | `macOS/` | macOS app target (`Florida-macOS`) |
+| `macOSUITests/` | Native keyboard smoke test and light/dark screenshots, using the iOS demo fixture |
 | `Widgets/` | iOS WidgetKit extension (`FloridaWidgets`) |
 
 XcodeGen writes `Info.plist` and `.entitlements` files into `iOS/`, `macOS/`,

@@ -21,6 +21,17 @@ struct AgendaView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(model.selectedDay.formatted(.dateTime.weekday(.wide)))
+                        .font(.title.weight(.medium))
+                    Text(model.selectedDay.formatted(.dateTime.month(.wide).day().year()))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
                 WeekStrip(
                     selectedDay: model.selectedDay,
                     today: model.today,
@@ -30,9 +41,14 @@ struct AgendaView: View {
                 Divider()
                 timeline
             }
-            .navigationTitle(model.selectedDay.formatted(.dateTime.month(.wide).year()))
+            .background(FloridaStyle.paper)
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(FloridaStyle.paper, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    FloridaWordmark(height: 26)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Today") {
                         model.selectToday()
@@ -102,6 +118,7 @@ struct AgendaView: View {
                                 .foregroundStyle(.primary)
                         }
                         .accessibilityHint("Shows the event")
+                        .listRowBackground(FloridaStyle.paper)
                     }
                 }
             }
@@ -110,14 +127,18 @@ struct AgendaView: View {
                     switch row {
                     case .now:
                         NowMarker(now: now)
+                            .listRowBackground(FloridaStyle.paper)
                     case .gap(let gap):
                         FreeGapRow(gap: gap)
+                            .listRowBackground(FloridaStyle.paper)
                     case .item(.event(let event)):
                         eventRow(event)
+                            .listRowBackground(FloridaStyle.paper)
                     case .item(.block(let block)):
                         blockRow(block)
                     case .item(.ghost(let ghost)):
                         GhostRow(ghost: ghost, category: model.category(id: ghost.categoryId))
+                            .listRowBackground(FloridaStyle.paper)
                     }
                 }
             } header: {
@@ -131,6 +152,8 @@ struct AgendaView: View {
             }
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(FloridaStyle.paper)
         .animation(.snappy, value: model.isDayCleared)
         .overlay {
             if items.isEmpty && allDayEvents.isEmpty {
@@ -169,7 +192,7 @@ struct AgendaView: View {
                 .foregroundStyle(.primary)
         }
         .accessibilityHint("Edits the task")
-        .listRowBackground(BloomBackground(color: Color.category(category), active: isBlooming, base: Color(uiColor: .systemBackground)))
+        .listRowBackground(BloomBackground(color: Color.category(category), active: isBlooming, base: FloridaStyle.paper))
         if block.task.completedAt == nil {
             row.taskActions(
                 block.task, targets: TaskActionTargets(doneForNow: $doneForNowTask, moving: $movingTask),

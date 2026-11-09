@@ -36,6 +36,7 @@ struct EventRow: View {
                     .accessibilityLabel("Has a meeting link")
             }
         }
+        .padding(.vertical, 8)
         .opacity(AgendaItem.event(event).isOver(at: now) ? 0.55 : 1)
         .accessibilityElement(children: .combine)
         .accessibilityValue(style.accessibilityDescription)
@@ -85,6 +86,7 @@ struct BlockRow: View {
             }
             Spacer(minLength: 0)
         }
+        .padding(.vertical, 8)
         .background(alignment: .leading) {
             if let fraction {
                 GeometryReader { proxy in
@@ -93,7 +95,7 @@ struct BlockRow: View {
                         .frame(width: proxy.size.width * fraction)
                         .animation(.linear(duration: 0.6), value: fraction)
                 }
-                .padding(.vertical, -6)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
                 .accessibilityHidden(true)
             }
         }
@@ -140,6 +142,7 @@ struct AllDayEventRow: View {
                     .lineLimit(1)
             }
         }
+        .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
         .accessibilityValue("All day, \(style.accessibilityDescription)")
     }

@@ -6,7 +6,7 @@ struct BloomBackground: View {
     let color: Color
     let active: Bool
     var tint: Color? = nil
-    var base: Color = Color(uiColor: .secondarySystemGroupedBackground)
+    var base: Color = FloridaStyle.paper
     @State private var shown = false
 
     var body: some View {

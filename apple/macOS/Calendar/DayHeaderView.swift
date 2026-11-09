@@ -1,7 +1,7 @@
 import FloridaKit
 import SwiftUI
 
-/// Weekday and day number above each column; today is filled with the accent color, the
+/// Weekday and day number above each column; today is filled with ink, the
 /// highlighted day is outlined. Click highlights a day, double-click opens it in the day view.
 struct DayHeaderView: View {
     @Environment(AppModel.self) private var model
@@ -17,13 +17,13 @@ struct DayHeaderView: View {
                 VStack(spacing: 2) {
                     Text(day.formatted(.dateTime.weekday(.abbreviated)))
                         .font(.caption)
-                        .foregroundStyle(isToday ? Color.accentColor : Color.secondary)
+                        .foregroundStyle(isToday ? FloridaStyle.ink : Color.secondary)
                     Text(day.formatted(.dateTime.day()))
                         .font(.title3.weight(isToday ? .bold : .regular))
-                        .foregroundStyle(isToday ? Color.white : Color.primary)
+                        .foregroundStyle(isToday ? FloridaStyle.paper : FloridaStyle.ink)
                         .frame(width: 30, height: 30)
-                        .background(isToday ? Color.accentColor : .clear, in: Circle())
-                        .overlay(Circle().strokeBorder(Color.accentColor, lineWidth: isSelected && !isToday ? 1.5 : 0))
+                        .background(isToday ? FloridaStyle.ink : .clear, in: Circle())
+                        .overlay(Circle().strokeBorder(FloridaStyle.ink, lineWidth: isSelected && !isToday ? 1.5 : 0))
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 6)

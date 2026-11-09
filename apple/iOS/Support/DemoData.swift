@@ -126,6 +126,7 @@ enum DemoData {
             ])
     }
 
+    #if os(iOS)
     /// What an AI parse of a pasted email would return, for the `-uiSheet aitask` screenshot.
     @MainActor
     static func parsedTask(model: AppModel) -> TaskEditorRequest {
@@ -142,6 +143,7 @@ enum DemoData {
             task: task, isNew: true,
             rationale: "“by Thursday EOD” is a hard deadline; security paperwork fits Work Infosec; about an hour of work.")
     }
+    #endif
 
     /// Guests, an organizer and an HTML description, as Google sends them.
     static func designReview(_ base: CalendarEvent) -> CalendarEvent {

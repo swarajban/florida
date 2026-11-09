@@ -38,8 +38,8 @@ struct StatusBarView: View {
         }
         .font(.caption)
         .padding(.horizontal, 10)
-        .frame(height: 24)
-        .background(.bar)
+        .frame(height: 28)
+        .background(FloridaStyle.paper)
     }
 }
 

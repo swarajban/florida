@@ -4,11 +4,8 @@ import SwiftUI
 struct SetupView: View {
     var body: some View {
         VStack(spacing: 20) {
-            Image(systemName: "calendar.badge.clock")
-                .font(.system(size: 56))
-                .foregroundStyle(Color.accentColor)
-            Text("Welcome to Florida")
-                .font(.largeTitle.weight(.semibold))
+            FloridaWordmark(height: 50)
+                .padding(.bottom, 12)
             Text("Enter your server's URL and API token to start syncing. You can change them later with ⌘,")
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -18,5 +15,6 @@ struct SetupView: View {
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(FloridaStyle.paper)
     }
 }

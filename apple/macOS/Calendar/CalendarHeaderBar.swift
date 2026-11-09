@@ -29,7 +29,7 @@ struct CalendarHeaderBar: View {
             .controlSize(.small)
 
             Text(model.viewTitle)
-                .font(.title2.weight(.semibold))
+                .font(.title3.weight(.medium))
                 .lineLimit(1)
 
             Spacer()
@@ -41,7 +41,7 @@ struct CalendarHeaderBar: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 300)
+            .frame(width: 250)
 
             Button {
                 model.perform(.toggleTasks)
@@ -53,7 +53,7 @@ struct CalendarHeaderBar: View {
             .help("Toggle tasks (⌘T)")
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
     }
 
     private var viewModeBinding: Binding<CalendarViewMode> {

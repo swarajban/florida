@@ -96,13 +96,18 @@ struct SettingsView: View {
                 }
 
                 Section("About") {
+                    FloridaWordmark()
+                        .padding(.vertical, 8)
                     LabeledContent("Version", value: Self.appVersion)
                     if let serverConfig = model.serverConfig {
                         LabeledContent("Server", value: serverConfig.baseURL.host() ?? serverConfig.baseURL.absoluteString)
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(FloridaStyle.paper)
             .navigationTitle("Settings")
+            .toolbarBackground(FloridaStyle.paper, for: .navigationBar)
             .toastOverlay()
             .onAppear {
                 guard !loaded else { return }

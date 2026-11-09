@@ -20,6 +20,7 @@ struct RootView: View {
             }
         }
         .frame(minWidth: 960, minHeight: 600)
+        .background(FloridaStyle.paper)
         .background(KeyEventMonitorView(model: model))
         .sheet(item: $model.editorTask) { task in
             TaskEditorSheet(task: task, isNew: model.tasksById[task.id] == nil)
@@ -51,6 +52,16 @@ struct RootView: View {
             SetupView()
         } else {
             VStack(spacing: 0) {
+                HStack {
+                    FloridaWordmark(height: 26)
+                    Spacer()
+                    Text("⌘K  Quick add")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                Divider()
                 HStack(spacing: 0) {
                     VStack(spacing: 0) {
                         CalendarHeaderBar()

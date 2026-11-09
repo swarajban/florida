@@ -44,7 +44,7 @@ struct TaskRow: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 7)
         .accessibilityElement(children: .combine)
     }
 
