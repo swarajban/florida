@@ -606,6 +606,49 @@ public struct ScheduleWrite: Codable, Hashable, Sendable {
     }
 }
 
+/// Body of `PUT /api/events/:id`. Creating an event is a `PUT` of a client-made id; the server
+/// writes it to Google and fills in `googleId`. Nil `location` and `description` are omitted from
+/// the JSON, like `TaskWrite`'s optionals.
+public struct EventWrite: Codable, Hashable, Sendable {
+    public var calendarId: String
+    public var summary: String
+    public var location: String?
+    public var description: String?
+    public var startAt: Date
+    public var endAt: Date
+    public var allDay: Bool
+    /// The user's own response: "accepted", "declined", "tentative" or "needsAction".
+    public var responseStatus: String?
+
+    public init(
+        calendarId: String, summary: String, location: String? = nil, description: String? = nil,
+        startAt: Date, endAt: Date, allDay: Bool, responseStatus: String? = nil
+    ) {
+        self.calendarId = calendarId
+        self.summary = summary
+        self.location = location
+        self.description = description
+        self.startAt = startAt
+        self.endAt = endAt
+        self.allDay = allDay
+        self.responseStatus = responseStatus
+    }
+
+    /// The body for an existing row, or nil for a row without `startAt` or `endAt` (Google omits
+    /// them on some cancelled instances): the server requires both, so there is no valid body to send.
+    public init?(_ event: CalendarEvent) {
+        guard let startAt = event.startAt, let endAt = event.endAt else { return nil }
+        calendarId = event.calendarId
+        summary = event.summary ?? ""
+        location = event.location
+        description = event.description
+        self.startAt = startAt
+        self.endAt = endAt
+        allDay = event.allDay
+        responseStatus = event.responseStatus
+    }
+}
+
 /// Response of `PUT /api/tasks/:id`.
 public struct TaskWriteResponse: Codable, Sendable {
     public var task: TaskItem
@@ -621,6 +664,12 @@ public struct CategoryWriteResponse: Codable, Sendable {
 /// Response of `PUT /api/schedules/:id`.
 public struct ScheduleWriteResponse: Codable, Sendable {
     public var schedule: Schedule
+    public var scheduling: SchedulingResult
+}
+
+/// Response of `PUT /api/events/:id`: the stored event as `/api/sync` serializes it.
+public struct EventWriteResponse: Codable, Sendable {
+    public var event: CalendarEvent
     public var scheduling: SchedulingResult
 }
 

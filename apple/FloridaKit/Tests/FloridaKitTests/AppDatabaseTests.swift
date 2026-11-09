@@ -445,6 +445,123 @@ import Testing
         #expect(try db.pendingWrites().filter { $0.entity == .category }.map(\.op) == [.delete])
     }
 
+    // MARK: 5. Event writes
+
+    @Test func saveEventQueuesOnePutAndShowsTheRowAtOnce() throws {
+        let db = try AppDatabase.inMemory()
+        try db.apply(SyncResponse(cursor: "c", calendars: [Fixtures.calendar()]))
+        // A new event has no Google id until the server's copy arrives.
+        var event = Fixtures.event(id: "e1", start: "2026-11-09T10:00:00Z", end: "2026-11-09T11:00:00Z", responseStatus: nil)
+        event.googleId = ""
+        event.location = "Room 4"
+        try db.saveEvent(event, now: Fixtures.instant("2026-11-08T10:00:00Z"))
+        event.summary = "renamed"
+        try db.saveEvent(event, now: Fixtures.instant("2026-11-08T10:01:00Z"))
+
+        let pending = try db.pendingWrites()
+        #expect(pending.map { "\($0.entity.rawValue):\($0.entityId):\($0.op.rawValue)" } == ["event:e1:put"])
+        let body = try JSONCoding.decoder.decode(EventWrite.self, from: try #require(pending.first?.body))
+        #expect(body == EventWrite(
+            calendarId: "cal", summary: "renamed", location: "Room 4", startAt: Fixtures.instant("2026-11-09T10:00:00Z"),
+            endAt: Fixtures.instant("2026-11-09T11:00:00Z"), allDay: false))
+
+        let stored = try #require(try db.event(id: "e1"))
+        #expect(stored.summary == "renamed")
+        #expect(stored.googleId == "")
+        #expect(stored.updatedAt == Fixtures.instant("2026-11-08T10:01:00Z"))
+        #expect(try db.events(in: Fixtures.allTime, calendar: Fixtures.utc).map(\.id) == ["e1"])
+        #expect(try db.agenda(for: Fixtures.instant("2026-11-09T12:00:00Z"), calendar: Fixtures.utc).events.map(\.id) == ["e1"])
+    }
+
+    @Test func saveEventWithoutTimesThrowsAndQueuesNothing() throws {
+        let db = try AppDatabase.inMemory()
+        try db.apply(SyncResponse(cursor: "c", calendars: [Fixtures.calendar()]))
+        var event = Fixtures.event(id: "e1", start: "2026-11-09T10:00:00Z", end: "2026-11-09T11:00:00Z")
+        event.endAt = nil
+
+        #expect(throws: AppDatabase.WriteError.eventWithoutTimes(id: "e1")) {
+            try db.saveEvent(event, now: Fixtures.t0)
+        }
+        #expect(try db.event(id: "e1") == nil, "nothing is stored")
+        #expect(try db.pendingWrites().isEmpty, "nothing is queued for the server to refuse")
+    }
+
+    @Test func deleteEventHidesTheRowAtOnceAndLeavesOneDeleteRow() throws {
+        let db = try AppDatabase.inMemory()
+        try db.apply(SyncResponse(
+            cursor: "c",
+            events: [
+                Fixtures.event(id: "e1", start: "2026-11-09T10:00:00Z", end: "2026-11-09T11:00:00Z"),
+                Fixtures.event(id: "e2", start: "2026-11-09T12:00:00Z", end: "2026-11-09T13:00:00Z"),
+            ],
+            calendars: [Fixtures.calendar()]))
+        var moved = try #require(try db.event(id: "e1"))
+        moved.startAt = Fixtures.instant("2026-11-09T14:00:00Z")
+        try db.saveEvent(moved, now: Fixtures.t0)
+        let deletedAt = Fixtures.instant("2026-11-08T10:05:00Z")
+        try db.deleteEvent(id: "e1", now: deletedAt)
+
+        let pending = try db.pendingWrites()
+        #expect(pending.count == 1, "the delete replaces the queued put")
+        #expect(pending.first?.entity == .event)
+        #expect(pending.first?.op == .delete)
+        #expect(pending.first?.entityId == "e1")
+        #expect(pending.first?.body == nil)
+
+        let row = try #require(try db.event(id: "e1"))
+        #expect(row.deletedAt == deletedAt)
+        #expect(row.updatedAt == deletedAt)
+        #expect(try db.events(in: Fixtures.allTime, calendar: Fixtures.utc).map(\.id) == ["e2"])
+        #expect(try db.agenda(for: Fixtures.instant("2026-11-09T12:00:00Z"), calendar: Fixtures.utc).events.map(\.id) == ["e2"])
+    }
+
+    @Test func applySyncResponseSkipsEventsWithPendingLocalWrites() throws {
+        let db = try AppDatabase.inMemory()
+        func event(_ id: String, start: String, end: String, summary: String? = nil) -> CalendarEvent {
+            var event = Fixtures.event(id: id, start: start, end: end)
+            if let summary { event.summary = summary }
+            return event
+        }
+        try db.apply(SyncResponse(
+            cursor: "c1",
+            events: [
+                event("e1", start: "2026-11-09T10:00:00Z", end: "2026-11-09T11:00:00Z"),
+                event("e2", start: "2026-11-09T12:00:00Z", end: "2026-11-09T13:00:00Z"),
+                event("e3", start: "2026-11-09T14:00:00Z", end: "2026-11-09T15:00:00Z"),
+            ],
+            calendars: [Fixtures.calendar()]))
+
+        // A local edit of e1 and a local delete of e2, neither pushed yet.
+        var local = try #require(try db.event(id: "e1"))
+        local.summary = "local edit"
+        try db.saveEvent(local, now: Fixtures.instant("2026-11-08T13:00:00Z"))
+        try db.deleteEvent(id: "e2", now: Fixtures.instant("2026-11-08T13:00:00Z"))
+
+        // The server sends its own e1, a live e2 and a renamed e3: only e3 may change.
+        let serverE1 = event("e1", start: "2026-11-09T10:00:00Z", end: "2026-11-09T11:00:00Z", summary: "server edit")
+        try db.apply(SyncResponse(
+            cursor: "c2",
+            events: [
+                serverE1,
+                event("e2", start: "2026-11-09T12:00:00Z", end: "2026-11-09T13:00:00Z", summary: "still alive"),
+                event("e3", start: "2026-11-09T14:00:00Z", end: "2026-11-09T15:00:00Z", summary: "renamed"),
+            ],
+            calendars: [Fixtures.calendar()]))
+
+        #expect(try db.event(id: "e1")?.summary == "local edit")
+        #expect(try db.event(id: "e2")?.deletedAt != nil)
+        #expect(try db.event(id: "e3")?.summary == "renamed")
+        #expect(try db.events(in: Fixtures.allTime, calendar: Fixtures.utc).map(\.id) == ["e1", "e3"])
+        #expect(try db.cursor() == "c2")
+
+        // Once the queue has drained the server's version applies again.
+        for write in try db.pendingWrites() {
+            try db.removePendingWrite(seq: try #require(write.seq))
+        }
+        try db.apply(SyncResponse(cursor: "c3", events: [serverE1], calendars: [Fixtures.calendar()]))
+        #expect(try db.event(id: "e1")?.summary == "server edit")
+    }
+
     // MARK: 7. Agenda
 
     @Test func agendaJoinsPlacementsToTasksAndKeepsOnlyThatDay() throws {

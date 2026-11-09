@@ -53,6 +53,11 @@ extension AppDatabase {
         try writer.read { db in try TaskItem.fetchOne(db, id: id) }
     }
 
+    /// The event row, whether or not it is visible (a locally deleted one still has its tombstone).
+    public func event(id: String) throws -> CalendarEvent? {
+        try writer.read { db in try CalendarEvent.fetchOne(db, id: id) }
+    }
+
     /// Tasks the last scheduler run could not fully place, by task id.
     public func unscheduled() throws -> [UnscheduledTask] {
         try writer.read { db in try UnscheduledTask.order(Column("taskId")).fetchAll(db) }
@@ -159,6 +164,18 @@ extension AppDatabase {
 // MARK: - Local writes
 
 extension AppDatabase {
+    /// A local write refused before it reached the store or the queue.
+    public enum WriteError: Error, Hashable, Sendable, LocalizedError {
+        /// `saveEvent` of a row without `startAt` or `endAt`; the server requires both.
+        case eventWithoutTimes(id: String)
+
+        public var errorDescription: String? {
+            switch self {
+            case .eventWithoutTimes(let id): "Event \(id) has no start or end time."
+            }
+        }
+    }
+
     /// Upserts the task with `updatedAt = now` and queues a `put` for the server, replacing any
     /// earlier queued write for the same task.
     public func saveTask(_ task: TaskItem, now: Date = Date()) throws {
@@ -192,6 +209,31 @@ extension AppDatabase {
         task.completedAt = nil
         task.completedMinutes = 0
         try saveTask(task, now: now)
+    }
+
+    /// Upserts the event with `updatedAt = now` and queues a `put` for the server, replacing any
+    /// earlier queued write for the same event. A new event has `googleId == ""` until the
+    /// server's copy replaces the row; it shows up in `events(in:)` as soon as its calendar is selected.
+    /// Throws `WriteError.eventWithoutTimes` for a row missing `startAt` or `endAt`, which the
+    /// server would refuse; nothing is stored or queued.
+    public func saveEvent(_ event: CalendarEvent, now: Date = Date()) throws {
+        var event = event
+        event.updatedAt = now
+        guard let write = EventWrite(event) else { throw WriteError.eventWithoutTimes(id: event.id) }
+        let body = try JSONCoding.encoder.encode(write)
+        try writer.write { db in
+            try event.save(db)
+            try Self.enqueue(db, entity: .event, id: event.id, op: .put, body: body, now: now)
+        }
+    }
+
+    /// Marks the event deleted locally, so every query and observation hides it at once, and
+    /// queues a `delete`, replacing any queued `put`.
+    public func deleteEvent(id: String, now: Date = Date()) throws {
+        try writer.write { db in
+            try db.execute(sql: "UPDATE event SET deletedAt = ?, updatedAt = ? WHERE id = ?", arguments: [now, now, id])
+            try Self.enqueue(db, entity: .event, id: id, op: .delete, body: nil, now: now)
+        }
     }
 
     public func saveCategory(_ category: TaskCategory, now: Date = Date()) throws {
@@ -242,8 +284,8 @@ extension AppDatabase {
 
 extension AppDatabase {
     /// Merges a `GET /api/sync` response: upserts changed rows, drops tombstoned rows, replaces
-    /// the placement, unscheduled, account and calendar tables, and stores the cursor. Tasks, categories and
-    /// schedules with a queued local write are left alone; the local version is newer and will be pushed.
+    /// the placement, unscheduled, account and calendar tables, and stores the cursor. Tasks, categories,
+    /// schedules and events with a queued local write are left alone; the local version is newer and will be pushed.
     public func apply(_ response: SyncResponse) throws {
         try writer.write { db in
             let pending = try Self.pendingEntityIds(db)
@@ -269,7 +311,7 @@ extension AppDatabase {
                     try task.save(db)
                 }
             }
-            for event in response.events {
+            for event in response.events where !pending.contains(.init(entity: .event, id: event.id)) {
                 if event.deletedAt != nil {
                     try CalendarEvent.deleteOne(db, id: event.id)
                 } else {
@@ -391,12 +433,14 @@ extension AppDatabase {
         case .task: _ = try TaskItem.deleteOne(db, id: id)
         case .category: _ = try TaskCategory.deleteOne(db, id: id)
         case .schedule: _ = try Schedule.deleteOne(db, id: id)
+        case .event: _ = try CalendarEvent.deleteOne(db, id: id)
         }
     }
 
     /// Records that the server accepted `write`: removes it from the queue, applies the scheduler
-    /// result (placements and unscheduled tasks), and stores the server's copy of the row unless a newer local write for the same
-    /// entity has been queued since.
+    /// result (placements and unscheduled tasks), and, unless a newer local write for the same
+    /// entity has been queued since, stores the server's copy of the row (a `put`) or removes the
+    /// local tombstone (a `delete`; the server's own tombstone would remove it on the next pull anyway).
     func completePendingWrite<Record: PersistableRecord>(
         _ write: PendingWrite, record: Record?, scheduling: SchedulingResult, computedAt: Date
     ) throws {
@@ -405,8 +449,12 @@ extension AppDatabase {
                 _ = try PendingWrite.deleteOne(db, key: seq)
             }
             let superseded = try Self.pendingEntityIds(db).contains(.init(entity: write.entity, id: write.entityId))
-            if let record, !superseded {
-                try record.save(db)
+            if !superseded {
+                if let record {
+                    try record.save(db)
+                } else if write.op == .delete {
+                    try Self.deleteRow(db, entity: write.entity, id: write.entityId)
+                }
             }
             try Self.replaceSchedulerOutput(db, with: scheduling, computedAt: computedAt)
         }

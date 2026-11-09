@@ -42,7 +42,7 @@ extension CalendarInfo: @retroactive FetchableRecord, @retroactive PersistableRe
 /// (entity, entityId); a later write replaces an earlier one.
 public struct PendingWrite: Codable, Hashable, Sendable, FetchableRecord, MutablePersistableRecord {
     public enum Entity: String, Codable, Hashable, Sendable {
-        case task, category, schedule
+        case task, category, schedule, event
     }
 
     public enum Op: String, Codable, Hashable, Sendable {
@@ -56,7 +56,7 @@ public struct PendingWrite: Codable, Hashable, Sendable, FetchableRecord, Mutabl
     public var entity: Entity
     public var entityId: String
     public var op: Op
-    /// JSON of `TaskWrite` / `CategoryWrite` / `ScheduleWrite` for `put`; nil for `delete`.
+    /// JSON of `TaskWrite` / `CategoryWrite` / `ScheduleWrite` / `EventWrite` for `put`; nil for `delete`.
     public var body: Data?
     public var createdAt: Date
 

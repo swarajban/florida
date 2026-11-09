@@ -150,6 +150,59 @@ import Testing
             == "https://us02web.zoom.us/j/1?pwd=a&amp;b=2")
     }
 
+    @Test func encodesEventWriteWithISOInstantsAndOmitsNilOptionals() throws {
+        let start = try #require(JSONCoding.parseInstant("2026-11-09T17:00:00Z"))
+        let write = EventWrite(
+            calendarId: "cal", summary: "Standup", startAt: start, endAt: start.addingTimeInterval(900),
+            allDay: false, responseStatus: "tentative")
+        let data = try JSONCoding.encoder.encode(write)
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(Set(object.keys) == ["calendarId", "summary", "startAt", "endAt", "allDay", "responseStatus"])
+        #expect(object["calendarId"] as? String == "cal")
+        #expect(object["summary"] as? String == "Standup")
+        #expect(object["startAt"] as? String == "2026-11-09T17:00:00.000Z")
+        #expect(object["endAt"] as? String == "2026-11-09T17:15:00.000Z")
+        #expect(object["allDay"] as? Bool == false)
+        #expect(object["responseStatus"] as? String == "tentative")
+        #expect(try JSONCoding.decoder.decode(EventWrite.self, from: data) == write)
+    }
+
+    @Test func eventWriteOfARowCarriesItsEditableFieldsOnly() throws {
+        let start = try #require(JSONCoding.parseInstant("2026-11-10T00:00:00Z"))
+        let end = start.addingTimeInterval(86_400)
+        let event = CalendarEvent(
+            id: "e1", calendarId: "cal", googleId: "g1", summary: "Offsite", location: "Tahoe", startAt: start, endAt: end,
+            allDay: true, responseStatus: "accepted", htmlLink: "https://calendar.google.com/x", description: "Pack warm",
+            eventType: "default", updatedAt: Date(timeIntervalSince1970: 0))
+        let write = try #require(EventWrite(event))
+        #expect(write == EventWrite(
+            calendarId: "cal", summary: "Offsite", location: "Tahoe", description: "Pack warm", startAt: start, endAt: end,
+            allDay: true, responseStatus: "accepted"))
+        let object = try #require(JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(write)) as? [String: Any])
+        #expect(object["htmlLink"] == nil && object["googleId"] == nil && object["id"] == nil)
+        #expect(object["allDay"] as? Bool == true)
+        #expect(object["startAt"] as? String == "2026-11-10T00:00:00.000Z")
+
+        // A row without a summary is sent with an empty one, never dropped.
+        let bare = CalendarEvent(id: "e2", calendarId: "cal", googleId: "", startAt: start, endAt: end, updatedAt: start)
+        let bareWrite = try #require(EventWrite(bare))
+        #expect(bareWrite.summary == "")
+        #expect(bareWrite.responseStatus == nil)
+
+        // A row missing either time has no valid body: the server requires both.
+        #expect(EventWrite(CalendarEvent(id: "e3", calendarId: "cal", googleId: "g3", endAt: end, updatedAt: start)) == nil)
+        #expect(EventWrite(CalendarEvent(id: "e4", calendarId: "cal", googleId: "g4", startAt: start, updatedAt: start)) == nil)
+    }
+
+    @Test func decodesEventWriteResponse() throws {
+        let response = try JSONCoding.decoder.decode(EventWriteResponse.self, from: Data("""
+            {"event":{\(Self.base)},"scheduling":{"placements":[{"taskId":"t1","start":"2026-11-09T18:00:00.000Z",
+             "end":"2026-11-09T19:00:00.000Z","pinned":false}],"unscheduled":[],"late":[]}}
+            """.utf8))
+        #expect(response.event.id == "e1" && response.event.summary == "Standup")
+        #expect(response.scheduling.placements.map(\.taskId) == ["t1"])
+    }
+
     @Test func inboxIsTheFixedCategoryId() {
         let at = Date(timeIntervalSince1970: 0)
         #expect(TaskCategory(id: TaskCategory.inboxId, name: "Inbox", scheduleId: "s", createdAt: at, updatedAt: at).isInbox)

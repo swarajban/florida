@@ -141,6 +141,7 @@ public actor SyncClient {
         case .task: "api/tasks"
         case .category: "api/categories"
         case .schedule: "api/schedules"
+        case .event: "api/events"
         }
     }
 
@@ -166,6 +167,9 @@ public actor SyncClient {
         case (.schedule, .put):
             let response = try api.decode(ScheduleWriteResponse.self, from: data)
             try database.completePendingWrite(write, record: response.schedule, scheduling: response.scheduling, computedAt: now)
+        case (.event, .put):
+            let response = try api.decode(EventWriteResponse.self, from: data)
+            try database.completePendingWrite(write, record: response.event, scheduling: response.scheduling, computedAt: now)
         case (_, .delete):
             let response = try api.decode(SchedulingResponse.self, from: data)
             try database.completePendingWrite(write, record: nil as TaskItem?, scheduling: response.scheduling, computedAt: now)
@@ -190,6 +194,9 @@ public actor SyncClient {
                 return row.deletedAt == nil ? .live(row) : .tombstoned
             case .schedule:
                 let row = try api.decode(Schedule.self, from: data)
+                return row.deletedAt == nil ? .live(row) : .tombstoned
+            case .event:
+                let row = try api.decode(CalendarEvent.self, from: data)
                 return row.deletedAt == nil ? .live(row) : .tombstoned
             }
         case 404 where api.serverError(data) != nil:

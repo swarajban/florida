@@ -27,13 +27,26 @@ public final class AppDatabase: Sendable {
         try AppDatabase(writer: DatabaseQueue())
     }
 
-    /// URL of the shared store inside the App Group container. Outside the Darwin sandbox (Linux
-    /// tests) it falls back to a temporary directory.
-    public static func defaultURL(appGroup: String = Florida.appGroup) -> URL {
+    /// URL of the shared store inside the App Group container; nil when this process has no
+    /// container (missing entitlement or a different group id, or outside the Darwin sandbox).
+    /// Extensions that must read the app's data use this rather than `defaultURL`, whose fallback
+    /// would silently open an empty private store.
+    public static func sharedURL(appGroup: String = Florida.appGroup) -> URL? {
         #if canImport(Darwin)
-        if let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup) {
-            return container.appendingPathComponent("florida.sqlite")
+        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup)?
+            .appendingPathComponent("florida.sqlite")
+        #else
+        return nil
+        #endif
+    }
+
+    /// `sharedURL`, or a private location when there is no App Group container. Outside the
+    /// Darwin sandbox (Linux tests) it falls back to a temporary directory.
+    public static func defaultURL(appGroup: String = Florida.appGroup) -> URL {
+        if let shared = sharedURL(appGroup: appGroup) {
+            return shared
         }
+        #if canImport(Darwin)
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         return support.appendingPathComponent("Florida/florida.sqlite")

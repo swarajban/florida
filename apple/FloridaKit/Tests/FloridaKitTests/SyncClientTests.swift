@@ -464,6 +464,122 @@ import Testing
         #expect(body.title == "v2")
     }
 
+    // MARK: Events
+
+    @Test func pushSendsAnEventPutAndStoresTheServersCopy() async throws {
+        let db = try AppDatabase.inMemory()
+        try db.apply(SyncResponse(cursor: "c0", calendars: [Fixtures.calendar()]))
+        var event = Fixtures.event(id: "e1", start: "2026-11-09T17:00:00Z", end: "2026-11-09T17:30:00Z", responseStatus: "tentative")
+        event.googleId = ""
+        event.summary = "Dentist"
+        event.description = "Bring the card"
+        try db.saveEvent(event, now: Fixtures.instant("2026-11-08T10:00:00Z"))
+
+        // The server created it in Google: it now has a Google id, a link and the server's updatedAt.
+        var serverCopy = event
+        serverCopy.googleId = "g-dentist"
+        serverCopy.htmlLink = "https://calendar.google.com/event?eid=1"
+        serverCopy.updatedAt = Fixtures.instant("2026-11-08T10:00:00.123Z")
+        let scheduling = SchedulingResult(placements: [Fixtures.piece(taskId: "t1", start: "2026-11-09T18:00:00Z", end: "2026-11-09T19:00:00Z")])
+        let transport = FakeTransport([.ok(try Fixtures.putResponse("event", serverCopy, scheduling: scheduling))])
+
+        #expect(try await client(db, transport).push() == 1)
+        let request = try #require(transport.requests.first)
+        #expect(request.method == "PUT")
+        #expect(request.path == "/api/events/e1")
+        #expect(request.headers["Authorization"] == "Bearer secret-token")
+        #expect(request.headers["Content-Type"] == "application/json")
+        let requestBody = try #require(request.body)
+        let body = try JSONCoding.decoder.decode(EventWrite.self, from: requestBody)
+        #expect(body == EventWrite(
+            calendarId: "cal", summary: "Dentist", description: "Bring the card",
+            startAt: Fixtures.instant("2026-11-09T17:00:00Z"), endAt: Fixtures.instant("2026-11-09T17:30:00Z"),
+            allDay: false, responseStatus: "tentative"))
+        let keys = try #require(JSONSerialization.jsonObject(with: requestBody) as? [String: Any]).keys
+        #expect(Set(keys) == ["calendarId", "summary", "description", "startAt", "endAt", "allDay", "responseStatus"])
+
+        #expect(try db.event(id: "e1") == serverCopy, "the server's copy, Google id included, replaces the row")
+        #expect(try db.events(in: Fixtures.allTime, calendar: Fixtures.utc).map(\.googleId) == ["g-dentist"])
+        #expect(try db.pendingWrites().isEmpty)
+        #expect(try db.placements(in: Fixtures.allTime).map(\.taskId) == ["t1"])
+    }
+
+    @Test func pushSendsAnEventDeleteAndRemovesTheLocalTombstone() async throws {
+        let db = try AppDatabase.inMemory()
+        try db.apply(SyncResponse(
+            cursor: "c0",
+            events: [
+                Fixtures.event(id: "e1", start: "2026-11-09T10:00:00Z", end: "2026-11-09T11:00:00Z"),
+                Fixtures.event(id: "e2", start: "2026-11-09T12:00:00Z", end: "2026-11-09T13:00:00Z"),
+            ],
+            calendars: [Fixtures.calendar()]))
+        try db.deleteEvent(id: "e1", now: Fixtures.t0)
+        #expect(try db.events(in: Fixtures.allTime, calendar: Fixtures.utc).map(\.id) == ["e2"], "hidden before the push")
+        let scheduling = SchedulingResult(placements: [Fixtures.piece(taskId: "t1", start: "2026-11-09T10:00:00Z", end: "2026-11-09T11:00:00Z")])
+        let transport = FakeTransport([.ok(try Fixtures.deleteResponse(scheduling: scheduling))])
+
+        #expect(try await client(db, transport).push() == 1)
+        let request = try #require(transport.requests.first)
+        #expect(request.method == "DELETE")
+        #expect(request.path == "/api/events/e1")
+        #expect(request.body == nil)
+        #expect(request.headers["Authorization"] == "Bearer secret-token")
+        #expect(try db.event(id: "e1") == nil, "the accepted delete removes the local tombstone")
+        #expect(try db.event(id: "e2") != nil)
+        #expect(try db.pendingWrites().isEmpty)
+        #expect(try db.placements(in: Fixtures.allTime).map(\.taskId) == ["t1"], "the freed slot's rescheduling is applied")
+    }
+
+    @Test func rejectedEventWriteIsResetToTheServersCopy() async throws {
+        let db = try AppDatabase.inMemory()
+        let serverCopy = Fixtures.event(id: "e1", start: "2026-11-09T10:00:00Z", end: "2026-11-09T11:00:00Z")
+        try db.apply(SyncResponse(cursor: "c0", events: [serverCopy], calendars: [Fixtures.calendar()]))
+        var moved = serverCopy
+        moved.startAt = Fixtures.instant("2026-11-09T14:00:00Z")
+        moved.endAt = Fixtures.instant("2026-11-09T15:00:00Z")
+        try db.saveEvent(moved, now: Fixtures.t0)
+        try db.saveTask(Fixtures.task(id: "later"), now: Fixtures.t0)
+        let transport = FakeTransport([
+            .error(403, "calendar cal is read-only"),
+            try .ok(serverCopy),
+            .ok(try Fixtures.putResponse("task", Fixtures.task(id: "later"))),
+            try .ok(SyncResponse(cursor: "c1")),
+        ])
+
+        let client = client(db, transport)
+        #expect(try await client.sync() == 1)
+        #expect(transport.requests.map { "\($0.method) \($0.path)" } == [
+            "PUT /api/events/e1", "GET /api/events/e1", "PUT /api/tasks/later", "GET /api/sync",
+        ])
+        #expect(try db.event(id: "e1") == serverCopy, "the move is undone by the server's copy")
+        #expect(try db.pendingWrites().isEmpty)
+        let rejected = await client.lastRejectedWrites
+        #expect(rejected.map(\.write.entity) == [.event])
+        #expect(rejected.first?.write.op == .put)
+        #expect(rejected.first?.status == 403)
+        #expect(rejected.first?.message == "calendar cal is read-only")
+    }
+
+    @Test func rejectedEventDeleteOfARowTheServerHasTombstonedRemovesIt() async throws {
+        let db = try AppDatabase.inMemory()
+        let event = Fixtures.event(id: "e1", start: "2026-11-09T10:00:00Z", end: "2026-11-09T11:00:00Z")
+        try db.apply(SyncResponse(cursor: "c0", events: [event], calendars: [Fixtures.calendar()]))
+        try db.deleteEvent(id: "e1", now: Fixtures.t0)
+        let transport = FakeTransport([
+            .error(409, "event is deleted"),
+            try .ok(Fixtures.event(id: "e1", start: "2026-11-09T10:00:00Z", end: "2026-11-09T11:00:00Z",
+                                   deletedAt: Fixtures.instant("2026-11-08T08:00:00Z"))),
+            try .ok(SyncResponse(cursor: "c1")),
+        ])
+
+        let client = client(db, transport)
+        #expect(try await client.sync() == 0)
+        #expect(transport.requests.map { "\($0.method) \($0.path)" } == ["DELETE /api/events/e1", "GET /api/events/e1", "GET /api/sync"])
+        #expect(try db.event(id: "e1") == nil)
+        #expect(try db.pendingWrites().isEmpty)
+        #expect(await client.lastRejectedWrites.map(\.status) == [409])
+    }
+
     // MARK: Scheduler endpoints
 
     @Test func runSchedulerPostsAndAppliesPlacements() async throws {

@@ -39,6 +39,24 @@ import Testing
         #expect(afterDeselect == [])
     }
 
+    @Test func eventsObservationFollowsLocalEventWrites() async throws {
+        let db = try AppDatabase.inMemory()
+        try db.apply(SyncResponse(cursor: "c1", calendars: [Fixtures.calendar()]))
+        let range = Fixtures.instant("2026-11-09T00:00:00Z")..<Fixtures.instant("2026-11-10T00:00:00Z")
+        var iterator = db.observeEvents(in: range, calendar: Fixtures.utc).makeAsyncIterator()
+        #expect(try await iterator.next() == [])
+
+        // A brand-new event, not yet known to the server, appears at once.
+        var event = Fixtures.event(id: "e1", start: "2026-11-09T10:00:00Z", end: "2026-11-09T11:00:00Z")
+        event.googleId = ""
+        try db.saveEvent(event, now: Fixtures.t0)
+        #expect(try await iterator.next()?.map(\.id) == ["e1"])
+
+        // And a locally deleted one disappears at once, before any push.
+        try db.deleteEvent(id: "e1", now: Fixtures.t0)
+        #expect(try await iterator.next() == [])
+    }
+
     @Test func agendaObservationFollowsPlacementsAndTaskEdits() async throws {
         let db = try AppDatabase.inMemory()
         try db.apply(SyncResponse(cursor: "c1", tasks: [Fixtures.task(id: "t1", title: "Write report")]))
