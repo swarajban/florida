@@ -16,13 +16,15 @@ public struct QuickAddDraft: Hashable, Sendable {
     public var pinnedStart: Date?
     /// Text after `#`, e.g. "work" or "personal-finances"; matching it to a category is the caller's job.
     public var categoryHint: String?
+    /// Where the task can be done, from `@errand`, `@home`, `@office` or `@computer`.
+    public var context: TaskContext?
     /// Text after the first ` // ` or ` -- ` separator, untouched by the token grammar.
     public var notes: String?
 
     public init(
         title: String = "", durationMinutes: Int? = nil, priority: Priority? = nil,
         deadlineType: DeadlineType? = nil, dueAt: Date? = nil, startAt: Date? = nil,
-        pinnedStart: Date? = nil, categoryHint: String? = nil, notes: String? = nil
+        pinnedStart: Date? = nil, categoryHint: String? = nil, context: TaskContext? = nil, notes: String? = nil
     ) {
         self.title = title
         self.durationMinutes = durationMinutes
@@ -32,6 +34,7 @@ public struct QuickAddDraft: Hashable, Sendable {
         self.startAt = startAt
         self.pinnedStart = pinnedStart
         self.categoryHint = categoryHint
+        self.context = context
         self.notes = notes
     }
 }
@@ -48,6 +51,8 @@ public struct QuickAddDraft: Hashable, Sendable {
 ///   (asap, high, medium, low). A bare `asap` / `urgent` as the first or last word of the title
 ///   also means asap; in the middle of a sentence it is left alone.
 /// - Category: `#slug` (letters, digits, `_`, `-`). The first one wins and is returned as `categoryHint`.
+/// - Context: `@computer` `@errand` `@home` `@office`. The first one wins; any other `@word`
+///   (a mention such as `@sam`) stays in the title.
 /// - Dates: `today` `eod` `tomorrow` `tmrw` `tmr` `eow` (this Friday), `mon`…`sunday` (the next one
 ///   strictly after today), `next week` (Monday after the coming Sunday), `next fri`, `11/20`,
 ///   `11/20/2026`, `2026-11-20`, `nov 20`, `nov 20th`, `20 nov`, `nov 20 2026`. Month/day dates
@@ -77,6 +82,11 @@ public enum QuickAddParser {
 
             if draft.categoryHint == nil, let slug = QuickAddScanner.categorySlug(tokens[i]) {
                 draft.categoryHint = slug
+                i += 1
+                continue
+            }
+            if draft.context == nil, let context = QuickAddScanner.contexts[word] {
+                draft.context = context
                 i += 1
                 continue
             }
@@ -205,6 +215,11 @@ struct QuickAddScanner {
         "!med": .medium, "!medium": .medium, "!m": .medium, "p3": .medium,
         "!low": .low, "!l": .low, "p4": .low,
     ]
+
+    /// `@errand` and friends: one token per `TaskContext`, spelled like its raw value.
+    static let contexts: [String: TaskContext] = Dictionary(
+        uniqueKeysWithValues: TaskContext.allCases.map { ("@\($0.rawValue)", $0) }
+    )
 
     static let dueKeywords: [String: DeadlineType] = ["by": .soft, "due": .hard, "deadline": .hard]
     static let startKeywords: Set<String> = ["after", "from", "starting", "start"]

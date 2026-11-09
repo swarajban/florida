@@ -55,7 +55,10 @@ import Testing
 
         let db = try AppDatabase(writer: queue)
         let applied = try queue.read { db in try AppDatabase.migrator.appliedMigrations(db) }
-        #expect(applied == ["v1", "v2", "v3"])
+        #expect(applied == ["v1", "v2", "v3", "v4"])
+        // Rows that predate the context column read as the default.
+        #expect(try db.task(id: "t1")?.context == .computer)
+        #expect(try db.routineBlocks() == [] && db.userSettings() == nil)
 
         let event = try #require(try db.events(in: Fixtures.allTime, calendar: Fixtures.utc).first)
         #expect(event.id == "e1" && event.summary == "Standup")
@@ -217,6 +220,50 @@ import Testing
         // A sync from a server without the field empties it, like placements.
         try db.apply(SyncResponse(cursor: "c2"))
         #expect(try db.unscheduled() == [])
+    }
+
+    @Test func applySyncResponseStoresTheRoutineSettingsContextAndArea() throws {
+        let db = try AppDatabase.inMemory()
+        func block(_ id: String, days: [Int], start: String, allows: [TaskContext], deletedAt: Date? = nil) -> RoutineBlock {
+            RoutineBlock(
+                id: id, name: id, days: days, start: start, end: "16:20", allows: allows,
+                createdAt: Fixtures.t0, updatedAt: Fixtures.t0, deletedAt: deletedAt)
+        }
+        let settings = UserSettings(id: "me", timeZone: "America/Los_Angeles", updatedAt: Fixtures.t0)
+        var errand = Fixtures.task(id: "t1")
+        errand.context = .errand
+        var engineering = Fixtures.category(id: "eng")
+        engineering.area = .work
+        // Sent out of week order: Wednesday, Sunday, Monday afternoon, Monday morning.
+        let wednesday = block("office-wed", days: [3], start: "09:00", allows: [.computer, .office])
+        let sunday = block("sunday", days: [0], start: "09:00", allows: [])
+        let mondayLate = block("home-late", days: [5, 1], start: "13:00", allows: [.computer])
+        let mondayEarly = block("home", days: [1, 4, 5], start: "09:00", allows: [.computer, .errand, .home])
+        try db.apply(SyncResponse(
+            cursor: "c1", settings: settings, routineBlocks: [wednesday, sunday, mondayLate, mondayEarly],
+            categories: [engineering, Fixtures.category()], tasks: [errand]))
+
+        #expect(try db.userSettings() == settings)
+        #expect(try db.routineBlocks() == [mondayEarly, mondayLate, wednesday, sunday], "Monday first, then by start")
+        #expect(try db.task(id: "t1")?.context == .errand)
+        #expect(try db.categories().map(\.area) == [.work, nil])
+        let allows = try db.writer.read { db in
+            try String.fetchOne(db, sql: "SELECT allows FROM routineBlock WHERE id = 'home'")
+        }
+        #expect(try JSONDecoder().decode([TaskContext].self, from: Data(try #require(allows).utf8)) == [.computer, .errand, .home])
+
+        // An incremental pull: one block tombstoned, the rest untouched, settings resent whole.
+        let moved = UserSettings(id: "me", timeZone: "America/New_York", updatedAt: Fixtures.t0)
+        try db.apply(SyncResponse(
+            cursor: "c2", settings: moved,
+            routineBlocks: [block("office-wed", days: [3], start: "09:00", allows: [], deletedAt: Fixtures.t0)]))
+        #expect(try db.routineBlocks().map(\.id) == ["home", "home-late", "sunday"])
+        #expect(try db.userSettings() == moved)
+
+        // A server that has not been seeded sends null settings.
+        try db.apply(SyncResponse(cursor: "c3"))
+        #expect(try db.userSettings() == nil)
+        #expect(try db.routineBlocks().count == 3)
     }
 
     @Test func applySchedulingResultReplacesPlacements() throws {

@@ -13,6 +13,20 @@ extension AppDatabase {
         }
     }
 
+    /// Live routine blocks, as `routineBlocks()` returns them.
+    public func observeRoutineBlocks() -> AsyncValueObservation<[RoutineBlock]> {
+        observe { db in
+            try Self.routineBlocks(db)
+        }
+    }
+
+    /// The server's settings row, as `userSettings()` returns it.
+    public func observeUserSettings() -> AsyncValueObservation<UserSettings?> {
+        observe { db in
+            try UserSettings.fetchOne(db)
+        }
+    }
+
     /// Live schedules, oldest first.
     public func observeSchedules() -> AsyncValueObservation<[Schedule]> {
         observe { db in

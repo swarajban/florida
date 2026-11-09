@@ -26,6 +26,73 @@ public enum DeadlineType: String, Codable, Hashable, Sendable, CaseIterable {
     case hard, soft, none
 }
 
+/// Where a task can be done. Each `RoutineBlock` lists the contexts it allows, so an errand is
+/// never placed on an office day and office-only work never lands on a home day.
+public enum TaskContext: String, Codable, Hashable, Sendable, CaseIterable {
+    /// Anywhere with a laptop; the default, and what every block that allows work allows.
+    case computer
+    /// In person, out of the house (a UPS return, a pharmacy run).
+    case errand
+    /// In person, at home (assemble the crib, sort the garage).
+    case home
+    /// Only at the office (badge pickup, a whiteboard session).
+    case office
+}
+
+/// Which side of life a category belongs to; nil for the inbox, whose tasks are unfiled.
+public enum CategoryArea: String, Codable, Hashable, Sendable, CaseIterable {
+    case work, personal
+}
+
+/// One window of the weekly routine: wall-clock hours on some weekdays, in `UserSettings.timeZone`,
+/// during which tasks of the listed contexts may be scheduled. Time outside every block (sleep,
+/// family, gym) is never scheduled. Server-owned for now; clients read and show it.
+public struct RoutineBlock: Codable, Hashable, Sendable, Identifiable {
+    public var id: String
+    public var name: String
+    /// Days of week the block applies to: 0 = Sunday … 6 = Saturday.
+    public var days: [Int]
+    /// "HH:MM", 24-hour.
+    public var start: String
+    /// "HH:MM", 24-hour; after `start` on the same day.
+    public var end: String
+    /// Empty means the block is shown but nothing is scheduled in it.
+    public var allows: [TaskContext]
+    public var createdAt: Date
+    public var updatedAt: Date
+    public var deletedAt: Date?
+
+    public init(
+        id: String, name: String, days: [Int], start: String, end: String, allows: [TaskContext],
+        createdAt: Date, updatedAt: Date, deletedAt: Date? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.days = days
+        self.start = start
+        self.end = end
+        self.allows = allows
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.deletedAt = deletedAt
+    }
+}
+
+/// The user's one row of preferences; the routine's time zone lives here. Never deleted.
+/// (Not `Settings`: SwiftUI exports a scene of that name on macOS.)
+public struct UserSettings: Codable, Hashable, Sendable, Identifiable {
+    public var id: String
+    /// IANA identifier the routine blocks' hours are read in, e.g. "America/Los_Angeles".
+    public var timeZone: String
+    public var updatedAt: Date
+
+    public init(id: String, timeZone: String, updatedAt: Date) {
+        self.id = id
+        self.timeZone = timeZone
+        self.updatedAt = updatedAt
+    }
+}
+
 /// A weekly availability window as wall-clock time in the schedule's time zone.
 public struct ScheduleWindow: Codable, Hashable, Sendable {
     /// Days of week the window applies to: 0 = Sunday … 6 = Saturday.
@@ -71,6 +138,8 @@ public struct TaskCategory: Codable, Hashable, Sendable, Identifiable {
     public var name: String
     /// CSS-style hex color such as "#4F46E5", or nil for the default.
     public var color: String?
+    /// Work or personal; nil for the inbox. Missing from older servers' JSON, which decodes as nil.
+    public var area: CategoryArea?
     public var scheduleId: String
     public var sortOrder: Int
     public var createdAt: Date
@@ -78,12 +147,13 @@ public struct TaskCategory: Codable, Hashable, Sendable, Identifiable {
     public var deletedAt: Date?
 
     public init(
-        id: String, name: String, color: String? = nil, scheduleId: String, sortOrder: Int = 0,
-        createdAt: Date, updatedAt: Date, deletedAt: Date? = nil
+        id: String, name: String, color: String? = nil, area: CategoryArea? = nil, scheduleId: String,
+        sortOrder: Int = 0, createdAt: Date, updatedAt: Date, deletedAt: Date? = nil
     ) {
         self.id = id
         self.name = name
         self.color = color
+        self.area = area
         self.scheduleId = scheduleId
         self.sortOrder = sortOrder
         self.createdAt = createdAt
@@ -113,6 +183,8 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
     public var startAt: Date?
     /// Overrides the category's schedule when set.
     public var scheduleId: String?
+    /// Where the task can be done; the scheduler only uses routine blocks that allow it.
+    public var context: TaskContext
     /// When set the task is fixed at this instant as one block.
     public var pinnedStart: Date?
     public var completedMinutes: Int
@@ -130,9 +202,9 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
     public init(
         id: String, categoryId: String, title: String, notes: String? = nil, durationMinutes: Int,
         minChunkMinutes: Int? = nil, priority: Priority = .medium, deadlineType: DeadlineType = .none,
-        dueAt: Date? = nil, startAt: Date? = nil, scheduleId: String? = nil, pinnedStart: Date? = nil,
-        completedMinutes: Int = 0, completedAt: Date? = nil, createdAt: Date, updatedAt: Date,
-        deletedAt: Date? = nil, recurrence: TaskRecurrence? = nil,
+        dueAt: Date? = nil, startAt: Date? = nil, scheduleId: String? = nil, context: TaskContext = .computer,
+        pinnedStart: Date? = nil, completedMinutes: Int = 0, completedAt: Date? = nil, createdAt: Date,
+        updatedAt: Date, deletedAt: Date? = nil, recurrence: TaskRecurrence? = nil,
         recurrenceSeriesId: String? = nil, recurrenceDate: String? = nil, recurrenceRevision: String? = nil
     ) {
         self.id = id
@@ -146,6 +218,7 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
         self.dueAt = dueAt
         self.startAt = startAt
         self.scheduleId = scheduleId
+        self.context = context
         self.pinnedStart = pinnedStart
         self.completedMinutes = completedMinutes
         self.completedAt = completedAt
@@ -156,6 +229,34 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.deletedAt = deletedAt
+    }
+
+    /// Hand-written only so `context` can default to `.computer` when the JSON (an older server)
+    /// or the row (a store that predates the column) lacks it; everything else is as synthesized.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        categoryId = try c.decode(String.self, forKey: .categoryId)
+        title = try c.decode(String.self, forKey: .title)
+        notes = try c.decodeIfPresent(String.self, forKey: .notes)
+        durationMinutes = try c.decode(Int.self, forKey: .durationMinutes)
+        minChunkMinutes = try c.decodeIfPresent(Int.self, forKey: .minChunkMinutes)
+        priority = try c.decode(Priority.self, forKey: .priority)
+        deadlineType = try c.decode(DeadlineType.self, forKey: .deadlineType)
+        dueAt = try c.decodeIfPresent(Date.self, forKey: .dueAt)
+        startAt = try c.decodeIfPresent(Date.self, forKey: .startAt)
+        scheduleId = try c.decodeIfPresent(String.self, forKey: .scheduleId)
+        context = try c.decodeIfPresent(TaskContext.self, forKey: .context) ?? .computer
+        pinnedStart = try c.decodeIfPresent(Date.self, forKey: .pinnedStart)
+        completedMinutes = try c.decode(Int.self, forKey: .completedMinutes)
+        completedAt = try c.decodeIfPresent(Date.self, forKey: .completedAt)
+        recurrence = try c.decodeIfPresent(TaskRecurrence.self, forKey: .recurrence)
+        recurrenceSeriesId = try c.decodeIfPresent(String.self, forKey: .recurrenceSeriesId)
+        recurrenceDate = try c.decodeIfPresent(String.self, forKey: .recurrenceDate)
+        recurrenceRevision = try c.decodeIfPresent(String.self, forKey: .recurrenceRevision)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        updatedAt = try c.decode(Date.self, forKey: .updatedAt)
+        deletedAt = try c.decodeIfPresent(Date.self, forKey: .deletedAt)
     }
 
     public var isOpen: Bool { deletedAt == nil && completedAt == nil }
@@ -427,7 +528,8 @@ public struct CalendarInfo: Codable, Hashable, Sendable, Identifiable {
 /// list with every sync, like placements.
 public struct UnscheduledTask: Codable, Hashable, Sendable, Identifiable {
     public var taskId: String
-    /// "no_fit_in_horizon", "no_fit_before_hard_deadline", or "unknown_schedule".
+    /// "no_fit_in_horizon", "no_fit_before_hard_deadline", "unknown_schedule", or
+    /// "no_allowed_block" (no routine block allows the task's context).
     public var reason: String
     public var unplacedMinutes: Int
     public var computedAt: Date
@@ -444,12 +546,17 @@ public struct UnscheduledTask: Codable, Hashable, Sendable, Identifiable {
 
 // MARK: - API payloads
 
-/// `GET /api/sync?since=` response. `schedules`, `categories`, `tasks` and `events` contain rows changed
-/// after `since`, including tombstones (`deletedAt` set). `placements`, `unscheduled`, `accounts`
-/// and `calendars` are always the complete tables and are meant to be replaced wholesale.
+/// `GET /api/sync?since=` response. `routineBlocks`, `schedules`, `categories`, `tasks` and `events`
+/// contain rows changed after `since`, including tombstones (`deletedAt` set). `settings` (nil before
+/// the server is seeded), `placements`, `unscheduled`, `accounts` and `calendars` are always complete
+/// and are meant to be replaced wholesale.
 public struct SyncResponse: Codable, Sendable {
     /// Server time when the diff was taken; pass back as the next `since`.
     public var cursor: String
+    /// Nil when the server predates settings or has not been seeded.
+    public var settings: UserSettings?
+    /// Empty when the server predates the routine.
+    public var routineBlocks: [RoutineBlock]
     public var schedules: [Schedule]
     public var categories: [TaskCategory]
     public var tasks: [TaskItem]
@@ -461,11 +568,14 @@ public struct SyncResponse: Codable, Sendable {
     public var unscheduled: [UnscheduledTask]
 
     public init(
-        cursor: String, schedules: [Schedule] = [], categories: [TaskCategory] = [], tasks: [TaskItem] = [],
+        cursor: String, settings: UserSettings? = nil, routineBlocks: [RoutineBlock] = [],
+        schedules: [Schedule] = [], categories: [TaskCategory] = [], tasks: [TaskItem] = [],
         events: [CalendarEvent] = [], placements: [Placement] = [], accounts: [GoogleAccount] = [],
         calendars: [CalendarInfo] = [], unscheduled: [UnscheduledTask] = []
     ) {
         self.cursor = cursor
+        self.settings = settings
+        self.routineBlocks = routineBlocks
         self.schedules = schedules
         self.categories = categories
         self.tasks = tasks
@@ -479,6 +589,8 @@ public struct SyncResponse: Codable, Sendable {
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         cursor = try container.decode(String.self, forKey: .cursor)
+        settings = try container.decodeIfPresent(UserSettings.self, forKey: .settings)
+        routineBlocks = try container.decodeIfPresent([RoutineBlock].self, forKey: .routineBlocks) ?? []
         schedules = try container.decode([Schedule].self, forKey: .schedules)
         categories = try container.decode([TaskCategory].self, forKey: .categories)
         tasks = try container.decode([TaskItem].self, forKey: .tasks)
@@ -508,7 +620,7 @@ public struct SchedulingResult: Codable, Hashable, Sendable {
 
     public struct Unscheduled: Codable, Hashable, Sendable {
         public var taskId: String
-        /// "no_fit_in_horizon", "no_fit_before_hard_deadline", or "unknown_schedule".
+        /// "no_fit_in_horizon", "no_fit_before_hard_deadline", "unknown_schedule", or "no_allowed_block".
         public var reason: String
         public var unplacedMinutes: Int
 
@@ -568,6 +680,7 @@ public struct TaskWrite: Codable, Hashable, Sendable {
     public var dueAt: Date?
     public var startAt: Date?
     public var scheduleId: String?
+    public var context: TaskContext
     public var pinnedStart: Date?
     public var completedMinutes: Int
     public var completedAt: Date?
@@ -586,6 +699,7 @@ public struct TaskWrite: Codable, Hashable, Sendable {
         dueAt = task.dueAt
         startAt = task.startAt
         scheduleId = task.scheduleId
+        context = task.context
         pinnedStart = task.pinnedStart
         completedMinutes = task.completedMinutes
         completedAt = task.completedAt
@@ -605,6 +719,7 @@ public struct TaskWrite: Codable, Hashable, Sendable {
         try container.encodeIfPresent(dueAt, forKey: .dueAt)
         try container.encodeIfPresent(startAt, forKey: .startAt)
         try container.encodeIfPresent(scheduleId, forKey: .scheduleId)
+        try container.encode(context, forKey: .context)
         try container.encodeIfPresent(pinnedStart, forKey: .pinnedStart)
         try container.encode(completedMinutes, forKey: .completedMinutes)
         try container.encodeIfPresent(completedAt, forKey: .completedAt)
@@ -614,16 +729,20 @@ public struct TaskWrite: Codable, Hashable, Sendable {
     }
 }
 
-/// Body of `PUT /api/categories/:id`.
+/// Body of `PUT /api/categories/:id`. A nil `area` is left out, and the server keeps the stored area
+/// when the key is missing. That is deliberate while no client edits areas: a row saved before the
+/// first sync after an upgrade has no area yet, and sending null would erase the server's.
 public struct CategoryWrite: Codable, Hashable, Sendable {
     public var name: String
     public var color: String?
+    public var area: CategoryArea?
     public var scheduleId: String
     public var sortOrder: Int
 
     public init(_ category: TaskCategory) {
         name = category.name
         color = category.color
+        area = category.area
         scheduleId = category.scheduleId
         sortOrder = category.sortOrder
     }

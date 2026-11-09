@@ -279,6 +279,24 @@ private func parse(_ text: String, now: Date = sundayMorning, calendar: Calendar
         #expect(parse("Issue #work!").title == "Issue #work!")
     }
 
+    @Test func contextTokenSetsContextAndLeavesMentionsInTheTitle() {
+        let draft = parse("UPS return @errand 30m #personal")
+        #expect(draft.context == .errand)
+        #expect(draft.title == "UPS return")
+        #expect(draft.durationMinutes == 30)
+        #expect(draft.categoryHint == "personal")
+
+        #expect(parse("Badge pickup @Office").context == .office)
+        #expect(parse("x @home").context == .home)
+        #expect(parse("x @computer").context == .computer)
+        #expect(parse("Call mom").context == nil)
+
+        let mention = parse("Ping @sam about @home @office")
+        #expect(mention.context == .home, "the first context wins")
+        #expect(mention.title == "Ping @sam about @office")
+        #expect(parse("Email sam@home.com").context == nil)
+    }
+
     @Test func titleTrimsSeparatorPunctuation() {
         #expect(parse("- buy milk tomorrow").title == "buy milk")
         #expect(parse("Call mom - 30m").title == "Call mom")

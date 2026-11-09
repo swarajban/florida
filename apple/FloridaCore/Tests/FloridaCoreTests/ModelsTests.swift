@@ -42,7 +42,49 @@ import Testing
         #expect(response.tasks.first?.priority == .high)
         #expect(response.tasks.first?.isOpen == true)
         #expect(response.tasks.first?.recurrenceRevision == nil, "older servers omit the revision")
+        #expect(response.tasks.first?.context == .computer, "older servers omit the context")
+        #expect(response.settings == nil)
+        #expect(response.routineBlocks == [])
         #expect(response.placements.first?.endAt.timeIntervalSince(response.placements[0].startAt) == 3600)
+    }
+
+    @Test func decodesTheRoutineSettingsContextAndArea() throws {
+        let stamps = #""createdAt":"2026-11-01T00:00:00.000Z","updatedAt":"2026-11-01T00:00:00.000Z","deletedAt":null"#
+        let json = """
+        {
+          "cursor": "c",
+          "settings": {"id":"me","timeZone":"America/Los_Angeles","updatedAt":"2026-11-01T00:00:00.000Z"},
+          "routineBlocks": [{"id":"office-tue","name":"Office","days":[2],"start":"10:15","end":"16:20",
+            "allows":["computer","office"],\(stamps)}],
+          "schedules": [],
+          "categories": [
+            {"id":"eng","name":"Engineering","color":null,"area":"work","scheduleId":"work","sortOrder":1,\(stamps)},
+            {"id":"inbox","name":"Inbox","color":null,"area":null,"scheduleId":"work","sortOrder":0,\(stamps)}],
+          "tasks": [{"id":"t1","categoryId":"inbox","title":"UPS return","notes":null,"durationMinutes":30,
+            "minChunkMinutes":null,"priority":"medium","deadlineType":"none","dueAt":null,"startAt":null,
+            "scheduleId":null,"context":"errand","pinnedStart":null,"completedMinutes":0,"completedAt":null,\(stamps)}],
+          "events": [], "placements": [], "accounts": [], "calendars": []
+        }
+        """
+        let response = try JSONCoding.decoder.decode(SyncResponse.self, from: Data(json.utf8))
+        let at = try #require(JSONCoding.parseInstant("2026-11-01T00:00:00Z"))
+        #expect(response.settings == UserSettings(id: "me", timeZone: "America/Los_Angeles", updatedAt: at))
+        #expect(response.routineBlocks == [RoutineBlock(
+            id: "office-tue", name: "Office", days: [2], start: "10:15", end: "16:20",
+            allows: [.computer, .office], createdAt: at, updatedAt: at)])
+        #expect(response.categories.map { $0.area } == [.work, nil])
+        #expect(response.tasks.first?.context == .errand)
+    }
+
+    @Test func categoryWriteSendsItsAreaAndOmitsAMissingOne() throws {
+        let at = Date(timeIntervalSince1970: 0)
+        func body(area: CategoryArea?) throws -> [String: Any] {
+            let category = TaskCategory(id: "c", name: "Taxes", area: area, scheduleId: "s", createdAt: at, updatedAt: at)
+            let data = try JSONCoding.encoder.encode(CategoryWrite(category))
+            return try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        }
+        #expect(try body(area: .personal)["area"] as? String == "personal")
+        #expect(try body(area: nil)["area"] == nil, "a null would erase the area stored on the server")
     }
 
     @Test func encodesTaskWriteWithNulls() throws {
@@ -53,6 +95,7 @@ import Testing
         let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         #expect(object["priority"] as? String == "asap")
         #expect(object["durationMinutes"] as? Int == 60)
+        #expect(object["context"] as? String == "computer")
         #expect(object["recurrence"] is NSNull, "nil explicitly disables recurrence")
         #expect(object["expectedRecurrenceRevision"] is NSNull, "nil is an explicit concurrency baseline")
         #expect(object["recurrenceRevision"] == nil)

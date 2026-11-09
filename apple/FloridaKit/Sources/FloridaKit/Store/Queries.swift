@@ -4,6 +4,26 @@ import GRDB
 // MARK: - Reads
 
 extension AppDatabase {
+    /// Live routine blocks in the order a week reads: by first weekday (Monday first), then start time.
+    public func routineBlocks() throws -> [RoutineBlock] {
+        try writer.read { db in try Self.routineBlocks(db) }
+    }
+
+    static func routineBlocks(_ db: Database) throws -> [RoutineBlock] {
+        // `days` is JSON text, so the order is computed here; the table holds a handful of rows.
+        func firstDay(_ block: RoutineBlock) -> Int {
+            block.days.map { ($0 + 6) % 7 }.min() ?? 7
+        }
+        return try RoutineBlock.filter(Column("deletedAt") == nil).fetchAll(db).sorted {
+            (firstDay($0), $0.start, $0.id) < (firstDay($1), $1.start, $1.id)
+        }
+    }
+
+    /// The server's settings row; nil until the first sync with a seeded server.
+    public func userSettings() throws -> UserSettings? {
+        try writer.read { db in try UserSettings.fetchOne(db) }
+    }
+
     /// Live schedules, by name.
     public func schedules() throws -> [Schedule] {
         try writer.read { db in
@@ -263,6 +283,7 @@ extension AppDatabase {
         trackDate("dueAt", \.dueAt)
         trackDate("startAt", \.startAt)
         track("scheduleId", \.scheduleId)
+        track("context", \.context)
         trackDate("pinnedStart", \.pinnedStart)
         track("completedMinutes", \.completedMinutes)
         trackDate("completedAt", \.completedAt)
@@ -370,11 +391,22 @@ extension AppDatabase {
 
 extension AppDatabase {
     /// Merges a `GET /api/sync` response: upserts changed rows, drops tombstoned rows, replaces
-    /// the placement, unscheduled, account and calendar tables, and stores the cursor. Tasks, categories,
+    /// the settings, placement, unscheduled, account and calendar tables, and stores the cursor. Tasks, categories,
     /// schedules and events with a queued local write are left alone; the local version is newer and will be pushed.
     public func apply(_ response: SyncResponse) throws {
         try writer.write { db in
             let pending = try Self.pendingEntityIds(db)
+
+            // The routine and settings are server-owned, so no local write can be newer.
+            for block in response.routineBlocks {
+                if block.deletedAt != nil {
+                    try RoutineBlock.deleteOne(db, id: block.id)
+                } else {
+                    try block.save(db)
+                }
+            }
+            _ = try UserSettings.deleteAll(db)
+            try response.settings?.insert(db)
 
             for schedule in response.schedules where !pending.contains(.init(entity: .schedule, id: schedule.id)) {
                 if schedule.deletedAt != nil {

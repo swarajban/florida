@@ -4,7 +4,16 @@ import GRDB
 // GRDB record conformances for the FloridaCore wire models. The model shapes are the table shapes:
 // every stored property is a column of the same name. Dates use GRDB's default text format
 // ("yyyy-MM-dd HH:mm:ss.SSS" UTC) and `Schedule.windows` is stored as a JSON text column by
-// GRDB's Codable support, as are `CalendarEvent.attendees` and `organizer`. The conformances are retroactive on purpose: FloridaCore stays free of GRDB.
+// GRDB's Codable support, as are `CalendarEvent.attendees` and `organizer` and `RoutineBlock.days`
+// and `allows`. The conformances are retroactive on purpose: FloridaCore stays free of GRDB.
+
+extension RoutineBlock: @retroactive FetchableRecord, @retroactive PersistableRecord {
+    public static let databaseTableName = "routineBlock"
+}
+
+extension UserSettings: @retroactive FetchableRecord, @retroactive PersistableRecord {
+    public static let databaseTableName = "userSettings"
+}
 
 extension Schedule: @retroactive FetchableRecord, @retroactive PersistableRecord {
     public static let databaseTableName = "schedule"

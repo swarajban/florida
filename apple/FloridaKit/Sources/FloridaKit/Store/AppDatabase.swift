@@ -213,6 +213,39 @@ public final class AppDatabase: Sendable {
             try db.execute(sql: "DELETE FROM syncState WHERE key = 'cursor'")
         }
 
+        migrator.registerMigration("v4") { db in
+            // Where a task can be done, and which side of life a category belongs to.
+            try db.alter(table: "task") { t in
+                t.add(column: "context", .text).notNull().defaults(to: TaskContext.computer.rawValue)
+            }
+            try db.alter(table: "category") { t in
+                t.add(column: "area", .text)
+            }
+
+            // The weekly routine; `days` and `allows` are JSON text like `schedule.windows`.
+            try db.create(table: "routineBlock") { t in
+                t.primaryKey("id", .text)
+                t.column("name", .text).notNull()
+                t.column("days", .text).notNull()
+                t.column("start", .text).notNull()
+                t.column("end", .text).notNull()
+                t.column("allows", .text).notNull()
+                t.column("createdAt", .datetime).notNull()
+                t.column("updatedAt", .datetime).notNull()
+                t.column("deletedAt", .datetime)
+            }
+
+            // The server's single settings row, replaced on every sync.
+            try db.create(table: "userSettings") { t in
+                t.primaryKey("id", .text)
+                t.column("timeZone", .text).notNull()
+                t.column("updatedAt", .datetime).notNull()
+            }
+
+            // Contexts, areas and the routine arrive for rows that have not changed recently.
+            try db.execute(sql: "DELETE FROM syncState WHERE key = 'cursor'")
+        }
+
         return migrator
     }
 }

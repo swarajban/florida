@@ -198,14 +198,16 @@ import Testing
         task.dueAt = Fixtures.t0
         task.startAt = Fixtures.t0
         task.scheduleId = "work"
+        task.context = .errand
         task.pinnedStart = Fixtures.t0
         task.recurrence = rule
         try db.saveTask(task, now: Fixtures.t0)
         let body = try queuedBody(db)
         #expect(Set(body.keys) == ["categoryId", "title", "notes", "durationMinutes", "minChunkMinutes", "priority",
-                                   "deadlineType", "dueAt", "startAt", "scheduleId", "pinnedStart", "recurrence",
+                                   "deadlineType", "dueAt", "startAt", "scheduleId", "context", "pinnedStart", "recurrence",
                                    "expectedRecurrenceRevision"])
         #expect(body["expectedRecurrenceRevision"] is NSNull)
+        #expect(body["context"] as? String == "errand")
         #expect(body["durationMinutes"] as? Int == 90 && body["priority"] as? String == "asap")
         #expect(body["dueAt"] as? String == JSONCoding.formatInstant(Fixtures.t0))
     }
