@@ -22,18 +22,45 @@ export class GoogleApiError extends Error {
   constructor(
     readonly status: number,
     readonly body: string,
-    message = `Google API responded ${status}`,
+    message = describeGoogleError(status, body),
   ) {
     super(message)
     this.name = 'GoogleApiError'
   }
 }
 
-/** HTTP 410: the sync token is no longer valid and a full sync is required. */
+/**
+ * HTTP 410 Gone. From `events.list` it means the sync token is no longer valid and a full sync is
+ * required; from a single-event method it means the event has been deleted.
+ */
 export class GoogleGoneError extends GoogleApiError {
   constructor(body: string) {
-    super(410, body, 'Google sync token expired (410 Gone)')
+    super(410, body)
     this.name = 'GoogleGoneError'
+  }
+}
+
+/**
+ * The OAuth token endpoint refused (typically `invalid_grant`: the refresh token was revoked or
+ * expired). Nothing about the request that needed the token was wrong; the account has to be
+ * connected again, so callers keep retrying rather than give the request up.
+ */
+export class GoogleTokenError extends GoogleApiError {
+  constructor(status: number, body: string) {
+    super(status, body)
+    this.name = 'GoogleTokenError'
+  }
+}
+
+/** Google's own message (`{ error: { message } }`) when the body carries one, so clients see why. */
+function describeGoogleError(status: number, body: string): string {
+  const prefix = `Google API responded ${status}`
+  try {
+    const parsed = JSON.parse(body) as { error?: { message?: unknown } }
+    const message = parsed.error?.message
+    return typeof message === 'string' && message !== '' ? `${prefix}: ${message}` : prefix
+  } catch {
+    return prefix
   }
 }
 
@@ -81,6 +108,32 @@ export interface GoogleEvent {
   iCalUID?: string
 }
 
+/**
+ * `start`/`end` as sent to Google: `date` for an all-day event, `dateTime` otherwise. Patch
+ * semantics merge nested objects, so a patch that switches representation sets the other key to
+ * `null`; an event holding both is rejected.
+ */
+export interface GoogleEventTimeWrite {
+  date?: string | null
+  dateTime?: string | null
+}
+
+/** The fields of an event the apps write. On a patch, absent fields keep their value. */
+export interface GoogleEventWrite {
+  /**
+   * Insert only: the id to create the event under (5–1024 base32hex characters), so a retry of a
+   * create whose reply was lost gets 409 instead of a second event. Absent, Google assigns one.
+   */
+  id?: string
+  summary?: string
+  location?: string | null
+  description?: string | null
+  start?: GoogleEventTimeWrite
+  end?: GoogleEventTimeWrite
+  /** Replaced wholesale by Google, so an RSVP re-sends every attendee. */
+  attendees?: GoogleEventAttendee[]
+}
+
 export type ListEventsParams =
   | { syncToken: string; pageToken?: string }
   | { timeMin: string; timeMax: string; pageToken?: string }
@@ -122,7 +175,7 @@ async function tokenRequest(body: Record<string, string>): Promise<Tokens> {
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams(body).toString(),
   })
-  if (!res.ok) throw new GoogleApiError(res.status, await res.text())
+  if (!res.ok) throw new GoogleTokenError(res.status, await res.text())
   const json = (await res.json()) as TokenResponse
   const tokens: Tokens = {
     accessToken: json.access_token,
@@ -233,6 +286,48 @@ export async function stopChannel(accessToken: string, id: string, resourceId: s
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ id, resourceId }),
   })
+}
+
+// Event writes notify guests like the Google Calendar app does: the organizer sees an RSVP, guests
+// see a moved or cancelled meeting. Google warns that `none` can keep events from syncing at all.
+const SEND_UPDATES = 'sendUpdates=all'
+
+function eventsUrl(calendarId: string, eventId?: string): string {
+  const base = `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events`
+  return eventId === undefined ? base : `${base}/${encodeURIComponent(eventId)}`
+}
+
+/** Google's current copy of one event. */
+export function getEvent(accessToken: string, calendarId: string, eventId: string): Promise<GoogleEvent> {
+  return apiFetch<GoogleEvent>(accessToken, eventsUrl(calendarId, eventId))
+}
+
+/** Creates an event; Google assigns the id and returns the full event. */
+export function insertEvent(accessToken: string, calendarId: string, event: GoogleEventWrite): Promise<GoogleEvent> {
+  return apiFetch<GoogleEvent>(accessToken, `${eventsUrl(calendarId)}?${SEND_UPDATES}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(event),
+  })
+}
+
+/** Patches an event (only the given fields change) and returns Google's updated copy. */
+export function patchEvent(
+  accessToken: string,
+  calendarId: string,
+  eventId: string,
+  patch: GoogleEventWrite,
+): Promise<GoogleEvent> {
+  return apiFetch<GoogleEvent>(accessToken, `${eventsUrl(calendarId, eventId)}?${SEND_UPDATES}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  })
+}
+
+/** Deletes an event. Google answers 204; a 404 or 410 means it was already gone. */
+export async function deleteEvent(accessToken: string, calendarId: string, eventId: string): Promise<void> {
+  await apiFetch<void>(accessToken, `${eventsUrl(calendarId, eventId)}?${SEND_UPDATES}`, { method: 'DELETE' })
 }
 
 /**

@@ -17,7 +17,8 @@ import type { Db } from './db/client.js'
 import { INBOX_CATEGORY_ID, categoriesWithExamples, defaultTimeZone, scheduleExists } from './db/queries.js'
 import { calendars, events, googleAccounts, placements, categories, schedules, tasks, unscheduled } from './db/schema.js'
 import type { GoogleAccountRow } from './db/schema.js'
-import { authorizationUrl, exchangeCode } from './google/client.js'
+import { eventBody, softDeleteEvent, upsertEvent } from './events.js'
+import { GoogleApiError, GoogleTokenError, authorizationUrl, exchangeCode } from './google/client.js'
 import type { CalendarSyncService } from './google/sync.js'
 import { mountMcp } from './mcp.js'
 import { softDeleteTask, taskBody, upsertTask } from './tasks.js'
@@ -130,6 +131,10 @@ export function createApp(deps: AppDeps): Hono {
     if (err instanceof ClaudeError) {
       console.error(`[ai] ${c.req.method} ${c.req.path} failed:`, err.message)
       return c.json({ error: `ai request failed: ${err.message}` }, 502)
+    }
+    if (err instanceof GoogleApiError) {
+      console.error(`[google] ${c.req.method} ${c.req.path} failed:`, err.message)
+      return c.json({ error: err.message }, googleStatus(err))
     }
     console.error(`[http] ${c.req.method} ${c.req.path} failed:`, err)
     return c.json({ error: 'internal server error' }, 500)
@@ -245,6 +250,13 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
     return c.json(schedule)
   })
 
+  app.get('/api/events/:id', async (c) => {
+    const id = c.req.param('id')
+    const [event] = await db.select().from(events).where(eq(events.id, id))
+    if (event === undefined) throw notFound(`event ${id}`)
+    return c.json(event)
+  })
+
   app.put('/api/tasks/:id', async (c) => {
     const task = await upsertTask(db, c.req.param('id'), taskBody.parse(await c.req.json()))
     const scheduling = await reschedule()
@@ -350,6 +362,26 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
   })
 
   app.post('/api/schedule/run', async (c) => c.json(await reschedule()))
+
+  // ---- Calendar events (written through to Google) ----------------------------------------------
+
+  // An unknown id creates the event in `calendarId`; a live row is patched with what changed (an
+  // RSVP re-sends the attendee list); a tombstone is 404. The reply holds Google's copy as a later
+  // sync would store it. Google's refusals pass through (see `googleStatus`) and leave the row
+  // untouched, except that an event Google has deleted since the last sync is tombstoned here, so
+  // the client's refetch after the 404 finds the tombstone and drops its optimistic copy.
+  app.put('/api/events/:id', async (c) => {
+    const event = await upsertEvent(db, sync, c.req.param('id'), eventBody.parse(await c.req.json()))
+    const scheduling = await reschedule()
+    if (event.deletedAt !== null) throw notFound(`event ${event.id}`)
+    return c.json({ event, scheduling })
+  })
+
+  app.delete('/api/events/:id', async (c) => {
+    await softDeleteEvent(db, sync, c.req.param('id'))
+    const scheduling = await reschedule()
+    return c.json({ scheduling })
+  })
 
   // ---- AI ---------------------------------------------------------------------------------------
 
@@ -529,6 +561,20 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
 
 function aiNotConfigured(): HTTPException {
   return new HTTPException(503, { message: 'ai is not configured (set ANTHROPIC_API_KEY)' })
+}
+
+/**
+ * How a Google failure reaches the client. A 400, 403 or 404/410 from the Calendar API is Google's
+ * final word on that write: the client drops it and resyncs the row. Everything else (401, 429,
+ * 5xx, a refresh token Google no longer honours) is between this server and Google, so the client
+ * keeps the write and retries later.
+ */
+function googleStatus(err: GoogleApiError): 400 | 403 | 404 | 502 {
+  if (err instanceof GoogleTokenError) return 502
+  if (err.status === 400) return 400
+  if (err.status === 403) return 403
+  if (err.status === 404 || err.status === 410) return 404
+  return 502
 }
 
 function safeEqual(a: string, b: string): boolean {

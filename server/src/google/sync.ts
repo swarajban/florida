@@ -6,15 +6,20 @@ import type { Db } from '../db/client.js'
 import { calendars, events, googleAccounts } from '../db/schema.js'
 import type { CalendarRow, GoogleAccountRow } from '../db/schema.js'
 import {
+  GoogleApiError,
   GoogleGoneError,
+  deleteEvent as deleteGoogleEvent,
+  getEvent as getGoogleEvent,
+  insertEvent,
   listCalendars,
   listEvents,
   mapEvent,
+  patchEvent,
   refreshAccessToken,
   stopChannel,
   watchEvents,
 } from './client.js'
-import type { GoogleCalendarListEntry, ListEventsParams, OAuthConfig, Tokens } from './client.js'
+import type { GoogleCalendarListEntry, GoogleEvent, GoogleEventWrite, ListEventsParams, OAuthConfig, Tokens } from './client.js'
 
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
@@ -33,6 +38,14 @@ export interface CalendarSyncService {
   syncCalendar(calendar: CalendarRow): Promise<void>
   syncAll(): Promise<void>
   ensureAllWatches(): Promise<void>
+  /** Google's current copy of one event of the calendar. */
+  getEvent(calendar: CalendarRow, googleId: string): Promise<GoogleEvent>
+  /** Creates an event in the calendar; Google assigns the id. Returns Google's copy. */
+  createEvent(calendar: CalendarRow, event: GoogleEventWrite): Promise<GoogleEvent>
+  /** Changes only the given fields of an event. Returns Google's updated copy. */
+  updateEvent(calendar: CalendarRow, googleId: string, patch: GoogleEventWrite): Promise<GoogleEvent>
+  /** Deletes an event. Resolves once it is gone, including when Google had already removed it. */
+  deleteEvent(calendar: CalendarRow, googleId: string): Promise<void>
 }
 
 type SyncConfig = Pick<Config, 'GOOGLE_CLIENT_ID' | 'GOOGLE_CLIENT_SECRET' | 'PUBLIC_URL' | 'TOKEN_ENCRYPTION_KEY'>
@@ -255,6 +268,34 @@ export class GoogleSync implements CalendarSyncService {
     for (const calendar of await this.selectedCalendars()) {
       await this.guarded(`watch ${calendar.googleId}`, () => this.ensureWatch(calendar))
     }
+  }
+
+  // ---- Event writes: one Google call each. The rows are owned by the caller (see events.ts). ----
+
+  async getEvent(calendar: CalendarRow, googleId: string): Promise<GoogleEvent> {
+    return getGoogleEvent(await this.tokenFor(calendar), calendar.googleId, googleId)
+  }
+
+  async createEvent(calendar: CalendarRow, event: GoogleEventWrite): Promise<GoogleEvent> {
+    return insertEvent(await this.tokenFor(calendar), calendar.googleId, event)
+  }
+
+  async updateEvent(calendar: CalendarRow, googleId: string, patch: GoogleEventWrite): Promise<GoogleEvent> {
+    return patchEvent(await this.tokenFor(calendar), calendar.googleId, googleId, patch)
+  }
+
+  async deleteEvent(calendar: CalendarRow, googleId: string): Promise<void> {
+    try {
+      await deleteGoogleEvent(await this.tokenFor(calendar), calendar.googleId, googleId)
+    } catch (err) {
+      // 404: Google never had it (or no longer shows it); 410: already deleted. Gone either way.
+      if (err instanceof GoogleApiError && (err.status === 404 || err.status === 410)) return
+      throw err
+    }
+  }
+
+  private async tokenFor(calendar: CalendarRow): Promise<string> {
+    return this.accessTokenFor(await this.accountFor(calendar))
   }
 
   private selectedCalendars(): Promise<CalendarRow[]> {

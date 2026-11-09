@@ -222,6 +222,10 @@ describe('POST /api/ai/parse-task', () => {
     syncCalendar: () => Promise.resolve(),
     syncAll: () => Promise.resolve(),
     ensureAllWatches: () => Promise.resolve(),
+    getEvent: () => Promise.reject(new Error('unused')),
+    createEvent: () => Promise.reject(new Error('unused')),
+    updateEvent: () => Promise.reject(new Error('unused')),
+    deleteEvent: () => Promise.reject(new Error('unused')),
   }
   const reschedule = () => Promise.resolve({ placements: [], unscheduled: [], late: [] })
   const AUTH = { authorization: `Bearer ${config.API_TOKEN}`, 'content-type': 'application/json' }
@@ -354,6 +358,10 @@ describe('POST /api/ai/suggest-category', () => {
     syncCalendar: () => Promise.resolve(),
     syncAll: () => Promise.resolve(),
     ensureAllWatches: () => Promise.resolve(),
+    getEvent: () => Promise.reject(new Error('unused')),
+    createEvent: () => Promise.reject(new Error('unused')),
+    updateEvent: () => Promise.reject(new Error('unused')),
+    deleteEvent: () => Promise.reject(new Error('unused')),
   }
   const reschedule = () => Promise.resolve({ placements: [], unscheduled: [], late: [] })
   const config: Config = {

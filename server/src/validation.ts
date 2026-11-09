@@ -45,6 +45,10 @@ export function badRequest(message: string): HTTPException {
   return new HTTPException(400, { message })
 }
 
+export function forbidden(message: string): HTTPException {
+  return new HTTPException(403, { message })
+}
+
 export function notFound(what: string): HTTPException {
   return new HTTPException(404, { message: `${what} not found` })
 }

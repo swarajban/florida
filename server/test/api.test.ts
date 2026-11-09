@@ -7,6 +7,9 @@ import { createApp } from '../src/app.js'
 import { ChangeBus } from '../src/changes.js'
 import type { Db } from '../src/db/client.js'
 import { calendars, categories, events, googleAccounts } from '../src/db/schema.js'
+import type { EventBody } from '../src/events.js'
+import { GoogleApiError, GoogleGoneError, GoogleTokenError, mapEvent } from '../src/google/client.js'
+import type { GoogleEvent, GoogleEventAttendee } from '../src/google/client.js'
 import { runScheduling } from '../src/scheduling.js'
 import { seed } from '../src/seed.js'
 import { createTestDb } from './db.js'
@@ -674,5 +677,409 @@ describe('change events', () => {
 
   it('requires the bearer token like every other /api route', async () => {
     expect((await app.request('/api/events')).status).toBe(401)
+  })
+})
+
+describe('calendar event writes', () => {
+  const start = new Date(Date.now() + 3 * 86_400_000)
+  start.setUTCMinutes(0, 0, 0)
+  const end = new Date(start.getTime() + 3_600_000)
+  const day = start.toISOString().slice(0, 10)
+  const nextDay = new Date(start.getTime() + 86_400_000).toISOString().slice(0, 10)
+  const write: EventBody = {
+    calendarId: 'cal-rw',
+    summary: 'Dentist',
+    location: 'Main St',
+    description: null,
+    startAt: start.toISOString(),
+    endAt: end.toISOString(),
+    allDay: false,
+    responseStatus: null,
+  }
+  /** The body that matches ev-1's stored state; tests that change ev-1 update it. */
+  let ev1 = { ...write }
+  let notices = 0
+  let unsubscribe = () => {}
+  const noScheduling = { placements: [], unscheduled: [], late: [] }
+
+  beforeAll(async () => {
+    await db.insert(googleAccounts).values({ id: 'acc-ev', email: 'ev@example.com', label: 'ev', refreshTokenEnc: 'opaque' })
+    await db.insert(calendars).values([
+      { id: 'cal-rw', accountId: 'acc-ev', googleId: 'ev@example.com', summary: 'Mine', accessRole: 'owner' },
+      { id: 'cal-ro', accountId: 'acc-ev', googleId: 'en.usa#holiday@group.v.calendar.google.com', summary: 'Holidays', accessRole: 'reader' },
+      { id: 'cal-off', accountId: 'acc-ev', googleId: 'team@group.calendar.google.com', summary: 'Team', accessRole: 'writer', selected: false },
+    ])
+    fake.eventWrites = []
+    unsubscribe = changes.subscribe(() => {
+      notices += 1
+    })
+  })
+
+  afterAll(() => unsubscribe())
+
+  it('PUT with a new id creates the event on Google and stores it under the client id', async () => {
+    const before = notices
+    const res = await api('/api/events/ev-1', { method: 'PUT', json: write })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { event: Record<string, unknown>; scheduling: unknown }
+    expect(body.scheduling).toEqual(noScheduling)
+    expect(notices).toBe(before + 1)
+    expect(body.event).toMatchObject({
+      id: 'ev-1',
+      calendarId: 'cal-rw',
+      googleId: 'g-1',
+      status: 'confirmed',
+      summary: 'Dentist',
+      location: 'Main St',
+      description: null,
+      startAt: start.toISOString(),
+      endAt: end.toISOString(),
+      allDay: false,
+      responseStatus: null,
+      htmlLink: 'https://www.google.com/calendar/event?eid=g-1',
+      attendees: null,
+      deletedAt: null,
+    })
+    expect(fake.eventWrites).toEqual([
+      {
+        method: 'insert',
+        calendarId: 'ev@example.com',
+        body: { summary: 'Dentist', location: 'Main St', start: { dateTime: start.toISOString() }, end: { dateTime: end.toISOString() } },
+      },
+    ])
+    // The reply is the row exactly as /api/sync and GET /api/events/:id serialize it.
+    const synced = (await (await api('/api/sync')).json()) as { events: { id: string }[] }
+    expect(synced.events.find((e) => e.id === 'ev-1')).toEqual(body.event)
+    expect(await (await api('/api/events/ev-1')).json()).toEqual(body.event)
+  })
+
+  it('keeps the client id when a sync already stored the Google event under its own id', async () => {
+    const googleId = `g-${fake.nextGoogleId}`
+    await db
+      .insert(events)
+      .values({ id: 'raced-row', calendarId: 'cal-rw', googleId, status: 'confirmed', allDay: false, startAt: start, endAt: end })
+    const res = await api('/api/events/ev-2', { method: 'PUT', json: { ...write, summary: 'Raced' } })
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { event: { googleId: string } }).event.googleId).toBe(googleId)
+    const rows = await db.select({ id: events.id }).from(events).where(eq(events.googleId, googleId))
+    expect(rows).toEqual([{ id: 'ev-2' }])
+  })
+
+  it('a UUID id is also the Google id, so a retried create finds the first attempt (409) instead of duplicating it', async () => {
+    const id = '6F9619FF-8B86-D011-B42D-00C04FC964FF'
+    const googleId = '6f9619ff8b86d011b42d00c04fc964ff'
+    fake.eventWrites = []
+    const res = await api(`/api/events/${id}`, { method: 'PUT', json: { ...write, summary: 'Retried' } })
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { event: { id: string; googleId: string } }).event).toMatchObject({ id, googleId })
+    expect(fake.eventWrites).toEqual([expect.objectContaining({ method: 'insert', body: expect.objectContaining({ id: googleId }) })])
+
+    // Google's reply (or the row written from it) was lost: the client retries the same PUT.
+    await db.delete(events).where(eq(events.id, id))
+    const googleCount = fake.googleEvents.size
+    fake.eventWrites = []
+    const retry = await api(`/api/events/${id}`, { method: 'PUT', json: { ...write, summary: 'Retried' } })
+    expect(retry.status).toBe(200)
+    const { event } = (await retry.json()) as { event: { id: string; googleId: string; summary: string } }
+    expect(event).toMatchObject({ id, googleId, summary: 'Retried' })
+    expect(fake.eventWrites).toEqual([])
+    expect(fake.googleEvents.size).toBe(googleCount)
+    expect(await db.select({ id: events.id }).from(events).where(eq(events.googleId, googleId))).toEqual([{ id }])
+  })
+
+  it("PUT on a live row patches only the changed fields and returns Google's copy", async () => {
+    const before = (await (await api('/api/events/ev-1')).json()) as { updatedAt: string }
+    fake.eventWrites = []
+    ev1 = { ...ev1, summary: 'Dentist (moved)', location: null }
+    const res = await api('/api/events/ev-1', { method: 'PUT', json: ev1 })
+    expect(res.status).toBe(200)
+    const { event } = (await res.json()) as { event: { updatedAt: string } }
+    expect(event).toMatchObject({ id: 'ev-1', summary: 'Dentist (moved)', location: null, startAt: start.toISOString(), allDay: false })
+    expect(new Date(event.updatedAt).getTime()).toBeGreaterThan(new Date(before.updatedAt).getTime())
+    expect(fake.eventWrites).toEqual([
+      { method: 'patch', calendarId: 'ev@example.com', googleId: 'g-1', body: { summary: 'Dentist (moved)', location: null } },
+    ])
+  })
+
+  it('moving a timed event sends start and end as dateTime', async () => {
+    fake.eventWrites = []
+    const laterStart = new Date(start.getTime() + 86_400_000)
+    const laterEnd = new Date(end.getTime() + 86_400_000)
+    ev1 = { ...ev1, startAt: laterStart.toISOString(), endAt: laterEnd.toISOString() }
+    const res = await api('/api/events/ev-1', { method: 'PUT', json: ev1 })
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { event: { startAt: string } }).event.startAt).toBe(laterStart.toISOString())
+    expect(fake.eventWrites).toEqual([
+      {
+        method: 'patch',
+        calendarId: 'ev@example.com',
+        googleId: 'g-1',
+        body: { start: { dateTime: laterStart.toISOString() }, end: { dateTime: laterEnd.toISOString() } },
+      },
+    ])
+  })
+
+  it('turning an event all-day sends dates, clears dateTime, and stores UTC midnight; an identical PUT is a no-op', async () => {
+    fake.eventWrites = []
+    ev1 = { ...ev1, startAt: `${day}T00:00:00Z`, endAt: `${nextDay}T00:00:00Z`, allDay: true }
+    const res = await api('/api/events/ev-1', { method: 'PUT', json: ev1 })
+    expect(res.status).toBe(200)
+    const { event } = (await res.json()) as { event: unknown }
+    expect(event).toMatchObject({ allDay: true, startAt: `${day}T00:00:00.000Z`, endAt: `${nextDay}T00:00:00.000Z` })
+    expect(fake.eventWrites).toEqual([
+      {
+        method: 'patch',
+        calendarId: 'ev@example.com',
+        googleId: 'g-1',
+        body: { start: { date: day, dateTime: null }, end: { date: nextDay, dateTime: null } },
+      },
+    ])
+
+    fake.eventWrites = []
+    const again = await api('/api/events/ev-1', { method: 'PUT', json: ev1 })
+    expect(again.status).toBe(200)
+    expect(((await again.json()) as { event: unknown }).event).toEqual(event)
+    expect(fake.eventWrites).toEqual([])
+  })
+
+  it("a changed responseStatus re-sends Google's current attendee list with only the self entry changed", async () => {
+    const attendees: GoogleEventAttendee[] = [
+      { email: 'lead@example.com', organizer: true, responseStatus: 'accepted' },
+      { email: 'ev@example.com', self: true, responseStatus: 'needsAction' },
+      // Invited on Google after our last sync: an RSVP built from our stale copy would drop them.
+      { email: 'new@example.com', optional: true, responseStatus: 'needsAction' },
+    ]
+    const meeting: GoogleEvent = {
+      id: 'g-invite',
+      status: 'confirmed',
+      summary: 'Design review',
+      start: { dateTime: start.toISOString() },
+      end: { dateTime: end.toISOString() },
+      organizer: { email: 'lead@example.com' },
+      attendees,
+    }
+    fake.googleEvents.set('g-invite', meeting)
+    await db.insert(events).values({ id: 'ev-invite', ...mapEvent('cal-rw', { ...meeting, attendees: attendees.slice(0, 2) }) })
+    fake.eventWrites = []
+    const invite = { ...write, summary: 'Design review', location: null, responseStatus: 'accepted' }
+
+    const res = await api('/api/events/ev-invite', { method: 'PUT', json: invite })
+    expect(res.status).toBe(200)
+    expect(fake.eventWrites).toEqual([
+      {
+        method: 'patch',
+        calendarId: 'ev@example.com',
+        googleId: 'g-invite',
+        body: {
+          attendees: [
+            { email: 'lead@example.com', organizer: true, responseStatus: 'accepted' },
+            { email: 'ev@example.com', self: true, responseStatus: 'accepted' },
+            { email: 'new@example.com', optional: true, responseStatus: 'needsAction' },
+          ],
+        },
+      },
+    ])
+    const { event } = (await res.json()) as { event: { responseStatus: string; attendees: { email: string; responseStatus: string }[] } }
+    expect(event.responseStatus).toBe('accepted')
+    expect(event.attendees.map((a) => [a.email, a.responseStatus])).toEqual([
+      ['lead@example.com', 'accepted'],
+      ['ev@example.com', 'accepted'],
+      ['new@example.com', 'needsAction'],
+    ])
+
+    // The same answer again changes nothing, so Google is not called.
+    fake.eventWrites = []
+    expect((await api('/api/events/ev-invite', { method: 'PUT', json: invite })).status).toBe(200)
+    expect(fake.eventWrites).toEqual([])
+
+    // An event the account is not a guest of cannot be answered.
+    const solo = await api('/api/events/ev-1', { method: 'PUT', json: { ...ev1, responseStatus: 'declined' } })
+    expect(solo.status).toBe(400)
+    expect(await solo.json()).toEqual({ error: expect.stringContaining('not a guest') })
+    expect(fake.eventWrites).toEqual([])
+  })
+
+  it("an answer Google already holds (given from another device) is not re-sent; Google's copy is stored", async () => {
+    const meeting: GoogleEvent = {
+      id: 'g-answered',
+      status: 'confirmed',
+      summary: 'Standup',
+      start: { dateTime: start.toISOString() },
+      end: { dateTime: end.toISOString() },
+      attendees: [
+        { email: 'lead@example.com', organizer: true, responseStatus: 'accepted' },
+        { email: 'ev@example.com', self: true, responseStatus: 'declined' },
+      ],
+    }
+    fake.googleEvents.set('g-answered', meeting)
+    // Our row, and the client's, predate the answer.
+    const stale = { ...meeting, attendees: [{ email: 'ev@example.com', self: true, responseStatus: 'needsAction' }] }
+    await db.insert(events).values({ id: 'ev-answered', ...mapEvent('cal-rw', stale) })
+    fake.eventWrites = []
+
+    const body = { ...write, summary: 'Standup', location: null, responseStatus: 'declined' }
+    const res = await api('/api/events/ev-answered', { method: 'PUT', json: body })
+    expect(res.status).toBe(200)
+    expect(fake.eventWrites).toEqual([])
+    const { event } = (await res.json()) as { event: { responseStatus: string; attendees: unknown[] } }
+    expect(event.responseStatus).toBe('declined')
+    expect(event.attendees).toHaveLength(2)
+    const stored = (await (await api('/api/events/ev-answered')).json()) as { responseStatus: string }
+    expect(stored.responseStatus).toBe('declined')
+  })
+
+  it('rejects bad bodies (400), unsynced or read-only calendars (403), and moves between calendars (400)', async () => {
+    fake.eventWrites = []
+    const backwards = await api('/api/events/ev-bad', { method: 'PUT', json: { ...write, endAt: write.startAt } })
+    expect(backwards.status).toBe(400)
+    expect(((await backwards.json()) as { error: string }).error).toBe('validation failed')
+    const sameDay = await api('/api/events/ev-bad', {
+      method: 'PUT',
+      json: { ...write, startAt: `${day}T00:00:00Z`, endAt: `${day}T12:00:00Z`, allDay: true },
+    })
+    expect(sameDay.status).toBe(400)
+    // All-day instants are UTC midnights (the apps convert local days with `AllDayDate.storedInstant`).
+    const localMidnight = await api('/api/events/ev-bad', {
+      method: 'PUT',
+      json: { ...write, startAt: `${day}T08:00:00Z`, endAt: `${nextDay}T08:00:00Z`, allDay: true },
+    })
+    expect(localMidnight.status).toBe(400)
+    expect(await localMidnight.json()).toEqual({
+      error: 'validation failed',
+      issues: [expect.objectContaining({ path: ['startAt'], message: expect.stringContaining('UTC midnight') })],
+    })
+    expect((await api('/api/events/ev-bad', { method: 'PUT', json: { ...write, responseStatus: 'maybe' } })).status).toBe(400)
+    expect((await api('/api/events/ev-bad', { method: 'PUT', json: { ...write, startAt: 'tomorrow' } })).status).toBe(400)
+
+    const unknown = await api('/api/events/ev-bad', { method: 'PUT', json: { ...write, calendarId: 'nope' } })
+    expect(unknown.status).toBe(400)
+    expect(await unknown.json()).toEqual({ error: 'unknown calendarId nope' })
+    const readOnly = await api('/api/events/ev-bad', { method: 'PUT', json: { ...write, calendarId: 'cal-ro' } })
+    expect(readOnly.status).toBe(403)
+    expect(await readOnly.json()).toEqual({ error: expect.stringContaining('read-only') })
+    const unsynced = await api('/api/events/ev-bad', { method: 'PUT', json: { ...write, calendarId: 'cal-off' } })
+    expect(unsynced.status).toBe(403)
+    expect(await unsynced.json()).toEqual({ error: expect.stringContaining('not synced') })
+
+    const moved = await api('/api/events/ev-2', { method: 'PUT', json: { ...write, summary: 'Raced', calendarId: 'cal-ro' } })
+    expect(moved.status).toBe(400)
+    expect(await moved.json()).toEqual({ error: expect.stringContaining('another calendar') })
+
+    expect(fake.eventWrites).toEqual([])
+    const missing = await api('/api/events/ev-bad')
+    expect(missing.status).toBe(404)
+    expect(await missing.json()).toEqual({ error: 'event ev-bad not found' })
+  })
+
+  it("passes Google's 400 and 403 through with its message and leaves the row alone; other failures are 502", async () => {
+    const before = await (await api('/api/events/ev-2')).json()
+    const edit = { ...write, summary: 'Raced again' }
+    fake.nextWriteError = new GoogleApiError(400, JSON.stringify({ error: { code: 400, message: 'Invalid start time.' } }))
+    const invalid = await api('/api/events/ev-2', { method: 'PUT', json: edit })
+    expect(invalid.status).toBe(400)
+    expect(await invalid.json()).toEqual({ error: 'Google API responded 400: Invalid start time.' })
+    expect(await (await api('/api/events/ev-2')).json()).toEqual(before)
+
+    // Editing a meeting someone else organises: Google refuses, and the client drops its edit.
+    fake.nextWriteError = new GoogleApiError(403, JSON.stringify({ error: { message: 'Forbidden' } }))
+    const theirs = await api('/api/events/ev-2', { method: 'PUT', json: edit })
+    expect(theirs.status).toBe(403)
+    expect(await theirs.json()).toEqual({ error: 'Google API responded 403: Forbidden' })
+    expect(await (await api('/api/events/ev-2')).json()).toEqual(before)
+
+    // A failed create stores nothing.
+    fake.nextWriteError = new GoogleApiError(403, JSON.stringify({ error: { message: 'Forbidden' } }))
+    const create = await api('/api/events/ev-never', { method: 'PUT', json: write })
+    expect(create.status).toBe(403)
+    expect(await create.json()).toEqual({ error: 'Google API responded 403: Forbidden' })
+    expect((await api('/api/events/ev-never')).status).toBe(404)
+
+    // Quota, outages and a dead refresh token are the server's to sort out: the client keeps the write.
+    for (const err of [
+      new GoogleApiError(429, JSON.stringify({ error: { message: 'Rate Limit Exceeded' } })),
+      new GoogleApiError(503, '<html>unavailable</html>'),
+      new GoogleTokenError(400, JSON.stringify({ error: 'invalid_grant' })),
+    ]) {
+      fake.nextWriteError = err
+      const res = await api('/api/events/ev-2', { method: 'PUT', json: edit })
+      expect(res.status).toBe(502)
+      expect(await res.json()).toEqual({ error: err.message })
+    }
+    expect(await (await api('/api/events/ev-2')).json()).toEqual(before)
+  })
+
+  it('an event Google deleted since the last sync is tombstoned when an edit or RSVP meets a 404 or 410', async () => {
+    const gone: GoogleEvent = {
+      id: 'g-gone',
+      status: 'confirmed',
+      summary: 'Offsite',
+      start: { dateTime: start.toISOString() },
+      end: { dateTime: end.toISOString() },
+      attendees: [{ email: 'ev@example.com', self: true, responseStatus: 'needsAction' }],
+    }
+    // One row per way Google can answer; none of them exists on the fake's Google any more.
+    const ids = ['ev-gone-404', 'ev-gone-410', 'ev-gone-rsvp']
+    for (const id of ids) await db.insert(events).values({ id, ...mapEvent('cal-rw', { ...gone, id: `g-${id}` }) })
+    const body = { ...write, summary: 'Offsite', location: null }
+    const cursor = ((await (await api('/api/sync')).json()) as { cursor: string }).cursor
+    const expectTombstoned = async (id: string, res: Response) => {
+      expect(res.status).toBe(404)
+      expect(await res.json()).toEqual({ error: `event ${id} not found` })
+      const row = (await (await api(`/api/events/${id}`)).json()) as { deletedAt: string | null }
+      expect(row.deletedAt).toEqual(expect.any(String))
+    }
+
+    const before = notices
+    fake.nextWriteError = new GoogleApiError(404, JSON.stringify({ error: { message: 'Not Found' } }))
+    await expectTombstoned('ev-gone-404', await api('/api/events/ev-gone-404', { method: 'PUT', json: { ...body, summary: 'Moved' } }))
+    expect(notices).toBe(before + 1)
+
+    fake.nextWriteError = new GoogleGoneError(JSON.stringify({ error: { message: 'Resource has been deleted' } }))
+    await expectTombstoned('ev-gone-410', await api('/api/events/ev-gone-410', { method: 'PUT', json: { ...body, summary: 'Moved' } }))
+
+    // An RSVP looks the live attendee list up first; the fake's Google has no such event.
+    const rsvp = await api('/api/events/ev-gone-rsvp', { method: 'PUT', json: { ...body, responseStatus: 'accepted' } })
+    await expectTombstoned('ev-gone-rsvp', rsvp)
+
+    expect(fake.eventWrites.filter((w) => w.method === 'patch' && ids.some((id) => w.googleId === `g-${id}`))).toEqual([])
+    const synced = (await (await api(`/api/sync?since=${encodeURIComponent(cursor)}`)).json()) as { events: { id: string }[] }
+    expect(synced.events.map((e) => e.id).sort()).toEqual(ids)
+  })
+
+  it('DELETE removes the event on Google, tombstones the row and reschedules', async () => {
+    const cursor = ((await (await api('/api/sync')).json()) as { cursor: string }).cursor
+    fake.eventWrites = []
+    const before = notices
+    const res = await api('/api/events/ev-2', { method: 'DELETE' })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ scheduling: noScheduling })
+    expect(notices).toBe(before + 1)
+    expect(fake.eventWrites).toEqual([{ method: 'delete', calendarId: 'ev@example.com', googleId: 'g-2' }])
+    expect(fake.googleEvents.has('g-2')).toBe(false)
+
+    const synced = (await (await api(`/api/sync?since=${encodeURIComponent(cursor)}`)).json()) as {
+      events: { id: string; deletedAt: string | null }[]
+    }
+    expect(synced.events).toEqual([expect.objectContaining({ id: 'ev-2', deletedAt: expect.any(String) })])
+
+    // The tombstone reads back like a task tombstone, rejects writes, and deleting it again is a local no-op.
+    const tombstone = await api('/api/events/ev-2')
+    expect(tombstone.status).toBe(200)
+    expect(((await tombstone.json()) as { deletedAt: string | null }).deletedAt).toEqual(expect.any(String))
+    const put = await api('/api/events/ev-2', { method: 'PUT', json: { ...write, summary: 'Raced' } })
+    expect(put.status).toBe(404)
+    expect(await put.json()).toEqual({ error: 'event ev-2 not found' })
+    fake.eventWrites = []
+    expect((await api('/api/events/ev-2', { method: 'DELETE' })).status).toBe(200)
+    expect(fake.eventWrites).toEqual([])
+
+    const never = await api('/api/events/never-existed', { method: 'DELETE' })
+    expect(never.status).toBe(404)
+    expect(await never.json()).toEqual({ error: 'event never-existed not found' })
+
+    // When Google refuses, the row stays live; the client's refetch of it undoes the local delete.
+    fake.nextWriteError = new GoogleApiError(403, JSON.stringify({ error: { message: 'Forbidden' } }))
+    expect((await api('/api/events/ev-1', { method: 'DELETE' })).status).toBe(403)
+    expect(((await (await api('/api/events/ev-1')).json()) as { deletedAt: string | null }).deletedAt).toBeNull()
   })
 })
