@@ -51,7 +51,7 @@ const STARTER_CATEGORIES: (typeof categories.$inferInsert)[] = [
 ]
 
 /**
- * Upserts the default schedules and the inbox; inserts the settings, the routine, and the starter
+ * Upserts the inbox; inserts the settings, the routine, the legacy schedules and the starter
  * categories when missing, so the user's edits to those survive. Safe to run repeatedly.
  */
 export async function seed(db: Db): Promise<void> {
@@ -61,13 +61,11 @@ export async function seed(db: Db): Promise<void> {
     .insert(routineBlocks)
     .values(SEED_ROUTINE.map((b) => ({ ...b, updatedAt: now })))
     .onConflictDoNothing({ target: routineBlocks.id })
-  for (const s of SEED_SCHEDULES) {
-    const fields = { name: s.name, timeZone: s.timeZone, windows: s.windows, updatedAt: now, deletedAt: null }
-    await db
-      .insert(schedules)
-      .values({ id: s.id, ...fields })
-      .onConflictDoUpdate({ target: schedules.id, set: fields })
-  }
+  // Shipped clients still edit and delete schedules; a re-seed on every deploy must not undo that.
+  await db
+    .insert(schedules)
+    .values(SEED_SCHEDULES.map((s) => ({ ...s, updatedAt: now })))
+    .onConflictDoNothing({ target: schedules.id })
   const inbox = { name: INBOX.name, scheduleId: INBOX.scheduleId, sortOrder: INBOX.sortOrder, updatedAt: now, deletedAt: null }
   await db
     .insert(categories)

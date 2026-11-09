@@ -336,7 +336,9 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
     const fields = {
       name: body.name,
       color: body.color ?? null,
-      area: body.area ?? null,
+      // Older shipped clients omit area (undefined is left out of the insert and the update, so
+      // the stored value survives a rename, recolor or reorder); null explicitly clears it.
+      area: body.area,
       scheduleId: body.scheduleId,
       sortOrder: body.sortOrder ?? 0,
       updatedAt: new Date(),

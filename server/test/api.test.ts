@@ -279,8 +279,13 @@ describe('tasks, sync and tombstones', () => {
     expect(proj.status).toBe(200)
     const catBody = (await proj.json()) as { category: { scheduleId: string; sortOrder: number; area: string | null } }
     expect(catBody.category).toMatchObject({ scheduleId: 'deep', sortOrder: 0, area: 'work' })
+    // A body without `area` (older clients) keeps the stored value; an explicit null clears it.
     const noArea = await api('/api/categories/side', { method: 'PUT', json: { name: 'Side', scheduleId: 'deep' } })
-    expect(((await noArea.json()) as { category: { area: string | null } }).category.area).toBeNull()
+    expect(((await noArea.json()) as { category: { area: string | null } }).category.area).toBe('work')
+    const nullArea = await api('/api/categories/side', { method: 'PUT', json: { name: 'Side', scheduleId: 'deep', area: null } })
+    expect(((await nullArea.json()) as { category: { area: string | null } }).category.area).toBeNull()
+    const fresh = await api('/api/categories/fresh', { method: 'PUT', json: { name: 'Fresh', scheduleId: 'deep' } })
+    expect(((await fresh.json()) as { category: { area: string | null } }).category.area).toBeNull()
     expect((await api('/api/categories/side', { method: 'PUT', json: { name: 'Side', scheduleId: 'deep', area: 'hobby' } })).status).toBe(400)
 
     const cursor = ((await (await api('/api/sync')).json()) as { cursor: string }).cursor

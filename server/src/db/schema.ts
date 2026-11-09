@@ -16,7 +16,9 @@ export const settings = pgTable('settings', {
 
 /**
  * The weekly routine: when each kind of task may be worked on, as wall-clock windows in the
- * settings time zone. Time outside every block (sleep, family, gym) is never scheduled.
+ * settings time zone. Time outside every block (sleep, family, gym) is never scheduled, except
+ * that a task which cannot otherwise make its hard deadline may spill into the scheduler's
+ * overflow window (07:00–23:00) so the deadline is met rather than silently missed.
  */
 export const routineBlocks = pgTable('routine_blocks', {
   id: text('id').primaryKey(),

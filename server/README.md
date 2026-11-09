@@ -94,8 +94,8 @@ The seed creates the settings row (time zone `America/Los_Angeles`), the routine
 09:00–15:30 for computer, errand and home tasks; `office-tue` 10:15–16:20 and `office-wed`
 09:00–16:20 for computer and office tasks), the categories `inbox`, `work` (area `work`) and
 `personal` (area `personal`), and the legacy schedules `work` and `personal` that shipped clients
-still read. Re-seeding resets the legacy schedules and the inbox but never touches the settings,
-the routine, `work` or `personal` once they exist, so your edits to them survive.
+still read. Re-seeding resets the inbox but never touches the settings, the routine, the legacy
+schedules, `work` or `personal` once they exist, so your edits to them survive.
 
 Then open these in a browser, signing in with the matching Google account each time:
 
