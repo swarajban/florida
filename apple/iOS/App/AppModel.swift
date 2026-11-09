@@ -36,6 +36,10 @@ final class AppModel {
     var selectedDay: Date
     var categories: [TaskCategory] = []
     var schedules: [Schedule] = []
+    /// The weekly routine the scheduler places tasks in; read-only here.
+    var routineBlocks: [RoutineBlock] = []
+    /// The server's settings row (the routine's time zone); nil until the first sync.
+    var userSettings: UserSettings?
     var openTasks: [TaskItem] = []
     /// Every scheduler placement, grouped by task; drives the "scheduled at" line of task rows.
     var placementsByTask: [String: [Placement]] = [:]

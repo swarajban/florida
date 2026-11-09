@@ -169,6 +169,7 @@ extension AppModel {
             deadlineType: draft.deadlineType ?? (draft.dueAt == nil ? .none : .soft),
             dueAt: draft.dueAt,
             startAt: draft.startAt,
+            context: draft.context ?? .computer,
             pinnedStart: draft.pinnedStart,
             createdAt: now,
             updatedAt: now)

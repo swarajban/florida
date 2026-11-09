@@ -38,6 +38,10 @@ final class AppModel {
     /// Why the scheduler could not place (all of) a task, by task id.
     private(set) var unscheduledByTask: [String: UnscheduledTask] = [:]
     private(set) var schedules: [Schedule] = []
+    /// The weekly routine the scheduler places tasks in; read-only here.
+    private(set) var routineBlocks: [RoutineBlock] = []
+    /// The server's settings row (the routine's time zone); nil until the first sync.
+    private(set) var userSettings: UserSettings?
     /// Today's events and task blocks for the menu bar, observed for the current day.
     var todayAgenda: DayAgenda?
     /// The current minute; the menu bar title and agenda recompute from it.
@@ -240,6 +244,12 @@ final class AppModel {
             observe(database.observeSchedules()) { model, schedules in
                 model.schedules = schedules
                 model.rebuildLayout()
+            },
+            observe(database.observeRoutineBlocks()) { model, blocks in
+                model.routineBlocks = blocks
+            },
+            observe(database.observeUserSettings()) { model, settings in
+                model.userSettings = settings
             },
             observe(database.observePlacements()) { model, placements in
                 let before = model.gridLayout.slotFrames

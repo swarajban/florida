@@ -22,7 +22,7 @@ struct QuickAddPreview: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if draft.title.isEmpty {
-                Text("Type a title; add 2h, !high, #category, by fri, at 3pm, after mon, // notes")
+                Text("Type a title; add 2h, !high, #category, @errand, by fri, at 3pm, after mon, // notes")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -90,6 +90,9 @@ struct QuickAddPreview: View {
                 text: "#\(unknownHint) → \(category?.name ?? "Inbox")", isDefault: true))
         } else if let category {
             chips.append(Chip(id: "category", symbol: "folder", text: category.name, isDefault: draft.categoryHint == nil))
+        }
+        if let context = draft.context {
+            chips.append(Chip(id: "context", symbol: context.symbolName, text: context.displayName, isDefault: false))
         }
         if let dueAt = draft.dueAt {
             let kind = draft.deadlineType == .hard ? "Due" : "By"

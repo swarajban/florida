@@ -18,6 +18,9 @@ struct QuickAddChip: Identifiable, Hashable {
             chips.append(QuickAddChip(
                 id: "priority", symbol: priority.symbolName, text: priority.displayName, tint: priority.tint))
         }
+        if let context = draft.context {
+            chips.append(QuickAddChip(id: "context", symbol: context.symbolName, text: context.displayName))
+        }
         if let hint = draft.categoryHint {
             if let category = QuickAddTaskBuilder.matchCategory(hint: hint, in: categories) {
                 chips.append(QuickAddChip(id: "category", symbol: "folder.fill", text: category.name, tint: Color.category(category)))

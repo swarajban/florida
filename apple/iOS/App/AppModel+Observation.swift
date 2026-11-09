@@ -8,6 +8,8 @@ extension AppModel {
     func startObserving() {
         observe("categories", { $0.observeCategories() }) { $0.categories = $1 }
         observe("schedules", { $0.observeSchedules() }) { $0.schedules = $1 }
+        observe("the routine", { $0.observeRoutineBlocks() }) { $0.routineBlocks = $1 }
+        observe("settings", { $0.observeUserSettings() }) { $0.userSettings = $1 }
         observe("tasks", { $0.observeOpenTasks() }) { $0.openTasks = $1 }
         observe("the schedule", { $0.observePlacements() }) { model, placements in
             model.placementsByTask = Dictionary(grouping: placements, by: \.taskId)

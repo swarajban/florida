@@ -52,6 +52,15 @@ enum DemoData {
 
         return SyncResponse(
             cursor: now.ISO8601Format(),
+            settings: UserSettings(id: "default", timeZone: zone, updatedAt: now),
+            routineBlocks: [
+                RoutineBlock(
+                    id: "demo-routine-home", name: "Home", days: [1, 4, 5], start: "09:00", end: "15:30",
+                    allows: [.computer, .errand, .home], createdAt: now, updatedAt: now),
+                RoutineBlock(
+                    id: "demo-routine-office", name: "Office", days: [2, 3], start: "09:00", end: "16:20",
+                    allows: [.computer, .office], createdAt: now, updatedAt: now),
+            ],
             schedules: [
                 Schedule(
                     id: workHours, name: "Work hours", timeZone: zone,
@@ -67,10 +76,10 @@ enum DemoData {
             ],
             categories: [
                 TaskCategory(id: inbox, name: "Inbox", scheduleId: workHours, sortOrder: 0, createdAt: now, updatedAt: now),
-                TaskCategory(id: engineering, name: "Work Engineering", color: "#4F46E5", scheduleId: workHours, sortOrder: 1, createdAt: now, updatedAt: now),
-                TaskCategory(id: infosec, name: "Work Infosec", color: "#DC2626", scheduleId: workHours, sortOrder: 2, createdAt: now, updatedAt: now),
-                TaskCategory(id: finance, name: "Personal Finance", color: "#059669", scheduleId: evenings, sortOrder: 3, createdAt: now, updatedAt: now),
-                TaskCategory(id: "demo-home", name: "Home", color: "#CA8A04", scheduleId: evenings, sortOrder: 4, createdAt: now, updatedAt: now),
+                TaskCategory(id: engineering, name: "Work Engineering", color: "#4F46E5", area: .work, scheduleId: workHours, sortOrder: 1, createdAt: now, updatedAt: now),
+                TaskCategory(id: infosec, name: "Work Infosec", color: "#DC2626", area: .work, scheduleId: workHours, sortOrder: 2, createdAt: now, updatedAt: now),
+                TaskCategory(id: finance, name: "Personal Finance", color: "#059669", area: .personal, scheduleId: evenings, sortOrder: 3, createdAt: now, updatedAt: now),
+                TaskCategory(id: "demo-home", name: "Home", color: "#CA8A04", area: .personal, scheduleId: evenings, sortOrder: 4, createdAt: now, updatedAt: now),
             ],
             tasks: [
                 task("demo-task-keys", infosec, "Rotate AWS access keys", minutes: 45, priority: .asap, due: at(1, 12), hard: true),

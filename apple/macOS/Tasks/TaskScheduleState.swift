@@ -72,6 +72,7 @@ struct TaskScheduleState: Hashable {
         case "no_fit_in_horizon": "No free time in the scheduling horizon"
         case "no_fit_before_hard_deadline": "No room before the hard deadline"
         case "unknown_schedule": "Its schedule no longer exists"
+        case "no_allowed_block": "No routine block allows its context"
         default: reason.replacingOccurrences(of: "_", with: " ")
         }
     }

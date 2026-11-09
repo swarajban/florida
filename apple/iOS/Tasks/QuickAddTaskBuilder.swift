@@ -26,8 +26,8 @@ enum QuickAddTaskBuilder {
         return categories.first(where: \.isInbox) ?? categories.first
     }
 
-    /// A new task from the draft: 30 minutes and medium priority unless the text said otherwise,
-    /// a deadline only when a date was parsed, a client-generated lowercase UUID.
+    /// A new task from the draft: 30 minutes, medium priority and the computer context unless the
+    /// text said otherwise, a deadline only when a date was parsed, a client-generated lowercase UUID.
     static func makeTask(from draft: QuickAddDraft, category: TaskCategory, now: Date) -> TaskItem {
         TaskItem(
             id: UUID().uuidString.lowercased(),
@@ -39,6 +39,7 @@ enum QuickAddTaskBuilder {
             deadlineType: draft.dueAt == nil ? .none : (draft.deadlineType ?? .soft),
             dueAt: draft.dueAt,
             startAt: draft.startAt,
+            context: draft.context ?? .computer,
             pinnedStart: draft.pinnedStart,
             createdAt: now,
             updatedAt: now)

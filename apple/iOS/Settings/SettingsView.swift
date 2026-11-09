@@ -92,10 +92,19 @@ struct SettingsView: View {
                             Image(systemName: "clock")
                         }
                     }
+                    NavigationLink {
+                        RoutineView()
+                    } label: {
+                        Label {
+                            LabeledContent("Routine", value: "\(model.routineBlocks.count)")
+                        } icon: {
+                            Image(systemName: "calendar.day.timeline.left")
+                        }
+                    }
                 } header: {
                     Text("Tasks")
                 } footer: {
-                    Text("Categories group tasks (Engineering, Infosec, Finances…) and pick the schedule whose hours they follow. Add as many as you like.")
+                    Text("Categories group tasks (Engineering, Infosec, Finances…); add as many as you like. The routine is the weekly hours tasks are scheduled in.")
                 }
 
                 JoySettingsSection()

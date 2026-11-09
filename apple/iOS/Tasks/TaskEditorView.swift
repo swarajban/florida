@@ -108,6 +108,11 @@ struct TaskEditorView: View {
                             Text(priority.displayName).tag(priority)
                         }
                     }
+                    Picker("Context", selection: $draft.context) {
+                        ForEach(TaskContext.allCases, id: \.self) { context in
+                            Text(context.displayName).tag(context)
+                        }
+                    }
                     Picker("Deadline", selection: $draft.deadlineType) {
                         ForEach(DeadlineType.allCases, id: \.self) { type in
                             Text(type.displayName).tag(type)
