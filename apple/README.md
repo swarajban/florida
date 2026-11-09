@@ -182,9 +182,16 @@ version should change.
 
 The archive is built unsigned. The export step signs it with Apple's
 cloud-managed distribution certificate through the API key, so no development
-profile, registered device, or local certificate is needed. The app icon is
-the single 1024×1024 image in `iOS/Assets.xcassets/AppIcon.appiconset`, which
-App Store Connect requires for every upload.
+profile, registered device, or local certificate is needed. One catch: the
+export keeps only the entitlements it finds in an existing code signature, and
+an unsigned bundle comes out with the profile's defaults, without App Groups,
+so the widgets see no shared store. The workflow therefore ad-hoc signs the
+widget extension and the app inside the archive with the `.entitlements` files
+XcodeGen wrote (`codesign --sign -`), checks that the App Group is in each
+signature, and after the upload checks the export's `DistributionSummary.plist`
+the same way. The app icon is the single 1024×1024 image in
+`iOS/Assets.xcassets/AppIcon.appiconset`, which App Store Connect requires for
+every upload.
 
 ## FloridaCore and FloridaKit
 

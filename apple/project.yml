@@ -84,7 +84,8 @@ targets:
       path: iOS/Florida.entitlements
       properties:
         com.apple.security.application-groups: [group.com.swarajban.florida]
-        aps-environment: development
+        # Add `aps-environment: development` here once the server sends silent pushes; the
+        # App ID then also needs the Push Notifications capability.
 
   FloridaWidgets:
     type: app-extension
