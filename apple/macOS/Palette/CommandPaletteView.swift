@@ -6,6 +6,7 @@ import SwiftUI
 struct CommandPaletteView: View {
     @Environment(AppModel.self) private var model
     @FocusState private var isFieldFocused: Bool
+    @State private var selection: TextSelection?
 
     var body: some View {
         @Bindable var model = model
@@ -25,7 +26,7 @@ struct CommandPaletteView: View {
             HStack(spacing: 10) {
                 Image(systemName: icon)
                     .foregroundStyle(.secondary)
-                TextField(placeholder, text: $model.palette.text)
+                TextField(placeholder, text: $model.palette.text, selection: $selection)
                     .textFieldStyle(.plain)
                     .font(.title3)
                     .focused($isFieldFocused)
@@ -108,6 +109,8 @@ struct CommandPaletteView: View {
             // The overlay's text field must be in the window before it can take focus.
             DispatchQueue.main.async {
                 isFieldFocused = true
+                // Append to command/search prefixes and prefilled dates instead of replacing them.
+                selection = TextSelection(insertionPoint: model.palette.text.endIndex)
             }
         }
         .onChange(of: model.palette.text) {
