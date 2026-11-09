@@ -289,13 +289,48 @@ describe('plan stability', () => {
   })
 
   it.each([
-    [30, '09:30'],
-    [50, '09:20'], // Only ten minutes remain, but the retained end cannot precede now.
-  ])('trims active work with %i completed minutes, never before now', (completedMinutes, end) => {
+    [0, '10:00'], // Twenty unlogged minutes count as worked; forty remain and fit the block.
+    [10, '10:00'], // Ten logged, twenty elapsed: the unlogged ten are credited, forty remain.
+    [30, '09:50'], // Thirty logged covers the elapsed twenty; thirty remain after now.
+    [50, '09:30'], // Ten minutes remain, so the block runs ten minutes past now.
+  ])('with %i completed minutes at 09:20, the active block ends at %s', (completedMinutes, end) => {
     const result = run([task({ id: 'a', completedMinutes })], [], {
       now: at('09:20'), previous: [block('a', '09:00', '10:00')],
     })
     expect(result.placements).toEqual([block('a', '09:00', end)])
+    expect(result.unscheduled).toEqual([])
+  })
+
+  it('does not count minutes logged with Done for now on top of the time elapsed in the block', () => {
+    // Halfway through, the user logs the 30 minutes worked. 30 remain: the block runs to its end.
+    const result = run([task({ id: 'a', completedMinutes: 30 })], [], {
+      now: at('09:30'), previous: [block('a', '09:00', '10:00')],
+    })
+    expect(result.placements).toEqual([block('a', '09:00', '10:00')])
+    expect(result.unscheduled).toEqual([])
+  })
+
+  it('still owes the time of a block that ended without logged progress', () => {
+    const result = run([task({ id: 'a' })], [], {
+      now: at('10:05'), previous: [block('a', '09:00', '10:00')],
+    })
+    expect(result.placements).toEqual([block('a', '10:15', '11:15')])
+  })
+
+  it.each([
+    ['09:30', '09:30'], // Do now at exactly this run's now.
+    ['09:29', '09:30'], // Pinned a minute ago: the scheduler runs just after the pin.
+  ])('yields active work to a task pinned at %s when now is %s', (pinnedAt, nowAt) => {
+    const result = run([task({ id: 'a' }), task({ id: 'p', pinnedStart: at(pinnedAt) })], [], {
+      now: at(nowAt), previous: [block('a', '09:00', '10:00')],
+    })
+    const pinnedEnd = pinnedAt === '09:30' ? '10:30' : '10:29'
+    // Active work yields from now; the pinned block owns the time from its start.
+    expect(result.placements).toEqual([
+      block('a', '09:00', nowAt),
+      { ...block('p', pinnedAt, pinnedEnd), pinned: true },
+      block('a', '10:30', '11:00'),
+    ])
     expect(result.unscheduled).toEqual([])
   })
 

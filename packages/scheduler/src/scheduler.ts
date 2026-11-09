@@ -59,11 +59,13 @@ export function schedule(input: SchedulerInput): SchedulerResult {
 
   const open = input.tasks.filter((t) => remainingMinutes(t) > 0)
 
+  const pinnedSpans: Span[] = []
   for (const task of open) {
     if (task.pinnedStart === undefined) continue
     const start = parseInstant(task.pinnedStart, 'pinnedStart')
     const span = { start, end: start + remainingMinutes(task) * MINUTE }
     placements.push(toPlacement(task.id, span, true))
+    pinnedSpans.push(span)
     busy = addSpan(busy, span)
   }
 
@@ -80,31 +82,41 @@ export function schedule(input: SchedulerInput): SchedulerResult {
   }
 
   // Reserve work already underway before new tasks can claim its time.
-  const active = new Map<string, Span[]>()
+  const active = new Map<string, Retained>()
   for (const task of flexible) {
+    const logged = (task.completedMinutes ?? 0) * MINUTE
     let remaining = remainingMinutes(task) * MINUTE
-    const spans: Span[] = []
+    const retained: Retained = { spans: [], work: 0 }
     const prior = previous.get(task.id) ?? []
     prior.sort((a, b) => a.start - b.start)
     for (const block of prior) {
       if (remaining <= 0 || block.start > now || block.end <= now) continue
-      const span = { start: block.start, end: Math.max(now, Math.min(block.end, block.start + remaining)) }
+      // Time already spent in the block counts as worked unless the logged minutes cover it, so
+      // logging progress mid-block never counts the same minutes twice.
+      const credit = Math.max(0, now - block.start - logged)
+      remaining = Math.max(0, remaining - credit)
+      const span = { start: block.start, end: Math.max(now, Math.min(block.end, now + remaining)) }
       for (const b of busySpans) {
         if (b.end > b.start && b.start > now && b.start < span.end) span.end = b.start
       }
-      spans.push(span)
+      // Pinned work is the user's explicit choice: a flexible block never runs over it.
+      for (const p of pinnedSpans) {
+        if (p.end > now && p.start < span.end) span.end = Math.max(now, p.start)
+      }
+      const ahead = span.end - now
+      retained.spans.push(span)
+      retained.work += credit + ahead
       busy = addSpan(busy, span)
-      remaining = Math.max(0, remaining - (span.end - span.start))
+      remaining -= ahead
     }
-    active.set(task.id, spans)
+    active.set(task.id, retained)
   }
 
   for (const task of flexible) {
     const sched = schedules.get(task.scheduleId)
-    const retained = active.get(task.id) ?? []
-    const remaining = Math.max(0, remainingMinutes(task) * MINUTE - retained.reduce((sum, s) => sum + s.end - s.start, 0))
+    const retained = active.get(task.id) ?? { spans: [], work: 0 }
     const fit: Fit = sched === undefined
-      ? { spans: retained, remaining, busy, hardLimited: false }
+      ? { spans: retained.spans, remaining: Math.max(0, remainingMinutes(task) * MINUTE - retained.work), busy, hardLimited: false }
       : placeTask(task, sched, ctx, busy, previous.get(task.id) ?? [], retained)
     busy = fit.busy
     for (const span of fit.spans) placements.push(toPlacement(task.id, span, false))
@@ -118,7 +130,6 @@ export function schedule(input: SchedulerInput): SchedulerResult {
       })
     }
 
-    if (sched === undefined && fit.spans.length === 0) continue
     const due = effectiveDue(task)
     if (due !== undefined && fit.spans.length > 0) {
       const eta = Math.max(...fit.spans.map((s) => s.end))
@@ -163,28 +174,34 @@ interface Fit {
   hardLimited: boolean
 }
 
+/** In-progress blocks kept from the prior run, and the work (ms) they account for. */
+interface Retained {
+  spans: Span[]
+  /** Elapsed time credited as worked plus the time the kept blocks still cover after `now`. */
+  work: number
+}
+
 function placeTask(
   task: Task,
   sched: Schedule,
   ctx: Context,
   initialBusy: Span[],
   previous: Span[],
-  retained: Span[],
+  retained: Retained,
 ): Fit {
-  const remainingTotal = remainingMinutes(task) * MINUTE
   const minChunk =
     Math.min(task.minChunkMinutes ?? Number.POSITIVE_INFINITY, remainingMinutes(task)) * MINUTE
   const earliest = Math.max(
     ctx.now,
     task.startAt === undefined ? ctx.now : parseInstant(task.startAt, 'startAt'),
-    ...retained.map((span) => span.end),
+    ...retained.spans.map((span) => span.end),
   )
   const hardDue = task.deadlineType === 'hard' ? effectiveDue(task)?.ms : undefined
   const limit = Math.min(ctx.horizonEnd, hardDue ?? Number.POSITIVE_INFINITY)
 
   let busy = initialBusy
-  let remaining = Math.max(0, remainingTotal - retained.reduce((sum, s) => sum + s.end - s.start, 0))
-  const spans: Span[] = [...retained]
+  let remaining = Math.max(0, remainingMinutes(task) * MINUTE - retained.work)
+  const spans: Span[] = [...retained.spans]
 
   for (const span of previous) {
     const duration = span.end - span.start
