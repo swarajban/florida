@@ -18,6 +18,11 @@ struct RoutineView: View {
                         Text(RoutineText.allows(block))
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
+                        if block.optional {
+                            Label(RoutineText.optionalNote, systemImage: "moon.stars")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     .accessibilityElement(children: .combine)
                 }

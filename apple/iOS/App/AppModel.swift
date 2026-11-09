@@ -45,6 +45,8 @@ final class AppModel {
     var placementsByTask: [String: [Placement]] = [:]
     /// The scheduler's unplaced remainders, by task id.
     var unscheduledByTask: [String: UnscheduledTask] = [:]
+    /// The scheduler's suggestions for optional routine blocks (weekday evenings), by start.
+    var optionalPlacements: [OptionalPlacement] = []
     /// Events and task blocks of `selectedDay`; nil until the first observation fires.
     var agenda: DayAgenda?
     var accounts: [GoogleAccount] = []

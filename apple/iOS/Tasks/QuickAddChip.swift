@@ -32,14 +32,14 @@ struct QuickAddChip: Identifiable, Hashable {
             let hard = draft.deadlineType == .hard
             chips.append(QuickAddChip(
                 id: "due",
-                symbol: hard ? "calendar.badge.exclamationmark" : "calendar",
-                text: "\(hard ? "Due" : "By") \(Formatting.dayAndTime(dueAt, now: now, calendar: calendar))",
+                symbol: hard ? "calendar.badge.clock" : "calendar",
+                text: "\(hard ? "Due" : "By") \(Formatting.due(dueAt, now: now, calendar: calendar))",
                 tint: hard ? .red : .secondary))
         }
         if let startAt = draft.startAt {
             chips.append(QuickAddChip(
                 id: "start", symbol: "arrow.right.to.line",
-                text: "After \(Formatting.dayAndTime(startAt, now: now, calendar: calendar))"))
+                text: "After \(Formatting.notBefore(startAt, now: now, calendar: calendar))"))
         }
         if let pinnedStart = draft.pinnedStart {
             chips.append(QuickAddChip(

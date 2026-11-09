@@ -5,12 +5,18 @@ import SwiftUI
 /// with Save (or Mark done / Reopen, which also save); Cancel discards. In create mode (`isNew`,
 /// from the + button or an AI parse) the same form adds the task, and an AI parse's rationale
 /// shows on top for review.
+///
+/// Due and Not before are whole days; "Add a time" shows a clock for the rare task that needs one
+/// (see `TaskDay` for what a day without a time stores).
 struct TaskEditorView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var draft: TaskItem
     @State private var confirmingDelete = false
     @State private var saveError: String?
+    /// The "Add a time" switches once the user has touched them; until then each follows its date.
+    @State private var dueTimeChoice: Bool?
+    @State private var startTimeChoice: Bool?
     @FocusState private var titleFocused: Bool
     private let original: TaskItem
     private let isNew: Bool
@@ -119,14 +125,22 @@ struct TaskEditorView: View {
                         }
                     }
                     if draft.deadlineType != .none {
-                        DatePicker("Due", selection: dueAt, displayedComponents: [.date, .hourAndMinute])
+                        DatePicker("Due", selection: dueAt, displayedComponents: .date)
+                        Toggle("Add a time", isOn: hasDueTime)
+                        if hasDueTime.wrappedValue {
+                            DatePicker("Due time", selection: dueAt, displayedComponents: .hourAndMinute)
+                        }
                     }
                 }
 
                 Section {
                     Toggle("Earliest start", isOn: hasStart)
                     if draft.startAt != nil {
-                        DatePicker("Not before", selection: startAt, displayedComponents: [.date, .hourAndMinute])
+                        DatePicker("Not before", selection: startAt, displayedComponents: .date)
+                        Toggle("Add a time", isOn: hasStartTime)
+                        if hasStartTime.wrappedValue {
+                            DatePicker("Not before time", selection: startAt, displayedComponents: .hourAndMinute)
+                        }
                     }
                     Toggle("Pin to a time", isOn: hasPin)
                     if draft.pinnedStart != nil {
@@ -185,6 +199,7 @@ struct TaskEditorView: View {
             .onChange(of: draft.deadlineType) { _, type in
                 if type == .none {
                     draft.dueAt = nil
+                    dueTimeChoice = nil
                 } else if draft.dueAt == nil {
                     draft.dueAt = defaultDueDate
                 }
@@ -200,22 +215,57 @@ struct TaskEditorView: View {
             set: { draft.notes = $0.isEmpty ? nil : $0 })
     }
 
+    /// Both Due pickers. Without a time, a new day keeps the whole-day clock the date already had
+    /// (the date picker carries it over) and anything else becomes the 17:00 default.
     private var dueAt: Binding<Date> {
         Binding(
             get: { draft.dueAt ?? defaultDueDate },
-            set: { draft.dueAt = $0 })
+            set: { date in
+                let calendar = model.calendar
+                let keepsClock = hasDueTime.wrappedValue || !TaskDay.dueHasTime(date, calendar: calendar)
+                draft.dueAt = keepsClock ? date : TaskDay.due(on: date, calendar: calendar)
+            })
+    }
+
+    /// On when the due date carries a time; switching it off puts the date back on its whole day.
+    private var hasDueTime: Binding<Bool> {
+        Binding(
+            get: { dueTimeChoice ?? draft.dueAt.map { TaskDay.dueHasTime($0, calendar: model.calendar) } ?? false },
+            set: { on in
+                dueTimeChoice = on
+                if !on, let dueAt = draft.dueAt {
+                    draft.dueAt = TaskDay.due(on: dueAt, calendar: model.calendar)
+                }
+            })
     }
 
     private var hasStart: Binding<Bool> {
         Binding(
             get: { draft.startAt != nil },
-            set: { draft.startAt = $0 ? (draft.startAt ?? model.calendar.startOfDay(for: Date())) : nil })
+            set: { on in
+                draft.startAt = on ? (draft.startAt ?? TaskDay.notBefore(on: Date(), calendar: model.calendar)) : nil
+                if !on {
+                    startTimeChoice = nil
+                }
+            })
     }
 
+    /// Both Not before pickers; without a time the date is the start of its day.
     private var startAt: Binding<Date> {
         Binding(
             get: { draft.startAt ?? Date() },
-            set: { draft.startAt = $0 })
+            set: { draft.startAt = hasStartTime.wrappedValue ? $0 : TaskDay.notBefore(on: $0, calendar: model.calendar) })
+    }
+
+    private var hasStartTime: Binding<Bool> {
+        Binding(
+            get: { startTimeChoice ?? draft.startAt.map { TaskDay.notBeforeHasTime($0, calendar: model.calendar) } ?? false },
+            set: { on in
+                startTimeChoice = on
+                if !on, let startAt = draft.startAt {
+                    draft.startAt = TaskDay.notBefore(on: startAt, calendar: model.calendar)
+                }
+            })
     }
 
     private var hasPin: Binding<Bool> {
@@ -247,11 +297,11 @@ struct TaskEditorView: View {
             : draft.recurrence?.validationMessage
     }
 
-    /// Tomorrow at 17:00, matching the quick-add parser's default clock for deadlines.
+    /// Tomorrow, with no time of its own.
     private var defaultDueDate: Date {
         let calendar = model.calendar
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: Date())) ?? Date()
-        return calendar.date(bySettingHour: 17, minute: 0, second: 0, of: tomorrow) ?? tomorrow
+        return TaskDay.due(on: tomorrow, calendar: calendar)
     }
 
     /// The next whole hour from now.

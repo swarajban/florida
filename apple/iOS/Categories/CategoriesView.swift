@@ -38,7 +38,7 @@ struct CategoriesView: View {
                 }
             } footer: {
                 if others.isEmpty {
-                    Text("Add categories such as Work or Personal; each one follows a schedule's hours.")
+                    Text("Add a category for each project or area, such as Engineering or Finances.")
                 }
             }
         }
@@ -95,11 +95,11 @@ struct CategoriesView: View {
         .accessibilityHint("Edits the category")
     }
 
-    /// "Work hours · 4 open tasks".
+    /// "Work · 4 open tasks"; a category with no area shows the count alone.
     private func subtitle(_ category: TaskCategory) -> String {
-        let schedule = model.schedule(id: category.scheduleId)?.name ?? "Unknown schedule"
         let count = model.openTasks.filter { $0.categoryId == category.id }.count
-        return "\(schedule) · \(count) open \(count == 1 ? "task" : "tasks")"
+        let tasks = "\(count) open \(count == 1 ? "task" : "tasks")"
+        return category.area.map { "\($0.displayName) · \(tasks)" } ?? tasks
     }
 }
 

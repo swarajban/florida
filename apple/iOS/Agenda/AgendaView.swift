@@ -6,7 +6,8 @@ import SwiftUI
 /// Swipe the strip to move a week, swipe the list or grid to move a day, tap the day heading for
 /// a month grid, pull to sync. The toolbar adds tasks and events and picks which calendars show.
 /// Today also shows the current block's progress, free gaps, finished blocks as ghosts and
-/// "Day cleared", each behind a `JoySetting`.
+/// "Day cleared", each behind a `JoySetting`. Under the list, a day with an optional routine block
+/// shows what the scheduler would do in it ("Evening, if you're up for it").
 struct AgendaView: View {
     @Environment(AppModel.self) private var model
     @State private var editingTask: TaskItem?
@@ -132,6 +133,11 @@ struct AgendaView: View {
 
     private var rows: [TimelineRow] {
         TimelineRow.rows(for: items, now: isToday ? now : nil, showsGaps: showsGaps)
+    }
+
+    /// Suggestions for the day's optional routine blocks; not part of the timeline above.
+    private var picks: [OptionalPicks] {
+        model.optionalPicks(on: model.selectedDay, now: now)
     }
 
     /// Today was asked for (the wordmark, a widget) while today's list is already on screen:
@@ -339,13 +345,16 @@ struct AgendaView: View {
                         .transition(.scale.combined(with: .opacity))
                 }
             }
+            ForEach(picks) { group in
+                OptionalPicksSection(group: group, now: now, onEdit: { editingTask = $0 })
+            }
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(FloridaStyle.paper)
         .animation(.snappy, value: model.isDayCleared)
         .overlay {
-            if items.isEmpty && allDayEvents.isEmpty {
+            if items.isEmpty && allDayEvents.isEmpty && picks.isEmpty {
                 ContentUnavailableView(
                     "Nothing scheduled",
                     systemImage: "calendar",

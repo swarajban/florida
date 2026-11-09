@@ -84,15 +84,6 @@ struct SettingsView: View {
                         }
                     }
                     NavigationLink {
-                        SchedulesView()
-                    } label: {
-                        Label {
-                            LabeledContent("Schedules", value: "\(model.schedules.count)")
-                        } icon: {
-                            Image(systemName: "clock")
-                        }
-                    }
-                    NavigationLink {
                         RoutineView()
                     } label: {
                         Label {

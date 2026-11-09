@@ -2,23 +2,24 @@ import FloridaKit
 import Foundation
 import SwiftUI
 
-// Categories and schedules: local-first like tasks. Inbox (`TaskCategory.inboxId`) is permanent
+// Categories: local-first like tasks. Inbox (`TaskCategory.inboxId`) is permanent
 // and keeps its name; the server enforces the same and moves a deleted category's tasks to it.
 
 extension AppModel {
-    /// A new category after the existing ones, with the next free palette color and Inbox's
-    /// schedule (the user's work hours on a fresh server) unless one is given.
+    /// A new category after the existing ones, with the next free palette color. The server still
+    /// wants a `scheduleId` on every category though the routine replaced schedules' hours, so
+    /// the new one takes Inbox's.
     @discardableResult
-    func createCategory(name: String, color: String? = nil, scheduleId: String? = nil) throws -> TaskCategory {
+    func createCategory(name: String, color: String? = nil, area: CategoryArea? = nil) throws -> TaskCategory {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { throw LocalWriteError("Give the category a name.") }
-        guard let scheduleId = scheduleId ?? inbox?.scheduleId ?? schedules.first?.id else {
-            throw LocalWriteError("There are no schedules yet. Sync with the server first.")
+        guard let scheduleId = inbox?.scheduleId ?? schedules.first?.id else {
+            throw LocalWriteError("Nothing has synced yet. Sync with the server first.")
         }
         let now = Date()
         let category = TaskCategory(
             id: UUID().uuidString.lowercased(), name: name,
-            color: color ?? CategoryPalette.nextColor(after: categories), scheduleId: scheduleId,
+            color: color ?? CategoryPalette.nextColor(after: categories), area: area, scheduleId: scheduleId,
             sortOrder: (categories.map(\.sortOrder).max() ?? 0) + 1, createdAt: now, updatedAt: now)
         try perform { try $0.saveCategory(category) }
         return category
@@ -80,49 +81,8 @@ extension AppModel {
 
     // MARK: - Schedules
 
+    /// Legacy rows the server still keeps; only the sync queue names them.
     func schedule(id: String) -> Schedule? {
         schedules.first { $0.id == id }
-    }
-
-    /// Categories (by name) whose tasks follow this schedule.
-    func categoriesUsing(scheduleId: String) -> [TaskCategory] {
-        categories.filter { $0.scheduleId == scheduleId }
-    }
-
-    func saveSchedule(_ schedule: Schedule) throws {
-        var schedule = schedule
-        schedule.name = schedule.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !schedule.name.isEmpty else { throw LocalWriteError("Give the schedule a name.") }
-        guard TimeZone(identifier: schedule.timeZone) != nil else {
-            throw LocalWriteError("\(schedule.timeZone) is not a time zone.")
-        }
-        if let problem = WeeklyHours(windows: schedule.windows).problem {
-            throw LocalWriteError(problem)
-        }
-        try perform { try $0.saveSchedule(schedule) }
-    }
-
-    /// Refuses while a category or task still uses the schedule: their tasks would become
-    /// unschedulable.
-    func deleteSchedule(_ schedule: Schedule) throws {
-        let users = categoriesUsing(scheduleId: schedule.id)
-        if !users.isEmpty {
-            let names = users.map(\.name).formatted(.list(type: .and))
-            throw LocalWriteError("\(names) \(users.count == 1 ? "uses" : "use") this schedule. Pick another schedule for \(users.count == 1 ? "it" : "them") first.")
-        }
-        if openTasks.contains(where: { $0.scheduleId == schedule.id }) {
-            throw LocalWriteError("Some tasks use this schedule directly. Change them first.")
-        }
-        try perform { try $0.deleteSchedule(id: schedule.id) }
-    }
-
-    /// A blank schedule: work hours on weekdays in the device's time zone.
-    func newSchedule() -> Schedule {
-        let now = Date()
-        return Schedule(
-            id: UUID().uuidString.lowercased(), name: "",
-            timeZone: TimeZone.autoupdatingCurrent.identifier,
-            windows: [ScheduleWindow(days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00")],
-            createdAt: now, updatedAt: now)
     }
 }

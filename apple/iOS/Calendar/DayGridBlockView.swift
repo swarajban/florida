@@ -2,7 +2,8 @@ import FloridaKit
 import SwiftUI
 
 /// One block on the grid: an event in its calendar color with the account rim, a task block in
-/// its category color (dashed until pinned), or a ghost. Sized and placed by the parent; shows
+/// its category color (dashed until pinned), a ghost, or a suggestion for an optional routine
+/// block (dotted, barely filled, with a moon). Sized and placed by the parent; shows
 /// the time range when tall enough. `isLifted` draws the copy that follows the finger (opaque;
 /// the parent adds its shadow and scale, so idle blocks carry neither).
 struct DayGridBlockView: View {
@@ -14,7 +15,7 @@ struct DayGridBlockView: View {
     var isLifted = false
 
     private var alpha: Double {
-        block.isDone ? 0.5 : (isPast ? 0.6 : 1)
+        block.isDone ? 0.5 : (isPast || block.isSuggestion ? 0.6 : 1)
     }
 
     var body: some View {
@@ -29,6 +30,10 @@ struct DayGridBlockView: View {
                 Spacer(minLength: 0)
                 if block.isPinned {
                     Image(systemName: "pin.fill")
+                        .font(.system(size: 9))
+                        .padding(.top, 2)
+                } else if block.isSuggestion {
+                    Image(systemName: "moon.stars")
                         .font(.system(size: 9))
                         .padding(.top, 2)
                 }
@@ -55,7 +60,7 @@ struct DayGridBlockView: View {
         .overlay {
             shape.strokeBorder(
                 block.tint.opacity(strokeOpacity),
-                style: StrokeStyle(lineWidth: 1, dash: dashed ? [3, 2] : []))
+                style: StrokeStyle(lineWidth: 1, dash: block.isSuggestion ? [1, 3] : (dashed ? [3, 2] : [])))
         }
         .overlay(alignment: .leading) {
             if let rim = block.rim {
@@ -73,7 +78,8 @@ struct DayGridBlockView: View {
     }
 
     private var fillOpacity: Double {
-        (block.isEvent ? 0.12 : 0.08) * alpha + (isLifted ? 0.1 : 0)
+        if block.isSuggestion { return 0.03 }
+        return (block.isEvent ? 0.12 : 0.08) * alpha + (isLifted ? 0.1 : 0)
     }
 
     private var strokeOpacity: Double {
@@ -86,7 +92,7 @@ struct DayGridBlockView: View {
     }
 
     private var accessibilityLabel: String {
-        var parts = [block.title]
+        var parts = [block.isSuggestion ? "Suggestion: \(block.title)" : block.title]
         if block.isPinned { parts.append("pinned") }
         if block.isDone { parts.append("done") }
         return parts.joined(separator: ", ")

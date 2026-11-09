@@ -1,7 +1,7 @@
 import FloridaKit
 import SwiftUI
 
-/// Sheet to add or edit a category: name, color, and the schedule whose hours its tasks follow.
+/// Sheet to add or edit a category: name, color, and whether it is work or personal.
 /// Inbox keeps its name and cannot be deleted. Errors show in place; nothing waits on the server.
 struct CategoryEditorView: View {
     @Environment(AppModel.self) private var model
@@ -9,7 +9,7 @@ struct CategoryEditorView: View {
     let target: CategoryEditorTarget
     @State private var name: String
     @State private var color: String?
-    @State private var scheduleId: String
+    @State private var area: CategoryArea?
     @State private var saveError: String?
     @State private var deleting: TaskCategory?
 
@@ -19,11 +19,11 @@ struct CategoryEditorView: View {
         case .new:
             _name = State(initialValue: "")
             _color = State(initialValue: nil)
-            _scheduleId = State(initialValue: "")
+            _area = State(initialValue: nil)
         case .edit(let category):
             _name = State(initialValue: category.name)
             _color = State(initialValue: category.color)
-            _scheduleId = State(initialValue: category.scheduleId)
+            _area = State(initialValue: category.area)
         }
     }
 
@@ -51,14 +51,21 @@ struct CategoryEditorView: View {
                     .padding(.vertical, 6)
                 }
 
-                Section {
-                    Picker("Schedule", selection: $scheduleId) {
-                        ForEach(model.schedules) { schedule in
-                            Text(schedule.name).tag(schedule.id)
+                if !isInbox {
+                    Section {
+                        Picker("Area", selection: $area) {
+                            // Offered only until an area is saved: a write without an area leaves
+                            // the server's as it is, so the choice could not be taken back.
+                            if storedArea == nil {
+                                Text("Not set").tag(CategoryArea?.none)
+                            }
+                            ForEach(CategoryArea.allCases, id: \.self) { area in
+                                Text(area.displayName).tag(CategoryArea?.some(area))
+                            }
                         }
+                    } footer: {
+                        Text(CategoryArea.footnote)
                     }
-                } footer: {
-                    Text("The scheduler places this category's tasks only inside these hours. Edit schedules from the Tasks tab.")
                 }
 
                 if case .edit(let category) = target, !category.isInbox {
@@ -92,9 +99,6 @@ struct CategoryEditorView: View {
             .onAppear {
                 if isNew {
                     color = color ?? CategoryPalette.nextColor(after: model.categories)
-                    if scheduleId.isEmpty {
-                        scheduleId = model.inbox?.scheduleId ?? model.schedules.first?.id ?? ""
-                    }
                 }
             }
         }
@@ -107,6 +111,12 @@ struct CategoryEditorView: View {
     private var isInbox: Bool {
         if case .edit(let category) = target { return category.isInbox }
         return false
+    }
+
+    /// The area the category had when the sheet opened; nil for a new one.
+    private var storedArea: CategoryArea? {
+        if case .edit(let category) = target { return category.area }
+        return nil
     }
 
     private func swatchButton(hex: String, name: String) -> some View {
@@ -138,13 +148,13 @@ struct CategoryEditorView: View {
         do {
             switch target {
             case .new:
-                try model.createCategory(name: name, color: color, scheduleId: scheduleId.isEmpty ? nil : scheduleId)
+                try model.createCategory(name: name, color: color, area: area)
             case .edit(let category):
                 // The live row, so a reorder or sync since the sheet opened is kept.
                 var updated = model.category(id: category.id) ?? category
                 updated.name = name
                 updated.color = color
-                updated.scheduleId = scheduleId
+                updated.area = area
                 try model.saveCategory(updated)
             }
             dismiss()

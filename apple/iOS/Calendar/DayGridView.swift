@@ -22,6 +22,8 @@ struct DayGridView: View {
     @State private var layout = DayGridLayout()
     @State private var hourLabels = HourLabels.make(calendar: .autoupdatingCurrent)
     @State private var drag: BlockDrag?
+    /// The suggestion whose block was tapped; its dialog offers to take it.
+    @State private var takingSuggestion: OptionalPicks.Pick?
     /// Set once a horizontal swipe is seen while a block is lifted, so that drag's finger does
     /// not also turn the page when it ends.
     @State private var swipeBlocked = false
@@ -98,8 +100,8 @@ struct DayGridView: View {
         }
         .onChange(of: inputs, initial: true) { _, inputs in
             layout = DayGridLayout.build(
-                days: inputs.days, agendas: inputs.agendas, ghosts: inputs.ghosts, blooming: inputs.blooming,
-                minimumMinutes: inputs.minimumMinutes, calendar: model.calendar,
+                days: inputs.days, agendas: inputs.agendas, ghosts: inputs.ghosts, suggestions: inputs.suggestions,
+                blooming: inputs.blooming, minimumMinutes: inputs.minimumMinutes, calendar: model.calendar,
                 eventStyle: { EventStyle(event: $0, calendars: inputs.calendars, accounts: inputs.accounts) },
                 categoryTint: { id in Color.category(inputs.categories.first { $0.id == id }) })
         }
@@ -180,6 +182,9 @@ struct DayGridView: View {
                     .onTapGesture {
                         open(block)
                     }
+                    .modifier(SuggestionDialog(
+                        block: block, taking: $takingSuggestion, now: now, calendar: model.calendar,
+                        onTake: { model.take($0) }, onEdit: { onEditTask($0.task) }))
             }
             if let drag {
                 let rect = drag.rect(in: geometry)
@@ -204,6 +209,7 @@ struct DayGridView: View {
         var days: [Date]
         var agendas: [DayAgenda]
         var ghosts: [GhostBlock]
+        var suggestions: [OptionalPicks.Pick]
         var blooming: Set<String>
         var categories: [TaskCategory]
         var calendars: [CalendarInfo]
@@ -217,6 +223,7 @@ struct DayGridView: View {
             // Today's finished blocks, on whichever column today is (`visibleGhosts` assumes the
             // selected day is today, which a 3-day grid opened on yesterday breaks).
             ghosts: JoySetting.ghosts.isOn ? model.ghostBlocks : [],
+            suggestions: days.flatMap { model.optionalPicks(on: $0).flatMap(\.picks) },
             blooming: Set(model.blooming.keys), categories: model.categories, calendars: model.calendars,
             accounts: model.accounts, minimumMinutes: DayGridGeometry.minimumMinutes(for: grid))
     }
@@ -288,6 +295,8 @@ struct DayGridView: View {
             if let task = model.task(id: ghost.taskId) {
                 onEditTask(task)
             }
+        case .suggestion(let pick):
+            takingSuggestion = pick
         }
     }
 
@@ -337,7 +346,7 @@ struct DayGridView: View {
         case .event(let event):
             guard model.canEdit(event) else { return }
             model.reschedule(event, start: current.start, end: current.end)
-        case .ghost:
+        case .ghost, .suggestion:
             break
         }
     }
@@ -350,5 +359,35 @@ struct DayGridView: View {
             drag = nil
         }
         swipeBlocked = false
+    }
+}
+
+/// On a suggestion's block: "Do tonight" or edit the task. Attached to the block so the dialog
+/// opens anchored to it (see `Binding.only`); other blocks get nothing.
+private struct SuggestionDialog: ViewModifier {
+    let block: DayGridLayout.Block
+    @Binding var taking: OptionalPicks.Pick?
+    let now: Date
+    let calendar: Calendar
+    let onTake: (OptionalPicks.Pick) -> Void
+    let onEdit: (OptionalPicks.Pick) -> Void
+
+    func body(content: Content) -> some View {
+        if case .suggestion(let pick) = block.item {
+            content.confirmationDialog(
+                pick.task.title, isPresented: $taking.only(pick).isPresent(), titleVisibility: .visible
+            ) {
+                Button(RoutineText.takeTitle(pick.placement, now: now, calendar: calendar)) {
+                    onTake(pick)
+                }
+                Button("Edit Task") {
+                    onEdit(pick)
+                }
+            } message: {
+                Text("Suggested for \(block.timeText). It is not on the plan until you take it.")
+            }
+        } else {
+            content
+        }
     }
 }

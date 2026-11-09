@@ -4,7 +4,7 @@ import SwiftUI
 /// The Tasks tab: quick-add field on top, then Inbox (with its triage count and AI chips) and
 /// every other category, empty ones collapsed to their header. Swipe or long-press a row for its
 /// actions (`TaskActions`, all with Undo), tap to edit, pull to sync. The toolbar adds a task and
-/// opens Categories and Schedules.
+/// opens Categories.
 struct TasksView: View {
     @Environment(AppModel.self) private var model
     @State private var quickAddText = ""
@@ -62,9 +62,6 @@ struct TasksView: View {
                     NavigationLink(value: TasksRoute.categories) {
                         Label("Categories", systemImage: "folder")
                     }
-                    NavigationLink(value: TasksRoute.schedules) {
-                        Label("Schedules", systemImage: "clock")
-                    }
                 } footer: {
                     Text("Add a category for each project or area. Typing #Infosec in quick add files the task there, or offers to create it.")
                 }
@@ -95,27 +92,17 @@ struct TasksView: View {
                     .accessibilityLabel("New task")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button {
-                            path = [.categories]
-                        } label: {
-                            Label("Categories", systemImage: "folder")
-                        }
-                        Button {
-                            path = [.schedules]
-                        } label: {
-                            Label("Schedules", systemImage: "clock")
-                        }
+                    Button {
+                        path = [.categories]
                     } label: {
                         Image(systemName: "folder.badge.gearshape")
                     }
-                    .accessibilityLabel("Categories and schedules")
+                    .accessibilityLabel("Categories")
                 }
             }
             .navigationDestination(for: TasksRoute.self) { route in
                 switch route {
                 case .categories: CategoriesView()
-                case .schedules: SchedulesView()
                 }
             }
             .sheet(item: $editor, onDismiss: clearQuickAddIfAdded) { request in
@@ -162,5 +149,5 @@ struct TasksView: View {
 
 /// Screens pushed from the Tasks tab's toolbar.
 enum TasksRoute: Hashable {
-    case categories, schedules
+    case categories
 }

@@ -11,6 +11,8 @@ struct DayGridLayout: Equatable {
         case event(CalendarEvent)
         case task(ScheduledBlock)
         case ghost(GhostBlock)
+        /// What the scheduler suggests for an optional routine block; not on the plan.
+        case suggestion(OptionalPicks.Pick)
     }
 
     /// A timed block in one day column.
@@ -46,7 +48,12 @@ struct DayGridLayout: Equatable {
             return false
         }
 
-        var canMove: Bool { !isDone && !isGhost }
+        var isSuggestion: Bool {
+            if case .suggestion = item { return true }
+            return false
+        }
+
+        var canMove: Bool { !isDone && !isGhost && !isSuggestion }
 
         /// Minutes the block is drawn as in its column.
         var spanMinutes: Int { endMinute - startMinute }
@@ -76,10 +83,13 @@ struct DayGridLayout: Equatable {
     /// day's blocks under another day's header. Events and placements present in two agendas
     /// (crossing midnight) are laid out once. A task whose `pinnedStart` no placement honours yet
     /// (the pin is local, the scheduler has not run) is drawn as the scheduler will place it: one
-    /// pinned block of its remaining minutes at `pinnedStart`.
+    /// pinned block of its remaining minutes at `pinnedStart`. `suggestions` (optional routine
+    /// blocks) are packed with the rest, so one never hides under an event added since the
+    /// scheduler ran.
     static func build(
-        days: [Date], agendas: [DayAgenda], ghosts: [GhostBlock], blooming: Set<String>, minimumMinutes: Int,
-        calendar: Calendar, eventStyle: (CalendarEvent) -> EventStyle, categoryTint: (String) -> Color
+        days: [Date], agendas: [DayAgenda], ghosts: [GhostBlock], suggestions: [OptionalPicks.Pick] = [],
+        blooming: Set<String>, minimumMinutes: Int, calendar: Calendar,
+        eventStyle: (CalendarEvent) -> EventStyle, categoryTint: (String) -> Color
     ) -> DayGridLayout {
         var layout = DayGridLayout()
         layout.days = days
@@ -163,6 +173,16 @@ struct DayGridLayout: Equatable {
             timed.append(LayoutItem(id: id, start: ghost.start, end: ghost.end))
         }
 
+        for pick in suggestions {
+            let placement = pick.placement
+            let id = "suggestion-\(placement.id)"
+            guard placement.endAt > range.lowerBound, placement.startAt < range.upperBound else { continue }
+            sources[id] = Source(
+                item: .suggestion(pick), start: placement.startAt, end: placement.endAt, title: pick.task.title,
+                tint: categoryTint(pick.task.categoryId), rim: nil, isPinned: false, isDone: false)
+            timed.append(LayoutItem(id: id, start: placement.startAt, end: placement.endAt))
+        }
+
         let rows = AllDayLayout.rows(allDay, days: days, calendar: calendar)
         layout.allDayRowCount = rows.count
         for row in rows {
@@ -213,7 +233,7 @@ struct DayGridLayout: Equatable {
         return summary.isEmpty ? "(No title)" : summary
     }
 
-    /// What a block is made from, keyed by event, placement or ghost id while building.
+    /// What a block is made from, keyed by event, placement, ghost or suggestion id while building.
     private struct Source {
         var item: Item
         var start: Date

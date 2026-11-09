@@ -4,11 +4,13 @@ import Foundation
 
 /// Sample data for screenshot runs (`-demoData YES`): two Google accounts with four calendars,
 /// five categories (Home empty, Inbox with tasks to triage), a day of meetings (with meeting links, guests and a three-day offsite) around
-/// scheduled task blocks, and more blocks tomorrow. All times are relative to `now`, so the Agenda
-/// tab's "today" is always populated.
+/// scheduled task blocks, more blocks tomorrow, and an optional evening block with suggestions for
+/// tonight and tomorrow night. All times are relative to `now`, so the Agenda tab's "today" is
+/// always populated.
 enum DemoData {
     static func syncResponse(now: Date, calendar: Calendar) -> SyncResponse {
         let today = calendar.startOfDay(for: now)
+        let evening = "demo-routine-evening"
         func at(_ dayOffset: Int, _ hour: Int, _ minute: Int = 0) -> Date {
             let day = calendar.date(byAdding: .day, value: dayOffset, to: today) ?? today
             return calendar.date(bySettingHour: hour, minute: minute, second: 0, of: day) ?? day
@@ -24,6 +26,9 @@ enum DemoData {
         }
         func block(_ id: String, _ taskId: String, _ start: Date, _ end: Date) -> Placement {
             Placement(id: id, taskId: taskId, startAt: start, endAt: end, pinned: false, computedAt: now)
+        }
+        func suggestion(_ id: String, _ taskId: String, _ start: Date, _ end: Date) -> OptionalPlacement {
+            OptionalPlacement(id: id, taskId: taskId, blockId: evening, startAt: start, endAt: end, computedAt: now)
         }
         func event(
             _ id: String, _ calendarId: String, _ summary: String, _ start: Date, _ end: Date,
@@ -60,6 +65,10 @@ enum DemoData {
                 RoutineBlock(
                     id: "demo-routine-office", name: "Office", days: [2, 3], start: "09:00", end: "16:20",
                     allows: [.computer, .office], createdAt: now, updatedAt: now),
+                // Every day, unlike the real Mon–Thu block, so a capture on any weekday has suggestions.
+                RoutineBlock(
+                    id: evening, name: "Evening", days: [0, 1, 2, 3, 4, 5, 6], start: "20:00", end: "23:00",
+                    allows: [.computer, .home], optional: true, createdAt: now, updatedAt: now),
             ],
             schedules: [
                 Schedule(
@@ -113,11 +122,18 @@ enum DemoData {
                 block("demo-block-pr", "demo-task-pr", at(0, 10, 15), at(0, 11, 15)),
                 block("demo-block-flaky", "demo-task-flaky", at(0, 13, 30), at(0, 14, 30)),
                 block("demo-block-roadmap-1", "demo-task-roadmap", at(0, 15), at(0, 16)),
-                block("demo-block-taxes", "demo-task-taxes", at(0, 18), at(0, 18, 30)),
                 block("demo-block-roadmap-2", "demo-task-roadmap", at(1, 9), at(1, 10)),
                 block("demo-block-soc2", "demo-task-soc2", at(1, 10), at(1, 11, 30)),
                 block("demo-block-dentist", "demo-task-dentist", at(1, 11, 30), at(1, 11, 45)),
-                block("demo-block-funds", "demo-task-funds", at(1, 18), at(1, 18, 45)),
+                block("demo-block-taxes", "demo-task-taxes", at(1, 14), at(1, 14, 30)),
+                block("demo-block-funds", "demo-task-funds", at(2, 9), at(2, 9, 45)),
+            ],
+            // Personal work first, as the scheduler orders an evening; each task keeps its block above.
+            optionalPlacements: [
+                suggestion("demo-pick-taxes", "demo-task-taxes", at(0, 20), at(0, 20, 30)),
+                suggestion("demo-pick-funds", "demo-task-funds", at(0, 20, 30), at(0, 21, 15)),
+                suggestion("demo-pick-roadmap", "demo-task-roadmap", at(0, 21, 15), at(0, 22, 15)),
+                suggestion("demo-pick-funds-2", "demo-task-funds", at(1, 20), at(1, 20, 45)),
             ],
             accounts: [
                 GoogleAccount(id: "demo-work", email: "swaraj@work.example", label: "work", updatedAt: now),

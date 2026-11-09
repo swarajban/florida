@@ -17,6 +17,7 @@ extension AppModel {
         observe("unscheduled tasks", { $0.observeUnscheduled() }) { model, rows in
             model.unscheduledByTask = Dictionary(rows.map { ($0.taskId, $0) }, uniquingKeysWith: { $1 })
         }
+        observe("suggestions", { $0.observeOptionalPlacements() }) { $0.optionalPlacements = $1 }
         observe("accounts", { $0.observeAccounts() }) { $0.accounts = $1 }
         observe("calendars", { $0.observeCalendars() }) { $0.calendars = $1 }
         observe("pending writes", { $0.observePendingWriteCount() }) { model, _ in model.refreshPendingWrites() }

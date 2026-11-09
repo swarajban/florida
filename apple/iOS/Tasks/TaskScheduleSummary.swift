@@ -59,7 +59,7 @@ struct TaskScheduleSummary: Hashable {
         }
     }
 
-    /// "Today 3:00 PM · 2 blocks", "Late · ETA Fri 3:00 PM", "Overdue · was due Mon 5:00 PM",
+    /// "Today 3:00 PM · 2 blocks", "Late · ETA Fri 3:00 PM", "Overdue · was due Mon",
     /// "Unscheduled".
     func headline(now: Date, calendar: Calendar) -> String {
         switch state {
@@ -74,7 +74,7 @@ struct TaskScheduleSummary: Hashable {
         case .unscheduled:
             return "Unscheduled"
         case .overdue(let dueAt):
-            return "Overdue · was due \(Formatting.dayAndTime(dueAt, now: now, calendar: calendar))"
+            return "Overdue · was due \(Formatting.due(dueAt, now: now, calendar: calendar))"
         }
     }
 

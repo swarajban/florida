@@ -71,6 +71,26 @@ extension AppModel {
             systemImage: "pin.fill", style: .info, undo: TaskUndo(from: previous, to: updated)))
     }
 
+    // MARK: - Optional blocks
+
+    /// What the scheduler suggests for the optional routine blocks of `day` ("Evening, if you're
+    /// up for it"), without tasks that are finishing or already taken.
+    func optionalPicks(on day: Date, now: Date = Date()) -> [OptionalPicks] {
+        guard !optionalPlacements.isEmpty else { return [] }
+        let open = openTasks.filter { blooming[$0.id] == nil }
+        return OptionalPicks.on(
+            day: day, placements: optionalPlacements,
+            tasksById: Dictionary(open.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }),
+            blocksById: Dictionary(routineBlocks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }),
+            now: now, calendar: calendar)
+    }
+
+    /// Takes a suggestion: pins the task where it was suggested, which moves it out of the
+    /// suggestions and onto the plan. The toast offers Undo.
+    func take(_ pick: OptionalPicks.Pick) {
+        pin(pick.task, at: pick.placement.startAt)
+    }
+
     // MARK: - Day cleared
 
     /// Today had task blocks and every one of them is done: struck through, blooming, or a ghost.

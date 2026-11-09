@@ -1,3 +1,4 @@
+import FloridaKit
 import Foundation
 
 /// Small text formatters shared by the agenda and task rows. Everything uses the user's locale
@@ -61,5 +62,20 @@ enum Formatting {
     /// "Today 3:00 PM", "Fri 9:00 AM", "Nov 20 5:00 PM".
     static func dayAndTime(_ date: Date, now: Date, calendar: Calendar) -> String {
         "\(dayLabel(date, now: now, calendar: calendar)) \(time(date))"
+    }
+
+    /// A task's due date: the day alone ("Fri"), or with its time ("Fri 3:00 PM") when the user
+    /// gave it one.
+    static func due(_ dueAt: Date, now: Date, calendar: Calendar) -> String {
+        TaskDay.dueHasTime(dueAt, calendar: calendar)
+            ? dayAndTime(dueAt, now: now, calendar: calendar)
+            : dayLabel(dueAt, now: now, calendar: calendar)
+    }
+
+    /// A task's "not before" date, printed like `due`.
+    static func notBefore(_ startAt: Date, now: Date, calendar: Calendar) -> String {
+        TaskDay.notBeforeHasTime(startAt, calendar: calendar)
+            ? dayAndTime(startAt, now: now, calendar: calendar)
+            : dayLabel(startAt, now: now, calendar: calendar)
     }
 }
