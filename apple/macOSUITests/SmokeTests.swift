@@ -38,7 +38,7 @@ final class SmokeTests: XCTestCase {
 
             // Capture month mode after the text field resigns focus.
             app.typeKey("m", modifierFlags: .shift)
-            XCTAssertEqual(app.radioButtons["Month"].value as? String, "1")
+            XCTAssertEqual((app.radioButtons["Month"].value as? NSNumber)?.intValue, 1)
             capture(window, "month-\(appearance)")
         }
     }

@@ -5,38 +5,33 @@ final class SmokeTests: XCTestCase {
     @MainActor
     func testScreensInBothAppearances() {
         continueAfterFailure = false
-        let originalAppearance = XCUIDevice.shared.appearance
-        defer { XCUIDevice.shared.appearance = originalAppearance }
-        for appearance in [XCUIDevice.Appearance.light, .dark] {
-            XCUIDevice.shared.appearance = appearance
-            let suffix = appearance == .light ? "light" : "dark"
-            let app = launch()
+        for appearance in ["light", "dark"] {
+            let app = launch(appearance: appearance)
             waitForText("Infra offsite", in: app)
-            capture(app, "agenda-\(suffix)")
+            capture(app, "agenda-\(appearance)")
 
             app.tabBars.buttons["Tasks"].tap()
             waitForText("Renew VPN certificate", in: app)
-            capture(app, "tasks-\(suffix)")
+            capture(app, "tasks-\(appearance)")
             app.tabBars.buttons["Settings"].tap()
             waitForText("Save and sync", in: app)
-            capture(app, "settings-\(suffix)")
+            capture(app, "settings-\(appearance)")
             app.terminate()
 
-            let event = launch(sheet: "event")
+            let event = launch(appearance: appearance, sheet: "event")
             let join = event.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Join meeting")).firstMatch
             XCTAssertTrue(join.waitForExistence(timeout: 20))
             waitForText("Design review: scheduler v2", in: event)
-            capture(event, "event-detail-\(suffix)")
+            capture(event, "event-detail-\(appearance)")
             event.terminate()
 
-            let draft = launch(tab: "tasks", sheet: "aitask")
+            let draft = launch(appearance: appearance, tab: "tasks", sheet: "aitask")
             waitForText("How AI read it", in: draft)
             XCTAssertTrue(draft.buttons["Add"].exists)
-            capture(draft, "task-draft-\(suffix)")
+            capture(draft, "task-draft-\(appearance)")
             draft.terminate()
         }
 
-        XCUIDevice.shared.appearance = .light
         let large = launch(largeText: true)
         waitForText("Infra offsite", in: large)
         capture(large, "agenda-large-text")
@@ -47,9 +42,9 @@ final class SmokeTests: XCTestCase {
     }
 
     @MainActor
-    private func launch(tab: String = "agenda", sheet: String? = nil, largeText: Bool = false) -> XCUIApplication {
+    private func launch(appearance: String = "light", tab: String = "agenda", sheet: String? = nil, largeText: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-demoData", "YES", "-uiTab", tab]
+        app.launchArguments = ["-demoData", "YES", "-uiTab", tab, "-uiAppearance", appearance]
         if let sheet { app.launchArguments += ["-uiSheet", sheet] }
         app.launchArguments += [
             "-UIPreferredContentSizeCategoryName",

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// Launch arguments the CI screenshot run passes, as in
 /// `xcrun simctl launch <udid> com.swarajban.florida -demoData YES -uiTab agenda -uiSheet event`.
@@ -29,6 +30,19 @@ enum LaunchOptions {
     static var initialSheet: String? {
         #if DEBUG
         return UserDefaults.standard.string(forKey: "uiSheet")
+        #else
+        return nil
+        #endif
+    }
+
+    /// Deterministic UI-test appearance; normal launches and Release builds follow the device.
+    static var colorScheme: ColorScheme? {
+        #if DEBUG
+        switch UserDefaults.standard.string(forKey: "uiAppearance") {
+        case "light": return .light
+        case "dark": return .dark
+        default: return nil
+        }
         #else
         return nil
         #endif
