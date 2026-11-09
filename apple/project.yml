@@ -41,6 +41,8 @@ schemes:
     test:
       config: Debug
       targets: [Florida-macOSUITests]
+      preferredScreenCaptureFormat: screenRecording
+      deleteScreenshotsWhenEachTestSucceeds: false
     archive:
       config: Release
 

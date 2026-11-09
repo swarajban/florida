@@ -14,11 +14,13 @@ final class SmokeTests: XCTestCase {
             let window = app.windows.firstMatch
             XCTAssertTrue(window.waitForExistence(timeout: 15))
             XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 10))
+            app.buttons["Today"].hover()
             capture(window, "calendar-\(appearance)")
 
             app.typeKey("k", modifierFlags: .command)
             let input = app.textFields.firstMatch
             XCTAssertTrue(input.waitForExistence(timeout: 5))
+            input.hover()
             input.typeText("Write launch notes 30m")
             XCTAssertTrue(app.staticTexts["Write launch notes"].exists)
             capture(window, "quick-add-\(appearance)")

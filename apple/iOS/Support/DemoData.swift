@@ -40,7 +40,7 @@ enum DemoData {
         func utcDay(_ dayOffset: Int) -> Date {
             let local = calendar.dateComponents([.year, .month, .day], from: at(dayOffset, 12))
             var utc = Calendar(identifier: .gregorian)
-            utc.timeZone = EventTiming.utc
+            utc.timeZone = .gmt
             return utc.date(from: local) ?? today
         }
 
