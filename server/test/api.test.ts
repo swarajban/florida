@@ -338,6 +338,41 @@ describe('single-row reads', () => {
   })
 })
 
+describe('unseeded database', () => {
+  it('creates the inbox on the deleted category\'s schedule when deleting a category', async () => {
+    const fresh = await createTestDb()
+    try {
+      const freshApp = createApp({
+        db: fresh.db,
+        config,
+        sync: new FakeSync(),
+        reschedule: () => runScheduling(fresh.db, config),
+        changes: new ChangeBus(),
+      })
+      const call = (path: string, method: string, json?: unknown): Promise<Response> =>
+        freshApp.request(path, {
+          method,
+          headers: { ...AUTH, 'content-type': 'application/json' },
+          ...(json === undefined ? {} : { body: JSON.stringify(json) }),
+        })
+      const schedule = { name: 'Evenings', timeZone: 'America/Los_Angeles', windows: [{ days: [1], start: '18:00', end: '21:00' }] }
+      expect((await call('/api/schedules/evenings', 'PUT', schedule)).status).toBe(200)
+      expect((await call('/api/categories/errands', 'PUT', { name: 'Errands', scheduleId: 'evenings' })).status).toBe(200)
+      expect((await call('/api/tasks/stamps', 'PUT', { ...taskBody, categoryId: 'errands' })).status).toBe(200)
+
+      expect((await call('/api/categories/errands', 'DELETE')).status).toBe(200)
+
+      const rows = Object.fromEntries((await fresh.db.select().from(categories)).map((p) => [p.id, p]))
+      expect(rows.inbox).toMatchObject({ name: 'Inbox', scheduleId: 'evenings', deletedAt: null })
+      expect(rows.errands?.deletedAt).toBeInstanceOf(Date)
+      const task = await (await call('/api/tasks/stamps', 'GET')).json() as { categoryId: string }
+      expect(task.categoryId).toBe('inbox')
+    } finally {
+      await fresh.close()
+    }
+  })
+})
+
 describe('seed', () => {
   it('creates work and personal once and keeps later edits on a re-seed, while the inbox is reset', async () => {
     const fresh = await createTestDb()

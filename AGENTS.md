@@ -26,7 +26,7 @@ pnpm --filter @florida/server db:generate   # after editing server/src/db/schema
 - TypeScript: ESM, relative imports end in `.js`, named exports, 2-space indent, single quotes, no semicolons, trailing commas. Strict settings from `tsconfig.base.json` (`exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`) apply everywhere.
 - Tasks are grouped by `categories` (name, color, and the schedule whose hours apply), not Motion-style projects. The Swift type is `TaskCategory`: a bare `Category` is ambiguous on Apple platforms because the Objective-C runtime exports `typealias Category = OpaquePointer`, and `Label` collides with SwiftUI's view (same reason `Task` is `TaskItem`). Linux builds do not catch Darwin-only name clashes like this; only the Xcode CI jobs do.
 - Dates cross the wire as ISO 8601 strings; the database stores `timestamptz`. Wall-clock schedule windows are "HH:MM" in the schedule's IANA time zone.
-- Derived data is recomputed, not stored, except `placements` (server-side scheduler output, replaced wholesale on each run) which other consumers need.
+- Derived data is recomputed, not stored, except `placements` and `unscheduled` (server-side scheduler output, both replaced wholesale on each run) which other consumers need.
 - Every mutable table has `updated_at` and a `deleted_at` tombstone; sync is `updated_at > since`.
 - Do not add dependencies to `packages/scheduler`. Add server dependencies with `pnpm add` inside `server/`.
 - Swift: 4-space indent, SwiftUI, Swift 6 language mode, swift-testing (`import Testing`) for new tests. Nothing in `FloridaCore` or `FloridaKit` may import SwiftUI/AppKit/UIKit; Darwin-only APIs go behind `#if canImport(...)`. Platform UI lives in the per-target folders.

@@ -295,8 +295,15 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
         .update(categories)
         .set({ deletedAt: now, updatedAt: now })
         .where(eq(categories.id, id))
-        .returning({ id: categories.id })
-      if (rows.length === 0) return false
+        .returning({ id: categories.id, scheduleId: categories.scheduleId })
+      const [row] = rows
+      if (row === undefined) return false
+      // A database that was never seeded has no inbox yet; create it on the deleted category's
+      // schedule rather than orphan the tasks.
+      await tx
+        .insert(categories)
+        .values({ id: INBOX_CATEGORY_ID, name: 'Inbox', scheduleId: row.scheduleId, sortOrder: 0, updatedAt: now })
+        .onConflictDoNothing({ target: categories.id })
       await tx
         .update(tasks)
         .set({ categoryId: INBOX_CATEGORY_ID, updatedAt: now })
