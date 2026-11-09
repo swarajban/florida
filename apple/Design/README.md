@@ -48,7 +48,9 @@ into the two app targets, never into FloridaCore or FloridaKit.
 
 `ios.yml` captures Agenda, Tasks, Settings and detail/editor sheets in light and
 dark appearances, plus large-text Agenda/Tasks. The CI macOS UI smoke test opens
-the real app, adds a task with ⌘K/Return, and captures calendar, quick-add and month
-states in both appearances. Both use the same Debug-only in-memory demo fixture,
-without a sync client or a keychain read. Review the uploaded screenshots; a
-successful build alone does not verify layout or contrast.
+the real app, filters commands with ⌘K, adds a task with c/Return, and captures
+calendar, quick-add and month states in both appearances. Both use the same
+Debug-only in-memory demo fixture, without a sync client or a keychain read.
+The iPhone test waits for visible content and checks tab navigation before
+capturing, rather than relying on a fixed delay after launch. Review the uploaded
+screenshots; a successful build alone does not verify layout or contrast.

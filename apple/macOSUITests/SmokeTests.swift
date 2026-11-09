@@ -21,6 +21,14 @@ final class SmokeTests: XCTestCase {
             let input = app.textFields.firstMatch
             XCTAssertTrue(input.waitForExistence(timeout: 5))
             input.hover()
+            input.typeText("Next day")
+            XCTAssertEqual(input.value as? String, ">Next day")
+            XCTAssertTrue(app.staticTexts["Next day"].exists)
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(input.waitForNonExistence(timeout: 5))
+
+            app.typeKey("c", modifierFlags: [])
+            XCTAssertTrue(input.waitForExistence(timeout: 5))
             input.typeText("Write launch notes 30m")
             XCTAssertTrue(app.staticTexts["Write launch notes"].exists)
             capture(window, "quick-add-\(appearance)")
@@ -29,7 +37,8 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(app.staticTexts["Write launch notes"].waitForExistence(timeout: 5))
 
             // Capture month mode after the text field resigns focus.
-            app.typeKey("m", modifierFlags: [])
+            app.typeKey("m", modifierFlags: .shift)
+            XCTAssertEqual(app.radioButtons["Month"].value as? String, "1")
             capture(window, "month-\(appearance)")
         }
     }

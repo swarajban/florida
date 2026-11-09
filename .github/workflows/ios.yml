@@ -66,55 +66,40 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             | tee build.log | xcbeautify --renderer github-actions
 
-      - name: Screenshots
+      - name: UI smoke test and screenshots
         working-directory: apple
         run: |
-          # -demoData seeds an in-memory store (apple/iOS/Support/DemoData.swift), so no personal
-          # data or server is involved; -uiTab picks the tab; -uiSheet opens a sheet over it
-          # (apple/iOS/Support/LaunchOptions.swift). All are Debug-only launch arguments.
+          set -o pipefail
           xcrun simctl boot "$UDID" || true
           xcrun simctl bootstatus "$UDID" -b
           xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100 --cellularBars 4 || true
-          xcrun simctl install "$UDID" build/Build/Products/Debug-iphonesimulator/Florida.app
-          mkdir -p screenshots
-          shoot() {
-            name=$1; tab=$2; sheet=${3:-}
-            xcrun simctl terminate "$UDID" "$BUNDLE_ID" 2>/dev/null || true
-            xcrun simctl launch "$UDID" "$BUNDLE_ID" -demoData YES -uiTab "$tab" ${sheet:+-uiSheet "$sheet"}
-            sleep 8
-            xcrun simctl io "$UDID" screenshot "screenshots/$name.png"
-          }
-          # The first launch is slow (dyld cache); take it twice.
-          shoot 01-agenda agenda
-          shoot 01-agenda agenda
-          shoot 02-tasks tasks
-          shoot 03-settings settings
-          shoot 06-event-detail agenda event
-          shoot 07-ai-draft tasks aitask
-          xcrun simctl ui "$UDID" appearance dark
-          shoot 04-agenda-dark agenda
-          shoot 05-tasks-dark tasks
-          shoot 08-event-detail-dark agenda event
-          shoot 09-ai-draft-dark tasks aitask
-          shoot 10-settings-dark settings
-          xcrun simctl ui "$UDID" appearance light
-          xcrun simctl ui "$UDID" content_size extra-extra-extra-large
-          shoot 11-agenda-large-text agenda
-          shoot 12-tasks-large-text tasks
-          xcrun simctl ui "$UDID" content_size large
-          # A blank screenshot is either a slow launch or a crash; make crashes loud.
-          crashes=$(ls ~/Library/Logs/DiagnosticReports/ 2>/dev/null | grep -i florida || true)
-          if [ -n "$crashes" ]; then
-            echo "::error::Florida crashed in the simulator: $crashes"
-            for f in $crashes; do head -80 ~/Library/Logs/DiagnosticReports/"$f"; done
-            exit 1
+          # The tests wait for visible demo content, exercise the real tab controls, then
+          # capture light/dark screens and large text. No personal data or server is involved.
+          xcodebuild test \
+            -project Florida.xcodeproj \
+            -scheme Florida-iOS \
+            -configuration Debug \
+            -destination "id=$UDID" \
+            -parallel-testing-enabled NO \
+            -derivedDataPath build \
+            -resultBundlePath ios-ui.xcresult \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            | tee ui-test.log | xcbeautify --renderer github-actions
+
+      - name: Export screenshots
+        if: always()
+        working-directory: apple
+        run: |
+          if [ -d ios-ui.xcresult ]; then
+            xcrun xcresulttool export attachments --path ios-ui.xcresult --output-path screenshots
           fi
 
       - name: Upload screenshots
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: screenshots
-          path: apple/screenshots/*.png
+          path: apple/screenshots/
           if-no-files-found: ignore
 
       - name: Upload build log on failure
@@ -122,7 +107,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-log
-          path: apple/build.log
+          path: apple/*.log
           if-no-files-found: ignore
 
   testflight:

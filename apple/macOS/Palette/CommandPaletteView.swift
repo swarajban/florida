@@ -105,7 +105,10 @@ struct CommandPaletteView: View {
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(FloridaStyle.rule))
         .shadow(color: .black.opacity(0.16), radius: 18, y: 8)
         .onAppear {
-            isFieldFocused = true
+            // The overlay's text field must be in the window before it can take focus.
+            DispatchQueue.main.async {
+                isFieldFocused = true
+            }
         }
         .onChange(of: model.palette.text) {
             model.paletteTextDidChange()

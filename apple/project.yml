@@ -30,6 +30,11 @@ schemes:
         Florida-iOS: all
     run:
       config: Debug
+    test:
+      config: Debug
+      targets: [Florida-iOSUITests]
+      preferredScreenCaptureFormat: screenRecording
+      deleteScreenshotsWhenEachTestSucceeds: false
     archive:
       config: Release
   Florida-macOS:
@@ -132,6 +137,18 @@ targets:
         com.apple.security.app-sandbox: true
         com.apple.security.network.client: true
         com.apple.security.application-groups: [group.com.swarajban.florida]
+
+  Florida-iOSUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [iOSUITests]
+    dependencies:
+      - target: Florida-iOS
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.swarajban.florida.uitests
+        TARGETED_DEVICE_FAMILY: "1"
 
   Florida-macOSUITests:
     type: bundle.ui-testing

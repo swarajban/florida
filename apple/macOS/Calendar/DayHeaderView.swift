@@ -10,7 +10,7 @@ struct DayHeaderView: View {
     var body: some View {
         HStack(spacing: 0) {
             Color.clear
-                .frame(width: gutterWidth)
+                .frame(width: gutterWidth, height: 0)
             ForEach(model.gridLayout.days, id: \.self) { day in
                 let isToday = model.calendar.isDateInToday(day)
                 let isSelected = model.calendar.isDate(day, inSameDayAs: model.selectedDay)

@@ -55,7 +55,7 @@ struct RootView: View {
                 HStack {
                     FloridaWordmark(height: 26)
                     Spacer()
-                    Text("⌘K  Quick add")
+                    Text("⌘K  Commands")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
