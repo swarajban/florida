@@ -104,7 +104,8 @@ struct TasksWidgetView: View {
     }
 }
 
-/// Priority glyph, title, and the due day; the whole row turns red when the task will finish late.
+/// Category color bar, title (heavier for ASAP and High), and the due day; the whole row turns red
+/// when the task will finish late.
 struct TasksWidgetRow: View {
     let task: WidgetTask
     let now: Date
@@ -112,12 +113,11 @@ struct TasksWidgetRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: task.priority.symbolName)
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(task.late ? Color.red : task.priority.tint)
-                .frame(width: 14)
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(task.late ? Color.red : task.tint)
+                .frame(width: 3, height: 12)
             Text(task.title)
-                .font(.caption)
+                .font(.caption.weight(task.priority == .asap || task.priority == .high ? .semibold : .regular))
                 .lineLimit(1)
                 .foregroundStyle(task.late ? Color.red : Color.primary)
             Spacer(minLength: 4)

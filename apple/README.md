@@ -74,13 +74,23 @@ ones:
 | `⌘T`, `g t` / `g c` | toggle the task pane, focus tasks / calendar |
 | `⌘K`, `/` or `⌘F` | command palette (quick add; type `>` for commands), search |
 | `c`, `e` or `↩`, `x`, `space` | new task, edit, delete, complete |
-| `p` / `⇧P`, `s`, `⌘1`–`⌘4` | pin / unpin to its slot, snooze to tomorrow, priority ASAP…low |
+| `p` / `⇧P`, `s`, `⌘1`–`⌘4` | pin / unpin to its slot (on an evening suggestion: do it tonight), snooze to tomorrow, priority ASAP…low |
+| `⇧E`, `r y` / `r m` / `r n` | edit the selected event, RSVP yes / maybe / no |
 | `o`, `⇧⌘C`, `⌘R`, `esc` | open in Google Calendar, copy link, sync now, cancel |
 
 Quick add parses natural language locally (`QuickAddParser`): "infosec review
 2h by fri high #work" sets duration, due date, priority, and category; the
 palette shows the parsed chips before you press return. Double-clicking an
 empty slot opens quick add prefilled with that time as a pinned start.
+
+The scheduler's suggestions for an optional routine block (the evening) sit
+on top of the task pane and as dotted blocks in the grid. They are not on the
+plan: `p` or "Do tonight" pins the task to the suggested time, and a pinned
+task's block moves at once, before the server answers. A due date is a day
+unless "Add a time" is on. Settings → Routine shows the weekly blocks tasks
+are scheduled in; a task's context decides which blocks it may use, and a
+category's Area (Work or Personal) puts personal tasks first in the evening's
+suggestions.
 
 First run: Settings (`⌘,`) → server URL and bearer token (kept in the Keychain),
 then toggle which calendars to show. While open, the app listens to the
@@ -89,9 +99,13 @@ server's `/api/events` stream and also syncs every 60 s.
 ### iOS (`Florida-iOS`)
 
 Three tabs. **Agenda**: a week strip over the day's all-day events, timed
-events, and scheduled task blocks; swipe to change day, pull to refresh.
+events, and scheduled task blocks; swipe to change day, pull to refresh. The
+evening's suggestions follow the day's plan ("Evening, if you're up for it"),
+each with a "Do tonight" button that pins it; in the day grids they are dotted
+blocks.
 **Tasks**: sections per category, a quick-add field with the same parser and
-chips as the Mac app, swipe to complete or delete, tap to edit. **Settings**:
+chips as the Mac app, swipe to complete or delete, tap to edit (due dates are
+a day; "Add a time" is opt-in). **Settings**:
 server URL and token, sync now, run the scheduler, refresh Google calendars,
 and the connected accounts with their calendars. The app syncs on launch, when
 it returns to the foreground, and every two minutes while active; after each
@@ -107,8 +121,8 @@ app (`florida://agenda`, `florida://tasks`):
   next six hours.
 - **Today** (medium, large): what is left today, all-day first; refreshes
   hourly.
-- **Tasks** (small, medium): open tasks in scheduler order with the open count;
-  late tasks in red.
+- **Tasks** (small, medium): open tasks in scheduler order with the open count
+  and each task's category color; late tasks in red.
 
 ## Building and shipping from GitHub Actions (no Mac needed)
 

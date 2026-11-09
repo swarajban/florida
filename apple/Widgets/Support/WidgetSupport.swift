@@ -38,26 +38,6 @@ extension WidgetTask {
     }
 }
 
-extension Priority {
-    /// SF Symbol drawn in front of a task title.
-    var symbolName: String {
-        switch self {
-        case .asap: "exclamationmark.3"
-        case .high: "exclamationmark.2"
-        case .medium: "exclamationmark"
-        case .low: "arrow.down"
-        }
-    }
-
-    var tint: Color {
-        switch self {
-        case .asap: .red
-        case .high: .orange
-        case .medium, .low: .secondary
-        }
-    }
-}
-
 /// Switches the app writes to the App Group defaults (`JoySetting` in the app target).
 enum WidgetSettings {
     /// "Join countdown on the Lock Screen"; on unless turned off.
