@@ -5,6 +5,8 @@ import WidgetKit
 /// The next event or task block (or the one in progress) as of the entry date; medium shows three.
 struct UpNextEntry: TimelineEntry {
     let date: Date
+    /// Whether the Lock Screen form counts down to a meeting's start from two minutes out.
+    var joinCountdown = true
     /// Blocks still running or starting at/after `date`, by start; at most three.
     let blocks: [WidgetBlock]
     /// False when the shared store could not be opened or read.
@@ -40,14 +42,17 @@ struct UpNextProvider: TimelineProvider {
     }
 
     /// One entry now plus one at every block start and end within the next six hours, so the
-    /// widget flips to the next item exactly when the current one ends.
+    /// widget flips to the next item exactly when the current one ends, and one two minutes
+    /// before each meeting with a link, when the Join countdown starts.
     func getTimeline(in context: Context, completion: @escaping (Timeline<UpNextEntry>) -> Void) {
         let now = Date()
         let horizon = now.addingTimeInterval(Self.horizon)
         let loaded = WidgetStore.timedBlocks(in: now..<horizon)
+        let countdown = WidgetSettings.joinCountdown
         var dates: Set<Date> = [now]
         for block in loaded ?? [] {
-            for boundary in [block.start, block.end] where boundary > now && boundary < horizon {
+            let joinAt = block.joinable && countdown ? [block.start.addingTimeInterval(-WidgetBlock.joinLead)] : []
+            for boundary in [block.start, block.end] + joinAt where boundary > now && boundary < horizon {
                 dates.insert(boundary)
             }
         }
@@ -58,7 +63,7 @@ struct UpNextProvider: TimelineProvider {
     static func entry(at date: Date, from loaded: [WidgetBlock]?) -> UpNextEntry {
         guard let loaded else { return UpNextEntry(date: date, blocks: [], available: false) }
         let upcoming = loaded.filter { $0.end > date }.prefix(rowsPerEntry)
-        return UpNextEntry(date: date, blocks: Array(upcoming), available: true)
+        return UpNextEntry(date: date, joinCountdown: WidgetSettings.joinCountdown, blocks: Array(upcoming), available: true)
     }
 }
 
@@ -128,7 +133,10 @@ struct UpNextWidgetView: View {
                 Text(block.title)
                     .font(.headline)
                     .lineLimit(1)
-                if block.isInProgress(at: entry.date) {
+                if entry.joinCountdown && block.isAboutToStart(at: entry.date) {
+                    Text("Join · \(Text(timerInterval: entry.date...block.start, countsDown: true))")
+                        .font(.caption.weight(.semibold).monospacedDigit())
+                } else if block.isInProgress(at: entry.date) {
                     Text("Ends \(Text(block.end, style: .time))")
                         .font(.caption)
                 } else {

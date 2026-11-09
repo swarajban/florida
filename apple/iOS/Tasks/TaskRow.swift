@@ -2,7 +2,8 @@ import FloridaKit
 import SwiftUI
 
 /// One open task in the Tasks list: priority glyph, title, duration, due date, and when the
-/// scheduler put it ("Unscheduled" when it has no placements, red when it will finish late).
+/// scheduler put it. Late and overdue tasks read red; an unscheduled or partly placed task says
+/// why and how much is left out.
 struct TaskRow: View {
     let task: TaskItem
     let summary: TaskScheduleSummary
@@ -16,12 +17,13 @@ struct TaskRow: View {
                 .foregroundStyle(task.priority.tint)
                 .frame(width: 18)
                 .padding(.top, 3)
-                .accessibilityLabel(task.priority.displayName)
+                .accessibilityLabel("\(task.priority.displayName) priority")
             VStack(alignment: .leading, spacing: 3) {
                 Text(task.title)
                     .font(.body)
+                    .foregroundStyle(.primary)
                 HStack(spacing: 6) {
-                    Text(Formatting.duration(minutes: task.durationMinutes))
+                    Text(Formatting.duration(minutes: task.remainingMinutes))
                     if let dueAt = task.dueAt {
                         Text("·")
                         Label(
@@ -31,29 +33,28 @@ struct TaskRow: View {
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                scheduleLine
+                Label(summary.headline(now: now, calendar: calendar), systemImage: summary.symbolName)
+                    .font(.caption)
+                    .foregroundStyle(scheduleStyle)
+                if let detail = summary.detail {
+                    Text(detail)
+                        .font(.caption2)
+                        .foregroundStyle(summary.isAlarming ? AnyShapeStyle(Color.red) : AnyShapeStyle(Color.orange))
+                }
             }
             Spacer(minLength: 0)
         }
         .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
     }
 
-    @ViewBuilder
-    private var scheduleLine: some View {
-        let text = summary.text(now: now, calendar: calendar)
-        switch summary.state {
-        case .unscheduled:
-            Label(text, systemImage: "calendar.badge.minus")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-        case .scheduled:
-            Label(text, systemImage: "calendar.badge.clock")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        case .late:
-            Label("Late · \(text)", systemImage: "exclamationmark.circle.fill")
-                .font(.caption)
-                .foregroundStyle(.red)
+    private var scheduleStyle: AnyShapeStyle {
+        if summary.isAlarming {
+            return AnyShapeStyle(Color.red)
         }
+        if case .unscheduled = summary.state {
+            return AnyShapeStyle(.tertiary)
+        }
+        return AnyShapeStyle(.secondary)
     }
 }

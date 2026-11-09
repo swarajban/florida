@@ -1,27 +1,55 @@
 import FloridaKit
 import SwiftUI
 
-/// Sheet for editing one task. Edits a copy and writes it back with Save (or Complete / Reopen,
-/// which also save); Cancel discards.
+/// Sheet for one task. Editing works on a copy written back with Save (or Complete / Reopen,
+/// which also save); Cancel discards. In create mode (`isNew`, from the + button or an AI parse)
+/// the same form adds the task, and an AI parse's rationale shows on top for review.
 struct TaskEditorView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var draft: TaskItem
     @State private var confirmingDelete = false
+    @State private var saveError: String?
+    @FocusState private var titleFocused: Bool
     private let original: TaskItem
+    private let isNew: Bool
+    private let rationale: String?
 
-    init(task: TaskItem) {
+    init(task: TaskItem, isNew: Bool = false, rationale: String? = nil) {
         original = task
+        self.isNew = isNew
+        self.rationale = rationale
         _draft = State(initialValue: task)
+    }
+
+    init(request: TaskEditorRequest) {
+        self.init(task: request.task, isNew: request.isNew, rationale: request.rationale)
     }
 
     var body: some View {
         NavigationStack {
             Form {
+                if let rationale, !rationale.isEmpty {
+                    Section {
+                        Label(rationale, systemImage: "sparkles")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } header: {
+                        Text("How AI read it")
+                    } footer: {
+                        Text("Check the fields below, then Add.")
+                    }
+                }
                 Section {
                     TextField("Title", text: $draft.title)
+                        .focused($titleFocused)
                     TextField("Notes", text: notes, axis: .vertical)
                         .lineLimit(2...6)
+                } footer: {
+                    if let saveError {
+                        Label(saveError, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                    }
                 }
 
                 Section("Category") {
@@ -70,32 +98,32 @@ struct TaskEditorView: View {
                     Text("A pinned task is placed at exactly that time as one block; otherwise the scheduler picks the time.")
                 }
 
-                Section {
-                    if draft.completedAt == nil {
-                        Button {
-                            draft.completedAt = Date()
-                            draft.completedMinutes = draft.durationMinutes
-                            save()
-                        } label: {
-                            Label("Complete", systemImage: "checkmark.circle")
+                if !isNew {
+                    Section {
+                        if draft.completedAt == nil {
+                            Button {
+                                completeFromEditor()
+                            } label: {
+                                Label("Complete", systemImage: "checkmark.circle")
+                            }
+                        } else {
+                            Button {
+                                draft.completedAt = nil
+                                draft.completedMinutes = 0
+                                save()
+                            } label: {
+                                Label("Reopen", systemImage: "arrow.uturn.backward.circle")
+                            }
                         }
-                    } else {
-                        Button {
-                            draft.completedAt = nil
-                            draft.completedMinutes = 0
-                            save()
+                        Button(role: .destructive) {
+                            confirmingDelete = true
                         } label: {
-                            Label("Reopen", systemImage: "arrow.uturn.backward.circle")
+                            Label("Delete task", systemImage: "trash")
                         }
-                    }
-                    Button(role: .destructive) {
-                        confirmingDelete = true
-                    } label: {
-                        Label("Delete task", systemImage: "trash")
                     }
                 }
             }
-            .navigationTitle("Edit Task")
+            .navigationTitle(isNew ? "New Task" : "Edit Task")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -104,7 +132,7 @@ struct TaskEditorView: View {
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
+                    Button(isNew ? "Add" : "Save") {
                         save()
                     }
                     .disabled(trimmedTitle.isEmpty)
@@ -115,6 +143,9 @@ struct TaskEditorView: View {
                     model.delete(original)
                     dismiss()
                 }
+            }
+            .onAppear {
+                titleFocused = isNew && draft.title.isEmpty
             }
             .onChange(of: draft.deadlineType) { _, type in
                 if type == .none {
@@ -185,13 +216,34 @@ struct TaskEditorView: View {
         return hour
     }
 
+    /// Saves pending edits, then completes through the model so the haptic, bloom and Undo
+    /// toast match a swipe.
+    private func completeFromEditor() {
+        if draft != original {
+            var task = draft
+            task.title = trimmedTitle.isEmpty ? original.title : trimmedTitle
+            do {
+                try model.save(task)
+            } catch {
+                saveError = error.localizedDescription
+                return
+            }
+        }
+        model.complete(draft)
+        dismiss()
+    }
+
     private func save() {
         var task = draft
         task.title = trimmedTitle
         if task.deadlineType == .none {
             task.dueAt = nil
         }
-        model.save(task)
-        dismiss()
+        do {
+            try model.save(task)
+            dismiss()
+        } catch {
+            saveError = error.localizedDescription
+        }
     }
 }

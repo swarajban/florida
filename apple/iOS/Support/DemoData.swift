@@ -3,8 +3,9 @@ import FloridaKit
 import Foundation
 
 /// Sample data for screenshot runs (`-demoData YES`): two Google accounts with four calendars,
-/// four categories, a day of meetings around scheduled task blocks, and more blocks tomorrow. All
-/// times are relative to `now`, so the Agenda tab's "today" is always populated.
+/// five categories (Home empty, Inbox with tasks to triage), a day of meetings (with meeting links, guests and a three-day offsite) around
+/// scheduled task blocks, and more blocks tomorrow. All times are relative to `now`, so the Agenda
+/// tab's "today" is always populated.
 enum DemoData {
     static func syncResponse(now: Date, calendar: Calendar) -> SyncResponse {
         let today = calendar.startOfDay(for: now)
@@ -26,17 +27,27 @@ enum DemoData {
         }
         func event(
             _ id: String, _ calendarId: String, _ summary: String, _ start: Date, _ end: Date,
-            allDay: Bool = false, location: String? = nil
+            allDay: Bool = false, location: String? = nil, meet: String? = nil
         ) -> CalendarEvent {
-            CalendarEvent(
+            var event = CalendarEvent(
                 id: id, calendarId: calendarId, googleId: "g-\(id)", summary: summary, location: location,
-                startAt: start, endAt: end, allDay: allDay, responseStatus: "accepted", updatedAt: now)
+                startAt: start, endAt: end, allDay: allDay, responseStatus: "accepted",
+                htmlLink: "https://calendar.google.com/calendar/event?eid=\(id)", updatedAt: now)
+            event.conferenceUrl = meet
+            return event
+        }
+        /// All-day events are stored as UTC midnights, as the server does.
+        func utcDay(_ dayOffset: Int) -> Date {
+            let local = calendar.dateComponents([.year, .month, .day], from: at(dayOffset, 12))
+            var utc = Calendar(identifier: .gregorian)
+            utc.timeZone = EventTiming.utc
+            return utc.date(from: local) ?? today
         }
 
         let zone = calendar.timeZone.identifier
         let workHours = "demo-work-hours"
         let evenings = "demo-evenings"
-        let inbox = "demo-inbox", engineering = "demo-eng", infosec = "demo-infosec", finance = "demo-finance"
+        let inbox = TaskCategory.inboxId, engineering = "demo-eng", infosec = "demo-infosec", finance = "demo-finance"
         let work = "demo-cal-work", ooo = "demo-cal-ooo", personal = "demo-cal-personal", birthdays = "demo-cal-birthdays"
 
         return SyncResponse(
@@ -59,6 +70,7 @@ enum DemoData {
                 TaskCategory(id: engineering, name: "Work Engineering", color: "#4F46E5", scheduleId: workHours, sortOrder: 1, createdAt: now, updatedAt: now),
                 TaskCategory(id: infosec, name: "Work Infosec", color: "#DC2626", scheduleId: workHours, sortOrder: 2, createdAt: now, updatedAt: now),
                 TaskCategory(id: finance, name: "Personal Finance", color: "#059669", scheduleId: evenings, sortOrder: 3, createdAt: now, updatedAt: now),
+                TaskCategory(id: "demo-home", name: "Home", color: "#CA8A04", scheduleId: evenings, sortOrder: 4, createdAt: now, updatedAt: now),
             ],
             tasks: [
                 task("demo-task-keys", infosec, "Rotate AWS access keys", minutes: 45, priority: .asap, due: at(1, 12), hard: true),
@@ -70,17 +82,24 @@ enum DemoData {
                 task("demo-task-taxes", finance, "Pay Q4 estimated taxes", minutes: 30, priority: .high, due: at(2, 17), hard: true),
                 task("demo-task-funds", finance, "Rebalance index funds", minutes: 45, priority: .low),
                 task("demo-task-dentist", inbox, "Book dentist appointment", minutes: 15, priority: .medium),
+                task("demo-task-postmortem", engineering, "Draft incident postmortem", minutes: 45, priority: .high, due: at(1, 17)),
+                task("demo-task-vpn", inbox, "Renew VPN certificate", minutes: 30, priority: .high, due: at(-1, 17)),
+                task("demo-task-offsite", inbox, "Prepare offsite slides", minutes: 240, priority: .medium, due: at(1, 9), hard: true),
             ],
             events: [
-                event("demo-event-standup", work, "Standup", at(0, 9), at(0, 9, 30)),
-                event("demo-event-design", work, "Design review: scheduler v2", at(0, 11, 30), at(0, 12, 30), location: "Zoom"),
+                event("demo-event-standup", work, "Standup", at(0, 9), at(0, 9, 30), meet: "https://meet.google.com/stu-ndup-xyz"),
+                DemoData.designReview(event("demo-event-design", work, "Design review: scheduler v2", at(0, 11, 30), at(0, 12, 30),
+                                            location: "Room 4 / Meet", meet: "https://meet.google.com/abc-defg-hij")),
                 event("demo-event-lunch", personal, "Lunch with Priya", at(0, 12, 30), at(0, 13, 30), location: "Souvla"),
                 event("demo-event-1on1", work, "1:1 with Sam", at(0, 14, 30), at(0, 15)),
-                event("demo-event-ooo", ooo, "Marcus out of office", at(0, 0), at(1, 0), allDay: true),
-                event("demo-event-birthday", birthdays, "Mom's birthday", at(0, 0), at(1, 0), allDay: true),
+                event("demo-event-ooo", ooo, "Marcus out of office", utcDay(0), utcDay(1), allDay: true),
+                event("demo-event-offsite", work, "Infra offsite", utcDay(-1), utcDay(2), allDay: true, location: "Half Moon Bay"),
+                event("demo-event-birthday", birthdays, "Mom's birthday", utcDay(0), utcDay(1), allDay: true),
                 event("demo-event-arch", work, "Architecture sync", at(1, 13), at(1, 14)),
             ],
             placements: [
+                // Always in progress, whatever time the screenshot runs, to show the progress fill.
+                block("demo-block-postmortem", "demo-task-postmortem", now.addingTimeInterval(-20 * 60), now.addingTimeInterval(25 * 60)),
                 block("demo-block-keys", "demo-task-keys", at(0, 9, 30), at(0, 10, 15)),
                 block("demo-block-pr", "demo-task-pr", at(0, 10, 15), at(0, 11, 15)),
                 block("demo-block-flaky", "demo-task-flaky", at(0, 13, 30), at(0, 14, 30)),
@@ -100,7 +119,46 @@ enum DemoData {
                 CalendarInfo(id: ooo, accountId: "demo-work", googleId: "g-ooo", summary: "Team OOO", color: "#F59E0B", accessRole: "reader", selected: true, updatedAt: now),
                 CalendarInfo(id: personal, accountId: "demo-personal", googleId: "g-personal", summary: "Personal", color: "#10B981", accessRole: "owner", selected: true, updatedAt: now),
                 CalendarInfo(id: birthdays, accountId: "demo-personal", googleId: "g-birthdays", summary: "Birthdays", color: "#EC4899", accessRole: "reader", selected: false, updatedAt: now),
+            ],
+            unscheduled: [
+                UnscheduledTask(taskId: "demo-task-vpn", reason: "no_fit_in_horizon", unplacedMinutes: 30, computedAt: now),
+                UnscheduledTask(taskId: "demo-task-offsite", reason: "no_fit_before_hard_deadline", unplacedMinutes: 240, computedAt: now),
             ])
+    }
+
+    /// What an AI parse of a pasted email would return, for the `-uiSheet aitask` screenshot.
+    @MainActor
+    static func parsedTask(model: AppModel) -> TaskEditorRequest {
+        var task = model.newTaskTemplate()
+        task.title = "Send vendor security questionnaire"
+        task.notes = "Pasted from Dana's email: needs SOC 2 report and pen-test summary."
+        task.durationMinutes = 60
+        task.priority = .high
+        task.deadlineType = .hard
+        task.dueAt = model.calendar.date(byAdding: .day, value: 3, to: model.today)
+            .flatMap { model.calendar.date(bySettingHour: 17, minute: 0, second: 0, of: $0) }
+        task.categoryId = "demo-infosec"
+        return TaskEditorRequest(
+            task: task, isNew: true,
+            rationale: "“by Thursday EOD” is a hard deadline; security paperwork fits Work Infosec; about an hour of work.")
+    }
+
+    /// Guests, an organizer and an HTML description, as Google sends them.
+    static func designReview(_ base: CalendarEvent) -> CalendarEvent {
+        var event = base
+        event.description = """
+            Walk through the <b>scheduler v2</b> design.<br><br>Doc: <a href="https://docs.example.com/scheduler-v2">Scheduler v2 RFC</a>\
+            <br>Notes go in https://notes.example.com/design-review<ul><li>Chunking rules</li><li>Hard deadlines</li></ul>
+            """
+        event.organizer = EventOrganizer(email: "priya@work.example", displayName: "Priya Raman", isSelf: false)
+        event.attendees = [
+            EventAttendee(email: "priya@work.example", displayName: "Priya Raman", responseStatus: "accepted", organizer: true, isSelf: false, optional: false),
+            EventAttendee(email: "swaraj@work.example", displayName: "Swaraj", responseStatus: "accepted", organizer: false, isSelf: true, optional: false),
+            EventAttendee(email: "sam@work.example", displayName: "Sam Lee", responseStatus: "tentative", organizer: false, isSelf: false, optional: false),
+            EventAttendee(email: "marcus@work.example", displayName: nil, responseStatus: "declined", organizer: false, isSelf: false, optional: true),
+            EventAttendee(email: "dana@work.example", displayName: "Dana Kim", responseStatus: "needsAction", organizer: false, isSelf: false, optional: false),
+        ]
+        return event
     }
 }
 #endif

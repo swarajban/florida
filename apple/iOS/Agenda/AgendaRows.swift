@@ -1,17 +1,18 @@
 import FloridaKit
 import SwiftUI
 
-/// A calendar event in the day timeline: time column, title, location.
+/// A calendar event in the day timeline: time column, calendar-colored bar, title, location,
+/// and "Day 2 of 3" when it spans several days.
 struct EventRow: View {
     let event: CalendarEvent
+    let style: EventStyle
+    let continuation: String?
     let now: Date
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             TimeColumn(start: event.startAt, end: event.endAt)
-            RoundedRectangle(cornerRadius: 2)
-                .fill(Color.secondary)
-                .frame(width: 3)
+            EventBar(style: style)
             VStack(alignment: .leading, spacing: 2) {
                 Text(AgendaItem.event(event).title)
                     .font(.body)
@@ -21,23 +22,34 @@ struct EventRow: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
+                if let continuation {
+                    Text(continuation)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
             Spacer(minLength: 0)
-            if event.htmlLink.flatMap(URL.init(string:)) != nil {
-                Image(systemName: "arrow.up.right.square")
+            if event.joinURL != nil {
+                Image(systemName: "video")
                     .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Has a meeting link")
             }
         }
         .opacity(AgendaItem.event(event).isOver(at: now) ? 0.55 : 1)
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(style.accessibilityDescription)
     }
 }
 
 /// A scheduled task block in the day timeline: time column, category color, title, pin glyph.
+/// With `showsProgress`, the block in progress fills left to right in its category color and
+/// says how long is left.
 struct BlockRow: View {
     let block: ScheduledBlock
     let category: TaskCategory?
     let now: Date
+    var showsProgress = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -60,26 +72,66 @@ struct BlockRow: View {
                         .foregroundStyle(block.task.priority.tint)
                     Text(category?.name ?? "No category")
                     Text("·")
-                    Text(Formatting.duration(minutes: block.task.durationMinutes))
+                    if let minutesLeft {
+                        Text("\(minutesLeft) min left")
+                            .foregroundStyle(Color.category(category))
+                            .fontWeight(.semibold)
+                    } else {
+                        Text(Formatting.duration(minutes: block.task.durationMinutes))
+                    }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
         }
+        .background(alignment: .leading) {
+            if let fraction {
+                GeometryReader { proxy in
+                    Color.category(category)
+                        .opacity(0.13)
+                        .frame(width: proxy.size.width * fraction)
+                        .animation(.linear(duration: 0.6), value: fraction)
+                }
+                .padding(.vertical, -6)
+                .accessibilityHidden(true)
+            }
+        }
         .opacity(AgendaItem.block(block).isOver(at: now) ? 0.55 : 1)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// How much of the block has passed, while it is in progress.
+    private var fraction: Double? {
+        guard showsProgress, block.task.completedAt == nil, AgendaItem.block(block).isInProgress(at: now) else { return nil }
+        let total = block.placement.endAt.timeIntervalSince(block.placement.startAt)
+        guard total > 0 else { return nil }
+        return min(1, max(0, now.timeIntervalSince(block.placement.startAt) / total))
+    }
+
+    /// Whole minutes until the block ends, rounded up, while it is in progress.
+    private var minutesLeft: Int? {
+        guard fraction != nil else { return nil }
+        return Int((block.placement.endAt.timeIntervalSince(now) / 60).rounded(.up))
     }
 }
 
 /// An all-day event in the section above the timeline.
 struct AllDayEventRow: View {
     let event: CalendarEvent
+    let style: EventStyle
+    let continuation: String?
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "sun.max")
-                .foregroundStyle(.secondary)
+        HStack(spacing: 10) {
+            EventBar(style: style)
+                .frame(height: 18)
             Text(AgendaItem.event(event).title)
+            if let continuation {
+                Text(continuation)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
             Spacer(minLength: 0)
             if let location = event.location, !location.isEmpty {
                 Text(location)
@@ -88,6 +140,8 @@ struct AllDayEventRow: View {
                     .lineLimit(1)
             }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityValue("All day, \(style.accessibilityDescription)")
     }
 }
 

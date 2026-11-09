@@ -17,6 +17,8 @@ struct WidgetBlock: Hashable, Sendable, Identifiable {
     var colorHex: String?
     var pinned: Bool
     var location: String?
+    /// The event has a meeting link (`CalendarEvent.joinURL`).
+    var joinable: Bool
 
     init(event: CalendarEvent) {
         id = "event-\(event.id)"
@@ -32,6 +34,7 @@ struct WidgetBlock: Hashable, Sendable, Identifiable {
         colorHex = nil
         pinned = false
         location = event.location
+        joinable = event.joinURL != nil
     }
 
     init(block: ScheduledBlock, category: TaskCategory?) {
@@ -44,11 +47,19 @@ struct WidgetBlock: Hashable, Sendable, Identifiable {
         colorHex = category?.color
         pinned = block.placement.pinned
         location = nil
+        joinable = false
     }
 
     func isInProgress(at date: Date) -> Bool {
         start <= date && date < end
     }
+
+    /// A meeting starting within two minutes of `date`: the moment for a Join countdown.
+    func isAboutToStart(at date: Date) -> Bool {
+        joinable && date < start && start.timeIntervalSince(date) <= WidgetBlock.joinLead
+    }
+
+    static let joinLead: TimeInterval = 120
 
     /// All-day rows first, then by start, then by end.
     static func byStart(_ lhs: WidgetBlock, _ rhs: WidgetBlock) -> Bool {

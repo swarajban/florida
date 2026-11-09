@@ -17,13 +17,13 @@ enum QuickAddTaskBuilder {
         return categories.first { normalize($0.name).hasPrefix(needle) }
     }
 
-    /// `matchCategory` when the hint matches; otherwise the category named "Inbox", otherwise the
-    /// first category; nil only when there are no categories at all.
+    /// `matchCategory` when the hint matches; otherwise Inbox, otherwise the first category; nil
+    /// only when there are no categories at all.
     static func resolveCategory(hint: String?, in categories: [TaskCategory]) -> TaskCategory? {
         if let hint, let match = matchCategory(hint: hint, in: categories) {
             return match
         }
-        return categories.first { normalize($0.name) == "inbox" } ?? categories.first
+        return categories.first(where: \.isInbox) ?? categories.first
     }
 
     /// A new task from the draft: 30 minutes and medium priority unless the text said otherwise,

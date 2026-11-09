@@ -1,20 +1,36 @@
 import FloridaKit
 import SwiftUI
 
-/// The Tasks tab: quick-add field on top, then open tasks grouped by category. Swipe right to
-/// complete, left to delete, tap to edit, pull to sync.
+/// The Tasks tab: quick-add field on top, then Inbox (with its triage count and AI chips) and
+/// every other category, empty ones collapsed to their header. Swipe or long-press a row for its
+/// actions (`TaskActions`, all with Undo), tap to edit, pull to sync. The toolbar adds a task and
+/// opens Categories and Schedules.
 struct TasksView: View {
     @Environment(AppModel.self) private var model
     @State private var quickAddText = ""
-    @State private var editingTask: TaskItem?
+    @State private var editor: TaskEditorRequest?
+    /// The unsaved task an AI parse opened, to clear the quick-add text once it is added.
+    @State private var parsedTaskId: String?
+    @State private var openedLaunchSheet = false
+    @State private var movingTask: TaskItem?
+    @State private var doneForNowTask: TaskItem?
+    @State private var path: [TasksRoute] = []
 
     var body: some View {
-        NavigationStack {
+        let now = Date()
+        NavigationStack(path: $path) {
             List {
                 Section {
-                    QuickAddField(text: $quickAddText, categories: model.categories, calendar: model.calendar) { draft in
-                        model.createTask(from: draft)
-                    }
+                    QuickAddField(
+                        text: $quickAddText, categories: model.categories, calendar: model.calendar,
+                        onSubmit: { draft, category in _ = try model.createTask(from: draft, in: category) },
+                        onCreateCategory: { try model.createCategory(fromHint: $0) },
+                        onParseWithAI: { text in
+                            let request = try await model.parseWithAI(text)
+                            parsedTaskId = request.id
+                            editor = request
+                        })
+                    SyncErrorBanner()
                     if model.needsSetup {
                         Label("Not connected. Add the server URL and token in Settings.", systemImage: "exclamationmark.triangle")
                             .font(.footnote)
@@ -28,75 +44,98 @@ struct TasksView: View {
                 ForEach(sections) { section in
                     Section {
                         ForEach(section.tasks) { task in
-                            TaskRow(
-                                task: task,
-                                summary: TaskScheduleSummary(task: task, placements: model.placementsByTask[task.id] ?? []),
-                                now: Date(),
-                                calendar: model.calendar)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                editingTask = task
-                            }
-                            .swipeActions(edge: .leading) {
-                                Button {
-                                    model.complete(task)
-                                } label: {
-                                    Label("Complete", systemImage: "checkmark")
-                                }
-                                .tint(.green)
-                            }
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    model.delete(task)
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
+                            TaskListRow(
+                                task: task, now: now,
+                                targets: TaskActionTargets(doneForNow: $doneForNowTask, moving: $movingTask),
+                                onEdit: { editor = TaskEditorRequest(task: task, isNew: false) })
                         }
                     } header: {
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(Color.category(section.category))
-                                .frame(width: 10, height: 10)
-                            Text(section.title)
-                            Spacer()
-                            Text("\(section.tasks.count)")
-                                .monospacedDigit()
+                        TaskSectionHeader(section: section)
+                    } footer: {
+                        if section.isInbox, let reason = model.triageUnavailable, !section.tasks.isEmpty {
+                            Text(reason)
                         }
                     }
                 }
             }
             .listStyle(.insetGrouped)
             .navigationTitle("Tasks")
-            .sheet(item: $editingTask) { task in
-                TaskEditorView(task: task)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        editor = TaskEditorRequest(task: model.newTaskTemplate(), isNew: true)
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("New task")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button {
+                            path = [.categories]
+                        } label: {
+                            Label("Categories", systemImage: "folder")
+                        }
+                        Button {
+                            path = [.schedules]
+                        } label: {
+                            Label("Schedules", systemImage: "clock")
+                        }
+                    } label: {
+                        Image(systemName: "folder.badge.gearshape")
+                    }
+                    .accessibilityLabel("Categories and schedules")
+                }
             }
+            .navigationDestination(for: TasksRoute.self) { route in
+                switch route {
+                case .categories: CategoriesView()
+                case .schedules: SchedulesView()
+                }
+            }
+            .sheet(item: $editor, onDismiss: clearQuickAddIfAdded) { request in
+                TaskEditorView(request: request)
+            }
+            .taskActionSheets(doneForNow: $doneForNowTask, moving: $movingTask)
             .refreshable {
                 await model.syncNow()
             }
+            .onChange(of: model.categories.isEmpty, initial: true) { _, empty in
+                // Screenshot runs (`-uiSheet aitask`): open a parsed draft once the demo data loads.
+                #if DEBUG
+                if LaunchOptions.initialSheet == "aitask", !openedLaunchSheet, !empty {
+                    openedLaunchSheet = true
+                    editor = DemoData.parsedTask(model: model)
+                }
+                #endif
+            }
+            .task(id: inboxKey) {
+                model.requestTriageSuggestions()
+            }
+            .toastOverlay()
         }
     }
 
-    /// Open tasks grouped by category in category order; tasks of an unknown category last.
+    /// After an AI-parsed task is added, the text it came from is done with.
+    private func clearQuickAddIfAdded() {
+        guard let id = parsedTaskId else { return }
+        parsedTaskId = nil
+        if (try? model.database?.task(id: id)) != nil {
+            quickAddText = ""
+        }
+    }
+
     private var sections: [TaskSection] {
-        let grouped = Dictionary(grouping: model.openTasks, by: \.categoryId)
-        var sections = model.categories.compactMap { category in
-            grouped[category.id].map { TaskSection(id: category.id, category: category, tasks: $0) }
-        }
-        let known = Set(model.categories.map(\.id))
-        let orphans = model.openTasks.filter { !known.contains($0.categoryId) }
-        if !orphans.isEmpty {
-            sections.append(TaskSection(id: "no-category", category: nil, tasks: orphans))
-        }
-        return sections
+        TaskSection.sections(categories: model.categories, tasks: model.listedOpenTasks)
+    }
+
+    /// Changes whenever an Inbox task appears or is renamed, which re-runs the triage request.
+    private var inboxKey: [String] {
+        model.openTasks.filter { $0.categoryId == TaskCategory.inboxId }.map { "\($0.id)\n\($0.title)" }
     }
 }
 
-/// The open tasks of one category, in `openTasks()` order.
-struct TaskSection: Identifiable {
-    let id: String
-    let category: TaskCategory?
-    let tasks: [TaskItem]
-
-    var title: String { category?.name ?? "No category" }
+/// Screens pushed from the Tasks tab's toolbar.
+enum TasksRoute: Hashable {
+    case categories, schedules
 }

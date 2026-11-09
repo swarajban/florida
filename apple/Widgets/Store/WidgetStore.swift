@@ -14,7 +14,7 @@ enum WidgetStore {
         guard let database else { return nil }
         do {
             let categories = try categoriesById(database)
-            let events = try database.events(in: range)
+            let events = try database.events(in: range, calendar: calendar)
                 .filter { !$0.allDay }
                 .map(WidgetBlock.init(event:))
             let blocks = try database.scheduledBlocks(in: range)

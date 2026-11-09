@@ -3,10 +3,11 @@ import Foundation
 import Observation
 
 /// The one object behind every screen. Opens the shared store, keeps in-memory copies of what the
-/// views show (refreshed by GRDB observation), applies local writes to the store first, and owns
-/// the `SyncClient` that pushes them and pulls server changes in the background (`AppModel+Sync`).
+/// views show (refreshed by GRDB observation in `AppModel+Observation`), applies local writes to
+/// the store first (`AppModel+Writes`), and owns the `SyncClient` that pushes them and pulls server
+/// changes in the background (`AppModel+Sync`).
 ///
-/// Views only ever read the arrays below; nothing here awaits the network on their behalf.
+/// Views only ever read the state below; nothing here awaits the network on their behalf.
 @Observable @MainActor
 final class AppModel {
     let calendar: Calendar
@@ -18,44 +19,83 @@ final class AppModel {
     /// `saveServerConfig` in `AppModel+Sync.swift`.
     var serverConfig: ServerConfig?
     @ObservationIgnored var syncClient: SyncClient?
+    /// Category suggestions and task parsing; nil until there is a server config.
+    @ObservationIgnored var aiClient: AIClient?
     let tokenStore = KeychainTokenStore()
 
     // MARK: Observed store contents
 
     /// Local midnight of the day the Agenda tab shows.
-    private(set) var selectedDay: Date
-    private(set) var categories: [TaskCategory] = []
-    private(set) var openTasks: [TaskItem] = []
+    var selectedDay: Date
+    var categories: [TaskCategory] = []
+    var schedules: [Schedule] = []
+    var openTasks: [TaskItem] = []
     /// Every scheduler placement, grouped by task; drives the "scheduled at" line of task rows.
-    private(set) var placementsByTask: [String: [Placement]] = [:]
+    var placementsByTask: [String: [Placement]] = [:]
+    /// The scheduler's unplaced remainders, by task id.
+    var unscheduledByTask: [String: UnscheduledTask] = [:]
     /// Events and task blocks of `selectedDay`; nil until the first observation fires.
-    private(set) var agenda: DayAgenda?
-    private(set) var accounts: [GoogleAccount] = []
-    private(set) var calendars: [CalendarInfo] = []
-    private(set) var pendingWriteCount = 0
+    var agenda: DayAgenda?
+    var accounts: [GoogleAccount] = []
+    var calendars: [CalendarInfo] = []
+    /// Local writes not pushed yet, oldest first (`AppModel+Queue`).
+    var pendingWrites: [PendingWrite] = []
 
     // MARK: Sync status
 
     /// Number of server calls in flight; `isSyncing` is derived from it.
     var activeOperations = 0
     var lastSyncAt: Date?
-    /// Most recent sync or write failure, in words the user can act on; nil after a clean sync.
+    /// Most recent sync failure, in words the user can act on; nil after a clean sync.
     var lastError: String?
+    /// Writes the server refused, kept until dismissed in Settings.
+    var rejectedChanges: [RejectedChange] = []
     @ObservationIgnored var runningSync: Task<Void, Never>?
     @ObservationIgnored var syncRequestedAgain = false
     @ObservationIgnored var periodicSync: Task<Void, Never>?
+    @ObservationIgnored var changeStream: ChangeStream?
+    @ObservationIgnored var changeListener: Task<Void, Never>?
+    @ObservationIgnored var midnightWatcher: Task<Void, Never>?
+    @ObservationIgnored var sceneIsActive = false
+    /// The local day the agenda was last anchored to; see `AppModel+Today`.
+    @ObservationIgnored var anchoredToday: Date
 
-    @ObservationIgnored private var observers: [Task<Void, Never>] = []
-    @ObservationIgnored private var agendaObserver: Task<Void, Never>?
+    // MARK: Feedback
+
+    /// The toast at the bottom of the screen: undo after complete/delete, or a write failure.
+    var toast: Toast?
+    @ObservationIgnored var toastDismissal: Task<Void, Never>?
+    /// Bumped on every completion; drives the one `.success` haptic.
+    var completionCount = 0
+    /// Tasks completed a moment ago, kept in the list (at their old position) while their row
+    /// blooms in the category color and folds away; see `AppModel+Actions`.
+    var blooming: [String: BloomingTask] = [:]
+    /// Today's finished blocks, drawn as struck-through ghosts (`AppModel+Joy`).
+    var ghostBlocks: [GhostBlock] = []
+
+    // MARK: AI triage
+
+    /// Category suggestions for Inbox tasks, by task id (`AppModel+Triage`).
+    var triageSuggestions: [String: TriageSuggestion] = [:]
+    /// Why suggestions are not coming, shown under Inbox; nil while they work.
+    var triageUnavailable: String?
+    @ObservationIgnored var triageAttempted: Set<String> = []
+    @ObservationIgnored var triageRunner: Task<Void, Never>?
+
+    @ObservationIgnored var observers: [Task<Void, Never>] = []
+    @ObservationIgnored var agendaObserver: Task<Void, Never>?
 
     var isSyncing: Bool { activeOperations > 0 }
     var needsSetup: Bool { serverConfig == nil }
+    var pendingWriteCount: Int { pendingWrites.count }
     var today: Date { calendar.startOfDay(for: Date()) }
 
     init() {
         let calendar = Calendar.autoupdatingCurrent
         self.calendar = calendar
-        selectedDay = calendar.startOfDay(for: Date())
+        let today = calendar.startOfDay(for: Date())
+        selectedDay = today
+        anchoredToday = today
 
         var openedDatabase: AppDatabase?
         var openError: String?
@@ -66,6 +106,7 @@ final class AppModel {
         }
         database = openedDatabase
         storeError = openError
+        ghostBlocks = GhostStore.load(today: today, calendar: calendar)
 
         if LaunchOptions.demoData {
             #if DEBUG
@@ -86,7 +127,7 @@ final class AppModel {
         return try AppDatabase(path: AppDatabase.defaultURL().path(percentEncoded: false))
     }
 
-    /// Reads the server settings from the keychain and, when there are some, creates the sync client.
+    /// Reads the server settings from the keychain and, when there are some, creates the clients.
     private func loadServerConfig() {
         do {
             serverConfig = try tokenStore.load()
@@ -95,6 +136,7 @@ final class AppModel {
         }
         if let serverConfig, let database {
             syncClient = SyncClient(database: database, config: serverConfig)
+            aiClient = AIClient(config: serverConfig)
         }
     }
 
@@ -112,135 +154,56 @@ final class AppModel {
     }
 
     func selectToday() {
+        anchoredToday = today
         select(day: Date())
     }
+
+    // MARK: - Lookups
 
     func category(id: String) -> TaskCategory? {
         categories.first { $0.id == id }
     }
 
-    // MARK: - Local writes
-
-    /// Creates a task from quick-add text with the app's defaults (30 minutes, medium priority,
-    /// the hinted category or Inbox). Returns nil, with `lastError` set, when there is no category yet.
-    @discardableResult
-    func createTask(from draft: QuickAddDraft) -> TaskItem? {
-        guard let category = QuickAddTaskBuilder.resolveCategory(hint: draft.categoryHint, in: categories) else {
-            lastError = "No categories yet. Connect to the server in Settings and sync first."
-            return nil
-        }
-        let task = QuickAddTaskBuilder.makeTask(from: draft, category: category, now: Date())
-        save(task)
-        return task
+    var inbox: TaskCategory? {
+        categories.first(where: \.isInbox)
     }
 
-    func save(_ task: TaskItem) {
-        write { try $0.saveTask(task) }
+    func calendarInfo(id: String) -> CalendarInfo? {
+        calendars.first { $0.id == id }
     }
 
-    func complete(_ task: TaskItem) {
-        write { try $0.completeTask(id: task.id) }
+    func account(id: String) -> GoogleAccount? {
+        accounts.first { $0.id == id }
     }
 
-    func reopen(_ task: TaskItem) {
-        write { try $0.reopenTask(id: task.id) }
+    func task(id: String) -> TaskItem? {
+        openTasks.first { $0.id == id } ?? agenda?.placements.first { $0.task.id == id }?.task
     }
+}
 
-    func delete(_ task: TaskItem) {
-        write { try $0.deleteTask(id: task.id) }
-    }
+/// An AI category suggestion for an Inbox task, for the title it was made for; `categoryId` nil
+/// means the model would leave the task in Inbox.
+struct TriageSuggestion: Hashable {
+    var title: String
+    var categoryId: String?
+    var rationale: String
+}
 
-    /// Applies a write to the store, then starts a background sync. Observation refreshes the
-    /// arrays, so the UI updates without waiting for the server.
-    private func write(_ change: (AppDatabase) throws -> Void) {
-        guard let database else {
-            lastError = storeError ?? "The local store is unavailable."
-            return
-        }
-        do {
-            try change(database)
-        } catch {
-            lastError = "Could not save locally: \(error.localizedDescription)"
-            return
-        }
-        requestSync()
-    }
+/// A just-completed task still on screen for its bloom.
+struct BloomingTask: Hashable {
+    var task: TaskItem
+    /// Its index in `openTasks` before it was completed.
+    var index: Int
+}
 
-    // MARK: - Observation
-
-    private func startObserving() {
-        guard let database else { return }
-        observers.append(Task { [weak self] in
-            do {
-                for try await categories in database.observeCategories() {
-                    self?.categories = categories
-                }
-            } catch {
-                self?.lastError = "Could not read categories: \(error.localizedDescription)"
-            }
-        })
-        observers.append(Task { [weak self] in
-            do {
-                for try await tasks in database.observeOpenTasks() {
-                    self?.openTasks = tasks
-                }
-            } catch {
-                self?.lastError = "Could not read tasks: \(error.localizedDescription)"
-            }
-        })
-        observers.append(Task { [weak self] in
-            do {
-                for try await placements in database.observePlacements() {
-                    self?.placementsByTask = Dictionary(grouping: placements, by: \.taskId)
-                }
-            } catch {
-                self?.lastError = "Could not read the schedule: \(error.localizedDescription)"
-            }
-        })
-        observers.append(Task { [weak self] in
-            do {
-                for try await accounts in database.observeAccounts() {
-                    self?.accounts = accounts
-                }
-            } catch {
-                self?.lastError = "Could not read accounts: \(error.localizedDescription)"
-            }
-        })
-        observers.append(Task { [weak self] in
-            do {
-                for try await calendars in database.observeCalendars() {
-                    self?.calendars = calendars
-                }
-            } catch {
-                self?.lastError = "Could not read calendars: \(error.localizedDescription)"
-            }
-        })
-        observers.append(Task { [weak self] in
-            do {
-                for try await count in database.observePendingWriteCount() {
-                    self?.pendingWriteCount = count
-                }
-            } catch {
-                self?.lastError = "Could not read pending writes: \(error.localizedDescription)"
-            }
-        })
-        observeAgenda()
-    }
-
-    /// (Re)starts the agenda observation for `selectedDay`; the previous one is cancelled.
-    private func observeAgenda() {
-        agendaObserver?.cancel()
-        guard let database else { return }
-        let day = selectedDay
-        let calendar = calendar
-        agendaObserver = Task { [weak self] in
-            do {
-                for try await agenda in database.observeAgenda(for: day, calendar: calendar) {
-                    self?.agenda = agenda
-                }
-            } catch {
-                self?.lastError = "Could not read the agenda: \(error.localizedDescription)"
-            }
-        }
-    }
+/// A write the server refused (4xx), copied out of `RejectedWrite` so the list outlives the next
+/// push, which resets `SyncClient.lastRejectedWrites`.
+struct RejectedChange: Identifiable, Hashable {
+    var id: String
+    var entity: PendingWrite.Entity
+    var entityId: String
+    var op: PendingWrite.Op
+    var status: Int
+    var message: String
+    var at: Date
 }

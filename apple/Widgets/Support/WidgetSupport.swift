@@ -58,6 +58,14 @@ extension Priority {
     }
 }
 
+/// Switches the app writes to the App Group defaults (`JoySetting` in the app target).
+enum WidgetSettings {
+    /// "Join countdown on the Lock Screen"; on unless turned off.
+    static var joinCountdown: Bool {
+        UserDefaults(suiteName: Florida.appGroup)?.object(forKey: "joy.joinCountdownWidget") as? Bool ?? true
+    }
+}
+
 enum WidgetFormatting {
     /// "Today", "Tomorrow", a weekday name within the coming week, otherwise "Nov 20".
     static func dayLabel(_ date: Date, now: Date, calendar: Calendar) -> String {

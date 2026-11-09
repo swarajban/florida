@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The three tabs. Also the place where the app reacts to the scene phase (sync on becoming
-/// active) and to widget deep links (`florida://agenda`, `florida://tasks`).
+/// active) and to widget deep links: `florida://agenda` shows today, `florida://tasks` the tasks.
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
@@ -18,19 +18,22 @@ struct RootView: View {
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gear") }
                 .tag(AppTab.settings)
-                .badge(model.lastError == nil ? 0 : 1)
+                .badge((model.storeError == nil && model.lastError == nil ? 0 : 1) + model.rejectedChanges.count)
         }
         .onAppear {
             if model.needsSetup, LaunchOptions.initialTab == nil {
                 selectedTab = .settings
             }
         }
+        .sensoryFeedback(.success, trigger: model.completionCount)
         .onChange(of: scenePhase, initial: true) { _, phase in
             model.scenePhaseChanged(to: phase)
         }
         .onOpenURL { url in
-            if let tab = AppTab(deepLink: url) {
-                selectedTab = tab
+            guard let tab = AppTab(deepLink: url) else { return }
+            selectedTab = tab
+            if tab == .agenda {
+                model.selectToday()
             }
         }
     }

@@ -7,13 +7,20 @@ import WidgetKit
 // `SyncClient` actor and only its outcome is written back to the model.
 
 extension AppModel {
-    /// Called with the scene phase on launch and on every change: an active app syncs at once and
-    /// then every two minutes; leaving the foreground stops the timer.
+    /// Called with the scene phase on launch and on every change. An active app rolls the agenda
+    /// to today if the day changed, syncs at once and then every two minutes, listens to the
+    /// server's change stream, and watches for midnight; leaving the foreground stops all of it.
     func scenePhaseChanged(to phase: ScenePhase) {
         periodicSync?.cancel()
         periodicSync = nil
-        guard phase == .active else { return }
+        stopChangeStream()
+        stopMidnightWatcher()
+        sceneIsActive = phase == .active
+        guard sceneIsActive else { return }
+        anchorToTodayIfDayChanged()
+        startMidnightWatcher()
         requestSync()
+        startChangeStream()
         periodicSync = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(120))
@@ -89,11 +96,50 @@ extension AppModel {
         if let database {
             syncClient = SyncClient(database: database, config: config)
         }
+        aiClient = AIClient(config: config)
+        triageUnavailable = nil
+        triageAttempted = []
         lastError = nil
         requestSync()
+        if sceneIsActive {
+            startChangeStream()
+        }
     }
 
     // MARK: - Private
+
+    /// Opens `GET /api/events` and syncs on every `changed` notice. A `connected` after a
+    /// reconnect also syncs, since notices sent while the link was down are lost; the first one
+    /// is skipped because becoming active has just requested a sync.
+    private func startChangeStream() {
+        stopChangeStream()
+        guard syncClient != nil, let serverConfig else { return }
+        let stream = ChangeStream(config: serverConfig)
+        changeStream = stream
+        changeListener = Task { [weak self] in
+            var connections = 0
+            for await event in stream.events {
+                switch event.event {
+                case "changed":
+                    self?.requestSync()
+                case "connected":
+                    connections += 1
+                    if connections > 1 {
+                        self?.requestSync()
+                    }
+                default:
+                    break
+                }
+            }
+        }
+    }
+
+    private func stopChangeStream() {
+        changeStream?.cancel()
+        changeStream = nil
+        changeListener?.cancel()
+        changeListener = nil
+    }
 
     private func runSyncLoop() async {
         activeOperations += 1
@@ -111,18 +157,16 @@ extension AppModel {
         guard let syncClient else { return }
         do {
             try await syncClient.sync()
-            let rejected = await syncClient.lastRejectedWrites
             lastSyncAt = Date()
-            if let first = rejected.first {
-                let noun = rejected.count == 1 ? "change" : "changes"
-                lastError = "The server rejected \(rejected.count) \(noun): \(Self.describe(first.error))"
-            } else {
-                lastError = nil
-            }
-            WidgetCenter.shared.reloadAllTimelines()
+            lastError = nil
         } catch {
             lastError = Self.describe(error)
         }
+        // A failed push still pulls and may have refused some writes before it stopped; they are
+        // listed in Settings, not folded into `lastError`.
+        recordRejections(await syncClient.lastRejectedWrites)
+        // A failed push still pulls, so the widgets may have something new either way.
+        WidgetCenter.shared.reloadAllTimelines()
     }
 
     private func runServerAction(_ action: @escaping @Sendable (SyncClient) async throws -> Void) {

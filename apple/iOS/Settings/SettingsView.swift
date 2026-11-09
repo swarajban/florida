@@ -1,8 +1,9 @@
 import FloridaKit
 import SwiftUI
 
-/// The Settings tab: server connection, sync controls and status, and the connected Google
-/// accounts with a toggle per calendar.
+/// The Settings tab: server connection, sync controls and status (with the refused and waiting
+/// changes), the Delight switches, the connected Google accounts with a toggle per calendar,
+/// and the app version.
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @State private var serverURL = ""
@@ -60,7 +61,6 @@ struct SettingsView: View {
                             Text("Never")
                         }
                     }
-                    LabeledContent("Pending writes", value: "\(model.pendingWriteCount)")
                     if let storeError = model.storeError {
                         Label(storeError, systemImage: "externaldrive.badge.exclamationmark")
                             .foregroundStyle(.red)
@@ -70,6 +70,10 @@ struct SettingsView: View {
                             .foregroundStyle(.red)
                     }
                 }
+
+                SyncQueueSections()
+
+                JoySettingsSection()
 
                 if model.accounts.isEmpty {
                     Section("Google accounts") {
@@ -90,8 +94,16 @@ struct SettingsView: View {
                         }
                     }
                 }
+
+                Section("About") {
+                    LabeledContent("Version", value: Self.appVersion)
+                    if let serverConfig = model.serverConfig {
+                        LabeledContent("Server", value: serverConfig.baseURL.host() ?? serverConfig.baseURL.absoluteString)
+                    }
+                }
             }
             .navigationTitle("Settings")
+            .toastOverlay()
             .onAppear {
                 guard !loaded else { return }
                 loaded = true
@@ -99,6 +111,14 @@ struct SettingsView: View {
                 token = model.serverConfig?.token ?? ""
             }
         }
+    }
+
+    /// "1.0 (42)": the marketing version and the build number.
+    static var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+        return "\(version) (\(build))"
     }
 
     /// The typed URL when it is an absolute http(s) URL.
