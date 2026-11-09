@@ -227,7 +227,7 @@ describe('POST /api/ai/parse-task', () => {
     updateEvent: () => Promise.reject(new Error('unused')),
     deleteEvent: () => Promise.reject(new Error('unused')),
   }
-  const reschedule = () => Promise.resolve({ placements: [], unscheduled: [], late: [] })
+  const reschedule = () => Promise.resolve({ placements: [], unscheduled: [], late: [], optional: [] })
   const AUTH = { authorization: `Bearer ${config.API_TOKEN}`, 'content-type': 'application/json' }
 
   let db: Db
@@ -363,7 +363,7 @@ describe('POST /api/ai/suggest-category', () => {
     updateEvent: () => Promise.reject(new Error('unused')),
     deleteEvent: () => Promise.reject(new Error('unused')),
   }
-  const reschedule = () => Promise.resolve({ placements: [], unscheduled: [], late: [] })
+  const reschedule = () => Promise.resolve({ placements: [], unscheduled: [], late: [], optional: [] })
   const config: Config = {
     DATABASE_URL: 'postgres://unused',
     API_TOKEN: 'test-token-0123456789abcdef',

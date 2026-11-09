@@ -19,6 +19,7 @@ import {
   calendars,
   events,
   googleAccounts,
+  optionalPlacements,
   placements,
   categories,
   routineBlocks,
@@ -105,6 +106,8 @@ const routineBlockBody = z
     end: clock,
     /** Empty means the block is shown but nothing is scheduled in it (a gym slot, say). */
     allows: z.array(taskContext),
+    /** Suggested, never planned (an evening). Omitted by clients that predate it: the stored value stays. */
+    optional: z.boolean().optional(),
   })
   .refine((b) => b.start < b.end, 'end must be after start')
 
@@ -225,6 +228,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
       .where(and(changedAfter(events.updatedAt), or(eq(calendars.selected, true), isNotNull(events.deletedAt))))
     // Small tables without tombstones: always sent in full so clients can replace them wholesale.
     const placementRows = await db.select().from(placements)
+    const optionalPlacementRows = await db.select().from(optionalPlacements)
     const unscheduledRows = await db.select().from(unscheduled)
     const accountRows = await db.select(publicAccountColumns).from(googleAccounts)
     const calendarRows = await db.select(publicCalendarColumns).from(calendars)
@@ -240,6 +244,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
       tasks: taskRows,
       events: eventRows,
       placements: placementRows,
+      optionalPlacements: optionalPlacementRows,
       unscheduled: unscheduledRows,
       accounts: accountRows,
       calendars: calendarRows,

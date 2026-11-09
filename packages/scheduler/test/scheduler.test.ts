@@ -545,6 +545,122 @@ describe('plan stability', () => {
   })
 })
 
+describe('optional blocks', () => {
+  /** Work hours plus an evening the user might work, Mon–Thu 20:00–23:00. */
+  const EVENING: Routine = {
+    timeZone: LA,
+    blocks: [
+      ...WORK.blocks,
+      { id: 'evening', days: [1, 2, 3, 4], start: '20:00', end: '23:00', allows: ['computer', 'home'], optional: true },
+    ],
+  }
+  const evening = (taskId: string, start: string, end: string) => ({ taskId, blockId: 'evening', start: iso(start), end: iso(end) })
+
+  it('never plans into an optional block; it only suggests the work the plan has not reached by then', () => {
+    // Monday's work hours are taken, so the plan runs Tuesday morning and Monday evening stays free.
+    const result = run([task({ id: 'a' })], MONDAY_FULL, { routine: EVENING })
+    expect(spansOf(result, 'a')).toEqual([[iso('2026-11-10T09:00:00-08:00'), iso('2026-11-10T10:00:00-08:00')]])
+    // Suggested Monday evening only: by Tuesday evening the plan has it done.
+    expect(result.optional).toEqual([evening('a', '2026-11-09T20:00:00-08:00', '2026-11-09T21:00:00-08:00')])
+    expect(result.unscheduled).toEqual([])
+    expect(result.late).toEqual([])
+  })
+
+  it('does not suggest work the plan finishes earlier that day', () => {
+    const result = run([task({ id: 'a' })], [], { routine: EVENING })
+    expect(spansOf(result, 'a')).toEqual([[iso('2026-11-09T09:00:00-08:00'), iso('2026-11-09T10:00:00-08:00')]])
+    expect(result.optional).toEqual([])
+  })
+
+  it('suggests personal tasks first, then the rest in the usual order', () => {
+    const result = run(
+      [
+        task({ id: 'work', area: 'work', priority: 'asap' }),
+        task({ id: 'unfiled', priority: 'high' }),
+        task({ id: 'personal', area: 'personal', priority: 'low' }),
+      ],
+      MONDAY_FULL,
+      { routine: EVENING, optionalDays: 1 },
+    )
+    expect(result.optional).toEqual([
+      evening('personal', '2026-11-09T20:00:00-08:00', '2026-11-09T21:00:00-08:00'),
+      evening('work', '2026-11-09T21:00:00-08:00', '2026-11-09T22:00:00-08:00'),
+      evening('unfiled', '2026-11-09T22:00:00-08:00', '2026-11-09T23:00:00-08:00'),
+    ])
+  })
+
+  it('stops at the end of the block: a task that does not fit whole is skipped unless it may be split', () => {
+    const tasks = (bChunk?: number): Task[] => [
+      task({ id: 'a', durationMinutes: 120, createdAt: '2026-11-01T00:00:00Z' }),
+      task({ id: 'b', durationMinutes: 120, createdAt: '2026-11-02T00:00:00Z', ...(bChunk === undefined ? {} : { minChunkMinutes: bChunk }) }),
+      task({ id: 'c', durationMinutes: 60, createdAt: '2026-11-03T00:00:00Z' }),
+    ]
+    const whole = run(tasks(), MONDAY_FULL, { routine: EVENING, optionalDays: 1 })
+    expect(whole.optional).toEqual([
+      evening('a', '2026-11-09T20:00:00-08:00', '2026-11-09T22:00:00-08:00'),
+      evening('c', '2026-11-09T22:00:00-08:00', '2026-11-09T23:00:00-08:00'),
+    ])
+    const split = run(tasks(30), MONDAY_FULL, { routine: EVENING, optionalDays: 1 })
+    expect(split.optional).toEqual([
+      evening('a', '2026-11-09T20:00:00-08:00', '2026-11-09T22:00:00-08:00'),
+      evening('b', '2026-11-09T22:00:00-08:00', '2026-11-09T23:00:00-08:00'),
+    ])
+  })
+
+  it('starts after now on the grid and works around events and pinned tasks, which are never suggested', () => {
+    const result = run(
+      [
+        task({ id: 'long', durationMinutes: 75, createdAt: '2026-11-01T00:00:00Z' }),
+        task({ id: 'short', durationMinutes: 30, createdAt: '2026-11-02T00:00:00Z' }),
+        task({ id: 'pinned', durationMinutes: 15, pinnedStart: '2026-11-09T22:45:00-08:00' }),
+      ],
+      [busy('2026-11-09T21:00:00-08:00', '2026-11-09T21:30:00-08:00')],
+      { routine: EVENING, now: '2026-11-09T20:20:00-08:00', optionalDays: 1 },
+    )
+    // 20:30–21:00 is too short for the 75-minute task; 21:30–22:45 holds it exactly.
+    expect(result.optional).toEqual([
+      evening('short', '2026-11-09T20:30:00-08:00', '2026-11-09T21:00:00-08:00'),
+      evening('long', '2026-11-09T21:30:00-08:00', '2026-11-09T22:45:00-08:00'),
+    ])
+  })
+
+  it('suggests a task the plan has no block for on every optional day in range, without planning it', () => {
+    const tasks = [task({ id: 'home', context: 'home' }), task({ id: 'errand', context: 'errand' })]
+    const routine: Routine = { timeZone: LA, blocks: EVENING.blocks.filter((b) => b.optional === true) }
+    const week = run(tasks, [], { routine })
+    expect(week.placements).toEqual([])
+    expect(week.unscheduled).toEqual([
+      { taskId: 'errand', reason: 'no_allowed_block', unplacedMinutes: 60 },
+      { taskId: 'home', reason: 'no_allowed_block', unplacedMinutes: 60 },
+    ])
+    // Mon–Thu of the next seven days; the evening does not allow errands.
+    expect(week.optional).toEqual(
+      ['09', '10', '11', '12'].map((d) => evening('home', `2026-11-${d}T20:00:00-08:00`, `2026-11-${d}T21:00:00-08:00`)),
+    )
+    expect(run(tasks, [], { routine, optionalDays: 2 }).optional).toHaveLength(2)
+  })
+
+  it('respects the start date and a hard deadline', () => {
+    const result = run(
+      [
+        task({ id: 'later', context: 'home', startAt: '2026-11-11T00:00:00-08:00' }),
+        task({ id: 'due', context: 'home', deadlineType: 'hard', dueAt: '2026-11-10T21:30:00-08:00', durationMinutes: 45 }),
+      ],
+      [],
+      { routine: { timeZone: LA, blocks: EVENING.blocks.filter((b) => b.optional === true) } },
+    )
+    expect(result.optional.filter((s) => s.taskId === 'later').map((s) => s.start)).toEqual([
+      iso('2026-11-11T20:00:00-08:00'),
+      iso('2026-11-12T20:00:00-08:00'),
+    ])
+    // Tuesday's suggestion must end by 21:30; from Wednesday on the deadline has passed.
+    expect(result.optional.filter((s) => s.taskId === 'due')).toEqual([
+      evening('due', '2026-11-09T20:00:00-08:00', '2026-11-09T20:45:00-08:00'),
+      evening('due', '2026-11-10T20:00:00-08:00', '2026-11-10T20:45:00-08:00'),
+    ])
+  })
+})
+
 describe('input validation', () => {
   it('rejects unparsable instants', () => {
     expect(() => run([task({ id: 'a', dueAt: 'tomorrow', deadlineType: 'soft' })])).toThrow(/dueAt/)

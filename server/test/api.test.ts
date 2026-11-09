@@ -158,22 +158,24 @@ describe('tasks, sync and tombstones', () => {
     const body = (await res.json()) as {
       cursor: string
       settings: { id: string; timeZone: string } | null
-      routineBlocks: { id: string; days: number[]; start: string; end: string; allows: string[] }[]
+      routineBlocks: { id: string; days: number[]; start: string; end: string; allows: string[]; optional: boolean }[]
       schedules: { id: string }[]
       categories: { id: string; area: string | null }[]
       tasks: { id: string; context: string; deletedAt: string | null }[]
       events: unknown[]
       placements: { taskId: string }[]
+      optionalPlacements: unknown[]
       unscheduled: unknown[]
       accounts: unknown[]
       calendars: unknown[]
     }
     expect(new Date(body.cursor).toISOString()).toBe(body.cursor)
     expect(body.settings).toMatchObject({ id: 'default', timeZone: 'America/Los_Angeles' })
-    expect(body.routineBlocks.map((b) => [b.id, b.days, b.start, b.end, b.allows]).sort()).toEqual([
-      ['home', [1, 4, 5], '09:00', '15:30', ['computer', 'errand', 'home']],
-      ['office-tue', [2], '10:15', '16:20', ['computer', 'office']],
-      ['office-wed', [3], '09:00', '16:20', ['computer', 'office']],
+    expect(body.routineBlocks.map((b) => [b.id, b.days, b.start, b.end, b.allows, b.optional]).sort()).toEqual([
+      ['evening', [1, 2, 3, 4], '20:00', '23:00', ['computer', 'home'], true],
+      ['home', [1, 4, 5], '09:00', '15:30', ['computer', 'errand', 'home'], false],
+      ['office-tue', [2], '10:15', '16:20', ['computer', 'office'], false],
+      ['office-wed', [3], '09:00', '16:20', ['computer', 'office'], false],
     ])
     expect(body.schedules.map((s) => s.id).sort()).toEqual(['personal', 'work'])
     expect(body.categories.map((p) => [p.id, p.area]).sort()).toEqual([
@@ -184,6 +186,7 @@ describe('tasks, sync and tombstones', () => {
     expect(body.tasks).toEqual([expect.objectContaining({ id: 't1', context: 'computer', deletedAt: null })])
     expect(body.events).toEqual([])
     expect(body.placements.map((p) => p.taskId)).toEqual(['t1'])
+    expect(Array.isArray(body.optionalPlacements)).toBe(true)
     expect(body.unscheduled).toEqual([])
     expect(body.accounts).toEqual([])
     expect(body.calendars).toEqual([])
@@ -300,7 +303,7 @@ describe('tasks, sync and tombstones', () => {
   it('POST /api/schedule/run returns a scheduler result', async () => {
     const res = await api('/api/schedule/run', { method: 'POST' })
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ placements: [], unscheduled: [], late: [] })
+    expect(await res.json()).toEqual({ placements: [], unscheduled: [], late: [], optional: [] })
   })
 })
 
@@ -470,6 +473,43 @@ describe('routine and settings', () => {
     for (const id of ['ups-return', 'desk-work']) expect((await api(`/api/tasks/${id}`, { method: 'DELETE' })).status).toBe(200)
   })
 
+  it('suggests a task for the evening without planning it there, and keeps the block optional for a client that predates the flag', async () => {
+    const evening = { name: 'Evening', days: [1, 2, 3, 4], start: '20:00', end: '23:00', allows: ['computer', 'home'] }
+    // A home-only task with the home block gone: the plan has nowhere for it, the evening does.
+    expect((await api('/api/routine-blocks/home', { method: 'DELETE' })).status).toBe(200)
+    const put = await api('/api/tasks/hang-shelf', { method: 'PUT', json: { ...taskBody, title: 'Hang shelf', context: 'home' } })
+    type Suggested = Scheduling & { optional: { taskId: string; blockId: string; start: string; end: string }[] }
+    const first = ((await put.json()) as { scheduling: Suggested }).scheduling
+    expect(first.placements).toEqual([])
+    expect(first.unscheduled).toEqual([{ taskId: 'hang-shelf', reason: 'no_allowed_block', unplacedMinutes: 60 }])
+    expect(first.optional.length).toBeGreaterThan(0)
+    for (const pick of first.optional) {
+      expect(pick).toMatchObject({ taskId: 'hang-shelf', blockId: 'evening' })
+      expect([1, 2, 3, 4]).toContain(weekdayIn(pick.start))
+      expect(new Date(pick.end).getTime() - new Date(pick.start).getTime()).toBe(60 * 60_000)
+    }
+    const synced = (await (await api('/api/sync')).json()) as { placements: unknown[]; optionalPlacements: { taskId: string; blockId: string }[] }
+    expect(synced.placements).toEqual([])
+    expect(synced.optionalPlacements).toHaveLength(first.optional.length)
+    expect(synced.optionalPlacements[0]).toMatchObject({ taskId: 'hang-shelf', blockId: 'evening' })
+
+    // A shipped client sends the block without `optional`; were it reset, the evening would become planned time.
+    const resaved = await api('/api/routine-blocks/evening', { method: 'PUT', json: evening })
+    const afterResave = (await resaved.json()) as { routineBlock: { optional: boolean }; scheduling: Suggested }
+    expect(afterResave.routineBlock.optional).toBe(true)
+    expect(afterResave.scheduling.placements).toEqual([])
+
+    const planned = await api('/api/routine-blocks/evening', { method: 'PUT', json: { ...evening, optional: false } })
+    const afterPlanned = (await planned.json()) as { routineBlock: { optional: boolean }; scheduling: Suggested }
+    expect(afterPlanned.routineBlock.optional).toBe(false)
+    expect(afterPlanned.scheduling.placements.map((p) => p.taskId)).toEqual(['hang-shelf'])
+    expect(afterPlanned.scheduling.optional).toEqual([])
+
+    expect((await api('/api/routine-blocks/evening', { method: 'PUT', json: { ...evening, optional: true } })).status).toBe(200)
+    expect((await api('/api/routine-blocks/home', { method: 'PUT', json: seededHome })).status).toBe(200)
+    expect((await api('/api/tasks/hang-shelf', { method: 'DELETE' })).status).toBe(200)
+  })
+
   it('rejects a routine block that ends before it starts, names an unknown context, or has an invalid day', async () => {
     const attempt = async (over: object) =>
       (await api('/api/routine-blocks/bad', { method: 'PUT', json: { ...seededHome, ...over } })).status
@@ -502,10 +542,11 @@ describe('seed', () => {
         { id: 'default', timeZone: 'America/Los_Angeles' },
       ])
       const blocks = await fresh.db.select().from(routineBlocks).orderBy(routineBlocks.id)
-      expect(blocks.map((b) => [b.id, b.days, b.start, b.end, b.allows, b.deletedAt])).toEqual([
-        ['home', [1, 4, 5], '09:00', '15:30', ['computer', 'errand', 'home'], null],
-        ['office-tue', [2], '10:15', '16:20', ['computer', 'office'], null],
-        ['office-wed', [3], '09:00', '16:20', ['computer', 'office'], null],
+      expect(blocks.map((b) => [b.id, b.days, b.start, b.end, b.allows, b.optional, b.deletedAt])).toEqual([
+        ['evening', [1, 2, 3, 4], '20:00', '23:00', ['computer', 'home'], true, null],
+        ['home', [1, 4, 5], '09:00', '15:30', ['computer', 'errand', 'home'], false, null],
+        ['office-tue', [2], '10:15', '16:20', ['computer', 'office'], false, null],
+        ['office-wed', [3], '09:00', '16:20', ['computer', 'office'], false, null],
       ])
 
       const edited = new Date('2026-11-01T00:00:00Z')
@@ -710,7 +751,7 @@ describe('google', () => {
     const res = await api('/api/google/sync', { method: 'POST' })
     expect(res.status).toBe(200)
     expect(fake.syncAllCalls).toBe(1)
-    expect(await res.json()).toEqual({ placements: [], unscheduled: [], late: [] })
+    expect(await res.json()).toEqual({ placements: [], unscheduled: [], late: [], optional: [] })
   })
 
   it('POST /api/google/resync drops the sync tokens of selected calendars only, then runs a full sync', async () => {
@@ -721,7 +762,7 @@ describe('google', () => {
     const before = fake.syncAllCalls
     const res = await api('/api/google/resync', { method: 'POST' })
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ placements: [], unscheduled: [], late: [] })
+    expect(await res.json()).toEqual({ placements: [], unscheduled: [], late: [], optional: [] })
     expect(fake.syncAllCalls).toBe(before + 1)
     const tokens = await db
       .select({ id: calendars.id, syncToken: calendars.syncToken })
@@ -846,7 +887,7 @@ describe('calendar event writes', () => {
   let ev1 = { ...write }
   let notices = 0
   let unsubscribe = () => {}
-  const noScheduling = { placements: [], unscheduled: [], late: [] }
+  const noScheduling = { placements: [], unscheduled: [], late: [], optional: [] }
 
   beforeAll(async () => {
     await db.insert(googleAccounts).values({ id: 'acc-ev', email: 'ev@example.com', label: 'ev', refreshTokenEnc: 'opaque' })

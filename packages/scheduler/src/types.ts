@@ -8,6 +8,9 @@ export type DeadlineType = 'hard' | 'soft' | 'none'
  */
 export type TaskContext = 'computer' | 'errand' | 'home' | 'office'
 
+/** The side of life a task's category belongs to. Only orders suggestions for optional blocks. */
+export type TaskArea = 'work' | 'personal'
+
 /** A weekly block of the routine, expressed as wall-clock time in the routine's time zone. */
 export interface RoutineBlock {
   id: string
@@ -22,6 +25,12 @@ export interface RoutineBlock {
    * nothing goes into (family time, the gym); time outside every allowing block is unavailable.
    */
   allows: TaskContext[]
+  /**
+   * Time the user might work but does not count on, such as a weekday evening. The plan never
+   * uses an optional block; the scheduler only suggests what to do there, in
+   * `SchedulerResult.optional`.
+   */
+  optional?: boolean
 }
 
 /** The user's week: when tasks may go, and which kinds. Replaces per-category schedules. */
@@ -34,6 +43,8 @@ export interface Routine {
 export interface Task {
   id: string
   context: TaskContext
+  /** Omit for unfiled tasks, which rank with work. */
+  area?: TaskArea
   durationMinutes: number
   /**
    * Smallest piece the task may be split into. Omit to require one contiguous block.
@@ -91,6 +102,8 @@ export interface SchedulerInput {
    * fit inside the routine before the deadline. Default 07:00–23:00.
    */
   overflowWindow?: { start: string; end: string }
+  /** How many local days, starting today, get suggestions for their optional blocks. Default 7. */
+  optionalDays?: number
 }
 
 export interface Placement {
@@ -100,10 +113,23 @@ export interface Placement {
   pinned: boolean
 }
 
+/**
+ * A suggestion for an optional block: what to do there if the user chooses to work. It is not
+ * part of the plan. The task keeps its planned blocks, and the same task may be suggested for
+ * several blocks.
+ */
+export interface OptionalPlacement {
+  taskId: string
+  /** The optional routine block the suggestion sits in. */
+  blockId: string
+  start: string
+  end: string
+}
+
 export type UnscheduledReason =
   | 'no_fit_in_horizon'
   | 'no_fit_before_hard_deadline'
-  /** No routine block allows the task's context, so there is nowhere it could ever go. */
+  /** No planned (non-optional) routine block allows the task's context, so the plan has nowhere for it. */
   | 'no_allowed_block'
 
 export interface Unscheduled {
@@ -126,4 +152,6 @@ export interface SchedulerResult {
   unscheduled: Unscheduled[]
   /** Tasks whose ETA passes their due time. Only retained active work can pass a hard deadline. */
   late: Late[]
+  /** Suggestions for optional blocks, sorted by start, then task id. Never counted above. */
+  optional: OptionalPlacement[]
 }

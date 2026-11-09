@@ -19,6 +19,9 @@ export const settings = pgTable('settings', {
  * settings time zone. Time outside every block (sleep, family, gym) is never scheduled, except
  * that a task which cannot otherwise make its hard deadline may spill into the scheduler's
  * overflow window (07:00–23:00) so the deadline is met rather than silently missed.
+ *
+ * An `optional` block is time the user might work but does not count on (a weekday evening).
+ * The plan never uses it; the scheduler only suggests what to do there (`optionalPlacements`).
  */
 export const routineBlocks = pgTable('routine_blocks', {
   id: text('id').primaryKey(),
@@ -27,6 +30,7 @@ export const routineBlocks = pgTable('routine_blocks', {
   start: text('start_time').notNull(),
   end: text('end_time').notNull(),
   allows: jsonb('allows').$type<TaskContext[]>().notNull(),
+  optional: boolean('optional').notNull().default(false),
   createdAt: ts('created_at').notNull().defaultNow(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
   deletedAt: ts('deleted_at'),
@@ -121,6 +125,23 @@ export const placements = pgTable('placements', {
   startAt: ts('start_at').notNull(),
   endAt: ts('end_at').notNull(),
   pinned: boolean('pinned').notNull(),
+  computedAt: ts('computed_at').notNull(),
+})
+
+/**
+ * Scheduler output: what to do in an optional routine block if the user chooses to work then.
+ * Suggestions, not the plan: a task listed here keeps its `placements`. Derived data, replaced
+ * with `placements`. Kept apart from them so nothing that reads the plan has to filter.
+ */
+export const optionalPlacements = pgTable('optional_placements', {
+  id: text('id').primaryKey(),
+  taskId: text('task_id')
+    .notNull()
+    .references(() => tasks.id, { onDelete: 'cascade' }),
+  /** The optional routine block; not a foreign key, since the rows are replaced on every run. */
+  blockId: text('block_id').notNull(),
+  startAt: ts('start_at').notNull(),
+  endAt: ts('end_at').notNull(),
   computedAt: ts('computed_at').notNull(),
 })
 
@@ -225,6 +246,7 @@ export type ScheduleRow = typeof schedules.$inferSelect
 export type CategoryRow = typeof categories.$inferSelect
 export type TaskRow = typeof tasks.$inferSelect
 export type PlacementRow = typeof placements.$inferSelect
+export type OptionalPlacementRow = typeof optionalPlacements.$inferSelect
 export type UnscheduledRow = typeof unscheduled.$inferSelect
 export type GoogleAccountRow = typeof googleAccounts.$inferSelect
 export type CalendarRow = typeof calendars.$inferSelect

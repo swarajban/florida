@@ -13,12 +13,14 @@ const SETTINGS = { id: SETTINGS_ID, timeZone: LA }
 /**
  * Home days Mon/Thu/Fri end when the gym run starts at 15:30; office days are Tue (after the
  * morning gym) and Wed, until the 16:20 drive to school pickup. Early mornings, evenings, and
- * weekends are family time and have no block, so nothing is ever scheduled there.
+ * weekends are family time and have no block, so nothing is ever scheduled there. Mon–Thu after
+ * 20:00 is optional: sometimes worked, never planned on, so it only gets suggestions.
  */
 const SEED_ROUTINE: (typeof routineBlocks.$inferInsert)[] = [
   { id: 'home', name: 'Home', days: [1, 4, 5], start: '09:00', end: '15:30', allows: ['computer', 'errand', 'home'] },
   { id: 'office-tue', name: 'Office', days: [2], start: '10:15', end: '16:20', allows: ['computer', 'office'] },
   { id: 'office-wed', name: 'Office', days: [3], start: '09:00', end: '16:20', allows: ['computer', 'office'] },
+  { id: 'evening', name: 'Evening', days: [1, 2, 3, 4], start: '20:00', end: '23:00', allows: ['computer', 'home'], optional: true },
 ]
 
 const SEED_SCHEDULES: { id: string; name: string; timeZone: string; windows: ScheduleWindow[] }[] = [

@@ -1,6 +1,6 @@
 import { eq, inArray } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
-import { placements, routineBlocks, tasks, unscheduled } from '../src/db/schema.js'
+import { optionalPlacements, placements, routineBlocks, tasks, unscheduled } from '../src/db/schema.js'
 import type { EventRow, CategoryRow, RoutineBlockRow, TaskRow } from '../src/db/schema.js'
 import { buildSchedulerInput, runScheduling } from '../src/scheduling.js'
 import { seed } from '../src/seed.js'
@@ -18,6 +18,7 @@ function routineBlockRow(id: string, over: Partial<RoutineBlockRow> = {}): Routi
     start: '09:00',
     end: '17:00',
     allows: ['computer', 'errand', 'home', 'office'],
+    optional: false,
     createdAt: T0,
     updatedAt: T0,
     deletedAt: null,
@@ -149,6 +150,25 @@ describe('buildSchedulerInput', () => {
     ])
   })
 
+  it('marks optional blocks and gives each task the area of its category', () => {
+    const input = buildSchedulerInput({
+      ...base,
+      routineBlocks: [routineBlockRow('work'), routineBlockRow('evening', { start: '20:00', end: '23:00', optional: true })],
+      categories: [categoryRow('inbox'), categoryRow('house', { area: 'personal' }), categoryRow('eng', { area: 'work' })],
+      tasks: [taskRow('unfiled', 'inbox'), taskRow('paint', 'house'), taskRow('review', 'eng')],
+      events: [],
+    })
+    expect(input.routine.blocks.map((b) => [b.id, b.optional])).toEqual([
+      ['work', undefined],
+      ['evening', true],
+    ])
+    expect(input.tasks.map((t) => [t.id, t.area])).toEqual([
+      ['unfiled', undefined],
+      ['paint', 'personal'],
+      ['review', 'work'],
+    ])
+  })
+
   it('skips deleted, completed, and orphaned tasks and deleted routine blocks', () => {
     const input = buildSchedulerInput({
       ...base,
@@ -214,6 +234,50 @@ describe('runScheduling', () => {
       expect(await db.select({ startAt: placements.startAt, endAt: placements.endAt }).from(placements)).toEqual([
         { startAt: new Date('2026-11-09T17:00:00Z'), endAt: new Date('2026-11-09T18:00:00Z') },
       ])
+    } finally {
+      await close()
+    }
+  })
+
+  it('stores evening suggestions apart from the plan and replaces them on every run', async () => {
+    const { db, close } = await createTestDb()
+    try {
+      await seed(db)
+      // Monday's home block (09:00–15:30) is exactly filled, so the hour-long task is planned for
+      // Tuesday at the office: work the plan has not reached by Monday evening.
+      await db.insert(tasks).values(taskRow('all-day', 'inbox', { durationMinutes: 390, createdAt: T0 }))
+      await db.insert(tasks).values(taskRow('taxes', 'personal', { createdAt: new Date('2026-11-02T00:00:00Z') }))
+      await runScheduling(db, { HORIZON_DAYS: 28 }, NOW)
+
+      const plan = () => db.select({ taskId: placements.taskId, startAt: placements.startAt }).from(placements).orderBy(placements.startAt)
+      const planned = [
+        { taskId: 'all-day', startAt: new Date('2026-11-09T17:00:00Z') },
+        { taskId: 'taxes', startAt: new Date('2026-11-10T18:15:00Z') },
+      ]
+      expect(await plan()).toEqual(planned)
+      const suggested = await db.select().from(optionalPlacements)
+      expect(suggested).toEqual([
+        {
+          id: expect.any(String),
+          taskId: 'taxes',
+          blockId: 'evening',
+          // Monday 20:00–21:00 in Los Angeles. Not Tuesday: by then the plan has it done.
+          startAt: new Date('2026-11-10T04:00:00Z'),
+          endAt: new Date('2026-11-10T05:00:00Z'),
+          computedAt: NOW,
+        },
+      ])
+
+      // The next run feeds the plan back but not the suggestion: nothing moves into the evening.
+      const later = new Date(NOW.getTime() + 60_000)
+      const result = await runScheduling(db, { HORIZON_DAYS: 28 }, later)
+      expect(await plan()).toEqual(planned)
+      expect(result.optional).toEqual([
+        { taskId: 'taxes', blockId: 'evening', start: '2026-11-10T04:00:00.000Z', end: '2026-11-10T05:00:00.000Z' },
+      ])
+      const replaced = await db.select().from(optionalPlacements)
+      expect(replaced.map((p) => [p.taskId, p.computedAt])).toEqual([['taxes', later]])
+      expect(replaced[0]?.id).not.toBe(suggested[0]?.id)
     } finally {
       await close()
     }

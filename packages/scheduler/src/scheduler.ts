@@ -1,5 +1,6 @@
 import type {
   Late,
+  OptionalPlacement,
   Placement,
   Priority,
   Routine,
@@ -38,6 +39,7 @@ interface Context {
  * Order of work: pinned tasks first (they are fixed), then reserve in-progress work.
  * Flexible tasks sorted by `compareTasks` reuse valid prior blocks before placing their
  * remaining work into the earliest free time inside routine blocks that allow their context.
+ * Optional blocks are never part of that plan; `suggestOptional` fills them afterwards.
  */
 export function schedule(input: SchedulerInput): SchedulerResult {
   const now = parseInstant(input.now, 'now')
@@ -113,13 +115,18 @@ export function schedule(input: SchedulerInput): SchedulerResult {
     active.set(task.id, retained)
   }
 
+  /** Per task: the blocks the plan gave it and the work (ms) it found no room for. */
+  const plan = new Map<string, Planned>()
   for (const task of flexible) {
-    const allowed = routine.blocks.some((b) => b.allows.includes(task.context) && b.days.length > 0)
+    const allowed = routine.blocks.some(
+      (b) => b.optional !== true && b.allows.includes(task.context) && b.days.length > 0,
+    )
     const retained = active.get(task.id) ?? { spans: [], work: 0 }
     const fit: Fit = allowed
       ? placeTask(task, routine, ctx, busy, previous.get(task.id) ?? [], retained)
       : { spans: retained.spans, remaining: Math.max(0, remainingMinutes(task) * MINUTE - retained.work), busy, hardLimited: false }
     busy = fit.busy
+    plan.set(task.id, { spans: fit.spans, unplaced: fit.remaining })
     for (const span of fit.spans) placements.push(toPlacement(task.id, span, false))
 
     if (fit.remaining > 0) {
@@ -139,7 +146,77 @@ export function schedule(input: SchedulerInput): SchedulerResult {
   }
 
   placements.sort((a, b) => a.start.localeCompare(b.start) || a.taskId.localeCompare(b.taskId))
-  return { placements, unscheduled, late }
+  const optional = suggestOptional(flexible, routine, ctx, busy, plan, input.optionalDays ?? 7)
+  return { placements, unscheduled, late, optional }
+}
+
+interface Planned {
+  spans: Span[]
+  unplaced: number
+}
+
+/**
+ * Suggestions for the optional blocks of the next `days` local days: what to do there if the user
+ * chooses to work. Each block is filled on its own, around busy time and planned blocks, from the
+ * work the plan has not finished by the time the block ends: blocks planned after it, and work
+ * that found no room. Personal tasks come first, then the rest, each in `compareTasks` order.
+ * Nothing here changes the plan, so the same task can be suggested on several days.
+ */
+function suggestOptional(
+  flexible: Task[],
+  routine: Routine,
+  ctx: Context,
+  busy: Span[],
+  plan: Map<string, Planned>,
+  days: number,
+): OptionalPlacement[] {
+  // `sort` is stable, so tasks keep their `compareTasks` order within an area.
+  const personalFirst = (task: Task): number => (task.area === 'personal' ? 0 : 1)
+  const ordered = [...flexible].sort((a, b) => personalFirst(a) - personalFirst(b))
+  const suggestions: OptionalPlacement[] = []
+  const firstDay = dayNumber(localDate(ctx.now, routine.timeZone))
+
+  for (let day = firstDay; day < firstDay + days; day++) {
+    const date = dateFromDayNumber(day)
+    const weekday = weekdayOf(date)
+    for (const block of routine.blocks) {
+      if (block.optional !== true || !block.days.includes(weekday)) continue
+      const window = windowSpan(date, block.start, block.end, routine.timeZone)
+      let taken = busy
+      for (const task of ordered) {
+        if (!block.allows.includes(task.context)) continue
+        const planned = plan.get(task.id)
+        if (planned === undefined) continue
+        let work = planned.unplaced
+        for (const span of planned.spans) {
+          if (span.start >= window.end) work += span.end - span.start
+        }
+        if (work <= 0) continue
+
+        const minChunk = Math.min((task.minChunkMinutes ?? Number.POSITIVE_INFINITY) * MINUTE, work)
+        const hardDue = task.deadlineType === 'hard' ? effectiveDue(task)?.ms : undefined
+        const notBefore = task.startAt === undefined ? ctx.now : parseInstant(task.startAt, 'startAt')
+        const open = {
+          start: Math.max(window.start, ctx.now, notBefore),
+          end: Math.min(window.end, hardDue ?? Number.POSITIVE_INFINITY),
+        }
+        if (open.end <= open.start) continue
+        for (const free of subtractSpans(open, taken)) {
+          const start = snapUp(free.start, ctx.granularity)
+          const available = Math.floor((free.end - start) / MINUTE) * MINUTE
+          if (available <= 0 || available < Math.min(minChunk, work)) continue
+          const take = Math.min(work, available)
+          const span = { start, end: start + take }
+          suggestions.push({ taskId: task.id, blockId: block.id, start: toIso(span.start), end: toIso(span.end) })
+          taken = addSpan(taken, span)
+          work -= take
+          if (work === 0) break
+        }
+      }
+    }
+  }
+
+  return suggestions.sort((a, b) => a.start.localeCompare(b.start) || a.taskId.localeCompare(b.taskId))
 }
 
 /**
@@ -252,14 +329,15 @@ function placeTask(
 }
 
 /**
- * Time on `date` where a task of `context` may go: the union of the routine blocks that allow it.
- * Overlapping or touching blocks merge, so a task can span them as one piece.
+ * Time on `date` where the plan may put a task of `context`: the union of the non-optional
+ * routine blocks that allow it. Overlapping or touching blocks merge, so a task can span them as
+ * one piece.
  */
 function blocksOn(routine: Routine, context: TaskContext, date: LocalDate): Span[] {
   const weekday = weekdayOf(date)
   return mergeSpans(
     routine.blocks
-      .filter((b) => b.days.includes(weekday) && b.allows.includes(context))
+      .filter((b) => b.optional !== true && b.days.includes(weekday) && b.allows.includes(context))
       .map((b) => windowSpan(date, b.start, b.end, routine.timeZone)),
   )
 }

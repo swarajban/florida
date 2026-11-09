@@ -5,7 +5,7 @@ import { and, eq, getTableColumns, isNull, sql } from 'drizzle-orm'
 import type { Config } from './config.js'
 import type { Db } from './db/client.js'
 import { defaultTimeZone } from './db/queries.js'
-import { calendars, events, placements, categories, routineBlocks, tasks, unscheduled } from './db/schema.js'
+import { calendars, events, optionalPlacements, placements, categories, routineBlocks, tasks, unscheduled } from './db/schema.js'
 import type { EventRow, CategoryRow, PlacementRow, RoutineBlockRow, TaskRow } from './db/schema.js'
 import { materializeRecurringTasks } from './tasks.js'
 
@@ -26,7 +26,8 @@ export interface SchedulerSources {
  * Maps database rows to scheduler input. Pure.
  *
  * Live routine blocks become the routine; each task carries its own `context`, and the scheduler
- * places it only in blocks that allow it. Tasks that are deleted, completed, or belong to a
+ * places it only in blocks that allow it. A task takes its `area` from its category, which orders
+ * the suggestions for optional blocks. Tasks that are deleted, completed, or belong to a
  * deleted category are skipped. Busy time is every live, timed, opaque, not-declined event that
  * overlaps [now, now + horizon). Previous placements go through as-is; the scheduler itself
  * decides which are still valid.
@@ -37,13 +38,21 @@ export function buildSchedulerInput(src: SchedulerSources): SchedulerInput {
 
   const blocks: RoutineBlock[] = src.routineBlocks
     .filter((b) => b.deletedAt === null)
-    .map((b) => ({ id: b.id, days: b.days, start: b.start, end: b.end, allows: b.allows }))
+    .map((b) => ({
+      id: b.id,
+      days: b.days,
+      start: b.start,
+      end: b.end,
+      allows: b.allows,
+      ...(b.optional ? { optional: true } : {}),
+    }))
 
-  const liveCategories = new Set(src.categories.filter((p) => p.deletedAt === null).map((p) => p.id))
+  const liveCategories = new Map(src.categories.filter((p) => p.deletedAt === null).map((p) => [p.id, p]))
 
   const openTasks: Task[] = []
   for (const t of src.tasks) {
-    if (t.deletedAt !== null || t.completedAt !== null || !liveCategories.has(t.categoryId)) continue
+    const category = liveCategories.get(t.categoryId)
+    if (t.deletedAt !== null || t.completedAt !== null || category === undefined) continue
     const task: Task = {
       id: t.id,
       context: t.context,
@@ -53,6 +62,7 @@ export function buildSchedulerInput(src: SchedulerSources): SchedulerInput {
       completedMinutes: t.completedMinutes,
       createdAt: t.createdAt.toISOString(),
     }
+    if (category.area !== null) task.area = category.area
     if (t.minChunkMinutes !== null) task.minChunkMinutes = t.minChunkMinutes
     if (t.dueAt !== null) task.dueAt = t.dueAt.toISOString()
     if (t.startAt !== null) task.startAt = t.startAt.toISOString()
@@ -93,11 +103,13 @@ export function buildSchedulerInput(src: SchedulerSources): SchedulerInput {
 const SCHEDULER_LOCK_SQL = 'select pg_advisory_xact_lock(731104)'
 
 /**
- * Loads the current state, runs the scheduler, and replaces the `placements` and `unscheduled`
- * tables with the result inside one transaction. Returns the scheduler result so callers can relay it.
+ * Loads the current state, runs the scheduler, and replaces the `placements`, `unscheduled` and
+ * `optional_placements` tables with the result inside one transaction. Returns the scheduler
+ * result so callers can relay it.
  *
  * The outgoing `placements` rows are fed back as `previous`, so a run triggered by an unrelated
  * change (a new event, a task completed elsewhere) keeps the blocks the user is looking at.
+ * Suggestions for optional blocks are not fed back: they are recomputed from the plan each run.
  */
 export async function runScheduling(
   db: Db,
@@ -145,6 +157,19 @@ export async function runScheduling(
           startAt: new Date(p.start),
           endAt: new Date(p.end),
           pinned: p.pinned,
+          computedAt: now,
+        })),
+      )
+    }
+    await tx.delete(optionalPlacements)
+    if (result.optional.length > 0) {
+      await tx.insert(optionalPlacements).values(
+        result.optional.map((p) => ({
+          id: randomUUID(),
+          taskId: p.taskId,
+          blockId: p.blockId,
+          startAt: new Date(p.start),
+          endAt: new Date(p.end),
           computedAt: now,
         })),
       )
