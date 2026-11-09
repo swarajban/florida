@@ -37,8 +37,9 @@ export async function defaultTimeZone(db: Db): Promise<string> {
 }
 
 /**
- * Live categories in display order, each with up to `perCategory` titles of its live tasks: open
- * tasks first (newest first), then completed ones (most recently completed first).
+ * Live categories in display order, each with up to `perCategory` distinct titles of its live
+ * tasks: open tasks first (newest first), then completed ones (most recently completed first). A
+ * repeated title ("Pay rent" every month) takes one slot, at the position of its best-ranked task.
  */
 export async function categoriesWithExamples(
   db: Db,
@@ -60,10 +61,23 @@ export async function categoriesWithExamples(
     .from(tasks)
     .where(isNull(tasks.deletedAt))
     .as('ranked')
-  const examples = await db
-    .select({ categoryId: ranked.categoryId, title: ranked.title })
+  const distinctTitles = db
+    .select({ categoryId: ranked.categoryId, title: ranked.title, rank: sql<number>`min(${ranked.rank})`.as('rank') })
     .from(ranked)
-    .where(lte(ranked.rank, perCategory))
-    .orderBy(ranked.categoryId, ranked.rank)
+    .groupBy(ranked.categoryId, ranked.title)
+    .as('distinct_titles')
+  const reranked = db
+    .select({
+      categoryId: distinctTitles.categoryId,
+      title: distinctTitles.title,
+      rank: sql<number>`row_number() over (partition by ${distinctTitles.categoryId} order by ${distinctTitles.rank})`.as('rank'),
+    })
+    .from(distinctTitles)
+    .as('reranked')
+  const examples = await db
+    .select({ categoryId: reranked.categoryId, title: reranked.title })
+    .from(reranked)
+    .where(lte(reranked.rank, perCategory))
+    .orderBy(reranked.categoryId, reranked.rank)
   return rows.map((p) => ({ ...p, examples: examples.filter((e) => e.categoryId === p.id).map((e) => e.title) }))
 }

@@ -309,7 +309,7 @@ describe('POST /api/ai/parse-task', () => {
     expect(await res.json()).toEqual({ error: 'ai request failed: Anthropic API 529: overloaded' })
   })
 
-  it('gives the parser up to 8 recent titles per category, open tasks first, then recently completed', async () => {
+  it('gives the parser up to 8 recent distinct titles per category, open tasks first, then recently completed', async () => {
     const t = (iso: string) => new Date(iso)
     const row = (id: string, categoryId: string, over: Partial<typeof tasks.$inferInsert> = {}) => ({
       id,
@@ -325,6 +325,9 @@ describe('POST /api/ai/parse-task', () => {
       row('open newer', 'work', { createdAt: t('2026-10-05T00:00:00Z') }),
       row('done long ago', 'work', { createdAt: t('2026-11-01T00:00:00Z'), completedAt: t('2026-11-02T00:00:00Z') }),
       row('done yesterday', 'work', { createdAt: t('2026-09-01T00:00:00Z'), completedAt: t('2026-11-07T00:00:00Z') }),
+      // A recurring chore: the same title twice takes one slot, where its most recent instance ranks.
+      row('rent oct', 'work', { title: 'Pay rent', createdAt: t('2026-10-01T00:00:00Z'), completedAt: t('2026-10-20T00:00:00Z') }),
+      row('rent nov', 'work', { title: 'Pay rent', createdAt: t('2026-11-01T00:00:00Z'), completedAt: t('2026-11-05T00:00:00Z') }),
       row('deleted', 'work', { createdAt: t('2026-11-06T00:00:00Z'), deletedAt: t('2026-11-07T00:00:00Z') }),
       ...Array.from({ length: 10 }, (_, i) =>
         row(`chore ${i}`, 'personal', { createdAt: t('2026-10-01T00:00:00Z'), completedAt: new Date(Date.UTC(2026, 9, 10 + i)) }),
@@ -334,7 +337,7 @@ describe('POST /api/ai/parse-task', () => {
     expect(res.status).toBe(200)
     expect(seen.at(-1)!.ctx.categories).toEqual([
       { id: 'inbox', name: 'Inbox', examples: [] },
-      { id: 'work', name: 'Work', examples: ['open newer', 'open older', 'done yesterday', 'done long ago'] },
+      { id: 'work', name: 'Work', examples: ['open newer', 'open older', 'done yesterday', 'Pay rent', 'done long ago'] },
       {
         id: 'personal',
         name: 'Personal',
