@@ -109,7 +109,13 @@ struct CommandPaletteView: View {
             // The overlay's text field must be in the window before it can take focus.
             DispatchQueue.main.async {
                 isFieldFocused = true
-                // Append to command/search prefixes and prefilled dates instead of replacing them.
+            }
+        }
+        .onChange(of: isFieldFocused) { _, focused in
+            guard focused else { return }
+            // AppKit selects all when focus arrives. Set the insertion point after that
+            // update so typing appends to command/search prefixes and prefilled dates.
+            DispatchQueue.main.async {
                 selection = TextSelection(insertionPoint: model.palette.text.endIndex)
             }
         }
