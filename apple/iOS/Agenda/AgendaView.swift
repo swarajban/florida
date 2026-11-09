@@ -2,13 +2,14 @@ import FloridaKit
 import SwiftUI
 
 /// The Agenda tab: a week strip over the merged timeline of events and task blocks for one day.
-/// Swipe the strip to move a week, swipe the list to move a day, pull to sync. Today also shows
-/// the current block's progress, free gaps, finished blocks as ghosts and "Day cleared", each
-/// behind a `JoySetting`.
+/// Swipe the strip to move a week, swipe the list to move a day, tap the day heading for a month
+/// grid, pull to sync. Today also shows the current block's progress, free gaps, finished blocks
+/// as ghosts and "Day cleared", each behind a `JoySetting`.
 struct AgendaView: View {
     @Environment(AppModel.self) private var model
     @State private var editingTask: TaskItem?
     @State private var selectedEvent: CalendarEvent?
+    @State private var showsDayPicker = false
     @State private var openedLaunchSheet = false
     @State private var doneForNowTask: TaskItem?
     @State private var movingTask: TaskItem?
@@ -21,17 +22,7 @@ struct AgendaView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(model.selectedDay.formatted(.dateTime.weekday(.wide)))
-                        .font(.title.weight(.medium))
-                    Text(model.selectedDay.formatted(.dateTime.month(.wide).day().year()))
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
+                dayHeading
                 WeekStrip(
                     selectedDay: model.selectedDay,
                     today: model.today,
@@ -56,6 +47,9 @@ struct AgendaView: View {
                     .disabled(isToday)
                 }
             }
+            .sheet(isPresented: $showsDayPicker) {
+                DayPickerSheet(selectedDay: model.selectedDay)
+            }
             .sheet(item: $editingTask) { task in
                 TaskEditorView(task: task)
             }
@@ -70,6 +64,12 @@ struct AgendaView: View {
                 else { return }
                 openedLaunchSheet = true
                 selectedEvent = event
+            }
+            .onAppear {
+                // Screenshot runs (`-uiSheet daypicker`): open the month grid over the agenda.
+                guard LaunchOptions.initialSheet == "daypicker", !openedLaunchSheet else { return }
+                openedLaunchSheet = true
+                showsDayPicker = true
             }
             .task {
                 // Keeps the "now" marker, block progress and the dimming of finished items current.
@@ -92,6 +92,35 @@ struct AgendaView: View {
 
     private var isToday: Bool {
         model.selectedDay == model.today
+    }
+
+    /// "Monday" over "November 9, 2026". Tapping it opens the month grid to jump to any day.
+    private var dayHeading: some View {
+        Button {
+            showsDayPicker = true
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(model.selectedDay.formatted(.dateTime.weekday(.wide)))
+                    .font(.title.weight(.medium))
+                    .foregroundStyle(FloridaStyle.ink)
+                HStack(spacing: 4) {
+                    Text(model.selectedDay.formatted(.dateTime.month(.wide).day().year()))
+                        .font(.subheadline)
+                    Image(systemName: "chevron.down")
+                        .font(.caption2.weight(.bold))
+                }
+                .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+        .accessibilityLabel("Go to day")
+        .accessibilityValue(model.selectedDay.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
+        .accessibilityHint("Opens a month calendar")
     }
 
     private var timeline: some View {

@@ -30,6 +30,12 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(draft.buttons["Add"].exists)
             capture(draft, "task-draft-\(appearance)")
             draft.terminate()
+
+            let picker = launch(appearance: appearance, sheet: "daypicker")
+            waitForText("Go to Day", in: picker)
+            XCTAssertTrue(picker.buttons["Done"].waitForExistence(timeout: 20))
+            capture(picker, "day-picker-\(appearance)")
+            picker.terminate()
         }
 
         let large = launch(largeText: true)

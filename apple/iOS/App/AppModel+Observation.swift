@@ -22,11 +22,19 @@ extension AppModel {
     }
 
     /// (Re)starts the agenda observation for `selectedDay`; the previous one is cancelled.
+    ///
+    /// The first value is read synchronously: the observation delivers its first rows a run
+    /// loop later, which left the strip on the new day over the old day's list for a frame (and,
+    /// when the new day was today, put a now marker into it). A day's rows are one indexed read
+    /// of the local store, so the strip, title and list now change together.
     func observeAgenda() {
         agendaObserver?.cancel()
         guard let database else { return }
         let day = selectedDay
         let calendar = calendar
+        if let current = try? database.agenda(for: day, calendar: calendar) {
+            agenda = current
+        }
         agendaObserver = Task { [weak self] in
             do {
                 for try await agenda in database.observeAgenda(for: day, calendar: calendar) {

@@ -263,9 +263,15 @@ final class AppModel {
         ]
     }
 
+    /// The first value is read synchronously, so a jump outside the loaded range draws its events
+    /// in the same frame as the new columns rather than a run loop later; the observation then
+    /// keeps them current.
     private func restartEventsObserver() {
         eventsObserver?.cancel()
         guard let database, let range = loadedRange else { return }
+        if let current = try? database.events(in: range) {
+            events = current
+        }
         eventsObserver = observe(database.observeEvents(in: range)) { model, events in
             model.events = events
             model.rebuildLayout()

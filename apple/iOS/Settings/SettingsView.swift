@@ -73,6 +73,31 @@ struct SettingsView: View {
 
                 SyncQueueSections()
 
+                Section {
+                    NavigationLink {
+                        CategoriesView()
+                    } label: {
+                        Label {
+                            LabeledContent("Categories", value: "\(model.categories.count)")
+                        } icon: {
+                            Image(systemName: "folder")
+                        }
+                    }
+                    NavigationLink {
+                        SchedulesView()
+                    } label: {
+                        Label {
+                            LabeledContent("Schedules", value: "\(model.schedules.count)")
+                        } icon: {
+                            Image(systemName: "clock")
+                        }
+                    }
+                } header: {
+                    Text("Tasks")
+                } footer: {
+                    Text("Categories group tasks (Engineering, Infosec, Finances…) and pick the schedule whose hours they follow. Add as many as you like.")
+                }
+
                 JoySettingsSection()
 
                 if model.accounts.isEmpty {

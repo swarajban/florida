@@ -58,6 +58,16 @@ struct TasksView: View {
                         }
                     }
                 }
+                Section {
+                    NavigationLink(value: TasksRoute.categories) {
+                        Label("Categories", systemImage: "folder")
+                    }
+                    NavigationLink(value: TasksRoute.schedules) {
+                        Label("Schedules", systemImage: "clock")
+                    }
+                } footer: {
+                    Text("Add a category for each project or area. Typing #Infosec in quick add files the task there, or offers to create it.")
+                }
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
