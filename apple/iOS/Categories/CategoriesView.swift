@@ -30,6 +30,8 @@ struct CategoriesView: View {
                             }
                             .tint(.red)
                         }
+                        // On the row, so the dialog opens next to it rather than at the list's edge.
+                        .categoryDeleteConfirmation($deleting.only(category))
                 }
                 .onMove { source, destination in
                     model.moveCategories(fromOffsets: source, toOffset: destination)
@@ -59,7 +61,6 @@ struct CategoriesView: View {
         .sheet(item: $editing) { target in
             CategoryEditorView(target: target)
         }
-        .categoryDeleteConfirmation($deleting)
         .toastOverlay()
     }
 
@@ -116,7 +117,8 @@ enum CategoryEditorTarget: Identifiable, Hashable {
 }
 
 extension View {
-    /// Asks before deleting a category, saying how many open tasks move to Inbox.
+    /// Asks before deleting a category, saying how many open tasks move to Inbox. Put it on the
+    /// row or button that sets `category`: the dialog opens anchored to the view it modifies.
     func categoryDeleteConfirmation(_ category: Binding<TaskCategory?>, onDeleted: @escaping () -> Void = {}) -> some View {
         modifier(CategoryDeleteConfirmation(category: category, onDeleted: onDeleted))
     }

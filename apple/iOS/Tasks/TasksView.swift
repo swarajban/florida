@@ -113,7 +113,7 @@ struct TasksView: View {
             .sheet(item: $editor, onDismiss: clearQuickAddIfAdded) { request in
                 TaskEditorView(request: request)
             }
-            .taskActionSheets(doneForNow: $doneForNowTask, moving: $movingTask)
+            .taskActionSheets(doneForNow: $doneForNowTask)
             .refreshable {
                 await model.syncNow()
             }

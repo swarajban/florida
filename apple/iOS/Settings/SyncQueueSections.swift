@@ -59,6 +59,18 @@ struct SyncQueueSections: View {
                         }
                         .buttonStyle(.borderless)
                         .accessibilityLabel("Discard")
+                        // On the button, so the dialog opens anchored to it.
+                        .confirmationDialog(
+                            "Discard this change?",
+                            isPresented: $discarding.only(write, by: \.seq).isPresent(),
+                            titleVisibility: .visible
+                        ) {
+                            Button("Discard", role: .destructive) {
+                                model.discardPendingWrite(write)
+                            }
+                        } message: {
+                            Text("It will not be sent, and this device goes back to the server's copy.")
+                        }
                     }
                     .accessibilityElement(children: .combine)
                 }
@@ -71,18 +83,6 @@ struct SyncQueueSections: View {
             }
         } header: {
             Text("Waiting to sync (\(model.pendingWriteCount))")
-        }
-        .confirmationDialog(
-            "Discard this change?",
-            isPresented: Binding(get: { discarding != nil }, set: { if !$0 { discarding = nil } }),
-            titleVisibility: .visible,
-            presenting: discarding
-        ) { write in
-            Button("Discard", role: .destructive) {
-                model.discardPendingWrite(write)
-            }
-        } message: { _ in
-            Text("It will not be sent, and this device goes back to the server's copy.")
         }
     }
 

@@ -68,6 +68,9 @@ struct CategoryEditorView: View {
                         } label: {
                             Label("Delete Category", systemImage: "trash")
                         }
+                        .categoryDeleteConfirmation($deleting) {
+                            dismiss()
+                        }
                     }
                 }
             }
@@ -85,9 +88,6 @@ struct CategoryEditorView: View {
                     }
                     .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
-            }
-            .categoryDeleteConfirmation($deleting) {
-                dismiss()
             }
             .onAppear {
                 if isNew {

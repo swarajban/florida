@@ -3,8 +3,8 @@ import SwiftUI
 
 /// Done, Done for now, Do now, Push to tomorrow and Move to… for one task, the same on a Tasks
 /// row and an agenda block. `taskActions(...)` adds them as swipe actions (Done on the leading
-/// edge, the rest trailing) and as a context menu; the sheets they need come from
-/// `taskActionSheets(...)` on the list.
+/// edge, the rest trailing), as a context menu, and the Move to… dialog anchored to the row; the
+/// Done for now sheet comes from `taskActionSheets(...)` on the list.
 struct TaskActionTargets {
     /// Set to open the Done for now sheet.
     var doneForNow: Binding<TaskItem?>
@@ -19,12 +19,11 @@ extension View {
         modifier(TaskActionsModifier(task: task, targets: targets, onEdit: onEdit, allowsDelete: allowsDelete))
     }
 
-    /// The Done for now sheet and the Move to… dialog for a list using `taskActions`.
-    func taskActionSheets(doneForNow: Binding<TaskItem?>, moving: Binding<TaskItem?>) -> some View {
+    /// The Done for now sheet for a list using `taskActions`. The Move to… dialog sits on each row.
+    func taskActionSheets(doneForNow: Binding<TaskItem?>) -> some View {
         sheet(item: doneForNow) { task in
             DoneForNowSheet(task: task)
         }
-        .moveToDialog(task: moving)
     }
 }
 
@@ -72,6 +71,8 @@ private struct TaskActionsModifier: ViewModifier {
                 }
                 .tint(.indigo)
             }
+            // On the row, so the dialog opens next to it rather than at the list's edge.
+            .moveToDialog(task: targets.moving.only(task))
             .contextMenu {
                 Button {
                     model.complete(task)

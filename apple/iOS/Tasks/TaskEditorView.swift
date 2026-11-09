@@ -120,6 +120,13 @@ struct TaskEditorView: View {
                         } label: {
                             Label("Delete task", systemImage: "trash")
                         }
+                        // On the button, so the dialog opens anchored to it.
+                        .confirmationDialog("Delete this task?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+                            Button("Delete", role: .destructive) {
+                                model.delete(original)
+                                dismiss()
+                            }
+                        }
                     }
                 }
             }
@@ -136,12 +143,6 @@ struct TaskEditorView: View {
                         save()
                     }
                     .disabled(trimmedTitle.isEmpty)
-                }
-            }
-            .confirmationDialog("Delete this task?", isPresented: $confirmingDelete, titleVisibility: .visible) {
-                Button("Delete", role: .destructive) {
-                    model.delete(original)
-                    dismiss()
                 }
             }
             .onAppear {

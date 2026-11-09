@@ -34,6 +34,20 @@ struct SchedulesView: View {
                     }
                     .tint(.red)
                 }
+                // On the row, so the dialog opens next to it rather than at the list's edge.
+                .confirmationDialog(
+                    "Delete “\(schedule.name)”?",
+                    isPresented: $deleting.only(schedule).isPresent(),
+                    titleVisibility: .visible
+                ) {
+                    Button("Delete Schedule", role: .destructive) {
+                        do {
+                            try model.deleteSchedule(schedule)
+                        } catch {
+                            model.showToast(Toast(message: error.localizedDescription, systemImage: "exclamationmark.triangle.fill", style: .error))
+                        }
+                    }
+                }
             }
         }
         .listStyle(.insetGrouped)
@@ -55,20 +69,6 @@ struct SchedulesView: View {
         }
         .sheet(item: $editing) { schedule in
             ScheduleEditorView(schedule: schedule, isNew: model.schedule(id: schedule.id) == nil)
-        }
-        .confirmationDialog(
-            "Delete “\(deleting?.name ?? "")”?",
-            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
-            titleVisibility: .visible,
-            presenting: deleting
-        ) { schedule in
-            Button("Delete Schedule", role: .destructive) {
-                do {
-                    try model.deleteSchedule(schedule)
-                } catch {
-                    model.showToast(Toast(message: error.localizedDescription, systemImage: "exclamationmark.triangle.fill", style: .error))
-                }
-            }
         }
         .toastOverlay()
     }
