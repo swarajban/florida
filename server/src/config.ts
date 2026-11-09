@@ -20,7 +20,7 @@ const envSchema = z.object({
   GOOGLE_SITE_VERIFICATION: z.string().min(1).optional(),
   /** Optional: enables POST /api/ai/parse-task. */
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
-  ANTHROPIC_MODEL: z.string().min(1).default('claude-haiku-5-5'),
+  ANTHROPIC_MODEL: z.string().min(1).default('claude-sonnet-5-5'),
 })
 
 export type Config = z.infer<typeof envSchema>
