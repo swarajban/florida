@@ -12,6 +12,7 @@ struct FloridaMacApp: App {
         WindowGroup("Florida", id: Self.mainWindowID) {
             RootView()
                 .environment(appDelegate.model)
+                .preferredColorScheme(FloridaStyle.captureColorScheme)
         }
         .defaultSize(width: 1240, height: 820)
         .commands {

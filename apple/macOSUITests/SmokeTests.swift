@@ -6,9 +6,9 @@ final class SmokeTests: XCTestCase {
     @MainActor
     func testCalendarAndQuickAddInBothAppearances() throws {
         continueAfterFailure = false
-        for appearance in ["Light", "Dark"] {
+        for appearance in ["light", "dark"] {
             let app = XCUIApplication()
-            app.launchArguments = ["-demoData", "YES", "-AppleInterfaceStyle", appearance]
+            app.launchArguments = ["-demoData", "YES", "-uiAppearance", appearance]
             app.launch()
             defer { app.terminate() }
             let window = app.windows.firstMatch

@@ -6,6 +6,19 @@ enum FloridaStyle {
     static let panel = Color("Panel")
     static let ink = Color("Ink")
     static let rule = Color("Rule")
+
+    /// Deterministic native captures; normal launches and Release builds follow the device.
+    static var captureColorScheme: ColorScheme? {
+        #if DEBUG
+        switch UserDefaults.standard.string(forKey: "uiAppearance") {
+        case "light": return .light
+        case "dark": return .dark
+        default: return nil
+        }
+        #else
+        return nil
+        #endif
+    }
 }
 
 struct FloridaMark: View {

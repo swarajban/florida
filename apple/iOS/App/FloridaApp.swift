@@ -10,7 +10,7 @@ struct FloridaApp: App {
         WindowGroup {
             RootView()
                 .environment(model)
-                .preferredColorScheme(LaunchOptions.colorScheme)
+                .preferredColorScheme(FloridaStyle.captureColorScheme)
         }
     }
 }
