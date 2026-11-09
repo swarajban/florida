@@ -1,8 +1,9 @@
 import FloridaKit
 import SwiftUI
 
-/// One task: priority glyph, title, then duration, due date, scheduled time and pin state, and a
-/// red or orange line when it is overdue, late (with its ETA) or could not be (fully) placed.
+/// One task: title, then priority (only ASAP or High is printed), duration, due day, scheduled
+/// time and pin state, and a red or orange line when it is overdue, late (with its ETA) or could
+/// not be (fully) placed.
 /// Inbox rows have a dashed edge and may offer the AI's category.
 struct TaskRowView: View {
     let task: TaskItem
@@ -19,18 +20,21 @@ struct TaskRowView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            Image(systemName: task.priority.symbolName)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(task.priority.tint)
-                .frame(width: 14)
-                .padding(.top, 2)
             VStack(alignment: .leading, spacing: 3) {
                 Text(task.title)
                     .lineLimit(2)
                 HStack(spacing: 8) {
+                    if let marker = task.priority.rowMarker {
+                        Text(marker)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(task.priority.tint)
+                            .accessibilityLabel("\(marker) priority")
+                    }
                     Text(DateText.duration(minutes: task.durationMinutes))
                     if let dueAt = task.dueAt {
-                        Label(DateText.day(dueAt, calendar: calendar), systemImage: task.deadlineType == .hard ? "flag.fill" : "flag")
+                        Label(
+                            DateText.due(dueAt, calendar: calendar),
+                            systemImage: task.deadlineType == .hard ? "calendar.badge.clock" : "calendar")
                             .foregroundStyle(state.isOverdue ? Color.red : Color.secondary)
                     }
                     Text(state.label(calendar: calendar))

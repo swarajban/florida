@@ -2,14 +2,12 @@ import AppKit
 import FloridaKit
 
 extension AppModel {
-    /// Google Calendar's "new event" page; Florida has no event write API, so `newEvent` opens it.
-    static let newGoogleEventURL = URL(string: "https://calendar.google.com/calendar/u/0/r/eventedit")!
-
     /// True while a sheet owns the window. Commands do nothing then (except Escape and sync):
     /// a sheet holds a draft, and a menu shortcut such as ⌘1 writing underneath it would be
     /// overwritten by the stale draft when the sheet saves.
     var isSheetOpen: Bool {
         editorTask != nil || isGoToDateOpen || isNewCategoryOpen || doneForNow != nil || recurringTaskToDelete != nil
+            || eventEditor != nil || eventToDelete != nil
     }
 
     /// Asks `RootView` to open the Settings window on `tab`.
@@ -23,8 +21,9 @@ extension AppModel {
         switch command {
         case .core(let shared):
             perform(shared)
-        case .undo, .move, .acceptSuggestion, .newCategory, .editSchedule, .newTaskEditor,
-             .doNow, .doneForNow, .repeatLast, .centerOnNow, .jumpToFirst, .jumpToLast:
+        case .undo, .move, .acceptSuggestion, .newCategory, .showRoutine, .newTaskEditor,
+             .doNow, .doneForNow, .repeatLast, .centerOnNow, .jumpToFirst, .jumpToLast,
+             .editEvent, .respondYes, .respondMaybe, .respondNo:
             guard !isSheetOpen else { return }
             statusMessage = nil
             switch command {
@@ -32,7 +31,7 @@ extension AppModel {
             case .move: openMovePicker()
             case .acceptSuggestion: acceptSuggestion()
             case .newCategory: isNewCategoryOpen = true
-            case .editSchedule: openSettings(.schedules)
+            case .showRoutine: openSettings(.routine)
             case .newTaskEditor: openNewTaskEditor()
             case .doNow: doNowSelection()
             case .doneForNow: doneForNowSelection()
@@ -40,6 +39,10 @@ extension AppModel {
             case .centerOnNow: centerOnNow()
             case .jumpToFirst: jumpToEdge(last: false)
             case .jumpToLast: jumpToEdge(last: true)
+            case .editEvent: editEvent()
+            case .respondYes: respondToEvent("accepted")
+            case .respondMaybe: respondToEvent("tentative")
+            case .respondNo: respondToEvent("declined")
             case .core: break
             }
         }
@@ -79,7 +82,7 @@ extension AppModel {
         case .search: openPalette(mode: .search)
         case .showHelp: isHelpOpen.toggle()
         case .newTask: openPalette(mode: .quickAdd)
-        case .newEvent: open(url: Self.newGoogleEventURL)
+        case .newEvent: openNewEventEditor()
         case .edit: editSelection()
         case .delete: deleteSelection()
         case .complete: completeSelection()
@@ -109,6 +112,10 @@ extension AppModel {
             eventDetailID = nil
         } else if recurringTaskToDelete != nil {
             recurringTaskToDelete = nil
+        } else if eventToDelete != nil {
+            eventToDelete = nil
+        } else if eventEditor != nil {
+            eventEditor = nil
         } else if editorTask != nil {
             editorTask = nil
         } else if isGoToDateOpen {
@@ -122,14 +129,19 @@ extension AppModel {
         }
     }
 
-    /// Return / `e` / double-click: tasks open the editor sheet, events their detail popover.
+    /// Return / `e` / double-click: tasks open the editor sheet, events their detail popover, and
+    /// an event whose popover is already open its editor sheet.
     func editSelection() {
         if case .gap(let id)? = selection, let gap = gridLayout.gap(id: id) {
             openFitPicker(gap)
         } else if let task = selectedTask {
             editorTask = task
         } else if let event = selectedEvent {
-            eventDetailID = event.id
+            if eventDetailID == event.id {
+                openEventEditor(event)
+            } else {
+                eventDetailID = event.id
+            }
         } else {
             statusMessage = "Select a task or event first"
         }

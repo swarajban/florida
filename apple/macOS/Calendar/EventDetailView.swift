@@ -2,8 +2,12 @@ import FloridaKit
 import SwiftUI
 
 /// The `↩` / double-click popover for a Google event: title, time, calendar and account,
-/// location, description with live links, guests with their responses, your own response
-/// (read-only), and Join. "Open in Google Calendar" lives in the ⋯ menu.
+/// location, description with live links, guests with their responses, and Join. "Open in Google
+/// Calendar" lives in the ⋯ menu.
+///
+/// On a calendar the user can write to it also answers an invitation (Yes / Maybe / No) and
+/// offers Edit and Delete; on a read-only calendar it only shows the response. The keymap's event
+/// keys (`e`, `r y` / `r m` / `r n`, `x`) work while it is open, through its own key monitor.
 struct EventDetailView: View {
     @Environment(AppModel.self) private var model
     let event: CalendarEvent
@@ -34,14 +38,59 @@ struct EventDetailView: View {
             if let attendees = event.attendees, !attendees.isEmpty {
                 EventAttendeeList(attendees: attendees)
             }
-            if let rsvp = Self.rsvpText(event.responseStatus) {
+            if model.canRespond(to: event) {
+                responseButtons
+            } else if let rsvp = Self.rsvpText(event.responseStatus) {
                 Label(rsvp, systemImage: EventAttendeeList.symbol(for: event.responseStatus ?? ""))
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
+            if model.canEdit(event) {
+                Divider()
+                HStack {
+                    Button("Edit…") {
+                        model.openEventEditor(event)
+                    }
+                    .help(Self.hint(for: .editEvent))
+                    Spacer()
+                    Button("Delete…", role: .destructive) {
+                        model.confirmDelete(event)
+                    }
+                    .help(Self.hint(for: .core(.delete)))
+                }
+            }
         }
         .padding(16)
         .frame(width: 360, alignment: .leading)
+        .background(KeyEventMonitorView(model: model, isEventPopover: true))
+    }
+
+    /// Yes / Maybe / No for an invitation, with the current answer shown pressed.
+    private var responseButtons: some View {
+        HStack(spacing: 8) {
+            Text("Going?")
+                .foregroundStyle(.secondary)
+            responseButton("Yes", status: "accepted", command: .respondYes)
+            responseButton("Maybe", status: "tentative", command: .respondMaybe)
+            responseButton("No", status: "declined", command: .respondNo)
+        }
+        .font(.callout)
+    }
+
+    private func responseButton(_ title: String, status: String, command: MacCommand) -> some View {
+        let isCurrent = Binding(
+            get: { event.responseStatus == status },
+            set: { _ in model.respond(to: event, status: status) })
+        return Toggle(isOn: isCurrent) {
+            Label(title, systemImage: EventAttendeeList.symbol(for: status))
+        }
+        .toggleStyle(.button)
+        .help(Self.hint(for: command))
+    }
+
+    /// "RSVP: Yes (r y)" — a button's tooltip: the command it runs and the keys bound to it.
+    private static func hint(for command: MacCommand) -> String {
+        "\(command.label) (\(MacKeymap.default.shortcut(for: command)))"
     }
 
     private var header: some View {
@@ -100,7 +149,7 @@ struct EventDetailView: View {
         return "\(range) (\(DateText.duration(minutes: minutes)))"
     }
 
-    /// Your own response, read-only for now; nil when you are not a guest.
+    /// Your own response in words, for calendars it cannot be changed on; nil when you are not a guest.
     static func rsvpText(_ status: String?) -> String? {
         switch status {
         case "accepted": "You're going"

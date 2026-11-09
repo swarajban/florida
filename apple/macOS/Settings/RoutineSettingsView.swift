@@ -1,8 +1,9 @@
 import FloridaKit
 import SwiftUI
 
-/// Settings › Routine: the weekly blocks tasks are scheduled in, with the contexts each allows.
-/// Read-only; the server owns the routine for now.
+/// Settings › Routine: the weekly blocks tasks are scheduled in, with the contexts each allows; an
+/// optional block (evenings) says it only gets suggestions. Read-only; the server owns the routine
+/// for now.
 struct RoutineSettingsView: View {
     @Environment(AppModel.self) private var model
 
@@ -19,6 +20,9 @@ struct RoutineSettingsView: View {
                         } label: {
                             Text(block.name)
                             Text(RoutineText.when(block, calendar: model.calendar))
+                            if block.optional {
+                                Text(RoutineText.optionalNote)
+                            }
                         }
                     }
                 } footer: {

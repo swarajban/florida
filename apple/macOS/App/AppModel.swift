@@ -37,6 +37,8 @@ final class AppModel {
     private(set) var placementsByTask: [String: [Placement]] = [:]
     /// Why the scheduler could not place (all of) a task, by task id.
     private(set) var unscheduledByTask: [String: UnscheduledTask] = [:]
+    /// The scheduler's suggestions for optional routine blocks (weekday evenings), by start.
+    private(set) var optionalPlacements: [OptionalPlacement] = []
     private(set) var schedules: [Schedule] = []
     /// The weekly routine the scheduler places tasks in; read-only here.
     private(set) var routineBlocks: [RoutineBlock] = []
@@ -78,6 +80,10 @@ final class AppModel {
     var editorAIText: String?
     /// The event whose detail popover is open.
     var eventDetailID: String?
+    /// The event open in the editor sheet (a stored one, or the draft of a new one).
+    var eventEditor: EventEditorRequest?
+    /// The event whose delete is waiting for confirmation: nothing undoes an event delete.
+    var eventToDelete: CalendarEvent?
     var isGoToDateOpen = false
     /// Display form of a multi-key sequence in progress, e.g. "g …".
     var pendingKeys = ""
@@ -219,7 +225,10 @@ final class AppModel {
     /// data or navigation change rather than inside the drawing code.
     func rebuildLayout() {
         gridLayout = GridLayout.build(
-            days: visibleDays, events: events, placements: placements, tasksById: tasksById,
+            days: visibleDays, events: events, placements: placements,
+            // A month cell has no room for work that is not on the plan.
+            suggestions: viewMode == .month ? [] : visibleDays.flatMap { optionalPicks(on: $0).flatMap(\.picks) },
+            tasksById: tasksById,
             categoriesById: categoriesById, calendarsById: calendarsById, schedules: activeSchedules,
             options: layoutOptions, lineLimit: viewMode == .month ? MonthGridView.maxLinesPerCell : nil,
             now: Date(), calendar: calendar)
@@ -247,6 +256,10 @@ final class AppModel {
             },
             observe(database.observeRoutineBlocks()) { model, blocks in
                 model.routineBlocks = blocks
+            },
+            observe(database.observeOptionalPlacements()) { model, suggestions in
+                model.optionalPlacements = suggestions
+                model.rebuildLayout()
             },
             observe(database.observeUserSettings()) { model, settings in
                 model.userSettings = settings

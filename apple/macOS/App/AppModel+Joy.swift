@@ -2,7 +2,8 @@ import FloridaKit
 import Foundation
 
 // The local-only touches: centering on now, jumping to the ends, sliding blocks when the
-// scheduler moves them, the current block in the status bar, and filling a free gap.
+// scheduler moves them, the current block in the status bar, filling a free gap, and taking a
+// suggestion for an optional routine block.
 
 extension AppModel {
     /// The schedules the categories use (all of them before categories sync), for dimming
@@ -110,5 +111,38 @@ extension AppModel {
             selection = .task(task.id)
             showGhost("Pinned to \(when)")
         }
+    }
+
+    // MARK: Optional blocks
+
+    /// What the scheduler suggests for the optional routine blocks of `day` ("Evening, if you're
+    /// up for it"). None of it is on the plan; a task leaves as soon as it is pinned or done.
+    func optionalPicks(on day: Date, now: Date = Date()) -> [OptionalPicks] {
+        guard !optionalPlacements.isEmpty else { return [] }
+        return OptionalPicks.on(
+            day: day, placements: optionalPlacements, tasksById: tasksById,
+            blocksById: Dictionary(routineBlocks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }),
+            now: now, calendar: calendar)
+    }
+
+    /// Today's suggestions, as the task pane lists them above the categories.
+    var paneSuggestions: [OptionalPicks] {
+        optionalPicks(on: clockNow, now: clockNow)
+    }
+
+    /// The suggestion whose dotted block or pane row is selected; nil once it has ended or its
+    /// task was pinned or finished.
+    var selectedSuggestion: OptionalPicks.Pick? {
+        guard case .suggestion(let id)? = selection,
+              let placement = optionalPlacements.first(where: { $0.id == id })
+        else { return nil }
+        return optionalPicks(on: placement.startAt).flatMap(\.picks).first { $0.id == id }
+    }
+
+    /// Takes a suggestion: pins the task where it was suggested, which moves it onto the plan and
+    /// out of the suggestions at once (`u` undoes it).
+    func take(_ pick: OptionalPicks.Pick) {
+        guard let task = tasksById[pick.task.id] else { return }
+        fill(start: pick.placement.startAt, with: task)
     }
 }

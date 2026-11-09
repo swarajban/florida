@@ -25,10 +25,15 @@ extension AppModel {
         return true
     }
 
-    /// `x`: deletes at once; `u` brings the task back.
+    /// `x`: deletes a task at once (`u` brings it back). An event, selected or open in its detail
+    /// popover, asks first: nothing undoes an event delete.
     func deleteSelection() {
+        if let event = commandEvent {
+            confirmDelete(event)
+            return
+        }
         guard let task = selectedTask else {
-            statusMessage = selectedEvent == nil ? "Select a task first" : "Events are managed in Google Calendar"
+            statusMessage = "Select a task or event first"
             return
         }
         if task.recurrence != nil {
@@ -41,7 +46,7 @@ extension AppModel {
     /// Called directly only after confirming a recurring delete's scope.
     func deleteTask(_ task: TaskItem) {
         guard let database else { return }
-        let next = neighbor(of: .task(task.id))
+        let next = neighbor(of: item(for: task))
         do {
             try recordingUndo("Deleted \(Self.quoted(task.title))", taskId: task.id) {
                 try database.deleteTask(id: task.id)
@@ -66,8 +71,15 @@ extension AppModel {
             statusMessage = "Select a task first"
             return
         }
+        complete(task)
+    }
+
+    /// Marks `task` done, with the sound and bloom, an undo entry and the "Done" ghost; when it
+    /// was the selection, the selection moves to its neighbor. Also the editor's Mark done.
+    func complete(_ task: TaskItem) {
         guard let database else { return }
-        let next = neighbor(of: .task(task.id))
+        let item = item(for: task)
+        let next = neighbor(of: item)
         completionFeedback(for: task)
         do {
             try recordingUndo("Completed \(Self.quoted(task.title))", taskId: task.id) {
@@ -77,13 +89,20 @@ extension AppModel {
             statusMessage = "Could not complete: \(error.localizedDescription)"
             return
         }
-        selection = next
+        if selection == item {
+            selection = next
+        }
         showGhost("Done · u to undo")
         scheduleSync()
     }
 
-    /// `p` fixes the task at its first scheduled start; ⇧P frees it again.
+    /// `p` fixes the task at its first scheduled start, or a suggestion where it is drawn (which
+    /// takes it); ⇧P frees it again.
     func pinSelection(_ pinned: Bool) {
+        if pinned, let pick = selectedSuggestion {
+            take(pick)
+            return
+        }
         guard var task = selectedTask else {
             statusMessage = "Select a task first"
             return

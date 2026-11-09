@@ -29,14 +29,26 @@ extension AppModel {
         return groups
     }
 
-    /// `j` / `k` order in the task pane.
+    /// `j` / `k` order in the task pane: today's suggestions, then every category's tasks.
     var orderedTaskItems: [ItemID] {
-        taskGroups.flatMap { group in group.tasks.map { ItemID.task($0.id) } }
+        paneSuggestions.flatMap { group in group.picks.map { ItemID.suggestion($0.id) } }
+            + taskGroups.flatMap { group in group.tasks.map { ItemID.task($0.id) } }
     }
 
+    /// The task the selection stands for: its row or block, or a suggestion of it.
     var selectedTask: TaskItem? {
-        guard case .task(let id)? = selection else { return nil }
-        return tasksById[id]
+        switch selection {
+        case .task(let id)?: tasksById[id]
+        case .suggestion?: selectedSuggestion.flatMap { tasksById[$0.task.id] }
+        default: nil
+        }
+    }
+
+    /// The selected item when it stands for `task`, else the task's own item: what to move the
+    /// selection off when the task goes away.
+    func item(for task: TaskItem) -> ItemID {
+        if let selection, selectedSuggestion?.task.id == task.id { return selection }
+        return .task(task.id)
     }
 
     var selectedEvent: CalendarEvent? {
@@ -72,11 +84,16 @@ extension AppModel {
         select(item)
     }
 
-    /// Selects an item; a calendar item also moves the day cursor onto its day.
+    /// Selects an item; a calendar item also moves the day cursor onto its day. A suggestion says
+    /// what it is in the status bar, because it looks like a block and is not on the plan.
     func select(_ item: ItemID?) {
         selection = item
         if focus == .calendar, let item, let day = gridLayout.day(of: item) {
             selectedDay = day
+        }
+        if let pick = selectedSuggestion {
+            let take = RoutineText.takeTitle(pick.placement, now: Date(), calendar: calendar)
+            statusMessage = "Suggestion, not on the plan · P: \(take.lowercased())"
         }
     }
 }

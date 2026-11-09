@@ -2,7 +2,8 @@ import FloridaKit
 import SwiftUI
 
 /// Categories: Inbox (fixed) and the rest in drag-to-reorder order, each with its color, name,
-/// schedule and task count. Every change saves locally at once and syncs in the background.
+/// task count and whether it is work or personal. Every change saves locally at once and syncs in
+/// the background.
 struct CategoriesSettingsView: View {
     @Environment(AppModel.self) private var model
 
@@ -44,7 +45,7 @@ struct CategoriesSettingsView: View {
     }
 }
 
-/// One category: color, name (fixed for Inbox), schedule, open task count, delete.
+/// One category: color, name (fixed for Inbox), open task count, work or personal, delete.
 struct CategorySettingsRow: View {
     @Environment(AppModel.self) private var model
     let category: TaskCategory
@@ -78,13 +79,21 @@ struct CategorySettingsRow: View {
             Text("\(count) open")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Picker("Schedule", selection: scheduleBinding) {
-                ForEach(model.schedules) { schedule in
-                    Text(schedule.name).tag(schedule.id)
+            if !category.isInbox {
+                Picker("Area", selection: areaBinding) {
+                    // "Not set" is offered only until an area is chosen: a write without an area leaves the
+                    // server's as it is, so the choice could not be taken back.
+                    if category.area == nil {
+                        Text("Not set").tag(CategoryArea?.none)
+                    }
+                    ForEach(CategoryArea.allCases, id: \.self) { area in
+                        Text(area.displayName).tag(CategoryArea?.some(area))
+                    }
                 }
+                .labelsHidden()
+                .frame(width: 110)
+                .help(CategoryArea.footnote)
             }
-            .labelsHidden()
-            .frame(width: 150)
             Button {
                 isConfirmingDelete = true
             } label: {
@@ -107,12 +116,12 @@ struct CategorySettingsRow: View {
         }
     }
 
-    private var scheduleBinding: Binding<String> {
+    private var areaBinding: Binding<CategoryArea?> {
         Binding(
-            get: { category.scheduleId },
-            set: { id in
+            get: { category.area },
+            set: { area in
                 var updated = category
-                updated.scheduleId = id
+                updated.area = area
                 model.save(updated)
             })
     }

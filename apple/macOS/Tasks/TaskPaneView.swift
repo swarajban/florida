@@ -1,9 +1,10 @@
 import FloridaKit
 import SwiftUI
 
-/// The right-hand task list: Inbox first (with its triage count), then each category's open
-/// tasks; empty categories stay as one collapsed line. Keeps the selected row scrolled into view
-/// as `j` / `k` move it.
+/// The right-hand task list: today's suggestions for optional routine blocks on top ("Evening, if
+/// you're up for it"), then Inbox (with its triage count) and each category's open tasks; empty
+/// categories stay as one collapsed line. Keeps the selected row scrolled into view as `j` / `k`
+/// move it.
 struct TaskPaneView: View {
     @Environment(AppModel.self) private var model
 
@@ -37,6 +38,21 @@ struct TaskPaneView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        ForEach(model.paneSuggestions) { group in
+                            Section {
+                                ForEach(group.picks) { pick in
+                                    suggestionRow(pick)
+                                }
+                                Text("Suggestions only: none of this is on the plan.")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                                    .padding(.horizontal, 16)
+                                    .padding(.top, 2)
+                                    .padding(.bottom, 8)
+                            } header: {
+                                OptionalPicksHeader(group: group)
+                            }
+                        }
                         ForEach(model.taskGroups) { group in
                             if group.tasks.isEmpty {
                                 TaskGroupHeader(group: group)
@@ -60,7 +76,7 @@ struct TaskPaneView: View {
                     .animation(.easeOut(duration: 0.15), value: model.openTasks.map(\.id))
                 }
                 .onChange(of: model.selection) { _, selection in
-                    if let selection, selection.isTask {
+                    if let selection, selection.isTask || selection.isSuggestion {
                         proxy.scrollTo(selection)
                     }
                 }
@@ -68,6 +84,30 @@ struct TaskPaneView: View {
         }
         .frame(width: Self.width)
         .background(FloridaStyle.panel)
+    }
+
+    private func suggestionRow(_ pick: OptionalPicks.Pick) -> some View {
+        let item = ItemID.suggestion(pick.id)
+        let takeTitle = RoutineText.takeTitle(pick.placement, now: model.clockNow, calendar: model.calendar)
+        return OptionalPickRowView(
+            pick: pick, category: model.categoriesById[pick.task.categoryId], takeTitle: takeTitle,
+            isSelected: model.selection == item, isFocused: model.focus == .tasks
+        ) {
+            model.take(pick)
+        }
+        .id(item)
+        .contextMenu {
+            Button(takeTitle) { model.take(pick) }
+            Divider()
+            TaskActionsMenu(task: pick.task)
+        }
+        .onTapGesture(count: 2) {
+            model.select(item, in: .tasks)
+            model.editSelection()
+        }
+        .onTapGesture {
+            model.select(item, in: .tasks)
+        }
     }
 
     private func row(_ task: TaskItem, in group: CategoryTaskGroup) -> some View {

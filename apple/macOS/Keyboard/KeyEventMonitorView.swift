@@ -5,11 +5,17 @@ import SwiftUI
 /// hands every event to `AppModel.handleKeyDown` before AppKit dispatches it. Events the model
 /// consumes are swallowed (nil); the rest continue to menus and text fields. Events from other
 /// windows (Settings) are ignored so their text fields and menu shortcuts behave normally.
+///
+/// An event's detail popover is a window of its own, so it carries a second copy with
+/// `isEventPopover` set: the keys that act on the open event work while the popover has the
+/// keyboard.
 struct KeyEventMonitorView: NSViewRepresentable {
     let model: AppModel
+    var isEventPopover = false
 
     func makeNSView(context: Context) -> KeyMonitorHostView {
         let view = KeyMonitorHostView()
+        view.isEventPopover = isEventPopover
         view.install(model: model)
         return view
     }
@@ -25,12 +31,17 @@ struct KeyEventMonitorView: NSViewRepresentable {
 final class KeyMonitorHostView: NSView {
     private var monitor: Any?
     private let box = MonitorBox()
+    /// Set before the view enters a window, for the copy in an event's detail popover: its
+    /// window is not the main window, and only the open event's keys run from it.
+    var isEventPopover = false
 
     func install(model: AppModel) {
         box.model = model
         box.view = self
         if let window {
-            model.mainWindow = window
+            if !isEventPopover {
+                model.mainWindow = window
+            }
             startMonitoring()
         }
     }
@@ -40,7 +51,9 @@ final class KeyMonitorHostView: NSView {
         if window == nil {
             stopMonitoring()
         } else {
-            box.model?.mainWindow = window
+            if !isEventPopover {
+                box.model?.mainWindow = window
+            }
             startMonitoring()
         }
     }
@@ -48,10 +61,11 @@ final class KeyMonitorHostView: NSView {
     private func startMonitoring() {
         guard monitor == nil else { return }
         let box = box
+        let inEventPopover = isEventPopover
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let handled = MainActor.assumeIsolated {
                 guard let window = box.view?.window, event.window === window else { return false }
-                return box.model?.handleKeyDown(event) ?? false
+                return box.model?.handleKeyDown(event, inEventPopover: inEventPopover) ?? false
             }
             return handled ? nil : event
         }

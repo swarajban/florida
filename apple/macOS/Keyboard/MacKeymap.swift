@@ -40,6 +40,10 @@ struct MacKeymap: Sendable {
         ("z z", .centerOnNow),
         ("g g", .jumpToFirst),
         ("shift+g", .jumpToLast),
+        ("shift+e", .editEvent),
+        ("r y", .respondYes),
+        ("r m", .respondMaybe),
+        ("r n", .respondNo),
     ]
 
     static let `default`: MacKeymap = {

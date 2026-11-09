@@ -97,13 +97,13 @@ struct QuickAddPreview: View {
         if let dueAt = draft.dueAt {
             let kind = draft.deadlineType == .hard ? "Due" : "By"
             chips.append(Chip(
-                id: "due", symbol: draft.deadlineType == .hard ? "flag.fill" : "flag",
-                text: "\(kind) \(DateText.dayAndTime(dueAt, calendar: calendar))", isDefault: false))
+                id: "due", symbol: draft.deadlineType == .hard ? "calendar.badge.clock" : "calendar",
+                text: "\(kind) \(DateText.due(dueAt, calendar: calendar))", isDefault: false))
         }
         if let startAt = draft.startAt {
             chips.append(Chip(
                 id: "start", symbol: "arrow.right.to.line",
-                text: "After \(DateText.day(startAt, calendar: calendar))", isDefault: false))
+                text: "After \(DateText.notBefore(startAt, calendar: calendar))", isDefault: false))
         }
         if let pinnedStart = draft.pinnedStart {
             chips.append(Chip(

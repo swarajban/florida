@@ -9,6 +9,8 @@ struct GridLayout {
         enum Kind: Hashable {
             case event
             case task(pinned: Bool)
+            /// What the scheduler suggests for an optional routine block; not on the plan.
+            case suggestion
         }
 
         /// Placement id or event id; unique per block, unlike `item` for multi-block tasks.
@@ -39,6 +41,8 @@ struct GridLayout {
             if case .task(let pinned) = kind { return pinned }
             return false
         }
+
+        var isSuggestion: Bool { kind == .suggestion }
     }
 
     /// An all-day event in the strip above the grid.
@@ -106,8 +110,12 @@ struct GridLayout {
         return best?.item
     }
 
+    /// `suggestions` (optional routine blocks) are packed with the events and task blocks, so one
+    /// never hides under an event added since the scheduler ran. They count as taken time for the
+    /// free gaps: a gap offers what is left around them.
     static func build(
-        days: [Date], events: [CalendarEvent], placements: [Placement], tasksById: [String: TaskItem],
+        days: [Date], events: [CalendarEvent], placements: [Placement], suggestions: [OptionalPicks.Pick] = [],
+        tasksById: [String: TaskItem],
         categoriesById: [String: TaskCategory], calendarsById: [String: CalendarInfo], schedules: [Schedule],
         options: Options, lineLimit: Int?, now: Date, calendar: Calendar
     ) -> GridLayout {
@@ -151,6 +159,17 @@ struct GridLayout {
                 tint: categoriesById[task.categoryId]?.tint ?? .defaultCategory, slotKey: "\(task.id)#\(number)",
                 rim: nil)
             timed.append(LayoutItem(id: placement.id, start: placement.startAt, end: placement.endAt))
+        }
+        for pick in suggestions {
+            let placement = pick.placement
+            guard placement.endAt > firstDay, placement.startAt < rangeEnd else { continue }
+            // Prefixed: the server draws placement and suggestion ids separately.
+            let id = "suggestion-\(placement.id)"
+            sources[id] = Source(
+                item: .suggestion(placement.id), kind: .suggestion, start: placement.startAt, end: placement.endAt,
+                title: pick.task.title, tint: categoriesById[pick.task.categoryId]?.tint ?? .defaultCategory,
+                slotKey: id, rim: nil)
+            timed.append(LayoutItem(id: id, start: placement.startAt, end: placement.endAt))
         }
 
         let rows = AllDayLayout.rows(allDay, days: days, calendar: calendar)

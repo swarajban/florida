@@ -15,9 +15,9 @@ struct AppCommands: Commands {
                 .keyboardShortcut("n")
             Button("New Task…") { model.run(.newTaskEditor) }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
-            Button("New Event in Google Calendar") { model.perform(.newEvent) }
+            Button("New Event…") { model.perform(.newEvent) }
             Button("New Category…") { model.run(.newCategory) }
-            Button("Edit Schedules…") { model.run(.editSchedule) }
+            Button("Routine…") { model.run(.showRoutine) }
             Divider()
             Button("Sync Now") { model.perform(.sync) }
                 .keyboardShortcut("r")

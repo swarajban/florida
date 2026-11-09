@@ -1,3 +1,4 @@
+import FloridaKit
 import Foundation
 
 /// Short display strings for dates and durations. Everything uses the autoupdating calendar and
@@ -40,6 +41,21 @@ enum DateText {
     /// "Today 2:00 PM", "Tue 9:00 AM", "Nov 20 9:00 AM".
     static func dayAndTime(_ date: Date, calendar: Calendar, now: Date = Date()) -> String {
         "\(day(date, calendar: calendar, now: now)) \(time(date))"
+    }
+
+    /// A task's due date: the day alone ("Fri"), or with its time ("Fri 3:00 PM") when the user
+    /// gave it one (see `TaskDay`).
+    static func due(_ dueAt: Date, calendar: Calendar, now: Date = Date()) -> String {
+        TaskDay.dueHasTime(dueAt, calendar: calendar)
+            ? dayAndTime(dueAt, calendar: calendar, now: now)
+            : day(dueAt, calendar: calendar, now: now)
+    }
+
+    /// A task's "not before" date, printed like `due`.
+    static func notBefore(_ startAt: Date, calendar: Calendar, now: Date = Date()) -> String {
+        TaskDay.notBeforeHasTime(startAt, calendar: calendar)
+            ? dayAndTime(startAt, calendar: calendar, now: now)
+            : day(startAt, calendar: calendar, now: now)
     }
 
     /// "November 2026".

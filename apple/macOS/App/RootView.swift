@@ -34,6 +34,9 @@ struct RootView: View {
         .sheet(item: $model.doneForNow) { request in
             DoneForNowSheet(request: request)
         }
+        .sheet(item: $model.eventEditor) { request in
+            EventEditorSheet(event: request.event, isNew: request.isNew)
+        }
         .confirmationDialog(
             "Delete this occurrence and stop repeating?",
             isPresented: Binding(
@@ -48,6 +51,22 @@ struct RootView: View {
             Button("Cancel", role: .cancel) { model.recurringTaskToDelete = nil }
         } message: { _ in
             Text("This and future unfinished occurrences will be removed. Completed history is kept.")
+        }
+        .confirmationDialog(
+            "Delete this event?",
+            isPresented: Binding(
+                get: { model.eventToDelete != nil },
+                set: { if !$0 { model.eventToDelete = nil } }),
+            titleVisibility: .visible, presenting: model.eventToDelete
+        ) { event in
+            Button("Delete Event", role: .destructive) {
+                model.delete(event: event)
+                model.eventToDelete = nil
+            }
+            .keyboardShortcut(.defaultAction)
+            Button("Cancel", role: .cancel) { model.eventToDelete = nil }
+        } message: { event in
+            Text("\(AppModel.quoted(AppModel.title(of: event))) is deleted from Google Calendar too. This cannot be undone.")
         }
         .onChange(of: model.settingsRequest) {
             openSettings()
@@ -68,7 +87,14 @@ struct RootView: View {
         } else {
             VStack(spacing: 0) {
                 HStack {
-                    FloridaWordmark(height: 26)
+                    Button {
+                        model.perform(.today)
+                    } label: {
+                        FloridaWordmark(height: 26)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Go to today (\(MacKeymap.default.shortcut(for: .core(.today))))")
+                    .accessibilityLabel("Go to today")
                     Spacer()
                     Text("⌘K  Commands")
                         .font(.caption)

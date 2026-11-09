@@ -10,7 +10,11 @@ extension AppModel {
     /// (the palette or any focused text view) only ⌘ chords and Escape reach the keymap; the
     /// palette additionally takes ↑ / ↓ for its result list, ⇥ to create quick add's unknown
     /// `#category`, and ⌘↩ to parse quick add's text with AI in the full editor.
-    func handleKeyDown(_ event: NSEvent) -> Bool {
+    ///
+    /// `inEventPopover` marks events from an event's detail popover, which is its own window:
+    /// only the commands that act on the open event run from there (`actsOnOpenEvent`); other
+    /// keys stay with the popover's own controls.
+    func handleKeyDown(_ event: NSEvent, inEventPopover: Bool = false) -> Bool {
         guard let chord = KeyChord(event: event) else { return false }
         let isCommandChord = chord.modifiers.contains(.command)
         let isEscape = chord == KeyChord("escape")
@@ -59,6 +63,9 @@ extension AppModel {
         switch matcher.feed(chord, at: Date()) {
         case .matched(let command):
             pendingKeys = ""
+            if inEventPopover, !command.actsOnOpenEvent {
+                return false
+            }
             run(command)
             return true
         case .pending:

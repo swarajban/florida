@@ -1,14 +1,24 @@
 import Foundation
 
-/// What the focus ring is on: one task (every placement of it lights up) or one Google event.
+/// What the focus ring is on: one task (every placement of it lights up), one Google event, a
+/// free gap, or a suggestion.
 enum ItemID: Hashable, Sendable {
     case task(String)
     case event(String)
     /// A free stretch of schedule time on the grid (`GridLayout.Gap.id`).
     case gap(String)
+    /// What the scheduler suggests for an optional routine block (`OptionalPlacement.id`): a dotted
+    /// block on the grid and, today, a row on top of the task pane. It stands for its task: task
+    /// commands act on that task, and `p` pins it at the suggested start.
+    case suggestion(String)
 
     var isTask: Bool {
         if case .task = self { return true }
+        return false
+    }
+
+    var isSuggestion: Bool {
+        if case .suggestion = self { return true }
         return false
     }
 }

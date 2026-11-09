@@ -1,8 +1,8 @@
 import FloridaKit
 import Foundation
 
-// Categories and schedules: local-first writes like tasks (the server keeps Inbox permanent and
-// moves a deleted category's tasks to Inbox), plus matching quick add's `#hint`s.
+// Categories: local-first writes like tasks (the server keeps Inbox permanent and moves a deleted
+// category's tasks to Inbox), plus matching quick add's `#hint`s.
 
 extension AppModel {
     /// Colors offered for categories, in the order new categories take them.
@@ -42,17 +42,18 @@ extension AppModel {
         normalizedCategoryName(hint).split(separator: " ").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
     }
 
-    /// Creates a category with the next unused palette color and Inbox's schedule; nil (with a
-    /// status message) when there is no schedule to give it yet.
+    /// Creates a category with the next unused palette color; nil (with a status message) before
+    /// the first sync. The server still wants a `scheduleId` on every category though the routine
+    /// replaced schedules' hours, so the new one takes Inbox's.
     @discardableResult
-    func createCategory(name: String, color: String? = nil, scheduleId: String? = nil) -> TaskCategory? {
+    func createCategory(name: String, color: String? = nil, area: CategoryArea? = nil) -> TaskCategory? {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else {
             statusMessage = "Type a name for the category"
             return nil
         }
-        guard let scheduleId = scheduleId ?? inboxCategory?.scheduleId ?? schedules.first?.id else {
-            statusMessage = "No schedules yet — sync with the server first"
+        guard let scheduleId = inboxCategory?.scheduleId ?? schedules.first?.id else {
+            statusMessage = "Nothing has synced yet — sync with the server first"
             return nil
         }
         let used = Set(categories.compactMap(\.color))
@@ -60,7 +61,7 @@ extension AppModel {
         let category = TaskCategory(
             id: UUID().uuidString.lowercased(), name: trimmed,
             color: color ?? Self.categoryPalette.first { !used.contains($0) } ?? Self.categoryPalette[categories.count % Self.categoryPalette.count],
-            scheduleId: scheduleId, sortOrder: (categories.map(\.sortOrder).max() ?? 0) + 1,
+            area: area, scheduleId: scheduleId, sortOrder: (categories.map(\.sortOrder).max() ?? 0) + 1,
             createdAt: now, updatedAt: now)
         guard save(category) else { return nil }
         showGhost("Created \(trimmed)")
@@ -115,46 +116,5 @@ extension AppModel {
 
     func taskCount(inCategory id: String) -> Int {
         openTasks.filter { $0.categoryId == id }.count
-    }
-
-    // MARK: Schedules
-
-    @discardableResult
-    func save(_ schedule: Schedule) -> Bool {
-        guard let database else { return false }
-        do {
-            try database.saveSchedule(schedule)
-        } catch {
-            statusMessage = "Could not save the schedule: \(error.localizedDescription)"
-            return false
-        }
-        scheduleSync()
-        return true
-    }
-
-    /// A new weekday 9–5 schedule in the current time zone.
-    @discardableResult
-    func createSchedule() -> Schedule? {
-        let now = Date()
-        let schedule = Schedule(
-            id: UUID().uuidString.lowercased(), name: "New schedule", timeZone: TimeZone.current.identifier,
-            windows: [ScheduleWindow(days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00")],
-            createdAt: now, updatedAt: now)
-        return save(schedule) ? schedule : nil
-    }
-
-    func deleteSchedule(_ schedule: Schedule) {
-        guard let database else { return }
-        guard !categories.contains(where: { $0.scheduleId == schedule.id }) else {
-            statusMessage = "Move its categories to another schedule first"
-            return
-        }
-        do {
-            try database.deleteSchedule(id: schedule.id)
-        } catch {
-            statusMessage = "Could not delete the schedule: \(error.localizedDescription)"
-            return
-        }
-        scheduleSync()
     }
 }

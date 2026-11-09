@@ -1,12 +1,12 @@
 import FloridaKit
 import SwiftUI
 
-/// `>New category`: name, color and schedule, created locally on Return.
+/// `>New category`: name, color, and work or personal, created locally on Return.
 struct NewCategorySheet: View {
     @Environment(AppModel.self) private var model
     @State private var name = ""
     @State private var color: String?
-    @State private var scheduleId = ""
+    @State private var area: CategoryArea?
     @FocusState private var isNameFocused: Bool
 
     var body: some View {
@@ -19,10 +19,16 @@ struct NewCategorySheet: View {
                     .focused($isNameFocused)
                     .onSubmit(create)
             }
-            Picker("Schedule", selection: $scheduleId) {
-                ForEach(model.schedules) { schedule in
-                    Text(schedule.name).tag(schedule.id)
+            VStack(alignment: .leading, spacing: 4) {
+                Picker("Area", selection: $area) {
+                    Text("Not set").tag(CategoryArea?.none)
+                    ForEach(CategoryArea.allCases, id: \.self) { area in
+                        Text(area.displayName).tag(CategoryArea?.some(area))
+                    }
                 }
+                Text(CategoryArea.footnote)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             HStack {
                 Button("Cancel") {
@@ -41,7 +47,6 @@ struct NewCategorySheet: View {
         .padding(20)
         .frame(width: 360)
         .onAppear {
-            scheduleId = model.inboxCategory?.scheduleId ?? model.schedules.first?.id ?? ""
             isNameFocused = true
         }
     }
@@ -54,8 +59,7 @@ struct NewCategorySheet: View {
 
     private func create() {
         guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-        let created = model.createCategory(
-            name: name, color: color ?? nextColor, scheduleId: scheduleId.isEmpty ? nil : scheduleId)
+        let created = model.createCategory(name: name, color: color ?? nextColor, area: area)
         if created != nil {
             model.isNewCategoryOpen = false
         }

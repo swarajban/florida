@@ -24,15 +24,21 @@ enum MacCommand: Hashable, Sendable {
     case centerOnNow
     /// `gg` / `G`: the first or last item of the focused pane.
     case jumpToFirst, jumpToLast
-    /// Opens Settings on the Schedules tab.
-    case editSchedule
+    /// Opens Settings on the Routine tab: the weekly blocks tasks are scheduled in.
+    case showRoutine
+    /// ⇧E: the editor sheet for the selected event, or the one whose detail popover is open.
+    case editEvent
+    /// `r y` / `r m` / `r n`: answer the invitation of the selected or open event.
+    case respondYes, respondMaybe, respondNo
 
     /// Grouping in the help overlay, reusing the shared sections.
     var section: AppCommand.Section {
         switch self {
         case .core(let command): command.section
-        case .undo, .move, .acceptSuggestion, .newTaskEditor, .doNow, .doneForNow, .repeatLast: .editing
-        case .newCategory, .editSchedule: .actions
+        case .undo, .move, .acceptSuggestion, .newTaskEditor, .doNow, .doneForNow, .repeatLast,
+             .editEvent, .respondYes, .respondMaybe, .respondNo:
+            .editing
+        case .newCategory, .showRoutine: .actions
         case .centerOnNow, .jumpToFirst, .jumpToLast: .navigation
         }
     }
@@ -49,17 +55,34 @@ enum MacCommand: Hashable, Sendable {
         case .doNow: "Do now"
         case .doneForNow: "Done for now…"
         case .repeatLast: "Repeat last action"
-        case .editSchedule: "Edit schedule"
+        case .showRoutine: "Routine"
         case .centerOnNow: "Center on now"
         case .jumpToFirst: "First item"
         case .jumpToLast: "Last item"
+        case .editEvent: "Edit event"
+        case .respondYes: "RSVP: Yes"
+        case .respondMaybe: "RSVP: Maybe"
+        case .respondNo: "RSVP: No"
+        }
+    }
+
+    /// Runs while an event's detail popover has the keyboard: the commands that act on that
+    /// event, and Escape. Everything else waits until the popover is closed.
+    var actsOnOpenEvent: Bool {
+        switch self {
+        case .core(.edit), .core(.delete), .core(.openInGoogle), .core(.copyLink), .core(.cancel),
+             .editEvent, .respondYes, .respondMaybe, .respondNo:
+            true
+        default:
+            false
         }
     }
 
     /// Every command in palette and help order: the shared commands first, then the Mac ones.
     static let all: [MacCommand] = AppCommand.allCases.map(MacCommand.core) + [
         .newTaskEditor, .doNow, .doneForNow, .repeatLast, .undo, .move, .acceptSuggestion,
-        .newCategory, .editSchedule, .centerOnNow, .jumpToFirst, .jumpToLast,
+        .editEvent, .respondYes, .respondMaybe, .respondNo,
+        .newCategory, .showRoutine, .centerOnNow, .jumpToFirst, .jumpToLast,
     ]
 
     /// The palette lists everything except Escape.

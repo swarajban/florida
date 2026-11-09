@@ -3,7 +3,8 @@ import SwiftUI
 
 /// Draws one `GridLayout` into a `Canvas`: off-hours shading, hour lines and labels, day
 /// separators, the day tints, free gaps, every block (sliding from its old slot while
-/// `transition` runs, the current one filling as it goes), the focus ring and the "now" line.
+/// `transition` runs, the current one filling as it goes; a suggestion dotted, barely filled,
+/// with a moon), the focus ring and the "now" line.
 /// Pure drawing from precomputed frames and labels; `now` is the model's minute clock.
 struct TimeGridCanvas: View {
     let layout: GridLayout
@@ -103,7 +104,7 @@ struct TimeGridCanvas: View {
     private func draw(_ block: GridLayout.Block, in context: inout GraphicsContext, geometry: GridGeometry) {
         let rect = animatedRect(for: block, geometry: geometry)
         let shape = Path(roundedRect: rect, cornerRadius: 5)
-        let alpha: Double = block.end < now ? 0.6 : 1
+        let alpha: Double = block.end < now || block.isSuggestion ? 0.6 : 1
         // Arbitrary calendar colors (including yellow) are not safe text colors in both themes.
         // Keep their identity in the fill/rim; ink stays readable on every subtle fill.
         let textColor = FloridaStyle.ink.opacity(alpha)
@@ -120,20 +121,23 @@ struct TimeGridCanvas: View {
             context.stroke(
                 shape, with: .color(block.tint.opacity(0.6 * alpha)),
                 style: StrokeStyle(lineWidth: 1, dash: pinned ? [] : [3, 2]))
+        case .suggestion:
+            context.fill(shape, with: .color(block.tint.opacity(0.03)))
+            context.stroke(shape, with: .color(block.tint.opacity(0.6)), style: StrokeStyle(lineWidth: 1, dash: [1, 3]))
         }
 
         var inner = context
         inner.clip(to: shape)
-        let isCurrent = showsProgress && block.start <= now && now < block.end
+        let isCurrent = showsProgress && !block.isSuggestion && block.start <= now && now < block.end
         if isCurrent {
             drawProgressFill(of: block, in: &inner, rect: rect)
         }
         let padding: CGFloat = 4
         var titleRect = rect.insetBy(dx: padding, dy: 2)
-        if block.isPinned {
+        if let glyph = block.isPinned ? "pin.fill" : (block.isSuggestion ? "moon.stars" : nil) {
             let pinSize: CGFloat = 10
             inner.draw(
-                Text(Image(systemName: "pin.fill")).font(.system(size: 9)).foregroundStyle(textColor),
+                Text(Image(systemName: glyph)).font(.system(size: 9)).foregroundStyle(textColor),
                 at: CGPoint(x: rect.maxX - padding - pinSize / 2, y: rect.minY + 2 + pinSize / 2))
             titleRect.size.width -= pinSize + 2
         }

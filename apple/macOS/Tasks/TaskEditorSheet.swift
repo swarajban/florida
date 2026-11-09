@@ -4,7 +4,10 @@ import SwiftUI
 /// Edits every user-settable field of a task, or fills in a new one (⇧N, `>New task`) starting
 /// from quick add's defaults. New tasks can also be described in free text and parsed by the
 /// server's AI, which fills the form for confirmation. Save writes locally and closes; nothing
-/// waits on the server.
+/// waits on the server. An open task has Mark done on top, which saves any edits and completes it.
+///
+/// Due and Not before are whole days; "Add a time" shows a clock for the rare task that needs one
+/// (see `TaskDay` for what a day without a time stores). A pinned start always has a time.
 struct TaskEditorSheet: View {
     @Environment(AppModel.self) private var model
     @State private var draft: TaskItem
@@ -14,6 +17,9 @@ struct TaskEditorSheet: View {
     @State private var startAt: Date
     @State private var hasPinnedStart: Bool
     @State private var pinnedStart: Date
+    /// The "Add a time" boxes once the user has touched them; until then each follows its date.
+    @State private var dueTimeChoice: Bool?
+    @State private var startTimeChoice: Bool?
     private let original: TaskItem
     /// Not in the store yet: titled "New task", shows the AI section, and saves as "Added".
     let isNew: Bool
@@ -22,7 +28,8 @@ struct TaskEditorSheet: View {
     init(task: TaskItem, isNew: Bool) {
         let calendar = Calendar.autoupdatingCurrent
         let today = calendar.startOfDay(for: Date())
-        let defaultDue = calendar.date(bySettingHour: 17, minute: 0, second: 0, of: today) ?? today
+        // Tomorrow, with no time of its own.
+        let defaultDue = TaskDay.due(on: calendar.date(byAdding: .day, value: 1, to: today) ?? today, calendar: calendar)
         let nextHour = calendar.date(bySetting: .minute, value: 0, of: Date().addingTimeInterval(3600)) ?? Date()
         _draft = State(initialValue: task)
         _hasDue = State(initialValue: task.dueAt != nil)
@@ -37,6 +44,21 @@ struct TaskEditorSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if !isNew, original.isOpen {
+                // Finishing is what the sheet is opened for most often, so it comes first and full width.
+                Button {
+                    markDone()
+                } label: {
+                    Label("Mark done", systemImage: "checkmark.circle.fill")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(hasEdits && recurrenceValidationMessage != nil)
+                .help("Completes the task and closes the editor")
+                .padding([.horizontal, .top], 20)
+            }
             Form {
                 if isNew {
                     AIParseSection(apply: apply)
@@ -54,6 +76,7 @@ struct TaskEditorSheet: View {
                     LabeledContent("Duration") {
                         HStack {
                             TextField("Minutes", value: $draft.durationMinutes, format: .number)
+                                .labelsHidden()
                                 .frame(width: 60)
                                 .multilineTextAlignment(.trailing)
                             Stepper("Minutes", value: $draft.durationMinutes, in: 5...960, step: 5)
@@ -77,8 +100,8 @@ struct TaskEditorSheet: View {
                             Text(type.displayName).tag(type)
                         }
                     }
-                    OptionalDateRow(title: "Due", isOn: $hasDue, date: $dueAt)
-                    OptionalDateRow(title: "Not before", isOn: $hasStart, date: $startAt)
+                    OptionalDateRow(title: "Due", isOn: $hasDue, date: $dueAt, hasTime: dueHasTime)
+                    OptionalDateRow(title: "Not before", isOn: $hasStart, date: $startAt, hasTime: startHasTime)
                     OptionalDateRow(title: "Pinned start", isOn: $hasPinnedStart, date: $pinnedStart)
                 }
                 TaskRecurrenceSection(
@@ -115,6 +138,30 @@ struct TaskEditorSheet: View {
             set: { draft.notes = $0.isEmpty ? nil : $0 })
     }
 
+    /// On when the due date carries a time. Without one the date picker moves the day and keeps
+    /// the whole-day clock the date already has; switching off puts the date back on its whole day.
+    private var dueHasTime: Binding<Bool> {
+        Binding(
+            get: { dueTimeChoice ?? TaskDay.dueHasTime(dueAt, calendar: model.calendar) },
+            set: { on in
+                dueTimeChoice = on
+                if !on {
+                    dueAt = TaskDay.due(on: dueAt, calendar: model.calendar)
+                }
+            })
+    }
+
+    private var startHasTime: Binding<Bool> {
+        Binding(
+            get: { startTimeChoice ?? TaskDay.notBeforeHasTime(startAt, calendar: model.calendar) },
+            set: { on in
+                startTimeChoice = on
+                if !on {
+                    startAt = TaskDay.notBefore(on: startAt, calendar: model.calendar)
+                }
+            })
+    }
+
     private var recurrenceTimeZone: String {
         let scheduleId = draft.scheduleId ?? model.categoriesById[draft.categoryId]?.scheduleId
         return model.schedules.first(where: { $0.id == scheduleId })?.timeZone ?? model.calendar.timeZone.identifier
@@ -141,13 +188,26 @@ struct TaskEditorSheet: View {
         dueAt = parsed.dueAt ?? dueAt
         hasStart = parsed.startAt != nil
         startAt = parsed.startAt ?? startAt
+        // The parsed dates say whether they carry a time.
+        dueTimeChoice = nil
+        startTimeChoice = nil
         hasPinnedStart = parsed.pinnedStart != nil
         pinnedStart = parsed.pinnedStart ?? pinnedStart
         isTitleFocused = true
     }
 
-    private func save() {
-        guard recurrenceValidationMessage == nil else { return }
+    /// True when a field differs from the task the sheet opened on.
+    private var hasEdits: Bool {
+        let due: Date? = hasDue ? dueAt : nil
+        let start: Date? = hasStart ? startAt : nil
+        let pinned: Date? = hasPinnedStart ? pinnedStart : nil
+        return draft != original || due != original.dueAt || start != original.startAt
+            || pinned != original.pinnedStart
+    }
+
+    /// The draft as it is written: title trimmed, the date rows applied, deadline type and
+    /// recurrence made consistent with them.
+    private var preparedTask: TaskItem {
         var task = draft
         task.title = task.title.trimmingCharacters(in: .whitespaces)
         task.durationMinutes = max(5, task.durationMinutes)
@@ -162,6 +222,28 @@ struct TaskEditorSheet: View {
         if original.recurrence == nil && task.recurrence != nil {
             task.prepareToEnableRecurrence()
         }
+        return task
+    }
+
+    /// Mark done: saves any edits as Save would (an emptied title keeps the old one), closes, and
+    /// completes through the model's Space path, so the sound, the bloom and `u` are the same.
+    private func markDone() {
+        var task = original
+        if hasEdits {
+            guard recurrenceValidationMessage == nil else { return }
+            task = preparedTask
+            if task.title.isEmpty {
+                task.title = original.title
+            }
+            guard model.save(task, undoLabel: "Edited \(AppModel.quoted(task.title))") else { return }
+        }
+        model.editorTask = nil
+        model.complete(task)
+    }
+
+    private func save() {
+        guard recurrenceValidationMessage == nil else { return }
+        let task = preparedTask
         let label = isNew ? "Added \(AppModel.quoted(task.title))" : "Edited \(AppModel.quoted(task.title))"
         guard model.save(task, undoLabel: label) else { return }
         model.editorTask = nil
@@ -172,18 +254,28 @@ struct TaskEditorSheet: View {
     }
 }
 
-/// A checkbox that enables a date-and-time picker.
+/// A checkbox that enables a date picker. With `hasTime` the row asks for a day only, and its
+/// "Add a time" box shows the clock; without it the row always has a time.
 struct OptionalDateRow: View {
     let title: String
     @Binding var isOn: Bool
     @Binding var date: Date
+    var hasTime: Binding<Bool>?
 
     var body: some View {
         HStack {
             Toggle(title, isOn: $isOn)
                 .toggleStyle(.checkbox)
             Spacer()
-            DatePicker(title, selection: $date, displayedComponents: [.date, .hourAndMinute])
+            if let hasTime {
+                Toggle("Add a time", isOn: hasTime)
+                    .toggleStyle(.checkbox)
+                    .foregroundStyle(.secondary)
+                    .disabled(!isOn)
+            }
+            DatePicker(
+                title, selection: $date,
+                displayedComponents: hasTime?.wrappedValue ?? true ? [.date, .hourAndMinute] : .date)
                 .labelsHidden()
                 .disabled(!isOn)
         }

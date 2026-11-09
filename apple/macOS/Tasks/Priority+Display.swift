@@ -11,13 +11,21 @@ extension Priority {
         }
     }
 
-    /// SF Symbol drawn in front of a task title.
+    /// SF Symbol for the quick-add chip of the priority.
     var symbolName: String {
         switch self {
-        case .asap: "exclamationmark.3"
-        case .high: "exclamationmark.2"
-        case .medium: "exclamationmark"
+        case .asap, .high: "flag.fill"
+        case .medium: "flag"
         case .low: "arrow.down"
+        }
+    }
+
+    /// What a task row prints for the priority: only the two that ask for attention. Medium and
+    /// low say nothing, so an ordinary list is not a column of marks.
+    var rowMarker: String? {
+        switch self {
+        case .asap, .high: displayName
+        case .medium, .low: nil
         }
     }
 

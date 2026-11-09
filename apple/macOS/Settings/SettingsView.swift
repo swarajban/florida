@@ -1,11 +1,11 @@
 import SwiftUI
 
 enum SettingsTab: Hashable {
-    case server, calendars, categories, schedules, routine, feel
+    case server, calendars, categories, routine, feel
 }
 
-/// The ⌘, window: server settings, the Google calendars to mirror, categories, schedules, the
-/// read-only routine, and the small touches that can be turned off.
+/// The ⌘, window: server settings, the Google calendars to mirror, categories, the read-only
+/// routine, and the small touches that can be turned off.
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
 
@@ -27,11 +27,6 @@ struct SettingsView: View {
                     Label("Categories", systemImage: "folder")
                 }
                 .tag(SettingsTab.categories)
-            SchedulesSettingsView()
-                .tabItem {
-                    Label("Schedules", systemImage: "clock")
-                }
-                .tag(SettingsTab.schedules)
             RoutineSettingsView()
                 .tabItem {
                     Label("Routine", systemImage: "calendar.day.timeline.left")
