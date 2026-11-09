@@ -20,7 +20,7 @@ public struct AllDaySpan<ID: Hashable & Sendable>: Hashable, Sendable {
 
 public enum AllDayLayout {
     /// Greedy row packer for the all-day strip. Each item covers the days it touches (clamped to
-    /// `days`) and takes the first row where all of those day slots are free. Items are placed by
+    /// `days`); an `allDay` item covers the local days of its stored dates (`AllDayDate.localDays`) and takes the first row where all of those day slots are free. Items are placed by
     /// first day, then longer first. The outer array is indexed by row; each row is sorted by start
     /// day. Items touching none of `days` are dropped.
     public static func rows<ID: Hashable & Sendable>(
@@ -32,11 +32,15 @@ public enum AllDayLayout {
 
         var spans: [SpannedItem<ID>] = []
         for (order, item) in items.enumerated() {
+            let range = item.allDay
+                ? AllDayDate.localDays(start: item.start, end: item.end, calendar: calendar)
+                : item.start..<item.end
             // A zero-length item still covers the day it starts on.
-            let end = max(item.end, item.start.addingTimeInterval(1))
+            let start = range.lowerBound
+            let end = max(range.upperBound, start.addingTimeInterval(1))
             var first: Int?
             var last: Int?
-            for index in dayStarts.indices where item.start < dayEnds[index] && end > dayStarts[index] {
+            for index in dayStarts.indices where start < dayEnds[index] && end > dayStarts[index] {
                 if first == nil { first = index }
                 last = index
             }

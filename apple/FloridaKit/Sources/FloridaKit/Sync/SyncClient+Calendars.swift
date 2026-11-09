@@ -12,8 +12,8 @@ extension SyncClient {
     /// UI does not wait on the network; the next pull replaces the calendar table either way.
     public func setCalendarSelected(id: String, selected: Bool) async throws {
         let body = try JSONCoding.encoder.encode(CalendarPatch(selected: selected))
-        let request = makeRequest(method: "PATCH", path: "api/calendars", id: id, body: body)
-        let response: SchedulingResponse = try await perform(request)
+        let request = api.makeRequest(method: "PATCH", path: "api/calendars", id: id, body: body)
+        let response: SchedulingResponse = try await api.perform(request)
         try database.setCalendarSelected(id: id, selected: selected)
         try database.apply(response.scheduling, computedAt: Date())
     }

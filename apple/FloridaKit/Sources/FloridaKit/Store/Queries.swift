@@ -53,15 +53,21 @@ extension AppDatabase {
         try writer.read { db in try TaskItem.fetchOne(db, id: id) }
     }
 
+    /// Tasks the last scheduler run could not fully place, by task id.
+    public func unscheduled() throws -> [UnscheduledTask] {
+        try writer.read { db in try UnscheduledTask.order(Column("taskId")).fetchAll(db) }
+    }
+
     /// Placements overlapping `range`, by start.
     public func placements(in range: Range<Date>) throws -> [Placement] {
         try writer.read { db in try Self.placements(db, in: range) }
     }
 
     /// Visible events (live, not cancelled, not declined) from selected calendars that overlap
-    /// `range`, by start. All-day events are compared with the instants the server stored.
-    public func events(in range: Range<Date>) throws -> [CalendarEvent] {
-        try writer.read { db in try Self.events(db, in: range) }
+    /// `range`, by start. All-day events count when one of their dates is a day of `calendar`
+    /// that overlaps `range`, so a Nov 10 all-day event is on Nov 10 in every time zone.
+    public func events(in range: Range<Date>, calendar: Calendar = .autoupdatingCurrent) throws -> [CalendarEvent] {
+        try writer.read { db in try Self.events(db, in: range, calendar: calendar) }
     }
 
     /// Placements overlapping `range` joined to their tasks, by start. Placements whose task is
@@ -81,7 +87,7 @@ extension AppDatabase {
     /// Visible events and scheduled task blocks for the calendar day containing `day`.
     public func agenda(for day: Date, calendar: Calendar) throws -> DayAgenda {
         let range = Self.dayRange(containing: day, calendar: calendar)
-        return try writer.read { db in try Self.agenda(db, in: range) }
+        return try writer.read { db in try Self.agenda(db, in: range, calendar: calendar) }
     }
 
     /// The `since` cursor returned by the last applied `GET /api/sync`, if any.
@@ -117,16 +123,19 @@ extension AppDatabase {
         }
     }
 
-    /// `range` must be one calendar day, as `dayRange(containing:calendar:)` returns it.
-    static func agenda(_ db: Database, in range: Range<Date>) throws -> DayAgenda {
+    /// `range` must be one day of `calendar`, as `dayRange(containing:calendar:)` returns it.
+    static func agenda(_ db: Database, in range: Range<Date>, calendar: Calendar) throws -> DayAgenda {
         DayAgenda(
             day: range.lowerBound,
-            events: try events(db, in: range),
+            events: try events(db, in: range, calendar: calendar),
             placements: try scheduledBlocks(db, in: range))
     }
 
-    static func events(_ db: Database, in range: Range<Date>) throws -> [CalendarEvent] {
-        try CalendarEvent.fetchAll(db, sql: """
+    /// Timed events are compared with `range` as instants; all-day events, stored as UTC
+    /// midnights, with the stored range of the local days `range` touches.
+    static func events(_ db: Database, in range: Range<Date>, calendar: Calendar) throws -> [CalendarEvent] {
+        let allDay = AllDayDate.storedRange(overlapping: range, calendar: calendar)
+        return try CalendarEvent.fetchAll(db, sql: """
             SELECT event.* FROM event
             JOIN calendar ON calendar.id = event.calendarId
             WHERE calendar.selected
@@ -134,9 +143,10 @@ extension AppDatabase {
               AND event.status <> 'cancelled'
               AND (event.responseStatus IS NULL OR event.responseStatus <> 'declined')
               AND event.startAt IS NOT NULL AND event.endAt IS NOT NULL
-              AND event.startAt < ? AND event.endAt > ?
+              AND ((event.allDay = 0 AND event.startAt < ? AND event.endAt > ?)
+                OR (event.allDay = 1 AND event.startAt < ? AND event.endAt > ?))
             ORDER BY event.startAt
-            """, arguments: [range.upperBound, range.lowerBound])
+            """, arguments: [range.upperBound, range.lowerBound, allDay.upperBound, allDay.lowerBound])
     }
 
     static func cursor(_ db: Database) throws -> String? {
@@ -230,7 +240,7 @@ extension AppDatabase {
 
 extension AppDatabase {
     /// Merges a `GET /api/sync` response: upserts changed rows, drops tombstoned rows, replaces
-    /// the placement, account and calendar tables, and stores the cursor. Tasks, categories and
+    /// the placement, unscheduled, account and calendar tables, and stores the cursor. Tasks, categories and
     /// schedules with a queued local write are left alone; the local version is newer and will be pushed.
     public func apply(_ response: SyncResponse) throws {
         try writer.write { db in
@@ -266,6 +276,7 @@ extension AppDatabase {
             }
 
             try Self.replacePlacements(db, with: response.placements)
+            try Self.replaceUnscheduled(db, with: response.unscheduled)
 
             _ = try GoogleAccount.deleteAll(db)
             for account in response.accounts {
@@ -282,17 +293,30 @@ extension AppDatabase {
         }
     }
 
-    /// Replaces the placement table with the result of a scheduler run.
+    /// Replaces the placement and unscheduled tables with the result of a scheduler run.
     public func apply(_ result: SchedulingResult, computedAt: Date) throws {
         try writer.write { db in
-            try Self.replacePlacements(db, with: result.placementRows(computedAt: computedAt))
+            try Self.replaceSchedulerOutput(db, with: result, computedAt: computedAt)
         }
+    }
+
+    static func replaceSchedulerOutput(_ db: Database, with result: SchedulingResult, computedAt: Date) throws {
+        try replacePlacements(db, with: result.placementRows(computedAt: computedAt))
+        try replaceUnscheduled(db, with: result.unscheduledRows(computedAt: computedAt))
     }
 
     static func replacePlacements(_ db: Database, with placements: [Placement]) throws {
         _ = try Placement.deleteAll(db)
         for placement in placements {
             try placement.insert(db)
+        }
+    }
+
+    static func replaceUnscheduled(_ db: Database, with rows: [UnscheduledTask]) throws {
+        _ = try UnscheduledTask.deleteAll(db)
+        for row in rows {
+            // `save` so a repeated task id overwrites instead of failing the whole apply.
+            try row.save(db)
         }
     }
 
@@ -323,8 +347,29 @@ extension AppDatabase {
         }
     }
 
+    /// Records that the server rejected `write`: removes it from the queue and, unless a newer local
+    /// write for the same entity has been queued since, replaces the local row with `serverRow`, or
+    /// removes it when `serverRow` is nil (tombstoned or unknown on the server).
+    func resolveRejectedWrite<Record: PersistableRecord>(_ write: PendingWrite, serverRow: Record?) throws {
+        try writer.write { db in
+            if let seq = write.seq {
+                _ = try PendingWrite.deleteOne(db, key: seq)
+            }
+            guard !(try Self.pendingEntityIds(db).contains(.init(entity: write.entity, id: write.entityId))) else { return }
+            if let serverRow {
+                try serverRow.save(db)
+                return
+            }
+            switch write.entity {
+            case .task: _ = try TaskItem.deleteOne(db, id: write.entityId)
+            case .category: _ = try TaskCategory.deleteOne(db, id: write.entityId)
+            case .schedule: _ = try Schedule.deleteOne(db, id: write.entityId)
+            }
+        }
+    }
+
     /// Records that the server accepted `write`: removes it from the queue, applies the scheduler
-    /// result, and stores the server's copy of the row unless a newer local write for the same
+    /// result (placements and unscheduled tasks), and stores the server's copy of the row unless a newer local write for the same
     /// entity has been queued since.
     func completePendingWrite<Record: PersistableRecord>(
         _ write: PendingWrite, record: Record?, scheduling: SchedulingResult, computedAt: Date
@@ -337,7 +382,7 @@ extension AppDatabase {
             if let record, !superseded {
                 try record.save(db)
             }
-            try Self.replacePlacements(db, with: scheduling.placementRows(computedAt: computedAt))
+            try Self.replaceSchedulerOutput(db, with: scheduling, computedAt: computedAt)
         }
     }
 }

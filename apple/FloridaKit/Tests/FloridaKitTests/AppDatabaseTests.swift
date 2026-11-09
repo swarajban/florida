@@ -35,6 +35,72 @@ import Testing
         #expect(decoded == windows)
     }
 
+    @Test func v1StoreMigratesToV2KeepingItsRows() throws {
+        let queue = try DatabaseQueue()
+        try AppDatabase.migrator.migrate(queue, upTo: "v1")
+        try queue.write { db in
+            try db.execute(sql: """
+                INSERT INTO calendar (id, accountId, googleId, summary, accessRole, selected, updatedAt)
+                VALUES ('cal', 'acct', 'g-cal', 'Work', 'owner', 1, '2026-11-08 00:00:00.000');
+                INSERT INTO event (id, calendarId, googleId, status, summary, startAt, endAt, allDay, updatedAt)
+                VALUES ('e1', 'cal', 'g-e1', 'confirmed', 'Standup', '2026-11-09 17:00:00.000', '2026-11-09 17:15:00.000', 0,
+                        '2026-11-08 00:00:00.000');
+                INSERT INTO task (id, categoryId, title, durationMinutes, priority, deadlineType, completedMinutes,
+                                  createdAt, updatedAt)
+                VALUES ('t1', 'inbox', 'Write report', 60, 'high', 'none', 0, '2026-11-08 00:00:00.000', '2026-11-08 00:00:00.000');
+                INSERT INTO pendingWrite (entity, entityId, op, body, createdAt) VALUES ('task', 't1', 'put', NULL, '2026-11-08 00:00:00.000');
+                INSERT INTO syncState (key, value) VALUES ('cursor', '2026-11-08T00:00:00.000Z');
+                """)
+        }
+
+        let db = try AppDatabase(writer: queue)
+        let applied = try queue.read { db in try AppDatabase.migrator.appliedMigrations(db) }
+        #expect(applied == ["v1", "v2"])
+
+        let event = try #require(try db.events(in: Fixtures.allTime, calendar: Fixtures.utc).first)
+        #expect(event.id == "e1" && event.summary == "Standup")
+        #expect(event.startAt == Fixtures.instant("2026-11-09T17:00:00Z"))
+        #expect(event.attendees == nil && event.organizer == nil && event.description == nil)
+        #expect(try db.task(id: "t1")?.title == "Write report")
+        #expect(try db.pendingWrites().map(\.entityId) == ["t1"])
+        #expect(try db.calendars().map(\.id) == ["cal"])
+        #expect(try db.unscheduled() == [])
+        // The cursor is cleared so the next pull brings the new event fields for existing rows.
+        #expect(try db.cursor() == nil)
+
+        // The migrated table takes the new columns.
+        var detailed = event
+        detailed.attendees = [EventAttendee(email: "me@example.com", responseStatus: "accepted", isSelf: true)]
+        detailed.organizer = EventOrganizer(email: "boss@example.com")
+        detailed.conferenceUrl = "https://meet.google.com/abc-defg-hij"
+        try db.apply(SyncResponse(cursor: "c", events: [detailed], calendars: [Fixtures.calendar()]))
+        #expect(try db.events(in: Fixtures.allTime, calendar: Fixtures.utc) == [detailed])
+    }
+
+    @Test func eventAttendeesAndOrganizerAreJSONTextColumns() throws {
+        let db = try AppDatabase.inMemory()
+        var event = Fixtures.event(id: "e1", start: "2026-11-09T10:00:00Z", end: "2026-11-09T11:00:00Z")
+        event.attendees = [
+            EventAttendee(email: "me@example.com", responseStatus: "accepted", isSelf: true),
+            EventAttendee(email: "guest@example.com", displayName: "Guest", optional: true),
+        ]
+        event.organizer = EventOrganizer(email: "me@example.com", isSelf: true)
+        event.description = "Notes"
+        event.eventType = "default"
+        event.recurringEventId = "series"
+        event.icalUid = "uid@google.com"
+        try db.apply(SyncResponse(cursor: "c", events: [event], calendars: [Fixtures.calendar()]))
+
+        #expect(try db.events(in: Fixtures.allTime, calendar: Fixtures.utc) == [event])
+        let raw = try db.writer.read { db in
+            try Row.fetchOne(db, sql: "SELECT attendees, organizer FROM event WHERE id = 'e1'")
+        }
+        let attendeesJSON: String = try #require(raw?["attendees"])
+        let organizerJSON: String = try #require(raw?["organizer"])
+        #expect(try JSONDecoder().decode([EventAttendee].self, from: Data(attendeesJSON.utf8)) == event.attendees)
+        #expect(organizerJSON.contains("\"self\":true"))
+    }
+
     @Test func defaultURLIsInsideAppGroupPath() {
         let url = AppDatabase.defaultURL()
         #expect(url.lastPathComponent == "florida.sqlite")
@@ -130,6 +196,29 @@ import Testing
         #expect(try db.task(id: "t3") != nil)
     }
 
+    @Test func unscheduledIsReplacedWholesaleBySyncsAndSchedulerResults() throws {
+        let db = try AppDatabase.inMemory()
+        let at = Fixtures.instant("2026-11-08T09:00:00Z")
+        try db.apply(SyncResponse(cursor: "c1", unscheduled: [
+            UnscheduledTask(taskId: "t2", reason: "no_fit_in_horizon", unplacedMinutes: 60, computedAt: at),
+            UnscheduledTask(taskId: "t1", reason: "unknown_schedule", unplacedMinutes: 30, computedAt: at),
+        ]))
+        #expect(try db.unscheduled().map(\.taskId) == ["t1", "t2"])
+
+        // A scheduler result replaces the table and stamps its rows with the given time.
+        let computedAt = Fixtures.instant("2026-11-08T15:00:00Z")
+        try db.apply(SchedulingResult(unscheduled: [
+            .init(taskId: "t3", reason: "no_fit_before_hard_deadline", unplacedMinutes: 15),
+        ]), computedAt: computedAt)
+        #expect(try db.unscheduled() == [
+            UnscheduledTask(taskId: "t3", reason: "no_fit_before_hard_deadline", unplacedMinutes: 15, computedAt: computedAt),
+        ])
+
+        // A sync from a server without the field empties it, like placements.
+        try db.apply(SyncResponse(cursor: "c2"))
+        #expect(try db.unscheduled() == [])
+    }
+
     @Test func applySchedulingResultReplacesPlacements() throws {
         let db = try AppDatabase.inMemory()
         try db.apply(SyncResponse(cursor: "c", placements: [
@@ -197,7 +286,47 @@ import Testing
             calendars: [Fixtures.calendar(id: "cal", selected: true), Fixtures.calendar(id: "hidden", selected: false)]))
 
         let day = Fixtures.instant("2026-11-09T00:00:00Z")..<Fixtures.instant("2026-11-10T00:00:00Z")
-        #expect(try db.events(in: day).map(\.id) == ["straddles", "allday", "in", "no-response"])
+        #expect(try db.events(in: day, calendar: Fixtures.utc).map(\.id) == ["straddles", "allday", "in", "no-response"])
+    }
+
+    /// Stored all-day dates are UTC midnights. Pacific is behind UTC (Nov 10 00:00Z is Nov 9 16:00
+    /// local) and Tokyo ahead of it (Nov 10 09:00 local), so each catches a different wrong answer.
+    @Test(arguments: ["America/Los_Angeles", "Asia/Tokyo"])
+    func allDayEventsAppearOnlyOnTheirLocalDates(_ zone: String) throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: zone)!
+        func day(_ d: Int) -> Date { calendar.date(from: DateComponents(year: 2026, month: 11, day: d))! }
+        func ids(on d: Int) throws -> [String] {
+            try db.events(in: day(d)..<day(d + 1), calendar: calendar).map(\.id)
+        }
+
+        let db = try AppDatabase.inMemory()
+        // The timed event runs 23:30 Nov 10 → 00:30 Nov 11 local in either zone.
+        let straddleStart = calendar.date(from: DateComponents(year: 2026, month: 11, day: 10, hour: 23, minute: 30))!
+        var straddle = Fixtures.event(id: "late", start: "2026-01-01T00:00:00Z", end: "2026-01-01T00:00:00Z")
+        straddle.startAt = straddleStart
+        straddle.endAt = straddleStart.addingTimeInterval(3600)
+        try db.apply(SyncResponse(
+            cursor: "c",
+            events: [
+                Fixtures.event(id: "nov10", start: "2026-11-10T00:00:00Z", end: "2026-11-11T00:00:00Z", allDay: true),
+                Fixtures.event(id: "nov12-13", start: "2026-11-12T00:00:00Z", end: "2026-11-14T00:00:00Z", allDay: true),
+                straddle,
+            ],
+            calendars: [Fixtures.calendar()]))
+
+        #expect(try ids(on: 9) == [])
+        #expect(try ids(on: 10) == ["nov10", "late"])
+        #expect(try ids(on: 11) == ["late"])
+        #expect(try ids(on: 12) == ["nov12-13"])
+        #expect(try ids(on: 13) == ["nov12-13"])
+        #expect(try ids(on: 14) == [])
+
+        // A week view's range and the agenda go through the same comparison.
+        #expect(try db.events(in: day(9)..<day(16), calendar: calendar).map(\.id).sorted() == ["late", "nov10", "nov12-13"])
+        let agenda = try db.agenda(for: day(9).addingTimeInterval(12 * 3600), calendar: calendar)
+        #expect(agenda.events.isEmpty)
+        #expect(try db.agenda(for: day(10), calendar: calendar).events.map(\.id) == ["nov10", "late"])
     }
 
     @Test func placementsOverlapRange() throws {

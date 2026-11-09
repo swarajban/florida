@@ -5,11 +5,15 @@ public struct LayoutItem<ID: Hashable & Sendable>: Hashable, Sendable {
     public var id: ID
     public var start: Date
     public var end: Date
+    /// An all-day event's dates as the server stores them (UTC midnights, see `AllDayDate`).
+    /// `AllDayLayout` maps them to local days; the timed layout ignores the flag.
+    public var allDay: Bool
 
-    public init(id: ID, start: Date, end: Date) {
+    public init(id: ID, start: Date, end: Date, allDay: Bool = false) {
         self.id = id
         self.start = start
         self.end = end
+        self.allDay = allDay
     }
 }
 

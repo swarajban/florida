@@ -164,6 +164,31 @@ public final class AppDatabase: Sendable {
             }
         }
 
+        migrator.registerMigration("v2") { db in
+            // Event details; `attendees` and `organizer` are JSON text like `schedule.windows`.
+            try db.alter(table: "event") { t in
+                t.add(column: "description", .text)
+                t.add(column: "conferenceUrl", .text)
+                t.add(column: "attendees", .text)
+                t.add(column: "organizer", .text)
+                t.add(column: "eventType", .text)
+                t.add(column: "recurringEventId", .text)
+                t.add(column: "icalUid", .text)
+            }
+
+            // Scheduler output, replaced wholesale like `placement`.
+            try db.create(table: "unscheduled") { t in
+                t.primaryKey("taskId", .text)
+                t.column("reason", .text).notNull()
+                t.column("unplacedMinutes", .integer).notNull()
+                t.column("computedAt", .datetime).notNull()
+            }
+
+            // Events already mirrored have no details yet; the next pull fetches every row again
+            // so they arrive without waiting for each event to change.
+            try db.execute(sql: "DELETE FROM syncState WHERE key = 'cursor'")
+        }
+
         return migrator
     }
 }

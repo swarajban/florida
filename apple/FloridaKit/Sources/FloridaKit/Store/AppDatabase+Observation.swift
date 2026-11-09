@@ -13,6 +13,13 @@ extension AppDatabase {
         }
     }
 
+    /// Live schedules, oldest first.
+    public func observeSchedules() -> AsyncValueObservation<[Schedule]> {
+        observe { db in
+            try Schedule.filter(Column("deletedAt") == nil).order(Column("createdAt"), Column("id")).fetchAll(db)
+        }
+    }
+
     /// Tasks that are neither deleted nor completed, in the same order as `openTasks()`.
     public func observeOpenTasks() -> AsyncValueObservation<[TaskItem]> {
         observe { db in
@@ -32,10 +39,19 @@ extension AppDatabase {
         }
     }
 
-    /// Visible events overlapping `range`, as `events(in:)` returns them.
-    public func observeEvents(in range: Range<Date>) -> AsyncValueObservation<[CalendarEvent]> {
+    /// Tasks the last scheduler run could not fully place, as `unscheduled()` returns them.
+    public func observeUnscheduled() -> AsyncValueObservation<[UnscheduledTask]> {
         observe { db in
-            try Self.events(db, in: range)
+            try UnscheduledTask.order(Column("taskId")).fetchAll(db)
+        }
+    }
+
+    /// Visible events overlapping `range`, as `events(in:calendar:)` returns them.
+    public func observeEvents(
+        in range: Range<Date>, calendar: Calendar = .autoupdatingCurrent
+    ) -> AsyncValueObservation<[CalendarEvent]> {
+        observe { db in
+            try Self.events(db, in: range, calendar: calendar)
         }
     }
 
@@ -44,7 +60,7 @@ extension AppDatabase {
     public func observeAgenda(for day: Date, calendar: Calendar) -> AsyncValueObservation<DayAgenda> {
         let range = Self.dayRange(containing: day, calendar: calendar)
         return observe { db in
-            try Self.agenda(db, in: range)
+            try Self.agenda(db, in: range, calendar: calendar)
         }
     }
 

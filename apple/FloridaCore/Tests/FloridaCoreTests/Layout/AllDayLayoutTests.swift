@@ -83,6 +83,38 @@ import Testing
         #expect(result["zero"]?.endDayIndex == 3)
     }
 
+    /// A stored all-day event (UTC midnights) from `first` up to the exclusive `end` date.
+    func stored(_ id: String, _ first: String, _ end: String) -> LayoutItem<String> {
+        LayoutItem(id: id, start: JSONCoding.parseInstant(first)!, end: JSONCoding.parseInstant(end)!, allDay: true)
+    }
+
+    @Test(arguments: [("pacific", PacificTestCalendar.calendar), ("tokyo", AllDayDateTests.tokyo)])
+    func allDayItemsCoverTheirLocalDatesOnly(_ name: String, _ calendar: Calendar) {
+        // Mon 2026-11-02 … Sun 2026-11-08 in `calendar`.
+        let days = (0..<7).map { AllDayDateTests.local(calendar, 2026, 11, 2 + $0) }
+        let items = [
+            stored("wed", "2026-11-04T00:00:00Z", "2026-11-05T00:00:00Z"),
+            stored("wed-fri", "2026-11-04T00:00:00Z", "2026-11-07T00:00:00Z"),
+            stored("mon", "2026-11-02T00:00:00Z", "2026-11-03T00:00:00Z"),
+            stored("next-mon", "2026-11-09T00:00:00Z", "2026-11-10T00:00:00Z"),
+        ]
+        let rows = AllDayLayout.rows(items, days: days, calendar: calendar)
+        let byId = Dictionary(uniqueKeysWithValues: rows.flatMap { $0 }.map { ($0.id, $0) })
+        #expect(byId["wed"]?.startDayIndex == 2 && byId["wed"]?.endDayIndex == 2)
+        #expect(byId["wed-fri"]?.startDayIndex == 2 && byId["wed-fri"]?.endDayIndex == 4)
+        #expect(byId["mon"]?.startDayIndex == 0 && byId["mon"]?.endDayIndex == 0)
+        #expect(byId["next-mon"] == nil, "the next Monday is outside the week in every zone")
+        #expect(rows.count == 2)
+    }
+
+    @Test func timedItemStraddlingMidnightCoversBothDays() {
+        // Thu 23:00 → Fri 01:00 Pacific; not all-day, so its instants are used as they are.
+        let late = LayoutItem(id: "late", start: PacificTestCalendar.date(2026, 11, 5, 23), end: PacificTestCalendar.date(2026, 11, 6, 1))
+        let result = spans([late])
+        #expect(result["late"]?.startDayIndex == 3)
+        #expect(result["late"]?.endDayIndex == 4)
+    }
+
     @Test func emptyInputsGiveEmptyRows() {
         #expect(AllDayLayout.rows([LayoutItem<String>](), days: week, calendar: calendar).isEmpty)
         #expect(AllDayLayout.rows([item("a", 0, 0)], days: [], calendar: calendar).isEmpty)

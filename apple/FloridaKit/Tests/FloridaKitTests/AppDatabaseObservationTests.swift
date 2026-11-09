@@ -84,6 +84,25 @@ import Testing
         #expect(try await placements.next()?.map(\.taskId) == ["t2", "t1"])
     }
 
+    @Test func schedulesAndUnscheduledObserveTheirTables() async throws {
+        let db = try AppDatabase.inMemory()
+        var schedules = db.observeSchedules().makeAsyncIterator()
+        var unscheduled = db.observeUnscheduled().makeAsyncIterator()
+        #expect(try await schedules.next() == [])
+        #expect(try await unscheduled.next() == [])
+
+        // Oldest first, regardless of name; deleted ones are hidden.
+        var newer = Fixtures.schedule(id: "a-newer")
+        newer.createdAt = Fixtures.instant("2026-11-09T00:00:00Z")
+        try db.apply(SyncResponse(cursor: "c1", schedules: [newer, Fixtures.schedule(id: "z-older")]))
+        #expect(try await schedules.next()?.map(\.id) == ["z-older", "a-newer"])
+        try db.deleteSchedule(id: "z-older", now: Fixtures.t0)
+        #expect(try await schedules.next()?.map(\.id) == ["a-newer"])
+
+        try db.apply(SchedulingResult(unscheduled: [.init(taskId: "t1", reason: "no_fit_in_horizon", unplacedMinutes: 20)]), computedAt: Fixtures.t0)
+        #expect(try await unscheduled.next()?.map(\.taskId) == ["t1"])
+    }
+
     @Test func accountsAndCalendarsObservationsFollowSyncResponses() async throws {
         let db = try AppDatabase.inMemory()
         var accounts = db.observeAccounts().makeAsyncIterator()

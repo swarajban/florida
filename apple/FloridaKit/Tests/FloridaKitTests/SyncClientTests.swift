@@ -104,6 +104,24 @@ import Testing
         #expect(try db.pendingWrites().isEmpty)
     }
 
+    @Test func acceptedWriteReplacesUnscheduledFromItsSchedulingResult() async throws {
+        let db = try AppDatabase.inMemory()
+        try db.apply(SyncResponse(cursor: "c", unscheduled: [
+            UnscheduledTask(taskId: "old", reason: "no_fit_in_horizon", unplacedMinutes: 60, computedAt: Fixtures.t0),
+        ]))
+        try db.saveTask(Fixtures.task(id: "t1"), now: Fixtures.t0)
+        let scheduling = SchedulingResult(unscheduled: [.init(taskId: "t1", reason: "no_fit_before_hard_deadline", unplacedMinutes: 25)])
+        let transport = FakeTransport([.ok(try Fixtures.putResponse("task", Fixtures.task(id: "t1"), scheduling: scheduling))])
+
+        let before = Date()
+        _ = try await client(db, transport).push()
+        let rows = try db.unscheduled()
+        #expect(rows.map(\.taskId) == ["t1"])
+        #expect(rows.first?.unplacedMinutes == 25)
+        #expect(rows.first?.reason == "no_fit_before_hard_deadline")
+        #expect(rows.allSatisfy { $0.computedAt >= before.addingTimeInterval(-1) })
+    }
+
     @Test func pullWithoutCursorOmitsSince() async throws {
         let db = try AppDatabase.inMemory()
         let transport = FakeTransport([try .ok(SyncResponse(cursor: "first", tasks: [Fixtures.task(id: "t1")]))])
@@ -126,12 +144,14 @@ import Testing
 
     // MARK: 6. Failure handling
 
-    @Test func fourHundredDropsWriteAndContinues() async throws {
+    @Test func fourHundredResetsTheRowToTheServersCopyAndContinues() async throws {
         let db = try AppDatabase.inMemory()
-        try db.saveTask(Fixtures.task(id: "bad"), now: Fixtures.t0)
+        try db.saveTask(Fixtures.task(id: "bad", categoryId: "gone", title: "local"), now: Fixtures.t0)
         try db.saveTask(Fixtures.task(id: "good"), now: Fixtures.t0)
+        let serverCopy = Fixtures.task(id: "bad", title: "server")
         let transport = FakeTransport([
-            .error(400, "unknown categoryId inbox"),
+            .error(400, "unknown categoryId gone"),
+            try .ok(serverCopy),
             .ok(try Fixtures.putResponse("task", Fixtures.task(id: "good"))),
             try .ok(SyncResponse(cursor: "c")),
         ])
@@ -139,48 +159,135 @@ import Testing
         let client = client(db, transport)
         let pushed = try await client.sync()
         #expect(pushed == 1)
-        #expect(transport.requests.map(\.path) == ["/api/tasks/bad", "/api/tasks/good", "/api/sync"])
+        #expect(transport.requests.map { "\($0.method) \($0.path)" } == [
+            "PUT /api/tasks/bad", "GET /api/tasks/bad", "PUT /api/tasks/good", "GET /api/sync",
+        ])
         #expect(try db.pendingWrites().isEmpty, "both the rejected and the accepted write leave the queue")
 
         let rejected = await client.lastRejectedWrites
-        #expect(rejected.count == 1)
-        #expect(rejected.first?.write.entityId == "bad")
-        if case .http(let status, let body)? = rejected.first?.error {
-            #expect(status == 400)
-            #expect(body.contains("unknown categoryId"))
-        } else {
-            Issue.record("expected .http error, got \(String(describing: rejected.first?.error))")
-        }
+        #expect(rejected.map(\.write.entityId) == ["bad"])
+        #expect(rejected.first?.status == 400)
+        #expect(rejected.first?.message == "unknown categoryId gone")
 
-        // The local row is still there (we don't roll back local state); only the queue entry is gone.
-        #expect(try db.task(id: "bad") != nil)
+        // The rejected local state is replaced by the server's row, even though the pull's
+        // `updatedAt > cursor` diff would never have sent it.
+        #expect(try db.task(id: "bad") == serverCopy)
     }
 
-    @Test func fiveHundredStopsAndKeepsRemainingRows() async throws {
+    @Test func fourHundredRemovesRowsTheServerHasTombstonedOrNeverHad() async throws {
+        let db = try AppDatabase.inMemory()
+        try db.saveTask(Fixtures.task(id: "never"), now: Fixtures.t0)
+        try db.saveTask(Fixtures.task(id: "tombstoned"), now: Fixtures.t0)
+        let transport = FakeTransport([
+            .error(400, "validation failed"),
+            .error(404, "task never not found"),
+            .error(409, "task is deleted"),
+            try .ok(Fixtures.task(id: "tombstoned", deletedAt: Fixtures.instant("2026-11-08T08:00:00Z"))),
+            try .ok(SyncResponse(cursor: "c")),
+        ])
+
+        let client = client(db, transport)
+        #expect(try await client.sync() == 0)
+        #expect(try db.task(id: "never") == nil)
+        #expect(try db.task(id: "tombstoned") == nil)
+        #expect(await client.lastRejectedWrites.map(\.status) == [400, 409])
+        #expect(try db.pendingWrites().isEmpty)
+    }
+
+    @Test func rejectedDeleteOfTheInboxRestoresIt() async throws {
+        let db = try AppDatabase.inMemory()
+        try db.apply(SyncResponse(cursor: "c0", categories: [Fixtures.category(id: TaskCategory.inboxId)]))
+        try db.deleteCategory(id: TaskCategory.inboxId, now: Fixtures.instant("2026-11-08T10:00:00Z"))
+        #expect(try db.categories().isEmpty)
+
+        let transport = FakeTransport([
+            .error(400, "the inbox category cannot be deleted"),
+            try .ok(Fixtures.category(id: TaskCategory.inboxId)),
+            try .ok(SyncResponse(cursor: "c1")),
+        ])
+        let client = client(db, transport)
+        try await client.sync()
+        #expect(transport.requests.map { "\($0.method) \($0.path)" } == [
+            "DELETE /api/categories/inbox", "GET /api/categories/inbox", "GET /api/sync",
+        ])
+        #expect(try db.categories().map(\.id) == ["inbox"])
+        #expect(await client.lastRejectedWrites.first?.message == "the inbox category cannot be deleted")
+    }
+
+    @Test func rejectedWriteStaysQueuedWhenTheRefetchFails() async throws {
+        let db = try AppDatabase.inMemory()
+        try db.saveSchedule(Fixtures.schedule(id: "s1"), now: Fixtures.t0)
+        try db.saveTask(Fixtures.task(id: "later"), now: Fixtures.t0)
+        let transport = FakeTransport([
+            .error(422, "bad windows"),
+            .error(503, "unavailable"),
+            try .ok(SyncResponse(cursor: "c", tasks: [Fixtures.task(id: "pulled")])),
+        ])
+
+        let client = client(db, transport)
+        await #expect(throws: SyncError.self) { try await client.sync() }
+        #expect(transport.requests.map { "\($0.method) \($0.path)" } == [
+            "PUT /api/schedules/s1", "GET /api/schedules/s1", "GET /api/sync",
+        ])
+        // Retried next time, when the server can say what the row should be.
+        #expect(try db.pendingWrites().map(\.entityId) == ["s1", "later"])
+        #expect(try db.task(id: "pulled") != nil)
+        #expect(await client.lastRejectedWrites.isEmpty)
+    }
+
+    @Test func notFoundWithoutErrorBodyLeavesTheRow() async throws {
+        // A server that predates `GET /api/tasks/:id` answers Hono's plain-text 404 for every id;
+        // that must not delete the local row.
+        let db = try AppDatabase.inMemory()
+        try db.saveTask(Fixtures.task(id: "t1", title: "local"), now: Fixtures.t0)
+        let transport = FakeTransport([
+            .error(400, "validation failed"),
+            .json(status: 404, body: Data("404 Not Found".utf8)),
+            try .ok(SyncResponse(cursor: "c")),
+        ])
+        let client = client(db, transport)
+        try await client.sync()
+        #expect(try db.task(id: "t1")?.title == "local")
+        #expect(try db.pendingWrites().isEmpty)
+        #expect(await client.lastRejectedWrites.map(\.message) == ["validation failed"])
+    }
+
+    @Test func fiveHundredStopsPushingButStillPulls() async throws {
         let db = try AppDatabase.inMemory()
         try db.saveTask(Fixtures.task(id: "a"), now: Fixtures.t0)
         try db.saveTask(Fixtures.task(id: "b"), now: Fixtures.t0)
         try db.saveTask(Fixtures.task(id: "c"), now: Fixtures.t0)
+        let pulled = SyncResponse(
+            cursor: "after",
+            events: [Fixtures.event(id: "e1", start: "2026-11-09T10:00:00Z", end: "2026-11-09T11:00:00Z")],
+            placements: [Fixtures.placement(id: "p1", taskId: "a", start: "2026-11-09T17:00:00Z", end: "2026-11-09T18:00:00Z")],
+            calendars: [Fixtures.calendar()])
         let transport = FakeTransport([
             .ok(try Fixtures.putResponse("task", Fixtures.task(id: "a"))),
             .error(500, "internal server error"),
-            // Must never be consumed.
-            .ok(try Fixtures.putResponse("task", Fixtures.task(id: "c"))),
+            try .ok(pulled),
         ])
 
         let client = client(db, transport)
-        await #expect(throws: SyncError.self) {
+        do {
             try await client.sync()
+            Issue.record("expected the push failure to be thrown")
+        } catch SyncError.http(let status, _) {
+            #expect(status == 500)
         }
-        #expect(transport.requests.map(\.path) == ["/api/tasks/a", "/api/tasks/b"], "stops at the 500; no pull")
+        #expect(transport.requests.map(\.path) == ["/api/tasks/a", "/api/tasks/b", "/api/sync"], "stops at the 500, then pulls")
         #expect(try db.pendingWrites().map(\.entityId) == ["b", "c"])
         #expect(await client.lastRejectedWrites.isEmpty)
+        // Incoming changes are applied despite the stuck write.
+        #expect(try db.cursor() == "after")
+        #expect(try db.events(in: Fixtures.allTime, calendar: Fixtures.utc).map(\.id) == ["e1"])
+        #expect(try db.placements(in: Fixtures.allTime).map(\.id) == ["p1"])
     }
 
-    @Test func transportErrorStopsAndKeepsRows() async throws {
+    @Test func transportErrorStopsPushingButStillPulls() async throws {
         let db = try AppDatabase.inMemory()
         try db.saveTask(Fixtures.task(id: "a"), now: Fixtures.t0)
-        let transport = FakeTransport([.failure(NetworkDown())])
+        let transport = FakeTransport([.failure(NetworkDown()), try .ok(SyncResponse(cursor: "after"))])
 
         do {
             try await client(db, transport).sync()
@@ -193,6 +300,7 @@ import Testing
             #expect(underlying is NetworkDown)
         }
         #expect(try db.pendingWrites().map(\.entityId) == ["a"])
+        #expect(try db.cursor() == "after")
     }
 
     @Test func unauthorizedThrowsAndKeepsRows() async throws {
