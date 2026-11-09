@@ -42,16 +42,16 @@ disk.
 
 - Bundle id prefix: `com.swarajban.florida` (`options.bundleIdPrefix` in
   `project.yml`). The app targets set explicit `PRODUCT_BUNDLE_IDENTIFIER`s:
-  `com.swarajban.florida` (iOS), `com.swarajban.florida.widgets` (widgets), and
-  `com.swarajban.florida.mac` (macOS).
+  `com.swarajban.florida` (both iOS and native macOS, sharing the Florida Tasks
+  App Store Connect record) and `com.swarajban.florida.widgets` (widgets).
 - App group: `group.com.swarajban.florida`, declared in each target's
   entitlements in `project.yml` and mirrored by `Florida.appGroup` in
   `FloridaKit/Sources/FloridaKit/FloridaKit.swift`.
 
 If you fork this for your own account, change the bundle id prefix, the three
-`PRODUCT_BUNDLE_IDENTIFIER`s, the app group (in `project.yml` and
-`FloridaKit.swift`), and register the app group under your team in the Apple
-Developer portal; automatic signing handles the rest.
+`PRODUCT_BUNDLE_IDENTIFIER`s (keep iOS and macOS identical), the app group (in
+`project.yml` and `FloridaKit.swift`), and register the app group under your
+team in the Apple Developer portal; automatic signing handles the rest.
 
 ## The apps
 
@@ -112,7 +112,7 @@ app (`florida://agenda`, `florida://tasks`):
 
 ## Building and shipping from GitHub Actions (no Mac needed)
 
-Two workflows build the Apple code:
+Three workflows build the Apple code:
 
 - `.github/workflows/ci.yml` (job **Apple apps**) builds `Florida-macOS` and
   runs the package tests on a macOS runner on every push and pull request.
@@ -126,6 +126,12 @@ Two workflows build the Apple code:
   pushes to `main`, or when started by hand (**Actions → iOS → Run workflow**),
   the **testflight** job also archives the app, signs it, and uploads it to
   TestFlight.
+- `.github/workflows/macos.yml` (**macOS TestFlight**) runs on pushes to `main`
+  that change `apple/` or that workflow, and can be started by hand on `main`.
+  It runs the native macOS UI smoke test, archives a Release build for Apple
+  silicon and Intel, preserves its entitlements, then cloud-signs and uploads
+  it to TestFlight using the same API-key secrets as iOS. Branches and pull
+  requests never upload. A running upload is not cancelled by a newer push.
 
 The demo launch arguments are Debug-only (`iOS/Support/LaunchOptions.swift`):
 `-demoData YES` swaps the shared store for an in-memory one seeded from
@@ -170,6 +176,45 @@ Xcode's scheme editor (Run → Arguments).
    `ITSAppUsesNonExemptEncryption` is already `false` in `project.yml`, so
    there is no export-compliance prompt. Every push to `main` that touches
    `apple/` ships a new build; builds stay installable for 90 days.
+
+### macOS TestFlight setup
+
+Reuse the existing **Florida Tasks** App Store Connect record, developer
+membership, Admin-role team API key, and repository secrets. Both native app
+targets use `com.swarajban.florida`; no new app record, SKU, API key, or local
+Xcode build is needed. The Mac build is the native `Florida-macOS` target,
+not the iPhone app running on Apple silicon.
+
+1. In [App Store Connect → Apps](https://appstoreconnect.apple.com/apps),
+   open **Florida Tasks → Distribution**, click **Add Platform** in the
+   sidebar, select **macOS**, and click **Add**. This keeps the existing app
+   name, SKU, and bundle ID. See [Apple's Add platforms instructions](https://developer.apple.com/help/app-store-connect/create-an-app-record/add-platforms).
+2. Reuse the existing App ID `com.swarajban.florida` and its **App Groups**
+   assignment to `group.com.swarajban.florida`. Do not register a new `.mac`
+   identifier. Automatic signing creates the macOS distribution profile.
+3. Once the workflow is on `main`, open **GitHub → Actions → macOS TestFlight
+   → Run workflow** and select `main`. The job checks that the app record is
+   accessible before building. Automatic signing manages the distribution
+   provisioning profile required by macOS TestFlight.
+4. After Apple processes the upload, open **Florida Tasks → TestFlight** and
+   select the **macOS** builds. Make the build available to your internal
+   testing group and enable **automatic distribution** for future builds.
+   The shared export options restrict builds to internal testers; no external
+   Beta App Review is needed.
+5. Install [TestFlight for Mac](https://apps.apple.com/app/testflight/id899247664),
+   accept the invitation, and install Florida. Enable automatic updates in
+   TestFlight. Florida requires **macOS 15 or later**.
+
+Future qualifying pushes to `main` upload a new build without a local checkout
+or Xcode. Builds expire after 90 days. Older locally built Mac copies used
+`com.swarajban.florida.mac`. Before switching, sync any pending edits and quit
+the old copy. The shared App Group stays the same, but the new bundle identity
+can change private preferences, fallback storage, and Keychain access; you may
+need to configure the server and token again and let it pull your data. No
+automatic migration from the old app's private container is performed.
+The workflow verifies the archive's entitlements before export; a successful
+upload still needs Apple's processing and a real TestFlight installation to
+confirm the final distribution build.
 
 ### Versions and signing
 

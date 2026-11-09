@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Export straight to App Store Connect (TestFlight). teamID is inserted by .github/workflows/ios.yml. -->
+	<!-- Export straight to App Store Connect (TestFlight). Each platform's workflow inserts teamID. -->
 	<key>method</key>
 	<string>app-store-connect</string>
 	<key>destination</key>
