@@ -76,7 +76,15 @@ struct TasksView: View {
             .toolbarBackground(FloridaStyle.paper, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    FloridaWordmark(height: 26)
+                    Button {
+                        model.showToday()
+                    } label: {
+                        FloridaWordmark(height: 26)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Florida")
+                    .accessibilityHint("Shows today's agenda")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

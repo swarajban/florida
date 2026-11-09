@@ -2,6 +2,8 @@ import FloridaKit
 import SwiftUI
 
 /// Weekday and day number above each column; today is a filled ink circle, as in `WeekStrip`.
+/// Only the three-day grid shows it: a single day is already named by the heading and the week
+/// strip above the grid.
 struct DayGridHeader: View {
     let days: [Date]
     let today: Date

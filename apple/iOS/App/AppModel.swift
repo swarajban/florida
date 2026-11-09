@@ -23,6 +23,13 @@ final class AppModel {
     @ObservationIgnored var aiClient: AIClient?
     let tokenStore = KeychainTokenStore()
 
+    // MARK: Navigation
+
+    /// The tab on screen. `RootView` binds the tab bar to it; deep links and the wordmark set it.
+    var selectedTab: AppTab = LaunchOptions.initialTab ?? .agenda
+    /// Bumped by `selectToday()`, so the agenda scrolls to now even when today was already showing.
+    var todayRequests = 0
+
     // MARK: Observed store contents
 
     /// Local midnight of the day the Agenda tab shows.
@@ -158,9 +165,18 @@ final class AppModel {
         select(day: DateNavigation.shift(selectedDay, by: days, calendar: calendar))
     }
 
+    /// Today, scrolled to now: the Today buttons, the wordmark, a widget tap. The agenda views
+    /// watch `todayRequests` so the scroll happens even when today was already showing.
     func selectToday() {
         anchoredToday = today
         select(day: Date())
+        todayRequests += 1
+    }
+
+    /// The wordmark on another tab: today's agenda.
+    func showToday() {
+        selectedTab = .agenda
+        selectToday()
     }
 
     // MARK: - Lookups

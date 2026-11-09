@@ -4,11 +4,11 @@ import UIKit
 
 /// `dayCount` is 1 or 3. Shows the days starting at `model.selectedDay`.
 ///
-/// Headers, the all-day strip and a scrolling hour grid: a `Canvas` for the chrome with one
-/// small view per block on top. Frames come from `DayGridLayout`, rebuilt only when the data
-/// changes; points from `DayGridGeometry`. Tap a block to open it, tap empty grid to create
-/// there, hold a block for a moment and drag to move it; a horizontal swipe shows the next or
-/// previous days.
+/// Column headers (three days only), the all-day strip and a scrolling hour grid: a `Canvas` for
+/// the chrome with one small view per block on top. Frames come from `DayGridLayout`, rebuilt
+/// only when the data changes; points from `DayGridGeometry`. Tap a block to open it, tap empty
+/// grid to create there, hold a block for a moment and drag to move it (`BlockMoveGesture`); a
+/// horizontal swipe moves one day, whatever the page shows.
 struct DayGridView: View {
     let dayCount: Int
     let onSelectEvent: (CalendarEvent) -> Void
@@ -22,9 +22,6 @@ struct DayGridView: View {
     @State private var layout = DayGridLayout()
     @State private var hourLabels = HourLabels.make(calendar: .autoupdatingCurrent)
     @State private var drag: BlockDrag?
-    /// True while a block is lifted. SwiftUI resets it when the touch ends *or is cancelled* (a
-    /// call banner, an edge swipe), which `onEnded` does not report.
-    @GestureState private var lifting = false
     /// Set once a horizontal swipe is seen while a block is lifted, so that drag's finger does
     /// not also turn the page when it ends.
     @State private var swipeBlocked = false
@@ -40,7 +37,6 @@ struct DayGridView: View {
 
     static let gutterWidth: CGFloat = 52
     static let slotMinutes = 15
-    static let longPressDuration: TimeInterval = 0.3
 
     /// Where the grid opens before its height is known: the current hour, a little above the
     /// middle, at the default hour height. The first layout pass corrects it (`scrollToStart`).
@@ -66,7 +62,7 @@ struct DayGridView: View {
             ZStack {
                 gridContent(geometry: geometry, days: days)
                     .id(shownDay ?? model.selectedDay)
-                    .transition(slide)
+                    .transition(slide(offset: dayCount > 1 ? geometry.columnWidth : 24))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -87,15 +83,15 @@ struct DayGridView: View {
                 shownDay = new
             }
         }
-        .onChange(of: lifting) { _, isLifting in
-            // The touch ended without `onEnded` (cancelled by a call banner or an edge swipe):
-            // put the block back and write nothing. After a normal release `drop()` has already
-            // cleared `drag` by the time this runs, since `onChange` fires on the next render.
-            guard !isLifting, drag != nil else { return }
-            withAnimation(.snappy(duration: 0.2)) {
-                drag = nil
+        .onChange(of: model.todayRequests) { _, _ in
+            // Today was asked for (the wordmark, Today, a widget): land on now. Forget the carried
+            // offset so a grid recreated for a day change opens at now too; when the day did not
+            // change there is no new grid, so scroll the one on screen.
+            scrollY = nil
+            guard (shownDay ?? model.selectedDay) == model.selectedDay else { return }
+            withAnimation(.snappy(duration: 0.3)) {
+                scrollToStart(days: days)
             }
-            swipeBlocked = false
         }
         .onChange(of: dayCount) { _, count in
             model.setGridRange(start: model.selectedDay, dayCount: count)
@@ -119,8 +115,12 @@ struct DayGridView: View {
     private func gridContent(geometry: DayGridGeometry, days: [Date]) -> some View {
         TimelineView(.everyMinute) { timeline in
             VStack(spacing: 0) {
-                DayGridHeader(days: days, today: model.today, gutterWidth: Self.gutterWidth, calendar: model.calendar)
-                Divider()
+                // One day is already named by the heading and week strip above; only the columns
+                // of a three-day grid need labelling.
+                if dayCount > 1 {
+                    DayGridHeader(days: days, today: model.today, gutterWidth: Self.gutterWidth, calendar: model.calendar)
+                    Divider()
+                }
                 if layout.allDayRowCount > 0 {
                     DayGridAllDayStrip(layout: layout, geometry: geometry, now: timeline.date, onSelect: onSelectEvent)
                     Divider()
@@ -166,10 +166,20 @@ struct DayGridView: View {
                     .frame(width: rect.width, height: rect.height)
                     .offset(x: rect.minX, y: rect.minY)
                     .opacity(drag?.block.id == block.id ? 0.3 : 1)
+                    // The hold is attached first so it outranks the tap: a quick tap opens the
+                    // block (the hold fails when the finger lifts early), a completed hold does
+                    // not also open it on release.
+                    .gesture(BlockMoveGesture(
+                        onLift: { lift(block, geometry: geometry) },
+                        onMove: { follow($0, geometry: geometry, days: days) },
+                        onDrop: { translation in
+                            follow(translation, geometry: geometry, days: days)
+                            drop()
+                        },
+                        onCancel: { cancelDrag() }))
                     .onTapGesture {
                         open(block)
                     }
-                    .gesture(moveGesture(for: block, geometry: geometry, days: days))
             }
             if let drag {
                 let rect = drag.rect(in: geometry)
@@ -235,15 +245,19 @@ struct DayGridView: View {
 
     // MARK: - Day change
 
-    private var slide: AnyTransition {
+    /// New content enters from the side the day moved towards and fades in; the old grid leaves
+    /// the other way. One day moves 24 points. Three days move a whole column: the two days the
+    /// new page shares with the old one stay exactly where they were and only the new column
+    /// slides in, so paging reads as a carousel rather than a page flip.
+    private func slide(offset: CGFloat) -> AnyTransition {
         .asymmetric(
-            insertion: .offset(x: 24 * slideDirection).combined(with: .opacity),
-            removal: .offset(x: -24 * slideDirection).combined(with: .opacity))
+            insertion: .offset(x: offset * slideDirection).combined(with: .opacity),
+            removal: .offset(x: -offset * slideDirection).combined(with: .opacity))
     }
 
-    /// Clear horizontal intent (the rule `AgendaView`'s list uses) turns the page by `dayCount`
-    /// days. Runs alongside the scroll view's pan and the blocks' gestures; a swipe seen while a
-    /// block is lifted belongs to that drag and is ignored when it ends.
+    /// Clear horizontal intent (the rule `AgendaView`'s list uses) moves one day, whatever the
+    /// page shows. Runs alongside the scroll view's pan and the blocks' gestures; a swipe seen
+    /// while a block is lifted belongs to that drag and is ignored when it ends.
     private var swipe: some Gesture {
         DragGesture(minimumDistance: 30)
             .onChanged { _ in
@@ -258,7 +272,7 @@ struct DayGridView: View {
                 let dx = value.translation.width
                 let dy = value.translation.height
                 guard abs(dx) > 60, abs(dx) > abs(dy) * 1.5 else { return }
-                model.shiftDay(by: dx < 0 ? dayCount : -dayCount)
+                model.shiftDay(by: dx < 0 ? 1 : -1)
             }
     }
 
@@ -285,35 +299,11 @@ struct DayGridView: View {
 
     // MARK: - Moving blocks
 
-    /// Hold for `longPressDuration`, then drag. Before the hold completes the scroll view owns
-    /// any movement (a finger that travels first scrolls, a quick tap opens); once it completes
-    /// the block lifts, scrolling is disabled for the rest of the touch, and the drag's
-    /// translation moves the block in whole slots across the columns.
-    private func moveGesture(for block: DayGridLayout.Block, geometry: DayGridGeometry, days: [Date]) -> some Gesture {
-        LongPressGesture(minimumDuration: Self.longPressDuration, maximumDistance: 12)
-            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
-            .updating($lifting) { value, state, _ in
-                if case .second(true, _) = value {
-                    state = true
-                }
-            }
-            .onChanged { value in
-                switch value {
-                case .second(true, nil):
-                    lift(block, geometry: geometry)
-                case .second(true, let move?):
-                    follow(move.translation, geometry: geometry, days: days)
-                default:
-                    break
-                }
-            }
-            .onEnded { value in
-                if case .second(true, let move) = value, let move {
-                    follow(move.translation, geometry: geometry, days: days)
-                }
-                drop()
-            }
-    }
+    // `BlockMoveGesture` on each block calls these. Before its hold completes the scroll view
+    // owns any movement (a finger that travels first scrolls, a quick tap opens); once it
+    // completes the block lifts, scrolling is disabled for the rest of the touch
+    // (`scrollDisabled(drag != nil)`), and the finger's travel moves the block in whole slots
+    // across the columns.
 
     private func lift(_ block: DayGridLayout.Block, geometry: DayGridGeometry) {
         guard block.canMove, drag == nil else { return }
@@ -350,5 +340,15 @@ struct DayGridView: View {
         case .ghost:
             break
         }
+    }
+
+    /// The system took the touch away (a call banner, an edge swipe): the block goes back and
+    /// nothing is written.
+    private func cancelDrag() {
+        guard drag != nil else { return }
+        withAnimation(.snappy(duration: 0.2)) {
+            drag = nil
+        }
+        swipeBlocked = false
     }
 }

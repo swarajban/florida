@@ -2,13 +2,13 @@ import SwiftUI
 
 /// The three tabs. Also the place where the app reacts to the scene phase (sync on becoming
 /// active) and to widget deep links: `florida://agenda` shows today, `florida://tasks` the tasks.
+/// The tab on screen is `model.selectedTab`, so the wordmark on any tab can show today's agenda.
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
-    @State private var selectedTab: AppTab = LaunchOptions.initialTab ?? .agenda
 
     var body: some View {
-        TabView(selection: $selectedTab) {
+        TabView(selection: Bindable(model).selectedTab) {
             AgendaView()
                 .tabItem { Label("Agenda", systemImage: "calendar") }
                 .tag(AppTab.agenda)
@@ -23,7 +23,7 @@ struct RootView: View {
         .tint(FloridaStyle.ink)
         .onAppear {
             if model.needsSetup, LaunchOptions.initialTab == nil {
-                selectedTab = .settings
+                model.selectedTab = .settings
             }
         }
         .sensoryFeedback(.success, trigger: model.completionCount)
@@ -32,9 +32,10 @@ struct RootView: View {
         }
         .onOpenURL { url in
             guard let tab = AppTab(deepLink: url) else { return }
-            selectedTab = tab
             if tab == .agenda {
-                model.selectToday()
+                model.showToday()
+            } else {
+                model.selectedTab = tab
             }
         }
     }

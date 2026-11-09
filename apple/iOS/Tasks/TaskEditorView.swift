@@ -1,9 +1,10 @@
 import FloridaKit
 import SwiftUI
 
-/// Sheet for one task. Editing works on a copy written back with Save (or Complete / Reopen,
-/// which also save); Cancel discards. In create mode (`isNew`, from the + button or an AI parse)
-/// the same form adds the task, and an AI parse's rationale shows on top for review.
+/// Sheet for one task. Mark done sits on top, full width; editing works on a copy written back
+/// with Save (or Mark done / Reopen, which also save); Cancel discards. In create mode (`isNew`,
+/// from the + button or an AI parse) the same form adds the task, and an AI parse's rationale
+/// shows on top for review.
 struct TaskEditorView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -39,6 +40,38 @@ struct TaskEditorView: View {
                     } footer: {
                         Text("Check the fields below, then Add.")
                     }
+                }
+                if !isNew {
+                    // Finishing is what the sheet is opened for most often, so it comes first and
+                    // full width; editing fields follow and Delete stays at the very end.
+                    Section {
+                        if draft.completedAt == nil {
+                            Button {
+                                completeFromEditor()
+                            } label: {
+                                Label("Mark done", systemImage: "checkmark.circle.fill")
+                                    .font(.headline)
+                                    .frame(maxWidth: .infinity, minHeight: 44)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                            .accessibilityHint("Completes the task and closes the editor")
+                        } else {
+                            Button {
+                                draft.completedAt = nil
+                                draft.completedMinutes = 0
+                                save()
+                            } label: {
+                                Label("Reopen", systemImage: "arrow.uturn.backward.circle")
+                                    .font(.headline)
+                                    .frame(maxWidth: .infinity, minHeight: 44)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.large)
+                        }
+                    }
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
                 }
                 Section {
                     TextField("Title", text: $draft.title)
@@ -104,21 +137,6 @@ struct TaskEditorView: View {
 
                 if !isNew {
                     Section {
-                        if draft.completedAt == nil {
-                            Button {
-                                completeFromEditor()
-                            } label: {
-                                Label("Complete", systemImage: "checkmark.circle")
-                            }
-                        } else {
-                            Button {
-                                draft.completedAt = nil
-                                draft.completedMinutes = 0
-                                save()
-                            } label: {
-                                Label("Reopen", systemImage: "arrow.uturn.backward.circle")
-                            }
-                        }
                         Button(role: .destructive) {
                             confirmingDelete = true
                         } label: {

@@ -56,10 +56,11 @@ struct AgendaView: View {
                         model.selectToday()
                     } label: {
                         FloridaWordmark(height: 26)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Florida")
-                    .accessibilityHint("Shows today")
+                    .accessibilityHint("Shows today, scrolled to now")
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     calendarMenu
@@ -127,6 +128,19 @@ struct AgendaView: View {
 
     private var allDayEvents: [CalendarEvent] {
         model.agenda.map(AgendaItem.allDay) ?? []
+    }
+
+    private var rows: [TimelineRow] {
+        TimelineRow.rows(for: items, now: isToday ? now : nil, showsGaps: showsGaps)
+    }
+
+    /// Today was asked for (the wordmark, a widget) while today's list is already on screen:
+    /// bring the now marker to the middle. Another day's list is new and starts at the top.
+    private func scrollToNow(_ proxy: ScrollViewProxy) {
+        guard isToday, rows.contains(.now) else { return }
+        withAnimation(.snappy(duration: 0.3)) {
+            proxy.scrollTo(TimelineRow.now.id, anchor: .center)
+        }
     }
 
     private var isToday: Bool {
@@ -257,9 +271,14 @@ struct AgendaView: View {
             // A ZStack so the outgoing and incoming lists overlap during the slide instead of
             // stacking.
             ZStack {
-                timeline
-                    .id(shownDay ?? model.selectedDay)
-                    .transition(slide)
+                ScrollViewReader { proxy in
+                    timeline
+                        .onChange(of: model.todayRequests) { _, _ in
+                            scrollToNow(proxy)
+                        }
+                }
+                .id(shownDay ?? model.selectedDay)
+                .transition(slide)
             }
         }
     }
@@ -293,7 +312,7 @@ struct AgendaView: View {
                 }
             }
             Section {
-                ForEach(TimelineRow.rows(for: items, now: isToday ? now : nil, showsGaps: showsGaps)) { row in
+                ForEach(rows) { row in
                     switch row {
                     case .now:
                         NowMarker(now: now)
