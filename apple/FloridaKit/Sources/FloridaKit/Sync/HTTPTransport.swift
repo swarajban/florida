@@ -69,7 +69,7 @@ struct ServerAPI: Sendable {
         case 401:
             throw SyncError.unauthorized
         default:
-            throw SyncError.http(status: response.statusCode, body: bodyText(data))
+            throw SyncError.http(status: response.statusCode, body: errorMessage(data))
         }
     }
 

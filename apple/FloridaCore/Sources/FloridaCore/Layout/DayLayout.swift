@@ -56,7 +56,10 @@ public enum DayLayout {
         _ items: [LayoutItem<ID>], day: Date, calendar: Calendar, minimumMinutes: Int = 15
     ) -> [LayoutFrame<ID>] {
         let dayStart = calendar.startOfDay(for: day)
-        guard let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) else { return [] }
+        // Where DST skips midnight the day starts at 01:00 and adding a day keeps that wall-clock
+        // time; `startOfDay` again lands on the next day's first instant.
+        guard let nextDay = calendar.date(byAdding: .day, value: 1, to: dayStart) else { return [] }
+        let dayEnd = calendar.startOfDay(for: nextDay)
         let minimum = max(0, minimumMinutes)
 
         var timed: [TimedItem<ID>] = []

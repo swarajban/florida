@@ -115,6 +115,29 @@ import Testing
         #expect(result["late"]?.endDayIndex == 4)
     }
 
+    @Test func dayColumnsEndAtTheNextMidnightWhenDSTSkipsIt() throws {
+        // Cuba's DST starts 2026-03-08 at 00:00, so that Sunday begins at 01:00 and is 23 hours long.
+        var havana = Calendar(identifier: .gregorian)
+        havana.timeZone = TimeZone(identifier: "America/Havana")!
+        let days = (8..<15).map { day in
+            havana.startOfDay(for: havana.date(from: DateComponents(year: 2026, month: 3, day: day, hour: 12))!)
+        }
+        try #require(havana.component(.hour, from: days[0]) == 1, "expected the Havana DST change at midnight")
+        try #require(days[1].timeIntervalSince(days[0]) == 23 * 3600)
+
+        let items = [
+            stored("mon", "2026-03-09T00:00:00Z", "2026-03-10T00:00:00Z"),
+            // 00:30–01:00 Monday: the hour that adding 24 h to Sunday's 01:00 start attaches to Sunday.
+            LayoutItem(id: "mon-early", start: days[1].addingTimeInterval(30 * 60), end: days[1].addingTimeInterval(60 * 60)),
+            LayoutItem(id: "sun-late", start: days[0].addingTimeInterval(21 * 3600), end: days[0].addingTimeInterval(22 * 3600)),
+        ]
+        let rows = AllDayLayout.rows(items, days: days, calendar: havana)
+        let byId = Dictionary(uniqueKeysWithValues: rows.flatMap { $0 }.map { ($0.id, $0) })
+        #expect(byId["mon"]?.startDayIndex == 1 && byId["mon"]?.endDayIndex == 1)
+        #expect(byId["mon-early"]?.startDayIndex == 1 && byId["mon-early"]?.endDayIndex == 1)
+        #expect(byId["sun-late"]?.startDayIndex == 0 && byId["sun-late"]?.endDayIndex == 0)
+    }
+
     @Test func emptyInputsGiveEmptyRows() {
         #expect(AllDayLayout.rows([LayoutItem<String>](), days: week, calendar: calendar).isEmpty)
         #expect(AllDayLayout.rows([item("a", 0, 0)], days: [], calendar: calendar).isEmpty)

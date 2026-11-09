@@ -28,7 +28,11 @@ public enum AllDayLayout {
     ) -> [[AllDaySpan<ID>]] {
         guard !days.isEmpty else { return [] }
         let dayStarts = days.map { calendar.startOfDay(for: $0) }
-        let dayEnds = dayStarts.map { calendar.date(byAdding: .day, value: 1, to: $0) ?? $0.addingTimeInterval(86_400) }
+        // Where DST skips midnight (Havana, Beirut) a day starts at 01:00 and adding a day keeps that
+        // wall-clock time; `startOfDay` again lands on the next day's first instant.
+        let dayEnds = dayStarts.map {
+            calendar.startOfDay(for: calendar.date(byAdding: .day, value: 1, to: $0) ?? $0.addingTimeInterval(86_400))
+        }
 
         var spans: [SpannedItem<ID>] = []
         for (order, item) in items.enumerated() {

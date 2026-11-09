@@ -141,6 +141,15 @@ import Testing
         #expect(event(description: "(https://acme.webex.com/meet/bob)").joinURL?.absoluteString == "https://acme.webex.com/meet/bob")
     }
 
+    @Test func joinURLDropsHTMLEntityRemnantsGluedToTheLink() {
+        #expect(event(description: "Join: https://zoom.us/j/123&nbsp;(backup below)").joinURL?.absoluteString == "https://zoom.us/j/123")
+        #expect(event(description: "<p>https://meet.google.com/abc-defg-hij&#160;</p>").joinURL?.absoluteString
+            == "https://meet.google.com/abc-defg-hij")
+        // An escaped ampersand inside the query is not a remnant.
+        #expect(event(description: "https://us02web.zoom.us/j/1?pwd=a&amp;b=2 now").joinURL?.absoluteString
+            == "https://us02web.zoom.us/j/1?pwd=a&amp;b=2")
+    }
+
     @Test func inboxIsTheFixedCategoryId() {
         let at = Date(timeIntervalSince1970: 0)
         #expect(TaskCategory(id: TaskCategory.inboxId, name: "Inbox", scheduleId: "s", createdAt: at, updatedAt: at).isInbox)

@@ -102,8 +102,10 @@ extension AppDatabase {
     /// Start of the calendar day containing `day` up to the start of the next one.
     static func dayRange(containing day: Date, calendar: Calendar) -> Range<Date> {
         let start = calendar.startOfDay(for: day)
-        let end = calendar.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
-        return start..<end
+        // Where DST skips midnight (Havana, Beirut) the day starts at 01:00 and adding a day keeps
+        // that wall-clock time; `startOfDay` again lands on the next day's first instant.
+        let next = calendar.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
+        return start..<calendar.startOfDay(for: next)
     }
 
     static func placements(_ db: Database, in range: Range<Date>) throws -> [Placement] {
@@ -347,24 +349,48 @@ extension AppDatabase {
         }
     }
 
-    /// Records that the server rejected `write`: removes it from the queue and, unless a newer local
-    /// write for the same entity has been queued since, replaces the local row with `serverRow`, or
-    /// removes it when `serverRow` is nil (tombstoned or unknown on the server).
-    func resolveRejectedWrite<Record: PersistableRecord>(_ write: PendingWrite, serverRow: Record?) throws {
+    /// What the server has for an entity, as `GET /api/<collection>/:id` reports it.
+    enum ServerCopy {
+        /// A live row, as `/api/sync` serializes it.
+        case live(any PersistableRecord)
+        /// The row exists on the server with `deletedAt` set.
+        case tombstoned
+        /// 404 with the server's `{error}` body: the server never had the row.
+        case missing
+        /// 404 without that body (an older server lacking the route): nothing is known.
+        case unavailable
+    }
+
+    /// Records that `write` left the queue without being applied (rejected or discarded): removes it
+    /// and, unless a newer local write for the same entity has been queued since, resets the local
+    /// row to the server's copy. A live row is saved; a tombstone removes the row. A row the server
+    /// never had is removed only when the write was itself a delete (the local row is already a
+    /// tombstone); a rejected `put` of such a row stays, so what the user typed is not lost. An
+    /// unavailable copy leaves the row as it is.
+    func resolveDroppedWrite(_ write: PendingWrite, serverCopy: ServerCopy) throws {
         try writer.write { db in
             if let seq = write.seq {
                 _ = try PendingWrite.deleteOne(db, key: seq)
             }
             guard !(try Self.pendingEntityIds(db).contains(.init(entity: write.entity, id: write.entityId))) else { return }
-            if let serverRow {
-                try serverRow.save(db)
-                return
+            switch serverCopy {
+            case .live(let row):
+                try row.save(db)
+            case .tombstoned:
+                try Self.deleteRow(db, entity: write.entity, id: write.entityId)
+            case .missing where write.op == .delete:
+                try Self.deleteRow(db, entity: write.entity, id: write.entityId)
+            case .missing, .unavailable:
+                break
             }
-            switch write.entity {
-            case .task: _ = try TaskItem.deleteOne(db, id: write.entityId)
-            case .category: _ = try TaskCategory.deleteOne(db, id: write.entityId)
-            case .schedule: _ = try Schedule.deleteOne(db, id: write.entityId)
-            }
+        }
+    }
+
+    private static func deleteRow(_ db: Database, entity: PendingWrite.Entity, id: String) throws {
+        switch entity {
+        case .task: _ = try TaskItem.deleteOne(db, id: id)
+        case .category: _ = try TaskCategory.deleteOne(db, id: id)
+        case .schedule: _ = try Schedule.deleteOne(db, id: id)
         }
     }
 

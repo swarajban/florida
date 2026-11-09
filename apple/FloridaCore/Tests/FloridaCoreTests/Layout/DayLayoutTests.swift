@@ -19,6 +19,24 @@ import Testing
         return Dictionary(uniqueKeysWithValues: result.map { ($0.id, $0) })
     }
 
+    @Test func itemsAfterAShortDaysMidnightAreNotLaidOutOnIt() throws {
+        // Cuba's DST starts 2026-03-08 at 00:00, so that Sunday begins at 01:00 and is 23 hours long.
+        var havana = Calendar(identifier: .gregorian)
+        havana.timeZone = TimeZone(identifier: "America/Havana")!
+        let sunday = havana.startOfDay(for: havana.date(from: DateComponents(year: 2026, month: 3, day: 8, hour: 12))!)
+        try #require(havana.component(.hour, from: sunday) == 1, "expected the Havana DST change at midnight")
+        let monday = sunday.addingTimeInterval(23 * 3600)
+        try #require(havana.component(.day, from: monday) == 9 && havana.component(.hour, from: monday) == 0)
+
+        let result = DayLayout.layout([
+            LayoutItem(id: "late", start: sunday.addingTimeInterval(21 * 3600), end: sunday.addingTimeInterval(22 * 3600)),
+            // 00:00–00:30 Monday: inside Sunday's column when its end is computed as 01:00 + 24 h.
+            LayoutItem(id: "mon-early", start: monday, end: monday.addingTimeInterval(30 * 60)),
+        ], day: sunday, calendar: havana)
+        #expect(result.map(\.id) == ["late"])
+        #expect(result.first?.startMinute == 22 * 60 && result.first?.endMinute == 23 * 60)
+    }
+
     @Test func emptyInputGivesEmptyOutput() {
         #expect(DayLayout.layout([LayoutItem<String>](), day: day, calendar: calendar).isEmpty)
     }

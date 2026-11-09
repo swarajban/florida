@@ -174,12 +174,13 @@ import Testing
         #expect(try db.task(id: "bad") == serverCopy)
     }
 
-    @Test func fourHundredRemovesRowsTheServerHasTombstonedOrNeverHad() async throws {
+    @Test func fourHundredRemovesRowsTheServerHasTombstonedOrADeleteItNeverHad() async throws {
         let db = try AppDatabase.inMemory()
-        try db.saveTask(Fixtures.task(id: "never"), now: Fixtures.t0)
+        try db.apply(SyncResponse(cursor: "c0", tasks: [Fixtures.task(id: "never"), Fixtures.task(id: "tombstoned")]))
+        try db.deleteTask(id: "never", now: Fixtures.t0)
         try db.saveTask(Fixtures.task(id: "tombstoned"), now: Fixtures.t0)
         let transport = FakeTransport([
-            .error(400, "validation failed"),
+            .error(404, "task never not found"),
             .error(404, "task never not found"),
             .error(409, "task is deleted"),
             try .ok(Fixtures.task(id: "tombstoned", deletedAt: Fixtures.instant("2026-11-08T08:00:00Z"))),
@@ -188,10 +189,36 @@ import Testing
 
         let client = client(db, transport)
         #expect(try await client.sync() == 0)
+        #expect(transport.requests.map { "\($0.method) \($0.path)" } == [
+            "DELETE /api/tasks/never", "GET /api/tasks/never", "PUT /api/tasks/tombstoned", "GET /api/tasks/tombstoned", "GET /api/sync",
+        ])
+        // The local tombstone of a row the server never had goes, as does the row the server has tombstoned.
         #expect(try db.task(id: "never") == nil)
         #expect(try db.task(id: "tombstoned") == nil)
-        #expect(await client.lastRejectedWrites.map(\.status) == [400, 409])
+        #expect(await client.lastRejectedWrites.map(\.status) == [404, 409])
         #expect(try db.pendingWrites().isEmpty)
+    }
+
+    @Test func rejectedPutOfARowTheServerNeverHadKeepsTheRow() async throws {
+        // Typed offline into a category another device deleted meanwhile: the server refuses the
+        // task and has no copy to fall back to. What the user typed must not vanish.
+        let db = try AppDatabase.inMemory()
+        try db.saveTask(Fixtures.task(id: "new", categoryId: "gone", title: "call dentist"), now: Fixtures.t0)
+        let transport = FakeTransport([
+            .error(400, "unknown categoryId gone"),
+            .error(404, "task new not found"),
+            try .ok(SyncResponse(cursor: "c")),
+        ])
+
+        let client = client(db, transport)
+        #expect(try await client.sync() == 0)
+        #expect(transport.requests.map { "\($0.method) \($0.path)" } == ["PUT /api/tasks/new", "GET /api/tasks/new", "GET /api/sync"])
+        #expect(try db.task(id: "new")?.title == "call dentist")
+        #expect(try db.pendingWrites().isEmpty, "retrying could never succeed")
+        let rejected = await client.lastRejectedWrites
+        #expect(rejected.map(\.write.entityId) == ["new"])
+        #expect(rejected.first?.status == 400)
+        #expect(rejected.first?.message == "unknown categoryId gone")
     }
 
     @Test func rejectedDeleteOfTheInboxRestoresIt() async throws {
@@ -250,6 +277,58 @@ import Testing
         #expect(try db.task(id: "t1")?.title == "local")
         #expect(try db.pendingWrites().isEmpty)
         #expect(await client.lastRejectedWrites.map(\.message) == ["validation failed"])
+    }
+
+    // MARK: Discarding queued writes
+
+    @Test func discardDropsTheWriteAndResetsTheRowToTheServersCopy() async throws {
+        let db = try AppDatabase.inMemory()
+        try db.apply(SyncResponse(cursor: "c0", tasks: [Fixtures.task(id: "t1", title: "server")]))
+        try db.saveTask(Fixtures.task(id: "t1", title: "local edit"), now: Fixtures.t0)
+        // Edited elsewhere since, so the server's copy is newer than what this device last pulled.
+        let serverCopy = Fixtures.task(id: "t1", title: "edited elsewhere", createdAt: Fixtures.instant("2026-11-08T12:00:00Z"))
+        let transport = FakeTransport([try .ok(serverCopy)])
+
+        let client = client(db, transport)
+        let write = try #require(try db.pendingWrites().first)
+        try await client.discard(write)
+        #expect(transport.requests.map { "\($0.method) \($0.path)" } == ["GET /api/tasks/t1"])
+        #expect(try db.pendingWrites().isEmpty)
+        #expect(try db.task(id: "t1") == serverCopy)
+    }
+
+    @Test func discardRemovesTheRowWhenTheServerHasItTombstoned() async throws {
+        let db = try AppDatabase.inMemory()
+        try db.apply(SyncResponse(cursor: "c0", tasks: [Fixtures.task(id: "t1")]))
+        try db.saveTask(Fixtures.task(id: "t1", title: "local edit"), now: Fixtures.t0)
+        let transport = FakeTransport([try .ok(Fixtures.task(id: "t1", deletedAt: Fixtures.instant("2026-11-08T08:00:00Z")))])
+
+        let write = try #require(try db.pendingWrites().first)
+        try await client(db, transport).discard(write)
+        #expect(try db.pendingWrites().isEmpty)
+        #expect(try db.task(id: "t1") == nil)
+    }
+
+    @Test func discardKeepsTheRowWhenTheServerDoesNotHaveIt() async throws {
+        let db = try AppDatabase.inMemory()
+        try db.saveTask(Fixtures.task(id: "draft", title: "typed offline"), now: Fixtures.t0)
+        let transport = FakeTransport([.error(404, "task draft not found")])
+
+        let write = try #require(try db.pendingWrites().first)
+        try await client(db, transport).discard(write)
+        #expect(try db.pendingWrites().isEmpty)
+        #expect(try db.task(id: "draft")?.title == "typed offline")
+    }
+
+    @Test func discardDropsTheWriteEvenWhenTheRefetchFails() async throws {
+        let db = try AppDatabase.inMemory()
+        try db.saveTask(Fixtures.task(id: "t1", title: "local edit"), now: Fixtures.t0)
+        let transport = FakeTransport([.error(503, "unavailable")])
+
+        let write = try #require(try db.pendingWrites().first)
+        await #expect(throws: SyncError.self) { try await client(db, transport).discard(write) }
+        #expect(try db.pendingWrites().isEmpty)
+        #expect(try db.task(id: "t1")?.title == "local edit")
     }
 
     @Test func fiveHundredStopsPushingButStillPulls() async throws {

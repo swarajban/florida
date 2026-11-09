@@ -15,8 +15,9 @@ public enum SyncError: Error, Sendable {
 }
 
 /// A queued write the server refused with a 4xx. It has left the queue because retrying could
-/// never succeed, and the local row has been reset to the server's copy (removed when the server
-/// has it tombstoned or never had it).
+/// never succeed, and the local row has been reset to the server's copy: saved when the server has
+/// it live, removed when tombstoned. A rejected `put` of a row the server never had keeps the local
+/// row, so the user's edit stays visible; `write.body` holds what was sent.
 public struct RejectedWrite: Hashable, Sendable {
     public var write: PendingWrite
     public var status: Int
@@ -68,11 +69,11 @@ public actor SyncClient {
         return pushed
     }
 
-    /// Pushes queued writes in `seq` order. A 401 throws. A 5xx, transport or decoding failure
-    /// stops the loop and is returned, keeping that row and the rest: later writes may depend on
-    /// it (a task in a category not yet created). Another 4xx resets the local row to the server's
-    /// copy, drops the write into `lastRejectedWrites`, and continues.
-    private func pushQueue() async throws -> (pushed: Int, failure: SyncError?) {
+    /// Pushes queued writes in `seq` order. A 401 throws. Any other failure (5xx, transport,
+    /// decoding, or the local store) stops the loop and is returned, keeping that row and the rest:
+    /// later writes may depend on it (a task in a category not yet created). Another 4xx resets the
+    /// local row to the server's copy, drops the write into `lastRejectedWrites`, and continues.
+    private func pushQueue() async throws -> (pushed: Int, failure: (any Error)?) {
         lastRejectedWrites = []
         var pushed = 0
         for write in try database.pendingWrites() {
@@ -85,18 +86,29 @@ public actor SyncClient {
                 case 401:
                     throw SyncError.unauthorized
                 case 400..<500:
-                    try await reconcileRejected(write)
+                    try database.resolveDroppedWrite(write, serverCopy: try await fetchServerCopy(of: write))
                     lastRejectedWrites.append(RejectedWrite(write: write, status: response.statusCode, message: api.errorMessage(data)))
                 default:
-                    throw SyncError.http(status: response.statusCode, body: api.bodyText(data))
+                    throw SyncError.http(status: response.statusCode, body: api.errorMessage(data))
                 }
             } catch SyncError.unauthorized {
                 throw SyncError.unauthorized
-            } catch let error as SyncError {
+            } catch {
                 return (pushed, error)
             }
         }
         return (pushed, nil)
+    }
+
+    /// Drops `write` from the queue without pushing it, then resets the local row to the server's
+    /// copy so the two stop diverging: saved when the server has it live, removed when tombstoned,
+    /// left as it is when the server does not know it. Throws when the server cannot be asked; the
+    /// write is gone either way.
+    public func discard(_ write: PendingWrite) async throws {
+        if let seq = write.seq {
+            try database.removePendingWrite(seq: seq)
+        }
+        try database.resolveDroppedWrite(write, serverCopy: try await fetchServerCopy(of: write))
     }
 
     /// `GET /api/sync?since=<cursor>` and applies the response.
@@ -160,35 +172,34 @@ public actor SyncClient {
         }
     }
 
-    /// After a 4xx, `GET`s the entity (the bare row, as `/api/sync` serializes it) and resets the local row to the server's copy: saved when
-    /// live, removed when tombstoned or when the server says it never existed (404 with `{error}`).
-    /// A 404 without that body (an older server lacking the route) leaves the row as it is. Throws,
-    /// keeping the write queued, when the server cannot be asked.
-    private func reconcileRejected(_ write: PendingWrite) async throws {
-        let (data, response) = try await api.send(api.makeRequest(method: "GET", path: collection(for: write.entity), id: write.entityId))
+    /// `GET`s the entity `write` targets (the bare row, as `/api/sync` serializes it). A 404 with the
+    /// server's `{error}` body means the server never had it; one without that body comes from an
+    /// older server lacking the route. Throws when the server cannot be asked (401, 5xx, transport
+    /// or decoding failure), so a caller pushing the write keeps it queued.
+    private func fetchServerCopy(of write: PendingWrite) async throws -> AppDatabase.ServerCopy {
+        let request = api.makeRequest(method: "GET", path: collection(for: write.entity), id: write.entityId)
+        let (data, response) = try await api.send(request)
         switch response.statusCode {
         case 200..<300:
             switch write.entity {
             case .task:
                 let row = try api.decode(TaskItem.self, from: data)
-                try database.resolveRejectedWrite(write, serverRow: row.deletedAt == nil ? row : nil)
+                return row.deletedAt == nil ? .live(row) : .tombstoned
             case .category:
                 let row = try api.decode(TaskCategory.self, from: data)
-                try database.resolveRejectedWrite(write, serverRow: row.deletedAt == nil ? row : nil)
+                return row.deletedAt == nil ? .live(row) : .tombstoned
             case .schedule:
                 let row = try api.decode(Schedule.self, from: data)
-                try database.resolveRejectedWrite(write, serverRow: row.deletedAt == nil ? row : nil)
+                return row.deletedAt == nil ? .live(row) : .tombstoned
             }
         case 404 where api.serverError(data) != nil:
-            try database.resolveRejectedWrite(write, serverRow: nil as TaskItem?)
+            return .missing
         case 404:
-            if let seq = write.seq {
-                try database.removePendingWrite(seq: seq)
-            }
+            return .unavailable
         case 401:
             throw SyncError.unauthorized
         default:
-            throw SyncError.http(status: response.statusCode, body: api.bodyText(data))
+            throw SyncError.http(status: response.statusCode, body: api.errorMessage(data))
         }
     }
 }

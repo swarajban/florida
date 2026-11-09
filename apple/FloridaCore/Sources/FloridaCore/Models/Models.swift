@@ -343,8 +343,8 @@ enum MeetingLink {
             let end = text[match.lowerBound...].firstIndex { $0.unicodeScalars.contains(where: terminators.contains) }
                 ?? text.endIndex
             var link = String(text[match.lowerBound..<end])
-            while let last = link.last, ".,;:!?".contains(last) {
-                link.removeLast()
+            while let junk = trailingJunk(of: link) {
+                link.removeLast(junk)
             }
             let lowered = link.lowercased()
             guard lowered.hasPrefix("https://") || lowered.hasPrefix("http://"),
@@ -355,6 +355,17 @@ enum MeetingLink {
             }
         }
         return nil
+    }
+
+    /// Characters to drop from the end of `link`: prose punctuation, or an HTML entity remnant an
+    /// HTML description glued to the URL ("…/j/123&nbsp;", "…/x&amp;").
+    private static func trailingJunk(of link: String) -> Int? {
+        if let last = link.last, ".,;:!?".contains(last) { return 1 }
+        guard let amp = link.lastIndex(of: "&") else { return nil }
+        let name = link[link.index(after: amp)...]
+        let named = (2...8).contains(name.count) && name.allSatisfy(\.isLetter)
+        let numeric = name.first == "#" && name.count > 1 && name.dropFirst().allSatisfy(\.isNumber)
+        return named || numeric ? name.count + 1 : nil
     }
 }
 

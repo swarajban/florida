@@ -329,6 +329,28 @@ import Testing
         #expect(try db.agenda(for: day(10), calendar: calendar).events.map(\.id) == ["nov10", "late"])
     }
 
+    @Test func agendaOfADayWhoseMidnightDSTSkipsEndsAtTheNextMidnight() throws {
+        // Cuba's DST starts 2026-03-08 at 00:00, so that Sunday begins at 01:00 and is 23 hours long.
+        var havana = Calendar(identifier: .gregorian)
+        havana.timeZone = TimeZone(identifier: "America/Havana")!
+        let sunday = havana.startOfDay(for: havana.date(from: DateComponents(year: 2026, month: 3, day: 8, hour: 12))!)
+        try #require(havana.component(.hour, from: sunday) == 1, "expected the Havana DST change at midnight")
+
+        let db = try AppDatabase.inMemory()
+        try db.apply(SyncResponse(
+            cursor: "c",
+            events: [
+                Fixtures.event(id: "sun", start: "2026-03-08T00:00:00Z", end: "2026-03-09T00:00:00Z", allDay: true),
+                Fixtures.event(id: "mon", start: "2026-03-09T00:00:00Z", end: "2026-03-10T00:00:00Z", allDay: true),
+                // 00:30–01:00 Monday (UTC-4 after the change): on Sunday when its end is 01:00 + 24 h.
+                Fixtures.event(id: "mon-early", start: "2026-03-09T04:30:00Z", end: "2026-03-09T05:00:00Z"),
+            ],
+            calendars: [Fixtures.calendar()]))
+
+        #expect(try db.agenda(for: sunday, calendar: havana).events.map(\.id) == ["sun"])
+        #expect(try db.agenda(for: sunday.addingTimeInterval(23 * 3600), calendar: havana).events.map(\.id) == ["mon", "mon-early"])
+    }
+
     @Test func placementsOverlapRange() throws {
         let db = try AppDatabase.inMemory()
         try db.apply(SyncResponse(cursor: "c", placements: [
