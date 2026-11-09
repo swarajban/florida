@@ -5,11 +5,13 @@ import SwiftUI
 /// palette and help as overlays. Shows the setup screen until a server token is saved.
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         @Bindable var model = model
         ZStack(alignment: .top) {
             content
+            GhostView()
             if model.isPaletteOpen {
                 paletteOverlay
             }
@@ -20,10 +22,19 @@ struct RootView: View {
         .frame(minWidth: 960, minHeight: 600)
         .background(KeyEventMonitorView(model: model))
         .sheet(item: $model.editorTask) { task in
-            TaskEditorSheet(task: task)
+            TaskEditorSheet(task: task, isNew: model.tasksById[task.id] == nil)
         }
         .sheet(isPresented: $model.isGoToDateOpen) {
             GoToDateView()
+        }
+        .sheet(isPresented: $model.isNewCategoryOpen) {
+            NewCategorySheet()
+        }
+        .sheet(item: $model.doneForNow) { request in
+            DoneForNowSheet(request: request)
+        }
+        .onChange(of: model.settingsRequest) {
+            openSettings()
         }
         .onAppear {
             model.start()

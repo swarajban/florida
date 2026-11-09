@@ -7,6 +7,15 @@ enum DateText {
         date.formatted(.dateTime.hour().minute())
     }
 
+    /// Gutter labels for hours 0…23, "1 PM" or "13" following the system's 12/24-hour setting the
+    /// same way `time(_:)` does. Built on a fixed mid-January day so a DST change cannot skip an hour.
+    static func hourLabels(calendar: Calendar) -> [(minute: Int, label: String)] {
+        (0..<24).map { hour in
+            let date = calendar.date(from: DateComponents(year: 2001, month: 1, day: 15, hour: hour)) ?? Date()
+            return (minute: hour * 60, label: date.formatted(.dateTime.hour()))
+        }
+    }
+
     static func timeRange(_ start: Date, _ end: Date) -> String {
         "\(time(start)) – \(time(end))"
     }

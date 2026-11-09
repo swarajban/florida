@@ -11,17 +11,24 @@ struct SearchResult: Identifiable, Hashable {
 }
 
 /// The palette's text and what it currently means: a quick-add draft, a filtered command list,
-/// or search hits. Quick add becomes command mode while the text starts with ">".
+/// search hits, or the categories a task can move to. Quick add becomes command mode while the
+/// text starts with ">".
 struct PaletteState {
     enum Mode: Hashable {
         case quickAdd, command, search
+        /// Move to…: pick a category for this task.
+        case move(taskId: String)
+        /// Fill a free gap: the tasks that fit in `minutes` from `start`.
+        case fit(start: Date, minutes: Int)
     }
 
     var text = ""
     var selectedIndex = 0
     var draft = QuickAddDraft()
-    var commands: [AppCommand] = AppCommand.allCases
+    var commands: [MacCommand] = MacCommand.paletteCommands
     var searchResults: [SearchResult] = []
+    var categoryResults: [TaskCategory] = []
+    var taskResults: [TaskItem] = []
     private var baseMode: Mode = .quickAdd
 
     init(mode: Mode = .quickAdd) {
@@ -31,8 +38,8 @@ struct PaletteState {
         case .command:
             baseMode = .quickAdd
             text = ">"
-        case .search:
-            baseMode = .search
+        case .search, .move, .fit:
+            baseMode = mode
         }
     }
 
@@ -50,19 +57,21 @@ struct PaletteState {
         case .quickAdd: 0
         case .command: commands.count
         case .search: searchResults.count
+        case .move: categoryResults.count
+        case .fit: taskResults.count
         }
     }
 
-    /// Re-parses the draft or re-filters the commands; search results need the store, so
-    /// `AppModel.paletteTextDidChange` fills them.
+    /// Re-parses the draft or re-filters the commands; search and move results need the store,
+    /// so `AppModel.paletteTextDidChange` fills them.
     mutating func textDidChange(now: Date, calendar: Calendar) {
         selectedIndex = 0
         switch mode {
         case .quickAdd:
             draft = QuickAddParser.parse(text, now: now, calendar: calendar)
         case .command:
-            commands = FuzzyMatch.filter(AppCommand.allCases, query: query, label: \.label)
-        case .search:
+            commands = FuzzyMatch.filter(MacCommand.paletteCommands, query: query, label: \.label)
+        case .search, .move, .fit:
             break
         }
     }

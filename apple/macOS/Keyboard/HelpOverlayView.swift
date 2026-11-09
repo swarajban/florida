@@ -6,7 +6,7 @@ import SwiftUI
 struct HelpOverlayView: View {
     @Environment(AppModel.self) private var model
 
-    private let sections = Keymap.default.helpSections()
+    private let sections = MacKeymap.default.helpSections()
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 24, alignment: .top), count: 3)
 
     var body: some View {

@@ -1,8 +1,9 @@
 import FloridaKit
 import SwiftUI
 
-/// The right-hand task list: open tasks grouped by category. Keeps the selected row scrolled
-/// into view as `j` / `k` move it.
+/// The right-hand task list: Inbox first (with its triage count), then each category's open
+/// tasks; empty categories stay as one collapsed line. Keeps the selected row scrolled into view
+/// as `j` / `k` move it.
 struct TaskPaneView: View {
     @Environment(AppModel.self) private var model
 
@@ -37,25 +38,16 @@ struct TaskPaneView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                         ForEach(model.taskGroups) { group in
-                            Section {
-                                ForEach(group.tasks) { task in
-                                    let item = ItemID.task(task.id)
-                                    TaskRowView(
-                                        task: task, state: model.scheduleState(for: task),
-                                        tint: group.category?.tint ?? .defaultCategory,
-                                        isSelected: model.selection == item, isFocused: model.focus == .tasks,
-                                        calendar: model.calendar)
-                                    .id(item)
-                                    .onTapGesture(count: 2) {
-                                        model.select(item, in: .tasks)
-                                        model.editSelection()
-                                    }
-                                    .onTapGesture {
-                                        model.select(item, in: .tasks)
-                                    }
-                                }
-                            } header: {
+                            if group.tasks.isEmpty {
                                 TaskGroupHeader(group: group)
+                            } else {
+                                Section {
+                                    ForEach(group.tasks) { task in
+                                        row(task, in: group)
+                                    }
+                                } header: {
+                                    TaskGroupHeader(group: group)
+                                }
                             }
                         }
                         if model.openTasks.isEmpty {
@@ -65,6 +57,7 @@ struct TaskPaneView: View {
                         }
                     }
                     .padding(.bottom, 8)
+                    .animation(.easeOut(duration: 0.15), value: model.openTasks.map(\.id))
                 }
                 .onChange(of: model.selection) { _, selection in
                     if let selection, selection.isTask {
@@ -75,25 +68,73 @@ struct TaskPaneView: View {
         }
         .frame(width: Self.width)
     }
+
+    private func row(_ task: TaskItem, in group: CategoryTaskGroup) -> some View {
+        let item = ItemID.task(task.id)
+        let suggestion = group.isInbox ? model.suggestedCategory(for: task) : nil
+        let tint = group.category?.tint ?? .defaultCategory
+        return TaskRowView(
+            task: task, state: model.scheduleState(for: task),
+            tint: tint,
+            isSelected: model.selection == item, isFocused: model.focus == .tasks,
+            isUntriaged: group.isInbox, suggestion: suggestion,
+            calendar: model.calendar
+        ) {
+            if let suggestion { model.move(task, to: suggestion) }
+        }
+        .id(item)
+        .transition(model.completingTaskIds.contains(task.id) ? .bloomFold(tint) : .opacity)
+        .contextMenu {
+            TaskActionsMenu(task: task)
+        }
+        .onTapGesture(count: 2) {
+            model.select(item, in: .tasks)
+            model.editSelection()
+        }
+        .onTapGesture {
+            model.select(item, in: .tasks)
+        }
+    }
 }
 
+/// A category's header: color, name and count. Inbox reads "3 to triage"; an empty category is
+/// a dimmed collapsed line.
 struct TaskGroupHeader: View {
     let group: CategoryTaskGroup
 
     var body: some View {
+        let isEmpty = group.tasks.isEmpty
         HStack(spacing: 6) {
-            Circle()
-                .fill(group.category?.tint ?? .defaultCategory)
-                .frame(width: 8, height: 8)
+            if group.isInbox {
+                Image(systemName: "tray")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Circle()
+                    .fill(group.category?.tint ?? .defaultCategory)
+                    .frame(width: 8, height: 8)
+            }
             Text(group.name)
-                .font(.subheadline.weight(.semibold))
+                .font(.subheadline.weight(isEmpty ? .regular : .semibold))
+            if isEmpty {
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
             Spacer()
-            Text("\(group.tasks.count)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if group.isInbox, !isEmpty {
+                Text("\(group.tasks.count) to triage")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.orange)
+            } else {
+                Text("\(group.tasks.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
+        .foregroundStyle(isEmpty ? Color.secondary : Color.primary)
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.vertical, isEmpty ? 3 : 6)
         .background(.bar)
     }
 }

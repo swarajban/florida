@@ -5,10 +5,54 @@ extension AppModel {
     /// Google Calendar's "new event" page; Florida has no event write API, so `newEvent` opens it.
     static let newGoogleEventURL = URL(string: "https://calendar.google.com/calendar/u/0/r/eventedit")!
 
+    /// True while a sheet owns the window. Commands do nothing then (except Escape and sync):
+    /// a sheet holds a draft, and a menu shortcut such as ⌘1 writing underneath it would be
+    /// overwritten by the stale draft when the sheet saves.
+    var isSheetOpen: Bool {
+        editorTask != nil || isGoToDateOpen || isNewCategoryOpen || doneForNow != nil
+    }
+
+    /// Asks `RootView` to open the Settings window on `tab`.
+    func openSettings(_ tab: SettingsTab) {
+        settingsTab = tab
+        settingsRequest += 1
+    }
+
+    /// Runs a Mac command: shared commands go to `perform`, Mac-only ones are handled here.
+    func run(_ command: MacCommand) {
+        switch command {
+        case .core(let shared):
+            perform(shared)
+        case .undo, .move, .acceptSuggestion, .newCategory, .editSchedule, .newTaskEditor,
+             .doNow, .doneForNow, .repeatLast, .centerOnNow, .jumpToFirst, .jumpToLast:
+            guard !isSheetOpen else { return }
+            statusMessage = nil
+            switch command {
+            case .undo: undo()
+            case .move: openMovePicker()
+            case .acceptSuggestion: acceptSuggestion()
+            case .newCategory: isNewCategoryOpen = true
+            case .editSchedule: openSettings(.schedules)
+            case .newTaskEditor: openNewTaskEditor()
+            case .doNow: doNowSelection()
+            case .doneForNow: doneForNowSelection()
+            case .repeatLast: repeatLastAction()
+            case .centerOnNow: centerOnNow()
+            case .jumpToFirst: jumpToEdge(last: false)
+            case .jumpToLast: jumpToEdge(last: true)
+            case .core: break
+            }
+        }
+    }
+
     /// Runs one command. Synchronous: every state change lands before this returns, and anything
     /// that needs the network is started in the background.
     func perform(_ command: AppCommand) {
+        if isSheetOpen, command != .cancel, command != .sync { return }
         statusMessage = nil
+        if RepeatableAction.repeatableCommands.contains(command), selectedTask != nil {
+            lastAction = .command(command)
+        }
         switch command {
         case .nextDay: moveDay(by: 1)
         case .previousDay: moveDay(by: -1)
@@ -61,21 +105,29 @@ extension AppModel {
             closePalette()
         } else if isHelpOpen {
             isHelpOpen = false
+        } else if eventDetailID != nil {
+            eventDetailID = nil
         } else if editorTask != nil {
             editorTask = nil
         } else if isGoToDateOpen {
             isGoToDateOpen = false
+        } else if isNewCategoryOpen {
+            isNewCategoryOpen = false
+        } else if doneForNow != nil {
+            doneForNow = nil
         } else {
             selection = nil
         }
     }
 
-    /// Return / `e`: tasks open the editor sheet, events open in Google Calendar.
+    /// Return / `e` / double-click: tasks open the editor sheet, events their detail popover.
     func editSelection() {
-        if let task = selectedTask {
+        if case .gap(let id)? = selection, let gap = gridLayout.gap(id: id) {
+            openFitPicker(gap)
+        } else if let task = selectedTask {
             editorTask = task
         } else if let event = selectedEvent {
-            openInGoogle(event)
+            eventDetailID = event.id
         } else {
             statusMessage = "Select a task or event first"
         }
@@ -99,20 +151,24 @@ extension AppModel {
 
     /// ⇧⌘C: an event's Google Calendar link, or a task's title.
     func copyLink() {
-        let text: String?
         if let event = selectedEvent {
-            text = event.htmlLink ?? event.summary
+            copyLink(of: event)
+        } else if let task = selectedTask {
+            copy(task.title)
         } else {
-            text = selectedTask?.title
-        }
-        guard let text else {
             statusMessage = "Nothing selected to copy"
-            return
         }
+    }
+
+    func copyLink(of event: CalendarEvent) {
+        copy(event.htmlLink ?? event.summary ?? "")
+    }
+
+    private func copy(_ text: String) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
-        statusMessage = "Copied"
+        showGhost("Copied")
     }
 
     func open(url: URL) {

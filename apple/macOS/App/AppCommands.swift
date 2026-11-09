@@ -1,16 +1,21 @@
 import FloridaKit
 import SwiftUI
 
-/// The menu bar. Items mirror `Keymap.default`; the ⌘ shortcuts shown here are the same chords
+/// The menu bar. Items mirror `MacKeymap.default`; the ⌘ shortcuts shown here are the same chords
 /// the key monitor handles, so a shortcut works whether the main window or Settings is key.
+/// Single-letter keys are not menu shortcuts: a menu key equivalent would also fire while typing.
 struct AppCommands: Commands {
     let model: AppModel
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("New Task") { model.perform(.newTask) }
+            Button("Quick Add Task") { model.perform(.newTask) }
                 .keyboardShortcut("n")
+            Button("New Task…") { model.run(.newTaskEditor) }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
             Button("New Event in Google Calendar") { model.perform(.newEvent) }
+            Button("New Category…") { model.run(.newCategory) }
+            Button("Edit Schedules…") { model.run(.editSchedule) }
             Divider()
             Button("Sync Now") { model.perform(.sync) }
                 .keyboardShortcut("r")
@@ -46,26 +51,39 @@ struct AppCommands: Commands {
         }
 
         CommandMenu("Task") {
-            Button("Edit") { model.perform(.edit) }
-            Button("Complete") { model.perform(.complete) }
-            Button("Delete") { model.perform(.delete) }
-            Divider()
-            Button("Pin") { model.perform(.pin) }
-            Button("Unpin") { model.perform(.unpin) }
-            Button("Snooze to Tomorrow") { model.perform(.snooze) }
-            Divider()
-            Button("Priority: ASAP") { model.perform(.setPriorityAsap) }
-                .keyboardShortcut("1")
-            Button("Priority: High") { model.perform(.setPriorityHigh) }
-                .keyboardShortcut("2")
-            Button("Priority: Medium") { model.perform(.setPriorityMedium) }
-                .keyboardShortcut("3")
-            Button("Priority: Low") { model.perform(.setPriorityLow) }
-                .keyboardShortcut("4")
-            Divider()
-            Button("Open in Google Calendar") { model.perform(.openInGoogle) }
-            Button("Copy Link") { model.perform(.copyLink) }
-                .keyboardShortcut("c", modifiers: [.command, .shift])
+            // A sheet holds a draft of the task; writing underneath it would be lost when it saves.
+            Group {
+                Button(model.undoStack.last.map { "Undo \($0.label)" } ?? "Undo") { model.run(.undo) }
+                    .disabled(model.undoStack.isEmpty)
+                Divider()
+                Button("Edit") { model.perform(.edit) }
+                Button("Done") { model.perform(.complete) }
+                Button("Done for Now…") { model.run(.doneForNow) }
+                Button("Delete") { model.perform(.delete) }
+                Divider()
+                Button("Do Now") { model.run(.doNow) }
+                Button("Pin") { model.perform(.pin) }
+                Button("Unpin") { model.perform(.unpin) }
+                Button("Push to Tomorrow") { model.perform(.snooze) }
+                Button("Move to…") { model.run(.move) }
+                Button("Repeat Last Action") { model.run(.repeatLast) }
+                    .disabled(model.lastAction == nil)
+                Button("Accept Suggested Category") { model.run(.acceptSuggestion) }
+                Divider()
+                Button("Priority: ASAP") { model.perform(.setPriorityAsap) }
+                    .keyboardShortcut("1")
+                Button("Priority: High") { model.perform(.setPriorityHigh) }
+                    .keyboardShortcut("2")
+                Button("Priority: Medium") { model.perform(.setPriorityMedium) }
+                    .keyboardShortcut("3")
+                Button("Priority: Low") { model.perform(.setPriorityLow) }
+                    .keyboardShortcut("4")
+                Divider()
+                Button("Open in Google Calendar") { model.perform(.openInGoogle) }
+                Button("Copy Link") { model.perform(.copyLink) }
+                    .keyboardShortcut("c", modifiers: [.command, .shift])
+            }
+            .disabled(model.isSheetOpen)
         }
     }
 }

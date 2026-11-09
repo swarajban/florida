@@ -17,15 +17,22 @@ extension AppModel {
             task.cancel()
         }
         backgroundTasks = []
+        suggestionWorker?.cancel()
+        suggestionWorker = nil
+        suggestionRequests = [:]
+        isAIUnavailable = false
         guard let config, let database else {
             syncClient = nil
+            aiClient = nil
             return
         }
         syncClient = SyncClient(database: database, config: config)
+        aiClient = AIClient(config: config)
         lastSyncError = nil
         scheduleSync()
         startChangeStream(config)
         startPeriodicSync()
+        refreshSuggestions()
     }
 
     /// Saves the server settings to the keychain and reconnects.

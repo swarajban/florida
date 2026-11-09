@@ -9,6 +9,12 @@ struct AllDayStripView: View {
 
     static let rowHeight: CGFloat = 22
 
+    /// The all-day bar of the open event detail, if it is an all-day event.
+    private var detailBlock: GridLayout.AllDayBlock? {
+        guard let id = model.eventDetailID else { return nil }
+        return model.gridLayout.allDayBlocks.first { $0.item == .event(id) }
+    }
+
     var body: some View {
         let layout = model.gridLayout
         if layout.allDayRowCount > 0 {
@@ -35,6 +41,12 @@ struct AllDayStripView: View {
                             }
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .eventDetailPopover(
+                    model, eventId: detailBlock?.id,
+                    anchor: .rect(.rect(detailBlock.map {
+                        AllDayBar.frame(for: $0, columnWidth: columnWidth, gutterWidth: gutterWidth)
+                    } ?? .zero)))
             }
             .frame(height: CGFloat(layout.allDayRowCount) * Self.rowHeight + 2)
             Divider()
@@ -51,12 +63,18 @@ private struct AllDayBar: View {
     let gutterWidth: CGFloat
     let isSelected: Bool
 
-    var body: some View {
+    /// Where the bar is drawn in the strip; also the detail popover's anchor.
+    static func frame(for block: GridLayout.AllDayBlock, columnWidth: CGFloat, gutterWidth: CGFloat) -> CGRect {
         let spannedDays = CGFloat(block.endDayIndex - block.startDayIndex + 1)
         let width: CGFloat = max(spannedDays * columnWidth - 4, 4)
         let height: CGFloat = AllDayStripView.rowHeight - 4
         let x: CGFloat = gutterWidth + CGFloat(block.startDayIndex) * columnWidth + 2
         let y: CGFloat = CGFloat(block.row) * AllDayStripView.rowHeight + 2
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    var body: some View {
+        let frame = Self.frame(for: block, columnWidth: columnWidth, gutterWidth: gutterWidth)
         let opacity: Double = block.start < Date() ? 0.6 : 0.9
         let shape = RoundedRectangle(cornerRadius: 4)
 
@@ -65,9 +83,9 @@ private struct AllDayBar: View {
             .foregroundStyle(.white)
             .lineLimit(1)
             .padding(.horizontal, 6)
-            .frame(width: width, height: height, alignment: .leading)
+            .frame(width: frame.width, height: frame.height, alignment: .leading)
             .background(block.tint.opacity(opacity), in: shape)
             .overlay(shape.strokeBorder(Color.primary, lineWidth: isSelected ? 2 : 0))
-            .offset(x: x, y: y)
+            .offset(x: frame.minX, y: frame.minY)
     }
 }

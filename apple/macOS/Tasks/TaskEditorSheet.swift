@@ -1,8 +1,10 @@
 import FloridaKit
 import SwiftUI
 
-/// Edits every user-settable field of a task. Save writes locally and closes; nothing waits on
-/// the server.
+/// Edits every user-settable field of a task, or fills in a new one (⇧N, `>New task`) starting
+/// from quick add's defaults. New tasks can also be described in free text and parsed by the
+/// server's AI, which fills the form for confirmation. Save writes locally and closes; nothing
+/// waits on the server.
 struct TaskEditorSheet: View {
     @Environment(AppModel.self) private var model
     @State private var draft: TaskItem
@@ -12,9 +14,11 @@ struct TaskEditorSheet: View {
     @State private var startAt: Date
     @State private var hasPinnedStart: Bool
     @State private var pinnedStart: Date
+    /// Not in the store yet: titled "New task", shows the AI section, and saves as "Added".
+    let isNew: Bool
     @FocusState private var isTitleFocused: Bool
 
-    init(task: TaskItem) {
+    init(task: TaskItem, isNew: Bool) {
         let calendar = Calendar.autoupdatingCurrent
         let today = calendar.startOfDay(for: Date())
         let defaultDue = calendar.date(bySettingHour: 17, minute: 0, second: 0, of: today) ?? today
@@ -26,44 +30,50 @@ struct TaskEditorSheet: View {
         _startAt = State(initialValue: task.startAt ?? today)
         _hasPinnedStart = State(initialValue: task.pinnedStart != nil)
         _pinnedStart = State(initialValue: task.pinnedStart ?? nextHour)
+        self.isNew = isNew
     }
 
     var body: some View {
         VStack(spacing: 0) {
             Form {
-                TextField("Title", text: $draft.title)
-                    .focused($isTitleFocused)
-                TextField("Notes", text: notes, axis: .vertical)
-                    .lineLimit(3...8)
-                Picker("Category", selection: $draft.categoryId) {
-                    ForEach(model.categories) { category in
-                        Text(category.name).tag(category.id)
-                    }
+                if isNew {
+                    AIParseSection(apply: apply)
                 }
-                LabeledContent("Duration") {
-                    HStack {
-                        TextField("Minutes", value: $draft.durationMinutes, format: .number)
-                            .frame(width: 60)
-                            .multilineTextAlignment(.trailing)
-                        Stepper("Minutes", value: $draft.durationMinutes, in: 5...960, step: 5)
-                            .labelsHidden()
-                        Text(DateText.duration(minutes: draft.durationMinutes))
-                            .foregroundStyle(.secondary)
+                Section(isNew ? "New task" : "Task") {
+                    TextField("Title", text: $draft.title)
+                        .focused($isTitleFocused)
+                    TextField("Notes", text: notes, axis: .vertical)
+                        .lineLimit(3...8)
+                    Picker("Category", selection: $draft.categoryId) {
+                        ForEach(model.orderedCategories) { category in
+                            Text(category.name).tag(category.id)
+                        }
                     }
-                }
-                Picker("Priority", selection: $draft.priority) {
-                    ForEach(Priority.allCases, id: \.self) { priority in
-                        Text(priority.displayName).tag(priority)
+                    LabeledContent("Duration") {
+                        HStack {
+                            TextField("Minutes", value: $draft.durationMinutes, format: .number)
+                                .frame(width: 60)
+                                .multilineTextAlignment(.trailing)
+                            Stepper("Minutes", value: $draft.durationMinutes, in: 5...960, step: 5)
+                                .labelsHidden()
+                            Text(DateText.duration(minutes: draft.durationMinutes))
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                }
-                Picker("Deadline", selection: $draft.deadlineType) {
-                    ForEach(DeadlineType.allCases, id: \.self) { type in
-                        Text(type.displayName).tag(type)
+                    Picker("Priority", selection: $draft.priority) {
+                        ForEach(Priority.allCases, id: \.self) { priority in
+                            Text(priority.displayName).tag(priority)
+                        }
                     }
+                    Picker("Deadline", selection: $draft.deadlineType) {
+                        ForEach(DeadlineType.allCases, id: \.self) { type in
+                            Text(type.displayName).tag(type)
+                        }
+                    }
+                    OptionalDateRow(title: "Due", isOn: $hasDue, date: $dueAt)
+                    OptionalDateRow(title: "Not before", isOn: $hasStart, date: $startAt)
+                    OptionalDateRow(title: "Pinned start", isOn: $hasPinnedStart, date: $pinnedStart)
                 }
-                OptionalDateRow(title: "Due", isOn: $hasDue, date: $dueAt)
-                OptionalDateRow(title: "Not before", isOn: $hasStart, date: $startAt)
-                OptionalDateRow(title: "Pinned start", isOn: $hasPinnedStart, date: $pinnedStart)
             }
             .formStyle(.grouped)
             Divider()
@@ -73,7 +83,7 @@ struct TaskEditorSheet: View {
                 }
                 .keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("Save") {
+                Button(isNew ? "Add Task" : "Save") {
                     save()
                 }
                 .keyboardShortcut(.defaultAction)
@@ -82,9 +92,9 @@ struct TaskEditorSheet: View {
             }
             .padding()
         }
-        .frame(width: 480, height: 520)
+        .frame(width: 520, height: isNew ? 700 : 540)
         .onAppear {
-            isTitleFocused = true
+            isTitleFocused = !isNew || model.editorAIText == nil
         }
     }
 
@@ -92,6 +102,26 @@ struct TaskEditorSheet: View {
         Binding(
             get: { draft.notes ?? "" },
             set: { draft.notes = $0.isEmpty ? nil : $0 })
+    }
+
+    /// Fills the form from an AI-parsed draft; unknown categories fall back to Inbox.
+    private func apply(_ parsed: TaskDraft) {
+        draft.title = parsed.title
+        draft.notes = parsed.notes
+        draft.durationMinutes = max(5, parsed.durationMinutes)
+        draft.minChunkMinutes = parsed.minChunkMinutes
+        draft.priority = parsed.priority
+        draft.deadlineType = parsed.deadlineType
+        if let id = parsed.categoryId, model.categoriesById[id] != nil {
+            draft.categoryId = id
+        }
+        hasDue = parsed.dueAt != nil
+        dueAt = parsed.dueAt ?? dueAt
+        hasStart = parsed.startAt != nil
+        startAt = parsed.startAt ?? startAt
+        hasPinnedStart = parsed.pinnedStart != nil
+        pinnedStart = parsed.pinnedStart ?? pinnedStart
+        isTitleFocused = true
     }
 
     private func save() {
@@ -106,8 +136,13 @@ struct TaskEditorSheet: View {
         } else if task.deadlineType == .none {
             task.deadlineType = .soft
         }
-        model.save(task)
+        let label = isNew ? "Added \(AppModel.quoted(task.title))" : "Edited \(AppModel.quoted(task.title))"
+        guard model.save(task, undoLabel: label) else { return }
         model.editorTask = nil
+        if isNew {
+            model.selection = .task(task.id)
+            model.showGhost("Added to \(model.categoriesById[task.categoryId]?.name ?? "Inbox")")
+        }
     }
 }
 

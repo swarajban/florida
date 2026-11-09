@@ -2,7 +2,8 @@ import FloridaKit
 import SwiftUI
 
 /// Six weeks of day cells listing each day's items as text lines. Click a day to highlight it,
-/// click a line to select that item, double-click a day to open it in the day view.
+/// click a line to select that item (double-click: edit a task, open an event's details),
+/// double-click a day to open it in the day view.
 struct MonthGridView: View {
     @Environment(AppModel.self) private var model
 
@@ -63,10 +64,10 @@ struct MonthCellView: View {
                 .frame(width: 20, height: 20)
                 .background(isToday ? Color.accentColor : .clear, in: Circle())
             ForEach(allDay.prefix(MonthGridView.maxLinesPerCell)) { block in
-                line(item: block.item, text: block.title, tint: block.tint, filled: true)
+                line(item: block.item, day: day, text: block.title, tint: block.tint, filled: true)
             }
             ForEach(timed.prefix(max(0, MonthGridView.maxLinesPerCell - allDay.count))) { block in
-                line(item: block.item, text: "\(DateText.time(block.start)) \(block.title)", tint: block.tint, filled: !block.isTask)
+                line(item: block.item, day: day, text: "\(DateText.time(block.start)) \(block.title)", tint: block.tint, filled: !block.isTask)
             }
             if overflow > 0 {
                 Text("+\(overflow) more")
@@ -93,8 +94,10 @@ struct MonthCellView: View {
         }
     }
 
-    private func line(item: ItemID, text: String, tint: Color, filled: Bool) -> some View {
+    private func line(item: ItemID, day: Date, text: String, tint: Color, filled: Bool) -> some View {
         let isSelected = model.selection == item
+        // An event spanning several cells shows its detail from the first one.
+        let detailId: String? = if case .event(let id) = item, layout.day(of: item) == day { id } else { nil }
         return HStack(spacing: 4) {
             Circle()
                 .fill(filled ? tint : .clear)
@@ -115,5 +118,6 @@ struct MonthCellView: View {
         .onTapGesture {
             model.select(item, in: .calendar)
         }
+        .eventDetailPopover(model, eventId: detailId)
     }
 }

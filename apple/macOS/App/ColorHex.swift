@@ -1,3 +1,4 @@
+import AppKit
 import FloridaKit
 import SwiftUI
 
@@ -25,6 +26,13 @@ extension Color {
             return nil
         }
         self.init(red: red, green: green, blue: blue)
+    }
+
+    /// "#RRGGBB" in sRGB, for storing a picked color; nil when it has no sRGB form.
+    var hexString: String? {
+        guard let rgb = NSColor(self).usingColorSpace(.sRGB) else { return nil }
+        let channel = { (value: CGFloat) in Int((min(max(value, 0), 1) * 255).rounded()) }
+        return String(format: "#%02X%02X%02X", channel(rgb.redComponent), channel(rgb.greenComponent), channel(rgb.blueComponent))
     }
 
     /// Tint for categories without a color: the "#4F46E5" indigo the models document as the default.

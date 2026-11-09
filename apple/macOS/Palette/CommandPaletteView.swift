@@ -1,8 +1,8 @@
 import FloridaKit
 import SwiftUI
 
-/// The floating panel behind ⌘K, `c` and `/`: one text field whose meaning follows the text —
-/// quick-add chips, a fuzzy-filtered command list after ">", or search hits.
+/// The floating panel behind ⌘K, `c`, `/` and `m`: one text field whose meaning follows the
+/// text — quick-add chips, a fuzzy-filtered command list after ">", search hits, or categories.
 struct CommandPaletteView: View {
     @Environment(AppModel.self) private var model
     @FocusState private var isFieldFocused: Bool
@@ -25,14 +25,16 @@ struct CommandPaletteView: View {
             Divider()
             switch model.palette.mode {
             case .quickAdd:
-                QuickAddPreview(draft: model.palette.draft, category: model.paletteCategory, calendar: model.calendar)
+                QuickAddPreview(
+                    draft: model.palette.draft, category: model.paletteCategory,
+                    unknownHint: model.paletteUnknownHint, calendar: model.calendar)
             case .command:
                 PaletteResultList(count: model.palette.commands.count, selectedIndex: model.palette.selectedIndex) { index in
                     let command = model.palette.commands[index]
                     HStack {
                         Text(command.label)
                         Spacer()
-                        Text(Keymap.default.bindings(for: command).map(\.shortcutDescription).joined(separator: "  "))
+                        Text(MacKeymap.default.shortcut(for: command))
                             .monospaced()
                             .foregroundStyle(.secondary)
                     }
@@ -49,6 +51,38 @@ struct CommandPaletteView: View {
                         Text(result.subtitle)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
+                    }
+                }
+            case .fit:
+                PaletteResultList(count: model.palette.taskResults.count, selectedIndex: model.palette.selectedIndex) { index in
+                    let task = model.palette.taskResults[index]
+                    HStack {
+                        Circle()
+                            .fill(model.categoriesById[task.categoryId]?.tint ?? .defaultCategory)
+                            .frame(width: 8, height: 8)
+                        Text(task.title)
+                            .lineLimit(1)
+                        Spacer()
+                        Text(DateText.duration(minutes: task.remainingMinutes))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            case .move(let taskId):
+                PaletteResultList(count: model.palette.categoryResults.count, selectedIndex: model.palette.selectedIndex) { index in
+                    let category = model.palette.categoryResults[index]
+                    HStack {
+                        Circle()
+                            .fill(category.tint)
+                            .frame(width: 10, height: 10)
+                        Text(category.name)
+                        Spacer()
+                        if model.tasksById[taskId]?.categoryId == category.id {
+                            Text("current")
+                                .foregroundStyle(.secondary)
+                        } else if let task = model.tasksById[taskId], model.suggestedCategory(for: task)?.id == category.id {
+                            Text("suggested")
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
@@ -70,6 +104,8 @@ struct CommandPaletteView: View {
         case .quickAdd: "plus.circle"
         case .command: "command"
         case .search: "magnifyingglass"
+        case .move: "folder"
+        case .fit: "calendar.badge.plus"
         }
     }
 
@@ -78,6 +114,8 @@ struct CommandPaletteView: View {
         case .quickAdd: "New task — e.g. \"Write report 2h by fri !high #work\"  (type > for commands)"
         case .command: "Run a command…"
         case .search: "Search tasks and events…"
+        case .move(let taskId): "Move “\(model.tasksById[taskId]?.title ?? "task")” to…"
+        case .fit(let start, let minutes): "Fill \(minutes) min free at \(DateText.time(start)) with…"
         }
     }
 }

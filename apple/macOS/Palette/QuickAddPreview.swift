@@ -2,10 +2,14 @@ import FloridaKit
 import SwiftUI
 
 /// Chips under the quick-add field showing what `QuickAddParser` understood and the defaults
-/// that will fill the gaps, so the user sees the task before pressing Return.
+/// that will fill the gaps, so the user sees the task before pressing Return. A `#hint` that
+/// matches no category is called out (the task would land in Inbox) with ⇥ to create it.
 struct QuickAddPreview: View {
+    @Environment(AppModel.self) private var model
     let draft: QuickAddDraft
     let category: TaskCategory?
+    /// The draft's `#hint` when no category matches it.
+    let unknownHint: String?
     let calendar: Calendar
 
     private struct Chip: Identifiable {
@@ -38,6 +42,28 @@ struct QuickAddPreview: View {
                             in: Capsule())
                 }
             }
+            if let unknownHint {
+                Button {
+                    model.createCategoryFromHint()
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("⇥")
+                            .monospaced()
+                            .padding(.horizontal, 5)
+                            .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+                        Text("Create category “\(AppModel.categoryName(fromHint: unknownHint))”")
+                        Text("— otherwise it goes to \(category?.name ?? "Inbox")")
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.caption)
+                }
+                .buttonStyle(.plain)
+            }
+            if draft.title.count > 60 {
+                Text("Long or pasted? ⌘↩ parses it with AI in the full editor")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             if let notes = draft.notes {
                 Text(notes)
                     .font(.caption)
@@ -58,10 +84,12 @@ struct QuickAddPreview: View {
         chips.append(Chip(
             id: "priority", symbol: (draft.priority ?? .medium).symbolName,
             text: (draft.priority ?? .medium).displayName, isDefault: draft.priority == nil))
-        if let category {
+        if let unknownHint {
+            chips.append(Chip(
+                id: "category", symbol: "folder.badge.questionmark",
+                text: "#\(unknownHint) → \(category?.name ?? "Inbox")", isDefault: true))
+        } else if let category {
             chips.append(Chip(id: "category", symbol: "folder", text: category.name, isDefault: draft.categoryHint == nil))
-        } else if let hint = draft.categoryHint {
-            chips.append(Chip(id: "category", symbol: "folder.badge.questionmark", text: "#\(hint)", isDefault: false))
         }
         if let dueAt = draft.dueAt {
             let kind = draft.deadlineType == .hard ? "Due" : "By"

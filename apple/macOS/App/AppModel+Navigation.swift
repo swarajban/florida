@@ -1,6 +1,14 @@
 import FloridaKit
 import Foundation
 
+/// Asks the time grid to scroll so `minute` sits a third of the way down (or centered).
+struct GridScrollRequest: Equatable {
+    let id = UUID()
+    let minute: Int
+    let centered: Bool
+    let animated: Bool
+}
+
 extension AppModel {
     var today: Date { calendar.startOfDay(for: Date()) }
 
@@ -22,6 +30,8 @@ extension AppModel {
     /// Moves the day cursor. The view follows when the cursor leaves it; the 3-day view pages by
     /// three days so the cursor lands on the first or last column instead of re-anchoring.
     func moveDay(by days: Int) {
+        let carried = carriedMinute()
+        defer { carrySelection(minute: carried) }
         selectedDay = DateNavigation.shift(selectedDay, by: days, calendar: calendar)
         if !visibleRange.contains(selectedDay) {
             if viewMode == .threeDays {
@@ -36,6 +46,8 @@ extension AppModel {
 
     /// Moves by whole weeks, or by whole months in the month view.
     func moveWeek(by weeks: Int) {
+        let carried = carriedMinute()
+        defer { carrySelection(minute: carried) }
         if viewMode == .month {
             selectedDay = calendar.date(byAdding: .month, value: weeks, to: selectedDay) ?? selectedDay
         } else {
@@ -43,6 +55,20 @@ extension AppModel {
         }
         anchorDate = selectedDay
         rangeDidChange()
+    }
+
+    /// Where the calendar selection sits on the highlighted day, so a day move can keep it there.
+    /// Nil when the selection is not a calendar item there (the task pane keeps its selection).
+    private func carriedMinute() -> Int? {
+        guard focus == .calendar, let selection else { return nil }
+        return gridLayout.startMinute(of: selection, onDay: selectedDay) ?? 0
+    }
+
+    /// After a day move: the calendar selection follows the cursor to the item on the new day
+    /// nearest the old one's start, or clears, so `j` / `k` continue from the new day.
+    private func carrySelection(minute: Int?) {
+        guard let minute else { return }
+        selection = gridLayout.nearestItem(onDay: selectedDay, toMinute: minute)
     }
 
     /// The header's arrows: one view-width forward or back.
@@ -70,8 +96,10 @@ extension AppModel {
         rangeDidChange()
     }
 
+    /// `t`: today, with the grid animating back to the current time.
     func goToToday() {
         goTo(day: Date())
+        gridScrollRequest = GridScrollRequest(minute: minuteOfDay(Date()), centered: true, animated: true)
     }
 
     /// Highlights a day without moving the view when it is already visible.

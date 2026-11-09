@@ -8,13 +8,14 @@ extension AppModel {
     ///
     /// A sheet (editor, go to date) owns the keyboard except for Escape. While typing elsewhere
     /// (the palette or any focused text view) only ⌘ chords and Escape reach the keymap; the
-    /// palette additionally takes ↑ / ↓ for its result list.
+    /// palette additionally takes ↑ / ↓ for its result list, ⇥ to create quick add's unknown
+    /// `#category`, and ⌘↩ to parse quick add's text with AI in the full editor.
     func handleKeyDown(_ event: NSEvent) -> Bool {
         guard let chord = KeyChord(event: event) else { return false }
         let isCommandChord = chord.modifiers.contains(.command)
         let isEscape = chord == KeyChord("escape")
 
-        if editorTask != nil || isGoToDateOpen {
+        if isSheetOpen {
             guard isEscape else { return false }
             cancel()
             return true
@@ -36,6 +37,14 @@ extension AppModel {
                 palette.moveSelection(by: 1)
                 return true
             }
+            if chord == KeyChord("return", [.command]), palette.mode == .quickAdd {
+                parsePaletteWithAI()
+                return true
+            }
+            if chord == KeyChord("tab"), palette.mode == .quickAdd, paletteUnknownHint != nil {
+                createCategoryFromHint()
+                return true
+            }
         }
 
         let typing = isPaletteOpen || NSApplication.shared.keyWindow?.firstResponder is NSTextView
@@ -50,10 +59,10 @@ extension AppModel {
         switch matcher.feed(chord, at: Date()) {
         case .matched(let command):
             pendingKeys = ""
-            perform(command)
+            run(command)
             return true
         case .pending:
-            pendingKeys = matcher.pendingSequence.shortcutDescription
+            pendingKeys = MacKeymap.display(matcher.pendingSequence) + " …"
             return true
         case .unmatched:
             pendingKeys = ""

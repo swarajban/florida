@@ -23,11 +23,34 @@ struct GridGeometry {
 
     /// The block's frame, inset a point so neighbours do not touch.
     func rect(for block: GridLayout.Block) -> CGRect {
-        let width = columnWidth / CGFloat(max(block.columnCount, 1))
-        let x = x(forDay: block.dayIndex) + CGFloat(block.column) * width
-        let y = grid.y(forMinute: block.startMinute)
-        let height = grid.y(forMinute: block.endMinute) - y
+        rect(dayIndex: block.dayIndex, column: block.column, columnCount: block.columnCount,
+             startMinute: block.startMinute, endMinute: block.endMinute)
+    }
+
+    /// Where a task block was before the scheduler moved it.
+    func rect(for slot: LayoutTransition.Slot) -> CGRect {
+        rect(dayIndex: slot.dayIndex, column: slot.column, columnCount: slot.columnCount,
+             startMinute: slot.startMinute, endMinute: slot.endMinute)
+    }
+
+    func rect(dayIndex: Int, column: Int, columnCount: Int, startMinute: Int, endMinute: Int) -> CGRect {
+        let width = columnWidth / CGFloat(max(columnCount, 1))
+        let x = x(forDay: dayIndex) + CGFloat(column) * width
+        let y = grid.y(forMinute: startMinute)
+        let height = grid.y(forMinute: endMinute) - y
         return CGRect(x: x + 1, y: y + 0.5, width: max(width - 2, 2), height: max(height - 1, 4))
+    }
+
+    /// A free gap spans its whole column, inset a little further than blocks.
+    func rect(for gap: GridLayout.Gap) -> CGRect {
+        let y = grid.y(forMinute: gap.startMinute)
+        let height = grid.y(forMinute: gap.endMinute) - y
+        return CGRect(x: x(forDay: gap.dayIndex) + 3, y: y + 1, width: max(columnWidth - 6, 2), height: max(height - 2, 2))
+    }
+
+    func gap(at point: CGPoint, in layout: GridLayout) -> GridLayout.Gap? {
+        guard let day = dayIndex(atX: point.x), layout.gapsByDay.indices.contains(day) else { return nil }
+        return layout.gapsByDay[day].first { rect(for: $0).contains(point) }
     }
 
     func dayIndex(atX x: CGFloat) -> Int? {

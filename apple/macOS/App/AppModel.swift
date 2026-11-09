@@ -35,6 +35,13 @@ final class AppModel {
     private(set) var calendarsById: [String: CalendarInfo] = [:]
     /// Each task's placements, by start.
     private(set) var placementsByTask: [String: [Placement]] = [:]
+    /// Why the scheduler could not place (all of) a task, by task id.
+    private(set) var unscheduledByTask: [String: UnscheduledTask] = [:]
+    private(set) var schedules: [Schedule] = []
+    /// Today's events and task blocks for the menu bar, observed for the current day.
+    var todayAgenda: DayAgenda?
+    /// The current minute; the menu bar title and agenda recompute from it.
+    var clockNow = Date()
 
     // MARK: Navigation and selection
 
@@ -58,10 +65,42 @@ final class AppModel {
     var isHelpOpen = false
     /// The task open in the editor sheet; nil when the sheet is closed.
     var editorTask: TaskItem?
+    /// Text the new-task editor should send to the AI parser when it opens (quick add's ⌘↩).
+    var editorAIText: String?
+    /// The event whose detail popover is open.
+    var eventDetailID: String?
     var isGoToDateOpen = false
-    /// Display form of a multi-key sequence in progress, e.g. "G".
+    /// Display form of a multi-key sequence in progress, e.g. "g …".
     var pendingKeys = ""
     var statusMessage: String?
+    var ghost: Ghost?
+    /// Task writes `u` can revert, oldest first.
+    var undoStack: [UndoEntry] = []
+    /// Set for a moment after a scheduler run moved visible task blocks, so they slide.
+    var layoutTransition: LayoutTransition?
+    /// What `.` repeats.
+    var lastAction: RepeatableAction?
+    /// The Done for now sheet, when open.
+    var doneForNow: DoneForNowRequest?
+    /// Tasks just completed, whose rows leave with the bloom instead of a plain fade.
+    var completingTaskIds: Set<String> = []
+    /// Bumped to ask the time grid to scroll; the grid owns its scroll position.
+    var gridScrollRequest: GridScrollRequest?
+    var isNewCategoryOpen = false
+    /// The Settings tab to show, and a counter `RootView` watches to open the Settings window.
+    var settingsTab: SettingsTab = .server
+    var settingsRequest = 0
+
+    // MARK: AI triage
+
+    /// The server's category guesses for Inbox tasks, by task id.
+    var aiSuggestions: [String: CategorySuggestion] = [:]
+    @ObservationIgnored var aiClient: AIClient?
+    /// The title each suggestion was requested for, so an edited title asks again.
+    @ObservationIgnored var suggestionRequests: [String: String] = [:]
+    @ObservationIgnored var suggestionWorker: Task<Void, Never>?
+    /// Set for the session when the server has no AI configured (503) or rejects the token.
+    @ObservationIgnored var isAIUnavailable = false
 
     // MARK: Sync status
 
@@ -70,11 +109,15 @@ final class AppModel {
     var syncsInFlight = 0
     var isSyncing: Bool { syncsInFlight > 0 }
 
-    @ObservationIgnored var matcher = KeySequenceMatcher(keymap: .default)
+    @ObservationIgnored var matcher = MacKeySequenceMatcher(keymap: .default)
     @ObservationIgnored var changeStream: ChangeStream?
     @ObservationIgnored var backgroundTasks: [Task<Void, Never>] = []
     @ObservationIgnored private var observers: [Task<Void, Never>] = []
     @ObservationIgnored private var eventsObserver: Task<Void, Never>?
+    @ObservationIgnored var agendaObserver: Task<Void, Never>?
+    @ObservationIgnored var clockTask: Task<Void, Never>?
+    /// The main window, so the menu bar can bring it back instead of opening another.
+    @ObservationIgnored weak var mainWindow: NSWindow?
     @ObservationIgnored private var isStarted = false
 
     init(tokenStore: any TokenStore = KeychainTokenStore(), calendar: Calendar = .autoupdatingCurrent) {
@@ -98,6 +141,7 @@ final class AppModel {
             self.database = database
             startObserving(database)
             rangeDidChange()
+            startClock()
         } catch {
             startupError = "Could not open the local store: \(error.localizedDescription)"
         }
@@ -132,7 +176,9 @@ final class AppModel {
     func rebuildLayout() {
         gridLayout = GridLayout.build(
             days: visibleDays, events: events, placements: placements, tasksById: tasksById,
-            categoriesById: categoriesById, calendarsById: calendarsById, calendar: calendar)
+            categoriesById: categoriesById, calendarsById: calendarsById, schedules: activeSchedules,
+            options: layoutOptions, lineLimit: viewMode == .month ? MonthGridView.maxLinesPerCell : nil,
+            now: Date(), calendar: calendar)
     }
 
     // MARK: Live queries
@@ -143,16 +189,24 @@ final class AppModel {
                 model.categories = categories
                 model.categoriesById = Dictionary(categories.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
                 model.rebuildLayout()
+                model.refreshSuggestions()
             },
             observe(database.observeOpenTasks()) { model, tasks in
                 model.openTasks = tasks
                 model.tasksById = Dictionary(tasks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
                 model.rebuildLayout()
+                model.refreshSuggestions()
+            },
+            observe(database.observeSchedules()) { model, schedules in
+                model.schedules = schedules
+                model.rebuildLayout()
             },
             observe(database.observePlacements()) { model, placements in
+                let before = model.gridLayout.slotFrames
                 model.placements = placements
                 model.placementsByTask = Dictionary(grouping: placements, by: \.taskId)
                 model.rebuildLayout()
+                model.placementsDidChange(from: before)
             },
             observe(database.observeAccounts()) { model, accounts in
                 model.accounts = accounts
@@ -164,6 +218,9 @@ final class AppModel {
             },
             observe(database.observePendingWriteCount()) { model, count in
                 model.pendingWriteCount = count
+            },
+            observe(database.observeUnscheduled()) { model, unscheduled in
+                model.unscheduledByTask = Dictionary(unscheduled.map { ($0.taskId, $0) }, uniquingKeysWith: { first, _ in first })
             },
         ]
     }

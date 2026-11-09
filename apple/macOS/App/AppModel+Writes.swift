@@ -2,23 +2,30 @@ import FloridaKit
 import Foundation
 
 // Every write goes to the local store first; the live queries update the views, and a background
-// sync pushes the change. Nothing here awaits anything.
+// sync pushes the change. Nothing here awaits anything. Each task write records an undo entry
+// first, so `u` can put the previous version back.
 
 extension AppModel {
     static let defaultDurationMinutes = 30
 
-    /// Upserts a task locally and syncs in the background.
-    func save(_ task: TaskItem) {
-        guard let database else { return }
+    /// Upserts a task locally, remembers the version it replaces for `u`, and syncs in the
+    /// background. `undoLabel` is past tense ("Edited “X”"); returns false when the store refused.
+    @discardableResult
+    func save(_ task: TaskItem, undoLabel: String? = nil) -> Bool {
+        guard let database else { return false }
+        recordUndo(undoLabel ?? "Edited \(Self.quoted(task.title))", taskIds: [task.id])
         do {
             try database.saveTask(task)
         } catch {
+            undoStack.removeLast()
             statusMessage = "Could not save: \(error.localizedDescription)"
-            return
+            return false
         }
         scheduleSync()
+        return true
     }
 
+    /// `x`: deletes at once; `u` brings the task back.
     func deleteSelection() {
         guard let task = selectedTask else {
             statusMessage = selectedEvent == nil ? "Select a task first" : "Events are managed in Google Calendar"
@@ -26,31 +33,43 @@ extension AppModel {
         }
         guard let database else { return }
         let next = neighbor(of: .task(task.id))
+        recordUndo("Deleted \(Self.quoted(task.title))", taskIds: [task.id])
         do {
             try database.deleteTask(id: task.id)
         } catch {
+            undoStack.removeLast()
             statusMessage = "Could not delete: \(error.localizedDescription)"
             return
         }
         selection = next
+        showGhost("Deleted \(Self.quoted(task.title)) · u to undo", for: .seconds(3))
         scheduleSync()
     }
 
     /// Space: marks the selected task done; the live query drops it from the list and the grid.
+    /// On a free gap it lists the tasks that fit instead.
     func completeSelection() {
+        if case .gap(let id)? = selection, let gap = gridLayout.gap(id: id) {
+            openFitPicker(gap)
+            return
+        }
         guard let task = selectedTask else {
             statusMessage = "Select a task first"
             return
         }
         guard let database else { return }
         let next = neighbor(of: .task(task.id))
+        completionFeedback(for: task)
+        recordUndo("Completed \(Self.quoted(task.title))", taskIds: [task.id])
         do {
             try database.completeTask(id: task.id)
         } catch {
+            undoStack.removeLast()
             statusMessage = "Could not complete: \(error.localizedDescription)"
             return
         }
         selection = next
+        showGhost("Done · u to undo")
         scheduleSync()
     }
 
@@ -66,10 +85,15 @@ extension AppModel {
                 return
             }
             task.pinnedStart = start
+            if save(task, undoLabel: "Pinned \(Self.quoted(task.title))") {
+                showGhost("Pinned to \(DateText.dayAndTime(start, calendar: calendar))")
+            }
         } else {
             task.pinnedStart = nil
+            if save(task, undoLabel: "Unpinned \(Self.quoted(task.title))") {
+                showGhost("Unpinned")
+            }
         }
-        save(task)
     }
 
     /// `s`: the task may not start before tomorrow, and a pinned start is released.
@@ -78,9 +102,12 @@ extension AppModel {
             statusMessage = "Select a task first"
             return
         }
-        task.startAt = DateNavigation.shift(today, by: 1, calendar: calendar)
+        let tomorrow = DateNavigation.shift(today, by: 1, calendar: calendar)
+        task.startAt = tomorrow
         task.pinnedStart = nil
-        save(task)
+        if save(task, undoLabel: "Pushed \(Self.quoted(task.title)) to tomorrow") {
+            showGhost("Pushed to \(tomorrow.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))")
+        }
     }
 
     func setPriority(_ priority: Priority) {
@@ -89,7 +116,23 @@ extension AppModel {
             return
         }
         task.priority = priority
-        save(task)
+        if save(task, undoLabel: "Set \(Self.quoted(task.title)) to \(priority.displayName)") {
+            showGhost("Priority: \(priority.displayName)")
+        }
+    }
+
+    /// ⇧N / `>New task`: the full editor on a new task with quick add's defaults (Inbox, 30m,
+    /// medium priority). `aiText` is parsed by the AI as the editor opens.
+    func openNewTaskEditor(aiText: String? = nil) {
+        guard let category = inboxCategory else {
+            statusMessage = "No categories yet — sync with the server first"
+            return
+        }
+        let now = Date()
+        editorAIText = aiText
+        editorTask = TaskItem(
+            id: UUID().uuidString.lowercased(), categoryId: category.id, title: "",
+            durationMinutes: Self.defaultDurationMinutes, priority: .medium, createdAt: now, updatedAt: now)
     }
 
     /// Creates a task from quick-add text. Returns false (with a status message) when nothing
@@ -101,7 +144,8 @@ extension AppModel {
             statusMessage = "Type a title for the task"
             return false
         }
-        guard let category = resolveCategory(hint: draft.categoryHint) else {
+        // An unknown #hint lands in Inbox; the preview says so and offers ⇥ to create it first.
+        guard let category = matchCategory(hint: draft.categoryHint) ?? inboxCategory else {
             statusMessage = "No categories yet — sync with the server first"
             return false
         }
@@ -119,36 +163,14 @@ extension AppModel {
             pinnedStart: draft.pinnedStart,
             createdAt: now,
             updatedAt: now)
-        save(task)
+        guard save(task, undoLabel: "Added \(Self.quoted(task.title))") else { return false }
         selection = .task(task.id)
+        showGhost("Added to \(category.name)")
         return true
     }
 
-    /// Matches a `#hint` to a category name case-insensitively, treating "-" and "_" as spaces:
-    /// exact match first, then prefix. Without a hint or a match: the category named "Inbox",
-    /// else the first category.
-    func resolveCategory(hint: String?) -> TaskCategory? {
-        if let hint {
-            let wanted = Self.normalizedCategoryName(hint)
-            if let exact = categories.first(where: { Self.normalizedCategoryName($0.name) == wanted }) {
-                return exact
-            }
-            if let prefix = categories.first(where: { Self.normalizedCategoryName($0.name).hasPrefix(wanted) }) {
-                return prefix
-            }
-        }
-        return categories.first { $0.name.caseInsensitiveCompare("Inbox") == .orderedSame } ?? categories.first
-    }
-
-    static func normalizedCategoryName(_ name: String) -> String {
-        name.lowercased()
-            .replacingOccurrences(of: "-", with: " ")
-            .replacingOccurrences(of: "_", with: " ")
-            .trimmingCharacters(in: .whitespaces)
-    }
-
     /// The item to select after `item` disappears: the next one in the focused pane, else the previous.
-    private func neighbor(of item: ItemID) -> ItemID? {
+    func neighbor(of item: ItemID) -> ItemID? {
         let items = focus == .tasks ? orderedTaskItems : gridLayout.orderedItems
         guard let index = items.firstIndex(of: item) else { return nil }
         let remaining = items.filter { $0 != item }

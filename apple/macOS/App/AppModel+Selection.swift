@@ -8,17 +8,19 @@ struct CategoryTaskGroup: Identifiable, Hashable {
     /// Nil for tasks whose category is not in the store (yet).
     let category: TaskCategory?
     let tasks: [TaskItem]
+
+    var isInbox: Bool { category?.isInbox ?? false }
 }
 
 extension AppModel {
-    /// Open tasks grouped by category in category order; tasks keep `openTasks`' priority order.
+    /// Every category in pane order, Inbox first, with its open tasks in `openTasks`' priority
+    /// order; empty categories are included (the pane shows them collapsed).
     var taskGroups: [CategoryTaskGroup] {
         var byCategory = Dictionary(grouping: openTasks, by: \.categoryId)
         var groups: [CategoryTaskGroup] = []
-        for category in categories {
-            if let tasks = byCategory.removeValue(forKey: category.id) {
-                groups.append(CategoryTaskGroup(id: category.id, name: category.name, category: category, tasks: tasks))
-            }
+        for category in orderedCategories {
+            let tasks = byCategory.removeValue(forKey: category.id) ?? []
+            groups.append(CategoryTaskGroup(id: category.id, name: category.name, category: category, tasks: tasks))
         }
         let orphans = openTasks.filter { byCategory[$0.categoryId] != nil }
         if !orphans.isEmpty {
@@ -43,7 +45,7 @@ extension AppModel {
     }
 
     func scheduleState(for task: TaskItem) -> TaskScheduleState {
-        TaskScheduleState(task: task, placements: placementsByTask[task.id] ?? [])
+        TaskScheduleState(task: task, placements: placementsByTask[task.id] ?? [], unscheduled: unscheduledByTask[task.id])
     }
 
     /// Moves the selection through the focused pane's items, clamped at both ends. With nothing

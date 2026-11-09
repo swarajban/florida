@@ -29,7 +29,10 @@ final class KeyMonitorHostView: NSView {
     func install(model: AppModel) {
         box.model = model
         box.view = self
-        if window != nil { startMonitoring() }
+        if let window {
+            model.mainWindow = window
+            startMonitoring()
+        }
     }
 
     override func viewDidMoveToWindow() {
@@ -37,6 +40,7 @@ final class KeyMonitorHostView: NSView {
         if window == nil {
             stopMonitoring()
         } else {
+            box.model?.mainWindow = window
             startMonitoring()
         }
     }

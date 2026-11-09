@@ -1,14 +1,19 @@
 import FloridaKit
 import SwiftUI
 
-/// Draws one `GridLayout` into a `Canvas`: hour lines and labels, day separators, the day
-/// tints, every block, the focus ring and the "now" line. Pure drawing from precomputed frames;
-/// `TimelineView` redraws it once a minute for the now line and past-dimming.
+/// Draws one `GridLayout` into a `Canvas`: off-hours shading, hour lines and labels, day
+/// separators, the day tints, free gaps, every block (sliding from its old slot while
+/// `transition` runs, the current one filling as it goes), the focus ring and the "now" line.
+/// Pure drawing from precomputed frames; `now` is the model's minute clock.
 struct TimeGridCanvas: View {
     let layout: GridLayout
     let selection: ItemID?
     let selectedDay: Date
     let now: Date
+    /// The animation frame's time, which drives `transition`.
+    let frameDate: Date
+    let transition: LayoutTransition?
+    let showsProgress: Bool
     let calendar: Calendar
     let grid: TimeGrid
     let gutterWidth: CGFloat
@@ -17,8 +22,10 @@ struct TimeGridCanvas: View {
         Canvas(rendersAsynchronously: false) { context, size in
             let geometry = GridGeometry(size: size, gutterWidth: gutterWidth, dayCount: layout.days.count, grid: grid)
             drawDayTints(in: &context, geometry: geometry)
+            drawOffHours(in: &context, geometry: geometry)
             drawHourLines(in: &context, geometry: geometry)
             drawDaySeparators(in: &context, geometry: geometry)
+            drawGaps(in: &context, geometry: geometry)
             for blocks in layout.blocksByDay {
                 for block in blocks {
                     draw(block, in: &context, geometry: geometry)
@@ -45,7 +52,7 @@ struct TimeGridCanvas: View {
 
     private func drawHourLines(in context: inout GraphicsContext, geometry: GridGeometry) {
         let lineColor = Color(nsColor: .separatorColor)
-        for (minute, label) in TimeGrid.hourLabels() {
+        for (minute, label) in DateText.hourLabels(calendar: calendar) {
             let y = grid.y(forMinute: minute)
             var line = Path()
             line.move(to: CGPoint(x: gutterWidth, y: y))
@@ -92,13 +99,16 @@ struct TimeGridCanvas: View {
     // MARK: Blocks
 
     private func draw(_ block: GridLayout.Block, in context: inout GraphicsContext, geometry: GridGeometry) {
-        let rect = geometry.rect(for: block)
+        let rect = animatedRect(for: block, geometry: geometry)
         let shape = Path(roundedRect: rect, cornerRadius: 4)
         let alpha: Double = block.end < now ? 0.45 : 1
         let textColor: Color
         switch block.kind {
         case .event:
             context.fill(shape, with: .color(block.tint.opacity(0.85 * alpha)))
+            if let rim = block.rim {
+                context.stroke(shape, with: .color(rim.opacity(alpha)), lineWidth: 1)
+            }
             textColor = .white.opacity(alpha)
         case .task(let pinned):
             context.fill(shape, with: .color(block.tint.opacity(0.16 * alpha)))
@@ -110,6 +120,10 @@ struct TimeGridCanvas: View {
 
         var inner = context
         inner.clip(to: shape)
+        let isCurrent = showsProgress && block.start <= now && now < block.end
+        if isCurrent {
+            drawProgressFill(of: block, in: &inner, rect: rect)
+        }
         let padding: CGFloat = 4
         var titleRect = rect.insetBy(dx: padding, dy: 2)
         if block.isPinned {
@@ -128,13 +142,21 @@ struct TimeGridCanvas: View {
         } else {
             inner.draw(title, in: CGRect(x: titleRect.minX, y: rect.minY + 1, width: titleRect.width, height: max(rect.height - 2, 8)))
         }
+        if isCurrent {
+            drawTimeLeft(of: block, in: &inner, rect: rect, color: textColor)
+        }
     }
 
     private func drawSelectionRing(in context: inout GraphicsContext, geometry: GridGeometry) {
         guard let selection else { return }
+        if case .gap(let id) = selection, let gap = layout.gap(id: id) {
+            let ring = Path(roundedRect: geometry.rect(for: gap).insetBy(dx: -1.5, dy: -1.5), cornerRadius: 5.5)
+            context.stroke(ring, with: .color(Color.accentColor), lineWidth: 2)
+            return
+        }
         for blocks in layout.blocksByDay {
             for block in blocks where block.item == selection {
-                let ring = Path(roundedRect: geometry.rect(for: block).insetBy(dx: -1.5, dy: -1.5), cornerRadius: 5.5)
+                let ring = Path(roundedRect: animatedRect(for: block, geometry: geometry).insetBy(dx: -1.5, dy: -1.5), cornerRadius: 5.5)
                 context.stroke(ring, with: .color(Color.accentColor), lineWidth: 2)
             }
         }

@@ -1,15 +1,22 @@
 import SwiftUI
 
-/// One thin line at the bottom: focused pane, pending key sequence, the last message, pending
-/// writes, and sync state.
+/// One thin line at the bottom: focused pane, the block happening now, pending key sequence,
+/// the last message, pending writes, and sync state.
 struct StatusBarView: View {
     @Environment(AppModel.self) private var model
+    @AppStorage(JoyPreference.pendingKeys.key) private var showsPendingKeys = true
+    @AppStorage(JoyPreference.currentProgress.key) private var showsCurrent = true
 
     var body: some View {
         HStack(spacing: 12) {
             Text(model.focus == .tasks ? "Tasks" : "Calendar")
                 .foregroundStyle(.secondary)
-            if !model.pendingKeys.isEmpty {
+            if showsCurrent, let current = model.currentBlockText {
+                Label(current, systemImage: "timer")
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            if showsPendingKeys, !model.pendingKeys.isEmpty {
                 Text(model.pendingKeys)
                     .monospaced()
                     .padding(.horizontal, 6)
