@@ -687,6 +687,77 @@ import Testing
         #expect(byTask["missing"]?.map(\.id) == ["p4"])
     }
 
+    @Test func pinningATaskMovesItsBlockAtOnceAndUnpinningTakesItOffThePlan() throws {
+        let db = try AppDatabase.inMemory()
+        var task = Fixtures.task(id: "t1")
+        task.completedMinutes = 15
+        let week = Fixtures.instant("2026-11-09T00:00:00Z")..<Fixtures.instant("2026-11-16T00:00:00Z")
+        try db.apply(SyncResponse(
+            cursor: "c",
+            tasks: [task, Fixtures.task(id: "t2")],
+            placements: [
+                Fixtures.placement(id: "p1", taskId: "t1", start: "2026-11-11T17:00:00Z", end: "2026-11-11T17:45:00Z"),
+                Fixtures.placement(id: "p2", taskId: "t2", start: "2026-11-10T18:00:00Z", end: "2026-11-10T19:00:00Z"),
+            ],
+            unscheduled: [UnscheduledTask(taskId: "t1", reason: "no_fit_in_horizon", unplacedMinutes: 30, computedAt: Fixtures.t0)]))
+
+        // An edit that leaves the pin alone leaves the plan alone.
+        task.title = "renamed"
+        try db.saveTask(task, now: Fixtures.instant("2026-11-09T01:00:00Z"))
+        #expect(try db.placements(in: week).map(\.id) == ["p2", "p1"])
+        #expect(try db.unscheduled().map(\.taskId) == ["t1"])
+
+        // Pinned: one block at the pin for the 45 minutes still to do, before the server answers.
+        task.pinnedStart = Fixtures.instant("2026-11-10T04:00:00Z")
+        try db.saveTask(task, now: Fixtures.instant("2026-11-09T02:00:00Z"))
+        let pinned = try db.placements(in: week)
+        #expect(pinned.map(\.taskId) == ["t1", "t2"])
+        #expect(pinned.first?.startAt == Fixtures.instant("2026-11-10T04:00:00Z"))
+        #expect(pinned.first?.endAt == Fixtures.instant("2026-11-10T04:45:00Z"))
+        #expect(pinned.first?.pinned == true)
+        #expect(pinned.last?.id == "p2", "other tasks keep their blocks")
+        #expect(try db.unscheduled().isEmpty)
+
+        // Unpinned (Undo): the block goes; the scheduler places the task again on its next run.
+        task.pinnedStart = nil
+        try db.saveTask(task, now: Fixtures.instant("2026-11-09T03:00:00Z"))
+        #expect(try db.placements(in: week).map(\.id) == ["p2"])
+    }
+
+    @Test func aPullOlderThanAQueuedPinOrUnpinKeepsWhatTheUserSees() throws {
+        let db = try AppDatabase.inMemory()
+        var task = Fixtures.task(id: "t1")
+        let week = Fixtures.instant("2026-11-09T00:00:00Z")..<Fixtures.instant("2026-11-16T00:00:00Z")
+        let pin = Fixtures.instant("2026-11-10T04:00:00Z")
+        let serverPlan = [
+            Fixtures.placement(id: "p1", taskId: "t1", start: "2026-11-11T17:00:00Z", end: "2026-11-11T18:00:00Z"),
+            Fixtures.placement(id: "p2", taskId: "t2", start: "2026-11-10T18:00:00Z", end: "2026-11-10T19:00:00Z"),
+        ]
+        try db.apply(SyncResponse(cursor: "c", tasks: [task, Fixtures.task(id: "t2")], placements: serverPlan))
+
+        // The pin is queued; a pull answered from before it still has t1 on Wednesday.
+        task.pinnedStart = pin
+        try db.saveTask(task, now: Fixtures.instant("2026-11-09T02:00:00Z"))
+        try db.apply(SyncResponse(cursor: "c2", placements: serverPlan))
+        let kept = try db.placements(in: week)
+        #expect(kept.map(\.taskId) == ["t1", "t2"])
+        #expect(kept.first?.startAt == pin)
+        #expect(kept.first?.pinned == true)
+        #expect(kept.last?.id == "p2", "tasks without a queued write take the pulled plan")
+
+        // The server accepts the pin, then the unpin is queued; a pull from before it still has the pinned block.
+        let accepted = try #require(try db.pendingWrites().first)
+        try db.removePendingWrite(seq: try #require(accepted.seq))
+        let pinnedPlan = [Placement(id: "p3", taskId: "t1", startAt: pin, endAt: pin.addingTimeInterval(3600), pinned: true, computedAt: Fixtures.t0), serverPlan[1]]
+        try db.apply(SyncResponse(cursor: "c3", placements: pinnedPlan))
+        #expect(try db.placements(in: week).map(\.id) == ["p3", "p2"], "an agreeing pull is stored as sent")
+
+        task.pinnedStart = nil
+        try db.saveTask(task, now: Fixtures.instant("2026-11-09T03:00:00Z"))
+        try db.apply(SyncResponse(cursor: "c4", placements: pinnedPlan))
+        #expect(try db.placements(in: week).map(\.id) == ["p2"])
+    }
+
     // MARK: Observation
 
     @Test func observeEmitsInitialAndChangedValues() async throws {

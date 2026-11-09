@@ -208,6 +208,7 @@ extension AppDatabase {
 
     /// Saves immediately and queues only changed user fields for an existing task. Creation and
     /// restoration use PUT; later edits merge into that PUT until it has been accepted.
+    /// A change of `pinnedStart` also moves the task's block at once (see `placePin`).
     public func saveTask(_ task: TaskItem, now: Date = Date()) throws {
         try writer.write { db in
             try Self.saveTask(task, in: db, now: now)
@@ -259,6 +260,23 @@ extension AppDatabase {
         }
         try local.save(db)
         try enqueue(db, entity: .task, id: task.id, op: op, body: body, now: now)
+        if local.pinnedStart != previous?.pinnedStart {
+            try placePin(of: local, in: db, now: now)
+        }
+    }
+
+    /// A pinned task sits at exactly its pinned start for its remaining minutes, so its block does
+    /// not have to wait for the server: pinning shows it there at once, and unpinning takes it off
+    /// the plan until the scheduler has placed it again. The next scheduler output replaces the
+    /// block like every other row; other tasks keep their blocks until then.
+    private static func placePin(of task: TaskItem, in db: Database, now: Date) throws {
+        try Placement.filter(Column("taskId") == task.id).deleteAll(db)
+        guard let start = task.pinnedStart, task.isOpen, task.remainingMinutes > 0 else { return }
+        try UnscheduledTask.filter(Column("taskId") == task.id).deleteAll(db)
+        try Placement(
+            id: UUID().uuidString.lowercased(), taskId: task.id, startAt: start,
+            endAt: start.addingTimeInterval(TimeInterval(task.remainingMinutes) * 60), pinned: true, computedAt: now
+        ).insert(db)
     }
 
     private static func taskWriteObject(_ data: Data) throws -> [String: Any] {
@@ -450,6 +468,7 @@ extension AppDatabase {
             try Self.replacePlacements(db, with: response.placements)
             try Self.replaceOptionalPlacements(db, with: response.optionalPlacements)
             try Self.replaceUnscheduled(db, with: response.unscheduled)
+            try Self.keepQueuedPins(db, pending: pending)
 
             _ = try GoogleAccount.deleteAll(db)
             for account in response.accounts {
@@ -470,6 +489,24 @@ extension AppDatabase {
     public func apply(_ result: SchedulingResult, computedAt: Date) throws {
         try writer.write { db in
             try Self.replaceSchedulerOutput(db, with: result, computedAt: computedAt)
+        }
+    }
+
+    /// A pull can answer before a queued task write is pushed, so its placements may predate a pin
+    /// or unpin the user already sees. Where the local pin and the pulled blocks disagree, the pin
+    /// wins (see `placePin`); the push's own scheduler result settles it for good.
+    private static func keepQueuedPins(_ db: Database, pending: Set<PendingEntityId>) throws {
+        for entry in pending where entry.entity == .task {
+            guard let task = try TaskItem.fetchOne(db, id: entry.id) else { continue }
+            let blocks = try Placement.filter(Column("taskId") == task.id).fetchAll(db)
+            let agrees = if let pin = task.pinnedStart {
+                blocks.count == 1 && blocks[0].pinned && blocks[0].startAt == pin
+            } else {
+                !blocks.contains(where: \.pinned)
+            }
+            if !agrees {
+                try placePin(of: task, in: db, now: task.updatedAt)
+            }
         }
     }
 

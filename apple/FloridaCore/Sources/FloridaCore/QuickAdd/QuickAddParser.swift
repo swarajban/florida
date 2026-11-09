@@ -166,7 +166,7 @@ struct QuickAddScanner {
         var minute: Int
 
         static let startOfDay = Clock(hour: 0, minute: 0)
-        static let endOfWorkday = Clock(hour: 17, minute: 0)
+        static let endOfWorkday = Clock(hour: TaskDay.dueHour, minute: 0)
     }
 
     /// A date and/or clock read from the tokens; at least one of the two is present.
