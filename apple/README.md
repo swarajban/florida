@@ -130,8 +130,10 @@ Three workflows build the Apple code:
   that change `apple/` or that workflow, and can be started by hand on `main`.
   It runs the native macOS UI smoke test, archives a Release build for Apple
   silicon and Intel, preserves its entitlements, then cloud-signs and uploads
-  it to TestFlight using the same API-key secrets as iOS. Branches and pull
-  requests never upload. A running upload is not cancelled by a newer push.
+  it to TestFlight using the same API-key secrets as iOS. It waits up to 20
+  minutes for Apple's processing and reports the internal testing state in
+  the run summary. Branches and pull requests never upload. A running upload
+  is not cancelled by a newer push.
 
 The demo launch arguments are Debug-only (`iOS/Support/LaunchOptions.swift`):
 `-demoData YES` swaps the shared store for an in-memory one seeded from
@@ -212,9 +214,11 @@ the old copy. The shared App Group stays the same, but the new bundle identity
 can change private preferences, fallback storage, and Keychain access; you may
 need to configure the server and token again and let it pull your data. No
 automatic migration from the old app's private container is performed.
-The workflow verifies the archive's entitlements before export; a successful
-upload still needs Apple's processing and a real TestFlight installation to
-confirm the final distribution build.
+The workflow verifies the archive's entitlements before export and checks
+Apple's processing result after upload. A real TestFlight installation is
+still needed to confirm the final distribution build. If processing times
+out, check the existing build in App Store Connect before rerunning the job;
+an upload may have succeeded even when processing has not finished.
 
 ### Versions and signing
 

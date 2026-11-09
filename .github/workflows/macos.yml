@@ -28,7 +28,7 @@ jobs:
     name: Test and upload to TestFlight
     if: github.ref == 'refs/heads/main'
     runs-on: macos-26
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
       ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
@@ -88,6 +88,8 @@ jobs:
               print(f"::error::No accessible App Store Connect app uses {bundle}. Check the existing iOS app's bundle ID and this key's access. See apple/README.md.")
               sys.exit(1)
           print(f"Found shared app '{apps[0]['attributes']['name']}' for {bundle}.")
+          with open(os.environ["GITHUB_ENV"], "a") as f:
+              f.write(f"APP_ID={apps[0]['id']}\n")
           PY
 
       - name: Generate Xcode project
@@ -119,6 +121,7 @@ jobs:
           set -o pipefail
           BUILD_NUMBER=$(( GITHUB_RUN_NUMBER * 10 + GITHUB_RUN_ATTEMPT ))
           echo "Build number: $BUILD_NUMBER"
+          echo "BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
           # As on iOS, archive without a local development certificate. Export cloud-signs it.
           xcodebuild archive \
             -project Florida.xcodeproj \
@@ -183,6 +186,59 @@ jobs:
             -authenticationKeyID "$ASC_KEY_ID" \
             -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
             2>&1 | tee mac-export.log
+
+      - name: Wait for TestFlight processing
+        timeout-minutes: 21
+        run: |
+          "$RUNNER_TEMP/asc-venv/bin/python" -u - <<'PY'
+          import json, os, sys, time, urllib.error, urllib.parse, urllib.request
+          import jwt
+          with open(os.environ["KEY_PATH"]) as f:
+              pem = f.read()
+          app, build = os.environ["APP_ID"], os.environ["BUILD_NUMBER"]
+          query = urllib.parse.urlencode({
+              "filter[app]": app, "filter[version]": build,
+              "filter[preReleaseVersion.platform]": "MAC_OS", "include": "buildBetaDetail",
+          })
+          for attempt in range(40):
+              now = int(time.time())
+              token = jwt.encode(
+                  {"iss": os.environ["ASC_ISSUER_ID"], "iat": now,
+                   "exp": now + 600, "aud": "appstoreconnect-v1"},
+                  pem, algorithm="ES256", headers={"kid": os.environ["ASC_KEY_ID"], "typ": "JWT"})
+              request = urllib.request.Request(
+                  f"https://api.appstoreconnect.apple.com/v1/builds?{query}",
+                  headers={"Authorization": f"Bearer {token}"})
+              try:
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      result = json.load(response)
+              except urllib.error.HTTPError as error:
+                  if error.code != 429 and error.code < 500:
+                      raise
+                  print(f"Apple returned HTTP {error.code}; retrying.")
+              else:
+                  builds = result["data"]
+                  state = builds[0]["attributes"]["processingState"] if builds else "NOT_VISIBLE_YET"
+                  print(f"Mac build {build}: {state}")
+                  if state in ("FAILED", "INVALID"):
+                      sys.exit(f"::error::Apple rejected Mac build {build}. Check App Store Connect and the processing email.")
+                  if state == "VALID":
+                      detail = builds[0].get("relationships", {}).get("buildBetaDetail", {}).get("data")
+                      internal = next((item["attributes"]["internalBuildState"]
+                                       for item in result.get("included", [])
+                                       if detail and item["type"] == "buildBetaDetails" and item["id"] == detail["id"]), "UNKNOWN")
+                      print(f"Internal TestFlight state: {internal}")
+                      url = f"https://appstoreconnect.apple.com/apps/{app}/testflight/macos"
+                      with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+                          f.write(f"## Mac TestFlight build {build}\n\nApple processing: **VALID**.\n\n")
+                          f.write(f"Internal testing: **{internal}**. [Open TestFlight]({url}).\n")
+                          if internal != "IN_BETA_TESTING":
+                              f.write("\nCheck the build's availability to your internal testing group before installing.\n")
+                      break
+              time.sleep(30)
+          else:
+              sys.exit(f"::error::Mac build {build} has not finished processing after 20 minutes. Check App Store Connect before uploading another build.")
+          PY
 
       - name: Upload logs on failure
         if: failure()
