@@ -1,19 +1,29 @@
 import FloridaKit
 import SwiftUI
 
-/// The Agenda tab: a week strip over the merged timeline of events and task blocks for one day.
-/// Swipe the strip to move a week, swipe the list to move a day, tap the day heading for a month
-/// grid, pull to sync. Today also shows the current block's progress, free gaps, finished blocks
-/// as ghosts and "Day cleared", each behind a `JoySetting`.
+/// The Agenda tab: a week strip over the selected day, shown as a merged timeline list of events
+/// and task blocks or, with the toggle beside the heading, as a one- or three-day time grid.
+/// Swipe the strip to move a week, swipe the list or grid to move a day, tap the day heading for
+/// a month grid, pull to sync. The toolbar adds tasks and events and picks which calendars show.
+/// Today also shows the current block's progress, free gaps, finished blocks as ghosts and
+/// "Day cleared", each behind a `JoySetting`.
 struct AgendaView: View {
     @Environment(AppModel.self) private var model
     @State private var editingTask: TaskItem?
+    @State private var newTask: TaskEditorRequest?
     @State private var selectedEvent: CalendarEvent?
+    @State private var newEvent: CalendarEvent?
     @State private var showsDayPicker = false
     @State private var openedLaunchSheet = false
     @State private var doneForNowTask: TaskItem?
     @State private var movingTask: TaskItem?
     @State private var now = Date()
+    /// The day the list on screen was built for. It follows `model.selectedDay` one update later,
+    /// inside an animation, so the old day's list slides out while the new one slides in.
+    @State private var shownDay: Date?
+    /// +1 when the day moved forward (new content enters from the right), −1 when back.
+    @State private var slideDirection: CGFloat = 1
+    @AppStorage(AgendaMode.storageKey, store: .florida) private var mode: AgendaMode = .list
     @AppStorage(JoySetting.blockProgress.rawValue, store: .florida) private var showsProgress = true
     @AppStorage(JoySetting.freeGaps.rawValue, store: .florida) private var showsGaps = true
     @AppStorage(JoySetting.ghosts.rawValue, store: .florida) private var showsGhosts = true
@@ -23,14 +33,18 @@ struct AgendaView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 dayHeading
-                WeekStrip(
-                    selectedDay: model.selectedDay,
-                    today: model.today,
-                    calendar: model.calendar,
-                    onSelect: { model.select(day: $0) },
-                    onShiftWeek: { model.shiftDay(by: 7 * $0) })
+                ZStack {
+                    WeekStrip(
+                        selectedDay: model.selectedDay,
+                        today: model.today,
+                        calendar: model.calendar,
+                        onSelect: { model.select(day: $0) },
+                        onShiftWeek: { model.shiftDay(by: 7 * $0) })
+                    .id(DateNavigation.startOfWeek(for: shownDay ?? model.selectedDay, calendar: model.calendar))
+                    .transition(slide)
+                }
                 Divider()
-                timeline
+                content
             }
             .background(FloridaStyle.paper)
             .navigationBarTitleDisplayMode(.inline)
@@ -38,9 +52,18 @@ struct AgendaView: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    FloridaWordmark(height: 26)
+                    Button {
+                        model.selectToday()
+                    } label: {
+                        FloridaWordmark(height: 26)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Florida")
+                    .accessibilityHint("Shows today")
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    calendarMenu
+                    addMenu
                     Button("Today") {
                         model.selectToday()
                     }
@@ -53,10 +76,22 @@ struct AgendaView: View {
             .sheet(item: $editingTask) { task in
                 TaskEditorView(task: task)
             }
+            .sheet(item: $newTask) { request in
+                TaskEditorView(request: request)
+            }
             .sheet(item: $selectedEvent) { event in
                 EventDetailView(event: event)
             }
-            .taskActionSheets(doneForNow: $doneForNowTask, moving: $movingTask)
+            .sheet(item: $newEvent) { event in
+                EventEditorView(event: event, isNew: true)
+            }
+            .taskActionSheets(doneForNow: $doneForNowTask)
+            .onChange(of: model.selectedDay) { old, new in
+                slideDirection = new > old ? 1 : -1
+                withAnimation(.snappy(duration: 0.22)) {
+                    shownDay = new
+                }
+            }
             .onChange(of: model.agenda, initial: true) { _, agenda in
                 // Screenshot runs (`-uiSheet event`): open the demo design review once it loads.
                 guard LaunchOptions.initialSheet == "event", !openedLaunchSheet,
@@ -66,6 +101,10 @@ struct AgendaView: View {
                 selectedEvent = event
             }
             .onAppear {
+                // Screenshot runs (`-uiAgendaMode threeDays`): show the grid instead of the list.
+                if let launchMode = LaunchOptions.initialAgendaMode {
+                    mode = launchMode
+                }
                 // Screenshot runs (`-uiSheet daypicker`): open the month grid over the agenda.
                 guard LaunchOptions.initialSheet == "daypicker", !openedLaunchSheet else { return }
                 openedLaunchSheet = true
@@ -94,33 +133,135 @@ struct AgendaView: View {
         model.selectedDay == model.today
     }
 
-    /// "Monday" over "November 9, 2026". Tapping it opens the month grid to jump to any day.
+    /// New-content-from-the-side slide for day changes: 28 points and a fade, mirrored on exit.
+    private var slide: AnyTransition {
+        .asymmetric(
+            insertion: .offset(x: 28 * slideDirection).combined(with: .opacity),
+            removal: .offset(x: -28 * slideDirection).combined(with: .opacity))
+    }
+
+    // MARK: - Heading and toolbar
+
+    /// "Monday" over "November 9, 2026" (tap for the month grid), with the list / day / 3-day
+    /// toggle on the right.
     private var dayHeading: some View {
-        Button {
-            showsDayPicker = true
-        } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(model.selectedDay.formatted(.dateTime.weekday(.wide)))
-                    .font(.title.weight(.medium))
-                    .foregroundStyle(FloridaStyle.ink)
-                HStack(spacing: 4) {
-                    Text(model.selectedDay.formatted(.dateTime.month(.wide).day().year()))
-                        .font(.subheadline)
-                    Image(systemName: "chevron.down")
-                        .font(.caption2.weight(.bold))
+        HStack(alignment: .center, spacing: 12) {
+            Button {
+                showsDayPicker = true
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(model.selectedDay.formatted(.dateTime.weekday(.wide)))
+                        .font(.title.weight(.medium))
+                        .foregroundStyle(FloridaStyle.ink)
+                    HStack(spacing: 4) {
+                        Text(model.selectedDay.formatted(.dateTime.month(.wide).day().year()))
+                            .font(.subheadline)
+                        Image(systemName: "chevron.down")
+                            .font(.caption2.weight(.bold))
+                    }
+                    .foregroundStyle(.secondary)
                 }
-                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .accessibilityLabel("Go to day")
+            .accessibilityValue(model.selectedDay.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
+            .accessibilityHint("Opens a month calendar")
+            modePicker
         }
-        .buttonStyle(.plain)
         .padding(.horizontal, 20)
         .padding(.top, 12)
         .padding(.bottom, 8)
-        .accessibilityLabel("Go to day")
-        .accessibilityValue(model.selectedDay.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
-        .accessibilityHint("Opens a month calendar")
+    }
+
+    private var modePicker: some View {
+        Picker("View", selection: $mode) {
+            ForEach(AgendaMode.allCases) { option in
+                Image(systemName: option.symbolName)
+                    .accessibilityLabel(option.title)
+                    .tag(option)
+            }
+        }
+        .pickerStyle(.segmented)
+        .fixedSize()
+        .accessibilityIdentifier("agenda-mode")
+    }
+
+    /// Which calendars show, grouped by Google account. Flipping one updates the store at once and
+    /// tells the server in the background, like the toggles in Settings.
+    private var calendarMenu: some View {
+        Menu {
+            if model.calendars.isEmpty {
+                Text(model.needsSetup ? "Connect to the server in Settings." : "No calendars synced yet.")
+            }
+            ForEach(model.accounts) { account in
+                let owned = model.calendars.filter { $0.accountId == account.id }
+                if !owned.isEmpty {
+                    Section(account.label.isEmpty ? account.email : "\(account.label) · \(account.email)") {
+                        ForEach(owned) { info in
+                            Toggle(info.summary, isOn: calendarSelection(info))
+                        }
+                    }
+                }
+            }
+        } label: {
+            Label("Calendars", systemImage: "calendar")
+        }
+        .accessibilityIdentifier("agenda-calendars")
+    }
+
+    private func calendarSelection(_ info: CalendarInfo) -> Binding<Bool> {
+        Binding(
+            get: { model.calendarInfo(id: info.id)?.selected ?? info.selected },
+            set: { model.setCalendarSelected(id: info.id, selected: $0) })
+    }
+
+    /// New task (the same editor as the Tasks tab) or new event, starting at the next quarter hour
+    /// today or 9:00 on another day.
+    private var addMenu: some View {
+        Menu {
+            Button {
+                newTask = TaskEditorRequest(task: model.newTaskTemplate(), isNew: true)
+            } label: {
+                Label("New Task", systemImage: "checkmark.circle")
+            }
+            Button {
+                newEvent = model.newEventTemplate(start: defaultEventStart)
+            } label: {
+                Label("New Event", systemImage: "calendar.badge.plus")
+            }
+            .disabled(model.writableCalendars.isEmpty)
+        } label: {
+            Label("Add", systemImage: "plus")
+        }
+        .accessibilityIdentifier("agenda-add")
+    }
+
+    private var defaultEventStart: Date {
+        if isToday { return now }
+        return model.calendar.date(bySettingHour: 9, minute: 0, second: 0, of: model.selectedDay) ?? model.selectedDay
+    }
+
+    // MARK: - Content
+
+    @ViewBuilder
+    private var content: some View {
+        if let dayCount = mode.dayCount {
+            DayGridView(
+                dayCount: dayCount,
+                onSelectEvent: { selectedEvent = $0 },
+                onEditTask: { editingTask = $0 },
+                onCreateAt: { newEvent = model.newEventTemplate(start: $0) })
+        } else {
+            // A ZStack so the outgoing and incoming lists overlap during the slide instead of
+            // stacking.
+            ZStack {
+                timeline
+                    .id(shownDay ?? model.selectedDay)
+                    .transition(slide)
+            }
+        }
     }
 
     private var timeline: some View {

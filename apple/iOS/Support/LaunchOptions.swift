@@ -34,4 +34,13 @@ enum LaunchOptions {
         return nil
         #endif
     }
+
+    /// The Agenda layout to start in (`list`, `day` or `threeDays`), overriding the saved choice.
+    static var initialAgendaMode: AgendaMode? {
+        #if DEBUG
+        return UserDefaults.standard.string(forKey: "uiAgendaMode").flatMap(AgendaMode.init(rawValue:))
+        #else
+        return nil
+        #endif
+    }
 }

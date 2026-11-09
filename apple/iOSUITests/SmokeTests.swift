@@ -18,6 +18,11 @@ final class SmokeTests: XCTestCase {
             capture(app, "settings-\(appearance)")
             app.terminate()
 
+            let grid = launch(appearance: appearance, mode: "threeDays")
+            waitForText("Infra offsite", in: grid)
+            capture(grid, "agenda-3day-\(appearance)")
+            grid.terminate()
+
             let event = launch(appearance: appearance, sheet: "event")
             let join = event.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Join meeting")).firstMatch
             XCTAssertTrue(join.waitForExistence(timeout: 20))
@@ -48,9 +53,13 @@ final class SmokeTests: XCTestCase {
     }
 
     @MainActor
-    private func launch(appearance: String = "light", tab: String = "agenda", sheet: String? = nil, largeText: Bool = false) -> XCUIApplication {
+    private func launch(
+        appearance: String = "light", tab: String = "agenda", sheet: String? = nil, mode: String = "list", largeText: Bool = false
+    ) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-demoData", "YES", "-uiTab", tab, "-uiAppearance", appearance]
+        // The agenda mode is always passed: the app remembers the last one in the App Group
+        // defaults, which the simulator keeps between the launches of one test run.
+        app.launchArguments = ["-demoData", "YES", "-uiTab", tab, "-uiAppearance", appearance, "-uiAgendaMode", mode]
         if let sheet { app.launchArguments += ["-uiSheet", sheet] }
         app.launchArguments += [
             "-UIPreferredContentSizeCategoryName",

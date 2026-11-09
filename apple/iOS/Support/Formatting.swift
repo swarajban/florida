@@ -14,6 +14,21 @@ enum Formatting {
         }
     }
 
+    /// "42 min" under an hour, otherwise `duration`'s "1h 30m" / "2h". For the free-gap rows.
+    static func freeTime(minutes: Int) -> String {
+        minutes < 60 ? "\(minutes) min" : duration(minutes: minutes)
+    }
+
+    /// "42 minutes", "1 hour 30 minutes", "2 hours"; for accessibility labels.
+    static func spokenDuration(minutes: Int) -> String {
+        let hours = minutes / 60
+        let rest = minutes % 60
+        var parts: [String] = []
+        if hours > 0 { parts.append(hours == 1 ? "1 hour" : "\(hours) hours") }
+        if rest > 0 || hours == 0 { parts.append(rest == 1 ? "1 minute" : "\(rest) minutes") }
+        return parts.joined(separator: " ")
+    }
+
     /// "9:00 AM" in the user's locale.
     static func time(_ date: Date) -> String {
         date.formatted(date: .omitted, time: .shortened)

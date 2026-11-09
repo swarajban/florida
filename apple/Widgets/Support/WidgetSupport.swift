@@ -82,7 +82,8 @@ enum WidgetFormatting {
     }
 }
 
-/// What a widget shows when there is nothing to list.
+/// What a widget shows when there is nothing to list. When the store could not be read it also
+/// names the reason in small print, so "no data" and "cannot read" look different on the Home Screen.
 struct WidgetPlaceholder: View {
     let available: Bool
     let emptyText: String
@@ -96,6 +97,13 @@ struct WidgetPlaceholder: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+            if !available, let reason = WidgetStore.unavailableReason {
+                Text(reason)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

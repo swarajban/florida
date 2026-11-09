@@ -72,6 +72,11 @@ extension AppModel {
                 try database.saveSchedule(schedule)
             case (.schedule, .delete):
                 try database.deleteSchedule(id: change.entityId)
+            case (.event, .put):
+                guard let event = try database.event(id: change.entityId) else { throw LocalWriteError("The event is gone.") }
+                try database.saveEvent(event)
+            case (.event, .delete):
+                try database.deleteEvent(id: change.entityId)
             }
         }
         if ok {
@@ -93,6 +98,9 @@ extension AppModel {
             return category(id: id).map { "Category “\($0.name)”" } ?? "Category \(id.prefix(8))"
         case .schedule:
             return schedule(id: id).map { "Schedule “\($0.name)”" } ?? "Schedule \(id.prefix(8))"
+        case .event:
+            let summary = (try? database?.event(id: id))?.summary
+            return summary.map { "Event “\($0)”" } ?? "Event \(id.prefix(8))"
         }
     }
 }

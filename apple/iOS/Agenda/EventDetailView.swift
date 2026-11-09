@@ -3,17 +3,21 @@ import SwiftUI
 
 /// Sheet for one calendar event, timed or all day: title and time (with a "Day 2 of 3" cue for
 /// multi-day events), a Join button when the event has a meeting link, calendar and account,
-/// location (opens Maps), description with live links, guests and your own response. Opening
-/// the event in Google Calendar is in the ⋯ menu. Read-only; Google is the source of truth.
+/// location (opens Maps), description with live links, guests and your own response, which is
+/// Yes / Maybe / No buttons when you are a guest. On a calendar you can write to, Edit opens the
+/// editor and the ⋯ menu (which also opens the event in Google Calendar) deletes the event.
 struct EventDetailView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    @State private var editing = false
+    @State private var confirmingDelete = false
     let event: CalendarEvent
 
     var body: some View {
         let event = current
         let style = model.eventStyle(event)
+        let canEdit = model.canEdit(event)
         NavigationStack {
             List {
                 Section {
@@ -65,8 +69,12 @@ struct EventDetailView: View {
                         }
                         .accessibilityHint("Opens in Maps")
                     }
-                    LabeledContent("Your response") {
-                        Label(EventTiming.responseText(event.responseStatus), systemImage: EventTiming.responseSymbol(event.responseStatus))
+                    if model.canRespond(to: event) {
+                        responseRow(event)
+                    } else {
+                        LabeledContent("Your response") {
+                            Label(EventTiming.responseText(event.responseStatus), systemImage: EventTiming.responseSymbol(event.responseStatus))
+                        }
                     }
                 }
 
@@ -84,34 +92,106 @@ struct EventDetailView: View {
             .navigationTitle("Event")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    if canEdit {
+                        Button("Edit") {
+                            editing = true
+                        }
+                    }
                     Button("Done") {
                         dismiss()
                     }
+                    .fontWeight(.semibold)
                 }
                 ToolbarItem(placement: .topBarLeading) {
+                    let link = event.htmlLink.flatMap(URL.init(string:))
                     Menu {
-                        if let url = event.htmlLink.flatMap(URL.init(string:)) {
+                        if let link {
                             Button {
-                                openURL(url)
+                                openURL(link)
                             } label: {
                                 Label("Open in Google Calendar", systemImage: "arrow.up.right.square")
+                            }
+                        }
+                        if canEdit {
+                            Button(role: .destructive) {
+                                confirmingDelete = true
+                            } label: {
+                                Label("Delete Event", systemImage: "trash")
                             }
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")
                     }
                     .accessibilityLabel("More")
-                    .disabled(event.htmlLink.flatMap(URL.init(string:)) == nil)
+                    .disabled(link == nil && !canEdit)
+                    // On the menu itself, so the dialog opens anchored to it (see Binding+Dialogs).
+                    .confirmationDialog("Delete this event?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+                        Button("Delete Event", role: .destructive) {
+                            model.delete(event: event)
+                            dismiss()
+                        }
+                    }
                 }
+            }
+            .sheet(isPresented: $editing) {
+                EventEditorView(event: current, isNew: false)
             }
         }
         .presentationDetents([.medium, .large])
     }
 
-    /// The live row when the agenda still has it (a sync may have changed it), else the copy given.
+    /// The live row when the agenda still has it (a sync may have changed it), else the store's
+    /// copy (a declined or moved event leaves the day while staying in the store), else the copy given.
     private var current: CalendarEvent {
-        model.agenda?.events.first { $0.id == event.id } ?? event
+        model.agenda?.events.first { $0.id == event.id } ?? model.storedVersion(of: event)
+    }
+
+    /// Yes / Maybe / No in place of the "Your response" line, the current answer filled. A tap
+    /// writes the answer locally at once; the sheet reads the store's row, so it follows.
+    private func responseRow(_ event: CalendarEvent) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Your response")
+            HStack(spacing: 8) {
+                responseButton("Yes", status: "accepted", event: event)
+                responseButton("Maybe", status: "tentative", event: event)
+                responseButton("No", status: "declined", event: event)
+            }
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Your response")
+        .accessibilityValue(EventTiming.responseText(event.responseStatus))
+    }
+
+    @ViewBuilder
+    private func responseButton(_ title: String, status: String, event: CalendarEvent) -> some View {
+        let selected = event.responseStatus == status
+        let button = Button {
+            model.respond(to: event, status: status)
+        } label: {
+            Label(title, systemImage: EventTiming.responseSymbol(status))
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+        }
+        .tint(selected ? Self.responseTint(status) : .secondary)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        // Two styles, so the chosen answer is filled and the others outlined; a List row with
+        // several buttons needs explicit styles for each to take only its own taps.
+        if selected {
+            button.buttonStyle(.borderedProminent)
+        } else {
+            button.buttonStyle(.bordered)
+        }
+    }
+
+    /// The attendee list's colors for the same answers.
+    private static func responseTint(_ status: String) -> Color {
+        switch status {
+        case "accepted": .green
+        case "declined": .red
+        default: .orange
+        }
     }
 
     private func statusBadge(_ event: CalendarEvent) -> String? {

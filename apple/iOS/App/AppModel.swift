@@ -85,6 +85,9 @@ final class AppModel {
 
     @ObservationIgnored var observers: [Task<Void, Never>] = []
     @ObservationIgnored var agendaObserver: Task<Void, Never>?
+    /// Events and task blocks of the days the hour grid shows (`AppModel+Grid`).
+    var gridDays: [DayAgenda] = []
+    @ObservationIgnored var gridObservation: GridObservation?
 
     var isSyncing: Bool { activeOperations > 0 }
     var needsSetup: Bool { serverConfig == nil }

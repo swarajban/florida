@@ -2,7 +2,8 @@ import FloridaKit
 import SwiftUI
 import WidgetKit
 
-/// The next event or task block (or the one in progress) as of the entry date; medium shows three.
+/// The next event or task block (or the one in progress) as of the entry date, looking through the
+/// end of tomorrow; medium shows three beside the top open tasks.
 struct UpNextEntry: TimelineEntry {
     let date: Date
     /// Whether the Lock Screen form counts down to a meeting's start from two minutes out.
@@ -11,6 +12,9 @@ struct UpNextEntry: TimelineEntry {
     let blocks: [WidgetBlock]
     /// False when the shared store could not be opened or read.
     let available: Bool
+    /// The top open tasks for the medium family's second column, and how many are open in all.
+    var tasks: [WidgetTask] = []
+    var openCount = 0
 
     static func placeholder(at date: Date) -> UpNextEntry {
         let start = date.addingTimeInterval(15 * 60)
@@ -18,12 +22,16 @@ struct UpNextEntry: TimelineEntry {
             id: "placeholder", calendarId: "", googleId: "", summary: "Team standup",
             startAt: start, endAt: start.addingTimeInterval(30 * 60), updatedAt: date)
         event.location = "Room 4"
-        return UpNextEntry(date: date, blocks: [WidgetBlock(event: event)], available: true)
+        let tasks = TasksEntry.placeholder(at: date)
+        return UpNextEntry(
+            date: date, blocks: [WidgetBlock(event: event)], available: true,
+            tasks: tasks.tasks, openCount: tasks.openCount)
     }
 }
 
 struct UpNextProvider: TimelineProvider {
-    static let horizon: TimeInterval = 6 * 3600
+    /// Entries are only planned this far ahead; WidgetKit asks again long before.
+    static let entryWindow: TimeInterval = 6 * 3600
     static let maxEntries = 30
     static let rowsPerEntry = 3
 
@@ -37,8 +45,7 @@ struct UpNextProvider: TimelineProvider {
             completion(UpNextEntry.placeholder(at: now))
             return
         }
-        let loaded = WidgetStore.timedBlocks(in: now..<now.addingTimeInterval(Self.horizon))
-        completion(Self.entry(at: now, from: loaded))
+        completion(Self.entry(at: now, from: Self.load(from: now), tasks: WidgetStore.openTasks(limit: Self.rowsPerEntry)))
     }
 
     /// One entry now plus one at every block start and end within the next six hours, so the
@@ -46,24 +53,36 @@ struct UpNextProvider: TimelineProvider {
     /// before each meeting with a link, when the Join countdown starts.
     func getTimeline(in context: Context, completion: @escaping (Timeline<UpNextEntry>) -> Void) {
         let now = Date()
-        let horizon = now.addingTimeInterval(Self.horizon)
-        let loaded = WidgetStore.timedBlocks(in: now..<horizon)
+        let window = now.addingTimeInterval(Self.entryWindow)
+        let loaded = Self.load(from: now)
+        let tasks = WidgetStore.openTasks(limit: Self.rowsPerEntry)
         let countdown = WidgetSettings.joinCountdown
         var dates: Set<Date> = [now]
         for block in loaded ?? [] {
             let joinAt = block.joinable && countdown ? [block.start.addingTimeInterval(-WidgetBlock.joinLead)] : []
-            for boundary in [block.start, block.end] + joinAt where boundary > now && boundary < horizon {
+            for boundary in [block.start, block.end] + joinAt where boundary > now && boundary < window {
                 dates.insert(boundary)
             }
         }
-        let entries = dates.sorted().prefix(Self.maxEntries).map { Self.entry(at: $0, from: loaded) }
+        let entries = dates.sorted().prefix(Self.maxEntries).map { Self.entry(at: $0, from: loaded, tasks: tasks) }
         completion(Timeline(entries: entries, policy: .after(now.addingTimeInterval(30 * 60))))
     }
 
-    static func entry(at date: Date, from loaded: [WidgetBlock]?) -> UpNextEntry {
+    /// Timed blocks from `now` through the end of tomorrow, so an evening glance still shows the
+    /// morning's first meeting instead of "Nothing coming up".
+    static func load(from now: Date) -> [WidgetBlock]? {
+        let calendar = WidgetStore.calendar
+        let today = calendar.startOfDay(for: now)
+        let end = calendar.date(byAdding: .day, value: 2, to: today) ?? now.addingTimeInterval(48 * 3600)
+        return WidgetStore.timedBlocks(in: now..<end)
+    }
+
+    static func entry(at date: Date, from loaded: [WidgetBlock]?, tasks: (count: Int, tasks: [WidgetTask])?) -> UpNextEntry {
         guard let loaded else { return UpNextEntry(date: date, blocks: [], available: false) }
         let upcoming = loaded.filter { $0.end > date }.prefix(rowsPerEntry)
-        return UpNextEntry(date: date, joinCountdown: WidgetSettings.joinCountdown, blocks: Array(upcoming), available: true)
+        return UpNextEntry(
+            date: date, joinCountdown: WidgetSettings.joinCountdown, blocks: Array(upcoming), available: true,
+            tasks: tasks?.tasks ?? [], openCount: tasks?.count ?? 0)
     }
 }
 
@@ -75,7 +94,7 @@ struct UpNextWidget: Widget {
             UpNextWidgetView(entry: entry)
         }
         .configurationDisplayName("Up Next")
-        .description("Your next event or scheduled task.")
+        .description("Your next events and scheduled tasks, with your top open tasks beside them.")
         .supportedFamilies([.systemSmall, .systemMedium, .accessoryRectangular])
     }
 }
@@ -112,17 +131,55 @@ struct UpNextWidgetView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
+    /// Two columns: what is next on the calendar, and the top open tasks (tap opens the Tasks tab).
     private var medium: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            header
-            if entry.blocks.isEmpty {
-                WidgetPlaceholder(available: entry.available, emptyText: "Nothing coming up")
-            } else {
-                ForEach(entry.blocks) { block in
-                    UpNextBlockView(block: block, now: entry.date, compact: true)
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                header
+                if entry.blocks.isEmpty {
+                    WidgetPlaceholder(available: entry.available, emptyText: "Nothing coming up")
+                } else {
+                    ForEach(entry.blocks) { block in
+                        UpNextBlockView(block: block, now: entry.date, compact: true)
+                    }
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            Divider()
+            if let tasksLink = WidgetLinks.tasks {
+                Link(destination: tasksLink) {
+                    tasksColumn
+                }
+            } else {
+                tasksColumn
+            }
+        }
+    }
+
+    private var tasksColumn: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Tasks")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if entry.available {
+                    Text("\(entry.openCount)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            if entry.tasks.isEmpty {
+                Text(entry.available ? "No open tasks" : "—")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(entry.tasks) { task in
+                    TasksWidgetRow(task: task, now: entry.date, showsDue: false)
+                }
+            }
+            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
@@ -215,7 +272,12 @@ struct UpNextBlockView: View {
             .font(.caption)
             .foregroundStyle(block.tint)
         } else {
-            Text("\(Text(block.start, style: .time)) – \(Text(block.end, style: .time))")
+            // "Tomorrow 9:00 AM – 9:30 AM" once the block is on another day.
+            let calendar = WidgetStore.calendar
+            let dayPrefix = calendar.isDate(block.start, inSameDayAs: now)
+                ? ""
+                : WidgetFormatting.dayLabel(block.start, now: now, calendar: calendar) + " "
+            Text("\(dayPrefix)\(Text(block.start, style: .time)) – \(Text(block.end, style: .time))")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

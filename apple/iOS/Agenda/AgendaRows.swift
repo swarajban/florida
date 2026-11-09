@@ -68,9 +68,8 @@ struct BlockRow: View {
                     Text(block.task.title)
                         .font(.body)
                 }
+                // No priority glyph here: the agenda is about when, the Tasks tab about how urgent.
                 HStack(spacing: 4) {
-                    Image(systemName: block.task.priority.symbolName)
-                        .foregroundStyle(block.task.priority.tint)
                     Text(category?.name ?? "No category")
                     Text("·")
                     if let minutesLeft {

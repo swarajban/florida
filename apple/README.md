@@ -119,7 +119,9 @@ Two workflows build the Apple code:
 - `.github/workflows/ios.yml` runs on changes under `apple/`. Its **build** job
   compiles `Florida-iOS` (with the widgets) for the simulator, then launches
   the app with `-demoData YES -uiTab <agenda|tasks|settings>` (plus
-  `-uiSheet <event|aitask>` for the event detail and AI draft sheets) and uploads
+  `-uiSheet <event|aitask|daypicker>` for the event detail, AI draft and month
+  grid sheets, and `-uiAgendaMode <list|day|threeDays>` for the Agenda layout)
+  and uploads
   screenshots of each tab, light and dark, as the `screenshots` artifact. On
   pushes to `main`, or when started by hand (**Actions → iOS → Run workflow**),
   the **testflight** job also archives the app, signs it, and uploads it to
