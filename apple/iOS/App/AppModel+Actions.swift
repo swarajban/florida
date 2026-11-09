@@ -14,7 +14,11 @@ extension AppModel {
     func complete(_ task: TaskItem) {
         let previous = storedVersion(of: task)
         let index = openTasks.firstIndex { $0.id == task.id }
-        guard write({ try $0.completeTask(id: task.id) }) else { return }
+        let now = Date()
+        var completed = previous
+        completed.completedAt = now
+        completed.completedMinutes = previous.durationMinutes
+        guard write({ try $0.completeTask(id: task.id, at: now) }) else { return }
         completionCount += 1
         let ghosts = recordGhosts(for: previous)
         if let index {
@@ -28,7 +32,7 @@ extension AppModel {
         }
         showToast(Toast(
             message: "Completed “\(task.title)”", systemImage: "checkmark.circle.fill", style: .success,
-            undo: [previous], ghostIds: ghosts))
+            undo: TaskUndo(from: previous, to: completed), ghostIds: ghosts))
     }
 
     /// Credits `minutes` of work without finishing: the rest stays open and the scheduler places
@@ -49,7 +53,7 @@ extension AppModel {
         let ghosts = recordGhosts(for: previous, includeUpcoming: false)
         showToast(Toast(
             message: "\(Formatting.duration(minutes: minutes)) done · \(Formatting.duration(minutes: updated.remainingMinutes)) left on “\(task.title)”",
-            systemImage: "checkmark.circle", style: .success, undo: [previous], ghostIds: ghosts))
+            systemImage: "checkmark.circle", style: .success, undo: TaskUndo(from: previous, to: updated), ghostIds: ghosts))
     }
 
     /// Pins the task to start now (to the minute).
@@ -66,7 +70,7 @@ extension AppModel {
         guard write({ try $0.saveTask(updated) }) else { return }
         showToast(Toast(
             message: "Pushed “\(task.title)” to tomorrow", systemImage: "arrow.turn.down.right", style: .info,
-            undo: [previous]))
+            undo: TaskUndo(from: previous, to: updated)))
     }
 
     /// Minutes "Done for now" proposes: the time since its in-progress block started, else the

@@ -32,7 +32,7 @@ struct QuickAddField: View {
                     .textFieldStyle(.plain)
                     .submitLabel(.done)
                     .autocorrectionDisabled()
-                    .onSubmit(submit)
+                    .onSubmit { submit() }
                     .accessibilityLabel("Quick add")
                 if !text.isEmpty {
                     Button {

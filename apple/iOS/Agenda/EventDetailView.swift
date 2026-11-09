@@ -36,7 +36,7 @@ struct EventDetailView: View {
                     .padding(.vertical, 4)
                     .accessibilityElement(children: .combine)
                     if let joinURL = event.joinURL {
-                        JoinButton(url: joinURL, start: event.allDay ? nil : event.startAt)
+                        JoinButton(url: joinURL, start: event.allDay ? nil : event.startAt, end: event.allDay ? nil : event.endAt)
                             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 12, trailing: 16))
                     }
                 }

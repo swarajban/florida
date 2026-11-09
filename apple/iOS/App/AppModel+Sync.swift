@@ -98,7 +98,7 @@ extension AppModel {
         }
         aiClient = AIClient(config: config)
         triageUnavailable = nil
-        triageAttempted = []
+        forgetTriageAttempts()
         lastError = nil
         requestSync()
         if sceneIsActive {

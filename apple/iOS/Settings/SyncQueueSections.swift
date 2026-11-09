@@ -82,7 +82,7 @@ struct SyncQueueSections: View {
                 model.discardPendingWrite(write)
             }
         } message: { _ in
-            Text("It will not be sent. This device keeps showing it until the server's copy changes.")
+            Text("It will not be sent, and this device goes back to the server's copy.")
         }
     }
 

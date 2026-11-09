@@ -68,7 +68,7 @@ extension AppModel {
         guard write({ try $0.saveTask(updated) }) else { return }
         showToast(Toast(
             message: "Pinned “\(task.title)” at \(Formatting.time(updated.pinnedStart ?? start))",
-            systemImage: "pin.fill", style: .info, undo: [previous]))
+            systemImage: "pin.fill", style: .info, undo: TaskUndo(from: previous, to: updated)))
     }
 
     // MARK: - Day cleared

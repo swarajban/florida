@@ -70,12 +70,17 @@ extension AppModel {
         write { try $0.reopenTask(id: task.id) }
     }
 
-    /// Deletes the task and offers Undo. The server's `PUT /api/tasks/:id` clears `deletedAt`, so
-    /// re-saving the old version brings it back even after the delete was pushed.
+    /// Deletes the task and offers Undo, which clears `deletedAt` again. The server's
+    /// `PUT /api/tasks/:id` does the same, so it works after the delete was pushed.
     func delete(_ task: TaskItem) {
         let previous = storedVersion(of: task)
-        guard write({ try $0.deleteTask(id: task.id) }) else { return }
-        showToast(Toast(message: "Deleted “\(task.title)”", systemImage: "trash.fill", style: .info, undo: [previous]))
+        let now = Date()
+        var deleted = previous
+        deleted.deletedAt = now
+        guard write({ try $0.deleteTask(id: task.id, now: now) }) else { return }
+        showToast(Toast(
+            message: "Deleted “\(task.title)”", systemImage: "trash.fill", style: .info,
+            undo: TaskUndo(from: previous, to: deleted)))
     }
 
     /// The store's copy of the task (the row the view holds may be a moment old).
@@ -102,14 +107,33 @@ extension AppModel {
         toast = nil
     }
 
-    /// Puts back the task versions the toast captured.
+    /// Puts back the fields the toast's action changed, after re-reading the row: when the task is
+    /// gone, or something else has changed those fields since, nothing is written and the toast
+    /// says so. The exception is a deleted task whose row is gone, which is what pulling the
+    /// pushed tombstone does: its version from before the delete is saved back, live.
     func undo(_ toast: Toast) {
         dismissToast()
         removeGhosts(ids: toast.ghostIds)
-        write { database in
-            for task in toast.undo {
-                try database.saveTask(task)
+        guard let undo = toast.undo else { return }
+        let current: TaskItem?
+        do {
+            current = try database?.task(id: undo.taskId)
+        } catch {
+            showToast(Toast(message: "Could not undo: \(error.localizedDescription)", systemImage: "exclamationmark.triangle.fill", style: .error))
+            return
+        }
+        let alreadyChanged = Toast(message: "Already changed since; nothing to undo.", systemImage: "arrow.uturn.backward.circle", style: .info)
+        if let current {
+            guard undo.stillApplies(to: current) else {
+                showToast(alreadyChanged)
+                return
             }
+            write { try $0.saveTask(undo.reverted(current)) }
+        } else if var restored = undo.deleted {
+            restored.deletedAt = nil
+            write { try $0.saveTask(restored) }
+        } else {
+            showToast(alreadyChanged)
         }
     }
 }

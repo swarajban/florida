@@ -29,13 +29,27 @@ extension AppModel {
         }
     }
 
-    /// Drops a queued write. The local row keeps the change until the server's copy changes.
+    /// Drops a queued write and puts the server's copy of its row back (removing the row when the
+    /// server has it tombstoned, keeping it when the server never had it). One round trip, shown
+    /// through `isSyncing`. The write leaves the queue before the server is asked, so when that
+    /// fails the toast says the row was not reset; a local store failure keeps the write queued.
     func discardPendingWrite(_ write: PendingWrite) {
-        guard let seq = write.seq else { return }
-        do {
-            try database?.removePendingWrite(seq: seq)
-        } catch {
-            showToast(Toast(message: "Could not discard: \(error.localizedDescription)", systemImage: "exclamationmark.triangle.fill", style: .error))
+        guard let syncClient else {
+            showToast(Toast(message: "Connect to the server in Settings first.", systemImage: "exclamationmark.triangle.fill", style: .error))
+            return
+        }
+        Task { [weak self] in
+            self?.activeOperations += 1
+            defer { self?.activeOperations -= 1 }
+            do {
+                try await syncClient.discard(write)
+            } catch let error as SyncError {
+                self?.showToast(Toast(
+                    message: "Discarded, but could not reset to the server's copy: \(Self.describe(error))",
+                    systemImage: "exclamationmark.triangle.fill", style: .error))
+            } catch {
+                self?.showToast(Toast(message: "Could not discard: \(error.localizedDescription)", systemImage: "exclamationmark.triangle.fill", style: .error))
+            }
         }
     }
 

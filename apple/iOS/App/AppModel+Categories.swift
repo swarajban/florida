@@ -40,12 +40,12 @@ extension AppModel {
         try perform { try $0.saveCategory(category) }
     }
 
-    /// Deletes the category and moves its open tasks to Inbox at once, as the server will.
+    /// Deletes the category and moves its live tasks, completed ones included, to Inbox at once,
+    /// as the server will.
     func deleteCategory(_ category: TaskCategory) throws {
         guard !category.isInbox else { throw LocalWriteError("Inbox can't be deleted.") }
-        let moved = openTasks.filter { $0.categoryId == category.id }
         try perform { database in
-            for var task in moved {
+            for var task in try database.tasks(inCategory: category.id) {
                 task.categoryId = TaskCategory.inboxId
                 try database.saveTask(task)
             }
@@ -75,7 +75,7 @@ extension AppModel {
         guard write({ try $0.saveTask(moved) }) else { return }
         triageSuggestions[task.id] = nil
         showToast(Toast(
-            message: "Moved to \(category.name)", systemImage: "folder.fill", style: .info, undo: [previous]))
+            message: "Moved to \(category.name)", systemImage: "folder.fill", style: .info, undo: TaskUndo(from: previous, to: moved)))
     }
 
     // MARK: - Schedules

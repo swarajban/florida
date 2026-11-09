@@ -63,8 +63,13 @@ enum RichText {
         return decodeEntities(text)
     }
 
+    /// The named entities Google uses, in replacement order: `&amp;` last, so that an escaped
+    /// entity such as `&amp;lt;` decodes once, to `&lt;`.
+    private static let entities: [(String, String)] = [
+        ("&nbsp;", " "), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""), ("&#39;", "'"), ("&apos;", "'"), ("&amp;", "&"),
+    ]
+
     static func decodeEntities(_ text: String) -> String {
-        let entities = ["&nbsp;": " ", "&lt;": "<", "&gt;": ">", "&quot;": "\"", "&#39;": "'", "&apos;": "'", "&amp;": "&"]
         var text = text
         for (entity, character) in entities {
             text = text.replacingOccurrences(of: entity, with: character)

@@ -79,6 +79,7 @@ final class AppModel {
     var triageSuggestions: [String: TriageSuggestion] = [:]
     /// Why suggestions are not coming, shown under Inbox; nil while they work.
     var triageUnavailable: String?
+    /// (task, title) keys already asked, this launch and (answered ones) earlier; `AppModel+Triage`.
     @ObservationIgnored var triageAttempted: Set<String> = []
     @ObservationIgnored var triageRunner: Task<Void, Never>?
 
@@ -107,6 +108,7 @@ final class AppModel {
         database = openedDatabase
         storeError = openError
         ghostBlocks = GhostStore.load(today: today, calendar: calendar)
+        triageAttempted = Self.loadTriageAttempts()
 
         if LaunchOptions.demoData {
             #if DEBUG

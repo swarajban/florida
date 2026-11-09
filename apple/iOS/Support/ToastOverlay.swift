@@ -17,7 +17,7 @@ struct ToastOverlay: View {
                         .font(.subheadline)
                         .lineLimit(2)
                     Spacer(minLength: 4)
-                    if !toast.undo.isEmpty {
+                    if toast.undo != nil {
                         Button("Undo") {
                             model.undo(toast)
                         }
