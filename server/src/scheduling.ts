@@ -4,7 +4,7 @@ import type { Interval, Schedule, SchedulerInput, SchedulerResult, Task } from '
 import { and, eq, getTableColumns, isNull, sql } from 'drizzle-orm'
 import type { Config } from './config.js'
 import type { Db } from './db/client.js'
-import { calendars, events, placements, categories, schedules, tasks } from './db/schema.js'
+import { calendars, events, placements, categories, schedules, tasks, unscheduled } from './db/schema.js'
 import type { EventRow, CategoryRow, ScheduleRow, TaskRow } from './db/schema.js'
 
 export interface SchedulerSources {
@@ -80,8 +80,8 @@ export function buildSchedulerInput(src: SchedulerSources): SchedulerInput {
 const SCHEDULER_LOCK_SQL = 'select pg_advisory_xact_lock(731104)'
 
 /**
- * Loads the current state, runs the scheduler, and replaces the `placements` table with the
- * result inside one transaction. Returns the scheduler result so callers can relay it.
+ * Loads the current state, runs the scheduler, and replaces the `placements` and `unscheduled`
+ * tables with the result inside one transaction. Returns the scheduler result so callers can relay it.
  */
 export async function runScheduling(
   db: Db,
@@ -124,6 +124,17 @@ export async function runScheduling(
           startAt: new Date(p.start),
           endAt: new Date(p.end),
           pinned: p.pinned,
+          computedAt: now,
+        })),
+      )
+    }
+    await tx.delete(unscheduled)
+    if (result.unscheduled.length > 0) {
+      await tx.insert(unscheduled).values(
+        result.unscheduled.map((u) => ({
+          taskId: u.taskId,
+          reason: u.reason,
+          unplacedMinutes: u.unplacedMinutes,
           computedAt: now,
         })),
       )

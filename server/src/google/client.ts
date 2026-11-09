@@ -1,4 +1,4 @@
-import type { NewEventRow } from '../db/schema.js'
+import type { AttendeeResponseStatus, EventAttendee, EventOrganizer, NewEventRow } from '../db/schema.js'
 
 export const SCOPES = ['https://www.googleapis.com/auth/calendar']
 
@@ -52,17 +52,33 @@ export interface GoogleEventDateTime {
   timeZone?: string
 }
 
+export interface GoogleEventAttendee {
+  email?: string
+  displayName?: string
+  responseStatus?: string
+  organizer?: boolean
+  self?: boolean
+  optional?: boolean
+}
+
 export interface GoogleEvent {
   id: string
   status?: string
   summary?: string
+  description?: string
   location?: string
   start?: GoogleEventDateTime
   end?: GoogleEventDateTime
   transparency?: string
   htmlLink?: string
+  hangoutLink?: string
+  conferenceData?: { entryPoints?: { entryPointType?: string; uri?: string }[] }
   updated?: string
-  attendees?: { self?: boolean; responseStatus?: string }[]
+  attendees?: GoogleEventAttendee[]
+  organizer?: { email?: string; displayName?: string; self?: boolean }
+  eventType?: string
+  recurringEventId?: string
+  iCalUID?: string
 }
 
 export type ListEventsParams =
@@ -239,9 +255,46 @@ export function mapEvent(calendarId: string, e: GoogleEvent, now: Date = new Dat
     transparency: e.transparency ?? null,
     responseStatus: e.attendees?.find((a) => a.self === true)?.responseStatus ?? null,
     htmlLink: e.htmlLink ?? null,
+    description: e.description ?? null,
+    conferenceUrl: conferenceUrl(e),
+    attendees: e.attendees === undefined ? null : e.attendees.flatMap(mapAttendee),
+    organizer: e.organizer?.email === undefined ? null : mapOrganizer(e.organizer.email, e.organizer),
+    eventType: e.eventType ?? null,
+    recurringEventId: e.recurringEventId ?? null,
+    icalUid: e.iCalUID ?? null,
     updatedAt: now,
     deletedAt: cancelled ? now : null,
   }
+}
+
+/** Meet link when Google set one, else the video entry point of any other conference solution. */
+function conferenceUrl(e: GoogleEvent): string | null {
+  if (e.hangoutLink !== undefined) return e.hangoutLink
+  return e.conferenceData?.entryPoints?.find((p) => p.entryPointType === 'video' && p.uri !== undefined)?.uri ?? null
+}
+
+const RESPONSE_STATUSES: readonly string[] = ['needsAction', 'declined', 'tentative', 'accepted']
+
+/** Attendees without an email cannot be shown or contacted, so they are dropped. */
+function mapAttendee(a: GoogleEventAttendee): EventAttendee[] {
+  if (a.email === undefined) return []
+  const responseStatus = (
+    a.responseStatus !== undefined && RESPONSE_STATUSES.includes(a.responseStatus) ? a.responseStatus : 'needsAction'
+  ) as AttendeeResponseStatus
+  return [
+    {
+      email: a.email,
+      displayName: a.displayName ?? null,
+      responseStatus,
+      organizer: a.organizer ?? false,
+      self: a.self ?? false,
+      optional: a.optional ?? false,
+    },
+  ]
+}
+
+function mapOrganizer(email: string, o: { displayName?: string; self?: boolean }): EventOrganizer {
+  return { email, displayName: o.displayName ?? null, self: o.self ?? false }
 }
 
 function toDate(dt: GoogleEventDateTime | undefined): Date | null {

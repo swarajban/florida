@@ -1,6 +1,6 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { SchedulerResult } from '@florida/scheduler'
-import { eq, gt, isNull } from 'drizzle-orm'
+import { and, eq, getTableColumns, gt, isNotNull, isNull, or } from 'drizzle-orm'
 import type { PgColumn } from 'drizzle-orm/pg-core'
 import { Hono } from 'hono'
 import type { MiddlewareHandler } from 'hono'
@@ -10,11 +10,12 @@ import { HTTPException } from 'hono/http-exception'
 import { ZodError, z } from 'zod'
 import { ClaudeError } from './ai/claude.js'
 import type { TaskParser } from './ai/parse-task.js'
+import type { CategorySuggester } from './ai/suggest-category.js'
 import { ChangeBus } from './changes.js'
 import type { Config } from './config.js'
 import type { Db } from './db/client.js'
-import { defaultTimeZone, scheduleExists } from './db/queries.js'
-import { calendars, events, googleAccounts, placements, categories, schedules, tasks } from './db/schema.js'
+import { INBOX_CATEGORY_ID, categoriesWithExamples, defaultTimeZone, scheduleExists } from './db/queries.js'
+import { calendars, events, googleAccounts, placements, categories, schedules, tasks, unscheduled } from './db/schema.js'
 import type { GoogleAccountRow } from './db/schema.js'
 import { authorizationUrl, exchangeCode } from './google/client.js'
 import type { CalendarSyncService } from './google/sync.js'
@@ -29,8 +30,10 @@ export interface AppDeps {
   reschedule: () => Promise<SchedulerResult>
   /** Receives a notice after every scheduler run the app triggers; streamed by `/api/events`. */
   changes?: ChangeBus
-  /** Natural-language task parsing (Claude). When absent, `/api/ai/*` answers 503. */
+  /** Natural-language task parsing (Claude). When absent, `/api/ai/parse-task` answers 503. */
   ai?: TaskParser
+  /** Category suggestions (Claude). When absent, `/api/ai/suggest-category` answers 503. */
+  categorySuggester?: CategorySuggester
   /** Delay before a webhook-triggered calendar sync runs; pings within it coalesce. Default 2 s. */
   webhookDebounceMs?: number
   /** Interval between SSE keep-alive comments. Default 25 s. */
@@ -87,6 +90,11 @@ const scheduleBody = z.object({
 })
 
 const calendarPatch = z.object({ selected: z.boolean() })
+
+const suggestCategoryBody = z.object({
+  title: z.string().trim().min(1).max(2000),
+  notes: z.string().max(10_000).nullish(),
+})
 
 const parseTaskBody = z.object({
   text: z.string().trim().min(1).max(2000),
@@ -167,9 +175,15 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
     const scheduleRows = await db.select().from(schedules).where(changedAfter(schedules.updatedAt))
     const categoryRows = await db.select().from(categories).where(changedAfter(categories.updatedAt))
     const taskRows = await db.select().from(tasks).where(changedAfter(tasks.updatedAt))
-    const eventRows = await db.select().from(events).where(changedAfter(events.updatedAt))
+    // Events of deselected calendars stay server-side; their tombstones still go out so clients drop them.
+    const eventRows = await db
+      .select(getTableColumns(events))
+      .from(events)
+      .innerJoin(calendars, eq(events.calendarId, calendars.id))
+      .where(and(changedAfter(events.updatedAt), or(eq(calendars.selected, true), isNotNull(events.deletedAt))))
     // Small tables without tombstones: always sent in full so clients can replace them wholesale.
     const placementRows = await db.select().from(placements)
+    const unscheduledRows = await db.select().from(unscheduled)
     const accountRows = await db.select(publicAccountColumns).from(googleAccounts)
     const calendarRows = await db.select(publicCalendarColumns).from(calendars)
 
@@ -180,6 +194,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
       tasks: taskRows,
       events: eventRows,
       placements: placementRows,
+      unscheduled: unscheduledRows,
       accounts: accountRows,
       calendars: calendarRows,
     })
@@ -207,6 +222,29 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
 
   // ---- Tasks ------------------------------------------------------------------------------------
 
+  // Single rows exactly as /api/sync sends them, tombstones included, so a client can resync one
+  // row after the server rejected its write.
+  app.get('/api/tasks/:id', async (c) => {
+    const id = c.req.param('id')
+    const [task] = await db.select().from(tasks).where(eq(tasks.id, id))
+    if (task === undefined) throw notFound(`task ${id}`)
+    return c.json(task)
+  })
+
+  app.get('/api/categories/:id', async (c) => {
+    const id = c.req.param('id')
+    const [category] = await db.select().from(categories).where(eq(categories.id, id))
+    if (category === undefined) throw notFound(`category ${id}`)
+    return c.json(category)
+  })
+
+  app.get('/api/schedules/:id', async (c) => {
+    const id = c.req.param('id')
+    const [schedule] = await db.select().from(schedules).where(eq(schedules.id, id))
+    if (schedule === undefined) throw notFound(`schedule ${id}`)
+    return c.json(schedule)
+  })
+
   app.put('/api/tasks/:id', async (c) => {
     const task = await upsertTask(db, c.req.param('id'), taskBody.parse(await c.req.json()))
     const scheduling = await reschedule()
@@ -225,6 +263,10 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
     const id = c.req.param('id')
     const body = categoryBody.parse(await c.req.json())
     if (!(await scheduleExists(db, body.scheduleId))) throw badRequest(`unknown scheduleId ${body.scheduleId}`)
+    if (id === INBOX_CATEGORY_ID) {
+      const [inbox] = await db.select({ name: categories.name }).from(categories).where(eq(categories.id, INBOX_CATEGORY_ID))
+      if (inbox !== undefined && inbox.name !== body.name) throw badRequest('the inbox category cannot be renamed')
+    }
     const fields = {
       name: body.name,
       color: body.color ?? null,
@@ -242,15 +284,26 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
     return c.json({ category, scheduling })
   })
 
+  // Tasks never outlive their category: they move to the permanent inbox first, so the scheduler
+  // keeps placing them and clients see them change category through `updatedAt`.
   app.delete('/api/categories/:id', async (c) => {
     const id = c.req.param('id')
+    if (id === INBOX_CATEGORY_ID) throw badRequest('the inbox category cannot be deleted')
     const now = new Date()
-    const deleted = await db
-      .update(categories)
-      .set({ deletedAt: now, updatedAt: now })
-      .where(eq(categories.id, id))
-      .returning({ id: categories.id })
-    if (deleted.length === 0) throw notFound(`category ${id}`)
+    const deleted = await db.transaction(async (tx) => {
+      const rows = await tx
+        .update(categories)
+        .set({ deletedAt: now, updatedAt: now })
+        .where(eq(categories.id, id))
+        .returning({ id: categories.id })
+      if (rows.length === 0) return false
+      await tx
+        .update(tasks)
+        .set({ categoryId: INBOX_CATEGORY_ID, updatedAt: now })
+        .where(and(eq(tasks.categoryId, id), isNull(tasks.deletedAt)))
+      return true
+    })
+    if (!deleted) throw notFound(`category ${id}`)
     const scheduling = await reschedule()
     return c.json({ scheduling })
   })
@@ -296,19 +349,24 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
   // Turns free text into a task draft. The client reviews it and then PUTs the task itself, so a
   // slow or wrong model answer never blocks or corrupts the local-first write path.
   app.post('/api/ai/parse-task', async (c) => {
-    if (deps.ai === undefined) throw new HTTPException(503, { message: 'ai is not configured (set ANTHROPIC_API_KEY)' })
+    if (deps.ai === undefined) throw aiNotConfigured()
     const body = parseTaskBody.parse(await c.req.json())
-    const categoryRows = await db
-      .select({ id: categories.id, name: categories.name })
-      .from(categories)
-      .where(isNull(categories.deletedAt))
-      .orderBy(categories.sortOrder, categories.name)
     const draft = await deps.ai.parse(body.text, {
       now: body.now === undefined ? new Date() : new Date(body.now),
       timeZone: body.timeZone ?? (await defaultTimeZone(db)),
-      categories: categoryRows,
+      categories: await categoriesWithExamples(db),
     })
     return c.json({ draft })
+  })
+
+  // Suggests where an already-titled task belongs. The inbox is where unfiled tasks wait, so it
+  // is never offered.
+  app.post('/api/ai/suggest-category', async (c) => {
+    if (deps.categorySuggester === undefined) throw aiNotConfigured()
+    const body = suggestCategoryBody.parse(await c.req.json())
+    const options = (await categoriesWithExamples(db)).filter((p) => p.id !== INBOX_CATEGORY_ID)
+    const suggestion = await deps.categorySuggester.suggest({ title: body.title, notes: body.notes ?? null }, options)
+    return c.json({ categoryId: suggestion.categoryId, rationale: suggestion.rationale })
   })
 
   // ---- Google -----------------------------------------------------------------------------------
@@ -323,20 +381,42 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
     return c.json({ accounts })
   })
 
+  // Deselecting tombstones the calendar's events so clients drop them. Selecting forgets the sync
+  // token and re-downloads the calendar in the background, so every event comes back with a fresh
+  // `updatedAt` that since-based sync picks up.
   app.patch('/api/calendars/:id', async (c) => {
     const id = c.req.param('id')
     const body = calendarPatch.parse(await c.req.json())
-    const [calendar] = await db
-      .update(calendars)
-      .set({ selected: body.selected, updatedAt: new Date() })
-      .where(eq(calendars.id, id))
-      .returning({ id: calendars.id, googleId: calendars.googleId, selected: calendars.selected })
+    const now = new Date()
+    const calendar = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(calendars)
+        .set(body.selected ? { selected: true, syncToken: null, updatedAt: now } : { selected: false, updatedAt: now })
+        .where(eq(calendars.id, id))
+        .returning({ id: calendars.id, googleId: calendars.googleId, selected: calendars.selected })
+      if (row !== undefined && !body.selected) {
+        await tx
+          .update(events)
+          .set({ deletedAt: now, updatedAt: now })
+          .where(and(eq(events.calendarId, id), isNull(events.deletedAt)))
+      }
+      return row
+    })
     if (calendar === undefined) throw notFound(`calendar ${id}`)
     const scheduling = await reschedule()
+    if (body.selected) void runCalendarSync(id)
     return c.json({ calendar, scheduling })
   })
 
   app.post('/api/google/sync', async (c) => {
+    await sync.syncAll()
+    return c.json(await reschedule())
+  })
+
+  // Full re-download of every selected calendar: rewrites every event row (and bumps `updatedAt`),
+  // e.g. to backfill columns added after the rows were first synced.
+  app.post('/api/google/resync', async (c) => {
+    await db.update(calendars).set({ syncToken: null, updatedAt: new Date() }).where(eq(calendars.selected, true))
     await sync.syncAll()
     return c.json(await reschedule())
   })
@@ -418,7 +498,8 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
   async function runCalendarSync(calendarId: string): Promise<void> {
     try {
       const [calendar] = await db.select().from(calendars).where(eq(calendars.id, calendarId)).limit(1)
-      if (calendar === undefined) return
+      // A deselected calendar's channel can still fire until it expires; its events stay tombstoned.
+      if (calendar === undefined || !calendar.selected) return
       await sync.syncCalendar(calendar)
       await reschedule()
     } catch (err) {
@@ -437,6 +518,10 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
   }
 
   return app
+}
+
+function aiNotConfigured(): HTTPException {
+  return new HTTPException(503, { message: 'ai is not configured (set ANTHROPIC_API_KEY)' })
 }
 
 function safeEqual(a: string, b: string): boolean {

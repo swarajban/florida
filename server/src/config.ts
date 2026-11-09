@@ -18,7 +18,7 @@ const envSchema = z.object({
    * Google accepts `PUBLIC_URL` as a push-notification (webhook) domain.
    */
   GOOGLE_SITE_VERIFICATION: z.string().min(1).optional(),
-  /** Optional: enables POST /api/ai/parse-task. */
+  /** Optional: enables POST /api/ai/parse-task and /api/ai/suggest-category. */
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
   ANTHROPIC_MODEL: z.string().min(1).default('claude-sonnet-5-5'),
 })

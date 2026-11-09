@@ -190,7 +190,11 @@ describe('task tools', () => {
 
   it('list_categories returns the seeded category', async () => {
     const { categories } = await data<{ categories: { id: string; scheduleId: string }[] }>('list_categories')
-    expect(categories).toEqual([expect.objectContaining({ id: 'inbox', scheduleId: 'work' })])
+    expect(categories).toEqual([
+      expect.objectContaining({ id: 'inbox', scheduleId: 'work' }),
+      expect.objectContaining({ id: 'work', scheduleId: 'work' }),
+      expect.objectContaining({ id: 'personal', scheduleId: 'personal' }),
+    ])
   })
 
   it('create_task generates an id, derives the deadline type, schedules, and notifies clients', async () => {
@@ -303,7 +307,21 @@ describe('get_agenda', () => {
     const base = { calendarId: 'cal-1', status: 'confirmed' }
     await db.insert(events).values([
       // Timed, inside the day.
-      { ...base, id: 'ev-standup', googleId: 'g1', summary: 'Standup', startAt: at(monday, 10 * 60), endAt: at(monday, 10 * 60 + 30), allDay: false },
+      {
+        ...base,
+        id: 'ev-standup',
+        googleId: 'g1',
+        summary: 'Standup',
+        startAt: at(monday, 10 * 60),
+        endAt: at(monday, 10 * 60 + 30),
+        allDay: false,
+        description: 'Blockers first',
+        conferenceUrl: 'https://meet.google.com/abc-defg-hij',
+        attendees: [
+          { email: 'me@example.com', displayName: 'Me', responseStatus: 'accepted', organizer: true, self: true, optional: false },
+          { email: 'pm@example.com', displayName: null, responseStatus: 'tentative', organizer: false, self: false, optional: true },
+        ],
+      },
       // Sunday 23:00 Pacific is Monday 07:00Z: a UTC-day query would wrongly include it.
       { ...base, id: 'ev-late', googleId: 'g2', summary: 'Late call', startAt: at(sunday, 23 * 60), endAt: at(sunday, 23 * 60 + 30), allDay: false },
       // All-day rows sit at UTC midnight of their calendar date.
@@ -330,6 +348,15 @@ describe('get_agenda', () => {
     expect(out.end).toBe(at(tuesday, 0).toISOString())
     expect(out.events.map((e) => e.id)).toEqual(['ev-holiday', 'ev-standup'])
     expect(out.events[0]).toMatchObject({ calendar: 'Work', allDay: true })
+    expect(out.events[1]).toMatchObject({
+      description: 'Blockers first',
+      conferenceUrl: 'https://meet.google.com/abc-defg-hij',
+      attendees: [
+        { email: 'me@example.com', displayName: 'Me', responseStatus: 'accepted', organizer: true, self: true, optional: false },
+        { email: 'pm@example.com', displayName: null, responseStatus: 'tentative', organizer: false, self: false, optional: true },
+      ],
+    })
+    expect(out.events[0]).toMatchObject({ description: null, conferenceUrl: null, attendees: null })
     expect(out.taskBlocks).toEqual([
       expect.objectContaining({
         taskId: 'pinned',
@@ -378,7 +405,7 @@ describe('official client', () => {
       expect(tools.map((t) => t.name)).toContain('get_agenda')
       const result = await client.callTool({ name: 'list_categories' })
       expect(result.isError).toBeFalsy()
-      expect((result.structuredContent as { categories: { id: string }[] }).categories.map((p) => p.id)).toEqual(['inbox'])
+      expect((result.structuredContent as { categories: { id: string }[] }).categories.map((p) => p.id)).toEqual(['inbox', 'work', 'personal'])
     } finally {
       await client.close()
     }

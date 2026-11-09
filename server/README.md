@@ -55,8 +55,8 @@ openssl rand -hex 32   # API_TOKEN
 openssl rand -hex 32   # TOKEN_ENCRYPTION_KEY
 ```
 
-Optional: an Anthropic API key (`ANTHROPIC_API_KEY`) enables `POST /api/ai/parse-task`; the model
-defaults to `claude-haiku-5-5` (`ANTHROPIC_MODEL`). Without the key the rest of the server works
+Optional: an Anthropic API key (`ANTHROPIC_API_KEY`) enables `POST /api/ai/parse-task` and
+`POST /api/ai/suggest-category`; the model defaults to `claude-sonnet-5-5` (`ANTHROPIC_MODEL`). Without the key the rest of the server works
 unchanged and the AI route answers 503.
 
 ### 4. Deploy to Fly
@@ -88,7 +88,9 @@ fly ssh console -C "node server/dist/seed.js"
 ```
 
 This creates the schedules `work` (Mon–Fri 09:00–12:00, 13:00–17:00 Pacific) and `personal`
-(Mon–Fri 18:00–21:00, Sat–Sun 10:00–18:00 Pacific) and the category `inbox`.
+(Mon–Fri 18:00–21:00, Sat–Sun 10:00–18:00 Pacific) and the categories `inbox`, `work` (schedule
+`work`) and `personal` (schedule `personal`). Re-seeding resets the schedules and the inbox but
+never touches `work` or `personal` once they exist, so your edits to them survive.
 
 Then open these in a browser, signing in with the matching Google account each time:
 
@@ -146,20 +148,25 @@ curl -s "$PUBLIC_URL/api/google/accounts" -H "authorization: Bearer $API_TOKEN" 
 curl -s -X PATCH "$PUBLIC_URL/api/calendars/<id>" -H "authorization: Bearer $API_TOKEN" \
   -H 'content-type: application/json' -d '{"selected": false}'
 curl -s -X POST "$PUBLIC_URL/api/google/sync" -H "authorization: Bearer $API_TOKEN" | jq .
+# Full re-download of every selected calendar (e.g. to backfill event columns after a deploy)
+curl -s -X POST "$PUBLIC_URL/api/google/resync" -H "authorization: Bearer $API_TOKEN" | jq .
 ```
 
 | Route | Purpose |
 | --- | --- |
 | `GET /health` | Liveness, no auth, no database access. |
-| `GET /api/sync?since=` | `{ cursor, schedules, categories, tasks, events, placements, accounts, calendars }`. The first four hold rows with `updatedAt > since` (all rows without `since`), including soft-deleted tombstones; `placements`, `accounts` and `calendars` are always complete (and never contain tokens). |
+| `GET /api/sync?since=` | `{ cursor, schedules, categories, tasks, events, placements, unscheduled, accounts, calendars }`. The first four hold rows with `updatedAt > since` (all rows without `since`), including soft-deleted tombstones; `events` holds only selected calendars' events plus tombstones. `placements`, `unscheduled` (`{ taskId, reason, unplacedMinutes, computedAt }`), `accounts` and `calendars` are always complete (and never contain tokens). Events carry `description`, `conferenceUrl`, `attendees`, `organizer`, `eventType`, `recurringEventId` and `icalUid`. |
 | `GET /api/events` | Server-sent events: `connected` on open, then one `changed` event after every scheduler run or calendar sync. Clients respond by calling `/api/sync` with their cursor. Keep-alive comment every 25 s. |
-| `PUT/DELETE /api/tasks/:id`, `/api/categories/:id`, `/api/schedules/:id` | Upsert / soft-delete, then rerun the scheduler. Responses include `scheduling: { placements, unscheduled, late }`. |
+| `PUT/DELETE /api/tasks/:id`, `/api/categories/:id`, `/api/schedules/:id` | Upsert / soft-delete, then rerun the scheduler. Responses include `scheduling: { placements, unscheduled, late }`. The `inbox` category cannot be deleted or renamed (400); deleting another category first moves its tasks to `inbox`. |
+| `GET /api/tasks/:id`, `/api/categories/:id`, `/api/schedules/:id` | The row exactly as `/api/sync` sends it, tombstones included; 404 only for an id that never existed. |
 | `POST /api/schedule/run` | Rerun the scheduler. |
 | `POST /api/ai/parse-task` | `{ text, now?, timeZone? }` → `{ draft }`: Claude turns one line of text into a task draft (`title, notes, durationMinutes, minChunkMinutes, priority, deadlineType, dueAt, startAt, pinnedStart, categoryId, rationale`). The client reviews the draft and then `PUT`s the task itself. `timeZone` defaults to the first schedule's zone. 503 without `ANTHROPIC_API_KEY`; 502 when the model call fails. |
+| `POST /api/ai/suggest-category` | `{ title, notes? }` → `{ categoryId, rationale }`: Claude picks the category the user would file the task under (never `inbox`; `null` when none fits). 503 without `ANTHROPIC_API_KEY`; 502 when the model call fails. |
 | `POST /mcp` | Model Context Protocol endpoint for agents (same bearer token). See below. |
 | `GET /api/google/accounts` | Accounts and calendars (never tokens). |
-| `PATCH /api/calendars/:id` | `{ selected }` toggles whether a calendar blocks time. |
+| `PATCH /api/calendars/:id` | `{ selected }` toggles whether a calendar blocks time and reaches the apps. Deselecting tombstones its events; selecting re-downloads it in the background. |
 | `POST /api/google/sync` | Sync every selected calendar now, then reschedule. |
+| `POST /api/google/resync` | Drop every selected calendar's sync token and run a full sync, rewriting every event row. |
 | `GET /auth/google/start?label=&key=` | Browser entry point for connecting an account. |
 | `POST /webhooks/google` | Google push notifications (validated by channel id + token). |
 
@@ -196,7 +203,7 @@ Client configuration (Claude Code, Amp, Cursor and friends accept this shape):
 | `create_task` | `categoryId`, `title`, and any task field; `id` defaults to a UUID, `durationMinutes` to 30, `priority` to `medium`, `deadlineType` to `soft` when `dueAt` is set, else `none`. Reschedules; returns the task's blocks plus `unscheduled`/`late`. |
 | `update_task` | `id` plus any task fields; omitted fields stay, `null` clears. Reschedules. |
 | `complete_task` / `delete_task` | Mark done (credits the full duration) / tombstone. Reschedule. |
-| `get_agenda` | `date?` (YYYY-MM-DD) and `timeZone?`: that day's events from selected calendars (all-day first) and planned task blocks with titles. Defaults to today in the first schedule's zone. |
+| `get_agenda` | `date?` (YYYY-MM-DD) and `timeZone?`: that day's events from selected calendars (all-day first) (with `description`, `conferenceUrl` and `attendees`) and planned task blocks with titles. Defaults to today in the first schedule's zone. |
 | `run_scheduler` | Rerun and return every placement. |
 
 Bad references (`unknown categoryId x`, `task x not found`) and invalid arguments come back as

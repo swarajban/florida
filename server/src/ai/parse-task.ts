@@ -8,7 +8,15 @@ export interface ParseTaskContext {
   /** IANA zone the text should be interpreted in. */
   timeZone: string
   /** Live categories; the parser picks `categoryId` from these or returns null. */
-  categories: { id: string; name: string }[]
+  categories: CategoryContext[]
+}
+
+/** A category as the model sees it: what the user calls it and what they have filed under it. */
+export interface CategoryContext {
+  id: string
+  name: string
+  /** Recent task titles in this category, open tasks first; the model mimics the user's filing. */
+  examples: string[]
 }
 
 /** A task as Claude understood it; the client turns it into a `PUT /api/tasks/:id` body. */
@@ -86,8 +94,6 @@ export function buildPrompt(text: string, ctx: ParseTaskContext): { system: stri
   const parts = localParts(ctx.now.getTime(), ctx.timeZone)
   const weekday = WEEKDAYS[weekdayOf(parts)] ?? 'unknown weekday'
   const local = `${parts.year}-${pad(parts.month)}-${pad(parts.day)} ${pad(parts.hour)}:${pad(parts.minute)}`
-  const categoryList =
-    ctx.categories.length === 0 ? '(none)' : ctx.categories.map((p) => `- id "${p.id}": ${p.name}`).join('\n')
 
   const system = [
     'You turn one line a user typed into a structured task for a personal auto-scheduling calendar.',
@@ -102,12 +108,23 @@ export function buildPrompt(text: string, ctx: ParseTaskContext): { system: stri
     '- Words like asap or urgent mean priority asap; otherwise default to medium unless the text says high or low.',
     '- Keep the title short and strip the parsed metadata from it; put leftover detail in notes.',
     '- Estimate durationMinutes when none is given (typical quick task 30, meeting prep 45, writing 90).',
-    '- Choose categoryId only from the list below; null when nothing fits.',
+    '- Choose categoryId only from the list below, filing the task where the user filed similar recent tasks; null when nothing fits.',
     'Categories:',
-    categoryList,
+    formatCategories(ctx.categories),
   ].join('\n')
 
   return { system, user: text }
+}
+
+/** One line per category with its id, then its recent task titles; shared by the AI prompts. */
+export function formatCategories(categories: CategoryContext[]): string {
+  if (categories.length === 0) return '(none)'
+  return categories
+    .map((p) => {
+      const line = `- id "${p.id}": ${p.name}`
+      return p.examples.length === 0 ? line : `${line}\n  recent tasks: ${p.examples.map((t) => JSON.stringify(t)).join(', ')}`
+    })
+    .join('\n')
 }
 
 /** Parses a line of text with Claude using structured output and validates the result. */

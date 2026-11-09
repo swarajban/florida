@@ -15,8 +15,8 @@ const timed: GoogleEvent = {
   htmlLink: 'https://www.google.com/calendar/event?eid=abc',
   updated: '2025-01-01T00:00:00.000Z',
   attendees: [
-    { responseStatus: 'declined' },
-    { self: true, responseStatus: 'accepted' },
+    { email: 'boss@example.com', responseStatus: 'declined' },
+    { email: 'me@example.com', self: true, responseStatus: 'accepted' },
   ],
 }
 
@@ -54,9 +54,99 @@ describe('mapEvent', () => {
       transparency: null,
       responseStatus: 'accepted',
       htmlLink: 'https://www.google.com/calendar/event?eid=abc',
+      description: null,
+      conferenceUrl: null,
+      attendees: [
+        { email: 'boss@example.com', displayName: null, responseStatus: 'declined', organizer: false, self: false, optional: false },
+        { email: 'me@example.com', displayName: null, responseStatus: 'accepted', organizer: false, self: true, optional: false },
+      ],
+      organizer: null,
+      eventType: null,
+      recurringEventId: null,
+      icalUid: null,
       updatedAt: NOW,
       deletedAt: null,
     })
+  })
+
+  it('keeps the details a detail view and a Join button need', () => {
+    const row = mapEvent(
+      CAL,
+      {
+        id: 'ev-meeting_20261109T170000Z',
+        status: 'confirmed',
+        summary: 'Design review',
+        description: 'Agenda:\n1. Mocks\nhttps://zoom.us/j/999 (not the join link)',
+        start: { dateTime: '2026-11-09T17:00:00Z' },
+        end: { dateTime: '2026-11-09T18:00:00Z' },
+        hangoutLink: 'https://meet.google.com/abc-defg-hij',
+        conferenceData: {
+          entryPoints: [
+            { entryPointType: 'phone', uri: 'tel:+1-555-0100' },
+            { entryPointType: 'video', uri: 'https://meet.google.com/abc-defg-hij?pli=1' },
+          ],
+        },
+        organizer: { email: 'lead@example.com', displayName: 'Team Lead' },
+        attendees: [
+          { email: 'lead@example.com', displayName: 'Team Lead', organizer: true, responseStatus: 'accepted' },
+          { email: 'me@example.com', self: true, responseStatus: 'tentative' },
+          { email: 'pm@example.com', displayName: 'PM', optional: true, responseStatus: 'needsAction' },
+        ],
+        eventType: 'default',
+        recurringEventId: 'ev-meeting',
+        iCalUID: 'ev-meeting@google.com',
+      },
+      NOW,
+    )
+    expect(row).toMatchObject({
+      description: 'Agenda:\n1. Mocks\nhttps://zoom.us/j/999 (not the join link)',
+      conferenceUrl: 'https://meet.google.com/abc-defg-hij',
+      organizer: { email: 'lead@example.com', displayName: 'Team Lead', self: false },
+      eventType: 'default',
+      recurringEventId: 'ev-meeting',
+      icalUid: 'ev-meeting@google.com',
+      responseStatus: 'tentative',
+    })
+    expect(row.attendees).toEqual([
+      { email: 'lead@example.com', displayName: 'Team Lead', responseStatus: 'accepted', organizer: true, self: false, optional: false },
+      { email: 'me@example.com', displayName: null, responseStatus: 'tentative', organizer: false, self: true, optional: false },
+      { email: 'pm@example.com', displayName: 'PM', responseStatus: 'needsAction', organizer: false, self: false, optional: true },
+    ])
+  })
+
+  it('falls back to the video entry point of a non-Meet conference and never scans text', () => {
+    const zoom = mapEvent(
+      CAL,
+      {
+        id: 'ev-zoom',
+        description: 'Join at https://meet.google.com/not-this-one',
+        location: 'https://zoom.us/j/111',
+        start: { dateTime: '2026-11-09T17:00:00Z' },
+        end: { dateTime: '2026-11-09T18:00:00Z' },
+        conferenceData: {
+          entryPoints: [
+            { entryPointType: 'more', uri: 'https://zoom.us/more' },
+            { entryPointType: 'video', uri: 'https://zoom.us/j/123456' },
+          ],
+        },
+      },
+      NOW,
+    )
+    expect(zoom.conferenceUrl).toBe('https://zoom.us/j/123456')
+
+    const textOnly = mapEvent(
+      CAL,
+      { id: 'ev-text', description: 'https://zoom.us/j/222', location: 'https://meet.google.com/xyz', start: { dateTime: '2026-11-09T17:00:00Z' } },
+      NOW,
+    )
+    expect(textOnly.conferenceUrl).toBeNull()
+  })
+
+  it('stores null rather than an empty list when Google sends no attendees or organizer', () => {
+    const row = mapEvent(CAL, allDay, NOW)
+    expect(row.attendees).toBeNull()
+    expect(row.organizer).toBeNull()
+    expect(row.description).toBeNull()
   })
 
   it('marks all-day events and uses UTC midnight for their dates', () => {

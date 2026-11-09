@@ -1,6 +1,9 @@
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, isNull, lte, sql } from 'drizzle-orm'
 import type { Db } from './client.js'
-import { categories, schedules } from './schema.js'
+import { categories, schedules, tasks } from './schema.js'
+
+/** The seeded category new and orphaned tasks land in; it cannot be renamed or deleted. */
+export const INBOX_CATEGORY_ID = 'inbox'
 
 /** True when a live (not soft-deleted) category has this id. */
 export async function categoryExists(db: Db, id: string): Promise<boolean> {
@@ -31,4 +34,36 @@ export async function defaultTimeZone(db: Db): Promise<string> {
     .orderBy(schedules.createdAt)
     .limit(1)
   return schedule?.timeZone ?? 'UTC'
+}
+
+/**
+ * Live categories in display order, each with up to `perCategory` titles of its live tasks: open
+ * tasks first (newest first), then completed ones (most recently completed first).
+ */
+export async function categoriesWithExamples(
+  db: Db,
+  perCategory = 8,
+): Promise<{ id: string; name: string; examples: string[] }[]> {
+  const rows = await db
+    .select({ id: categories.id, name: categories.name })
+    .from(categories)
+    .where(isNull(categories.deletedAt))
+    .orderBy(categories.sortOrder, categories.name)
+  const ranked = db
+    .select({
+      categoryId: tasks.categoryId,
+      title: tasks.title,
+      rank: sql<number>`row_number() over (partition by ${tasks.categoryId} order by ${tasks.completedAt} desc nulls first, ${tasks.createdAt} desc, ${tasks.id})`.as(
+        'rank',
+      ),
+    })
+    .from(tasks)
+    .where(isNull(tasks.deletedAt))
+    .as('ranked')
+  const examples = await db
+    .select({ categoryId: ranked.categoryId, title: ranked.title })
+    .from(ranked)
+    .where(lte(ranked.rank, perCategory))
+    .orderBy(ranked.categoryId, ranked.rank)
+  return rows.map((p) => ({ ...p, examples: examples.filter((e) => e.categoryId === p.id).map((e) => e.title) }))
 }

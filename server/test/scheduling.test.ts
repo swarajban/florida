@@ -1,6 +1,10 @@
+import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
+import { placements, schedules, tasks, unscheduled } from '../src/db/schema.js'
 import type { EventRow, CategoryRow, ScheduleRow, TaskRow } from '../src/db/schema.js'
-import { buildSchedulerInput } from '../src/scheduling.js'
+import { buildSchedulerInput, runScheduling } from '../src/scheduling.js'
+import { seed } from '../src/seed.js'
+import { createTestDb } from './db.js'
 
 const NOW = new Date('2026-11-09T17:00:00Z')
 const T0 = new Date('2026-11-01T00:00:00Z')
@@ -59,6 +63,13 @@ function eventRow(id: string, over: Partial<EventRow> = {}): EventRow {
     transparency: null,
     responseStatus: 'accepted',
     htmlLink: null,
+    description: null,
+    conferenceUrl: null,
+    attendees: null,
+    organizer: null,
+    eventType: null,
+    recurringEventId: null,
+    icalUid: null,
     updatedAt: T0,
     deletedAt: null,
     ...over,
@@ -157,5 +168,40 @@ describe('buildSchedulerInput', () => {
       { start: '2026-11-09T16:30:00.000Z', end: '2026-11-09T17:30:00.000Z' },
       { start: '2026-11-10T18:00:00.000Z', end: '2026-11-10T19:00:00.000Z' },
     ])
+  })
+})
+
+describe('runScheduling', () => {
+  it('replaces the unscheduled table wholesale next to placements', async () => {
+    const { db, close } = await createTestDb()
+    try {
+      await seed(db)
+      await db.insert(schedules).values(scheduleRow('doomed'))
+      const insert = (row: TaskRow) => db.insert(tasks).values(row)
+      await insert(taskRow('fits', 'inbox', { durationMinutes: 30 }))
+      // Hard deadline already passed: none of its 45 minutes can be placed before it.
+      await insert(taskRow('overdue', 'inbox', { durationMinutes: 45, deadlineType: 'hard', dueAt: new Date('2026-11-08T17:00:00Z') }))
+      // Its schedule disappears below; 90 minutes with 30 already done leaves 60 unplaced.
+      await insert(taskRow('homeless', 'inbox', { durationMinutes: 90, completedMinutes: 30, scheduleId: 'doomed' }))
+      await db.update(schedules).set({ deletedAt: NOW }).where(eq(schedules.id, 'doomed'))
+
+      await runScheduling(db, { HORIZON_DAYS: 28 }, NOW)
+      const first = await db.select().from(unscheduled).orderBy(unscheduled.taskId)
+      expect(first).toEqual([
+        { taskId: 'homeless', reason: 'unknown_schedule', unplacedMinutes: 60, computedAt: NOW },
+        { taskId: 'overdue', reason: 'no_fit_before_hard_deadline', unplacedMinutes: 45, computedAt: NOW },
+      ])
+      expect((await db.select().from(placements)).map((p) => p.taskId)).toEqual(['fits'])
+
+      // Fixing one task and running again drops its row rather than leaving a stale one behind.
+      await db.update(tasks).set({ scheduleId: null }).where(eq(tasks.id, 'homeless'))
+      const later = new Date(NOW.getTime() + 60_000)
+      await runScheduling(db, { HORIZON_DAYS: 28 }, later)
+      expect(await db.select().from(unscheduled)).toEqual([
+        { taskId: 'overdue', reason: 'no_fit_before_hard_deadline', unplacedMinutes: 45, computedAt: later },
+      ])
+    } finally {
+      await close()
+    }
   })
 })

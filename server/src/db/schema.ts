@@ -1,4 +1,4 @@
-import type { DeadlineType, Priority, ScheduleWindow } from '@florida/scheduler'
+import type { DeadlineType, Priority, ScheduleWindow, UnscheduledReason } from '@florida/scheduler'
 import { boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core'
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' })
@@ -64,6 +64,16 @@ export const placements = pgTable('placements', {
   computedAt: ts('computed_at').notNull(),
 })
 
+/** Scheduler output: tasks it could not (fully) place. Derived data, replaced with `placements`. */
+export const unscheduled = pgTable('unscheduled', {
+  taskId: text('task_id')
+    .primaryKey()
+    .references(() => tasks.id, { onDelete: 'cascade' }),
+  reason: text('reason').$type<UnscheduledReason>().notNull(),
+  unplacedMinutes: integer('unplaced_minutes').notNull(),
+  computedAt: ts('computed_at').notNull(),
+})
+
 export const googleAccounts = pgTable('google_accounts', {
   id: text('id').primaryKey(),
   email: text('email').notNull().unique(),
@@ -99,6 +109,23 @@ export const calendars = pgTable(
   (t) => [uniqueIndex('calendars_account_google_idx').on(t.accountId, t.googleId)],
 )
 
+export type AttendeeResponseStatus = 'needsAction' | 'declined' | 'tentative' | 'accepted'
+
+export interface EventAttendee {
+  email: string
+  displayName: string | null
+  responseStatus: AttendeeResponseStatus
+  organizer: boolean
+  self: boolean
+  optional: boolean
+}
+
+export interface EventOrganizer {
+  email: string
+  displayName: string | null
+  self: boolean
+}
+
 export const events = pgTable(
   'events',
   {
@@ -116,6 +143,13 @@ export const events = pgTable(
     transparency: text('transparency'),
     responseStatus: text('response_status'),
     htmlLink: text('html_link'),
+    description: text('description'),
+    conferenceUrl: text('conference_url'),
+    attendees: jsonb('attendees').$type<EventAttendee[]>(),
+    organizer: jsonb('organizer').$type<EventOrganizer>(),
+    eventType: text('event_type'),
+    recurringEventId: text('recurring_event_id'),
+    icalUid: text('ical_uid'),
     updatedAt: ts('updated_at').notNull().defaultNow(),
     deletedAt: ts('deleted_at'),
   },
@@ -129,6 +163,7 @@ export type ScheduleRow = typeof schedules.$inferSelect
 export type CategoryRow = typeof categories.$inferSelect
 export type TaskRow = typeof tasks.$inferSelect
 export type PlacementRow = typeof placements.$inferSelect
+export type UnscheduledRow = typeof unscheduled.$inferSelect
 export type GoogleAccountRow = typeof googleAccounts.$inferSelect
 export type CalendarRow = typeof calendars.$inferSelect
 export type EventRow = typeof events.$inferSelect

@@ -226,6 +226,9 @@ export function buildMcpServer(deps: McpDeps): McpServer {
             transparency: events.transparency,
             responseStatus: events.responseStatus,
             htmlLink: events.htmlLink,
+            description: events.description,
+            conferenceUrl: events.conferenceUrl,
+            attendees: events.attendees,
           })
           .from(events)
           .innerJoin(calendars, eq(events.calendarId, calendars.id))
