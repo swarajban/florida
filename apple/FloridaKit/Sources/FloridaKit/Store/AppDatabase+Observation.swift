@@ -53,6 +53,13 @@ extension AppDatabase {
         }
     }
 
+    /// Suggestions for optional routine blocks, as `optionalPlacements()` returns them.
+    public func observeOptionalPlacements() -> AsyncValueObservation<[OptionalPlacement]> {
+        observe { db in
+            try Self.optionalPlacements(db)
+        }
+    }
+
     /// Tasks the last scheduler run could not fully place, as `unscheduled()` returns them.
     public func observeUnscheduled() -> AsyncValueObservation<[UnscheduledTask]> {
         observe { db in

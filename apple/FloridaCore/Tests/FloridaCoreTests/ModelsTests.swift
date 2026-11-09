@@ -45,6 +45,7 @@ import Testing
         #expect(response.tasks.first?.context == .computer, "older servers omit the context")
         #expect(response.settings == nil)
         #expect(response.routineBlocks == [])
+        #expect(response.optionalPlacements == [], "older servers have no suggestions")
         #expect(response.placements.first?.endAt.timeIntervalSince(response.placements[0].startAt) == 3600)
     }
 
@@ -74,6 +75,48 @@ import Testing
             allows: [.computer, .office], createdAt: at, updatedAt: at)])
         #expect(response.categories.map { $0.area } == [.work, nil])
         #expect(response.tasks.first?.context == .errand)
+    }
+
+    @Test func decodesOptionalBlocksAndTheirSuggestions() throws {
+        let stamps = #""createdAt":"2026-11-01T00:00:00.000Z","updatedAt":"2026-11-01T00:00:00.000Z","deletedAt":null"#
+        let json = """
+        {
+          "cursor": "c",
+          "routineBlocks": [
+            {"id":"evening","name":"Evening","days":[1,2,3,4],"start":"20:00","end":"23:00",
+             "allows":["computer","home"],"optional":true,\(stamps)},
+            {"id":"home","name":"Home","days":[1],"start":"09:00","end":"15:30","allows":["computer"],\(stamps)}],
+          "schedules": [], "categories": [], "tasks": [], "events": [], "placements": [],
+          "optionalPlacements": [{"id":"o1","taskId":"t1","blockId":"evening",
+            "startAt":"2026-11-10T04:00:00.000Z","endAt":"2026-11-10T05:30:00.000Z","computedAt":"2026-11-09T17:00:00.000Z"}],
+          "accounts": [], "calendars": []
+        }
+        """
+        let response = try JSONCoding.decoder.decode(SyncResponse.self, from: Data(json.utf8))
+        #expect(response.routineBlocks.map(\.optional) == [true, false], "a block without the key is planned time")
+        #expect(response.optionalPlacements == [OptionalPlacement(
+            id: "o1", taskId: "t1", blockId: "evening",
+            startAt: try #require(JSONCoding.parseInstant("2026-11-10T04:00:00Z")),
+            endAt: try #require(JSONCoding.parseInstant("2026-11-10T05:30:00Z")),
+            computedAt: try #require(JSONCoding.parseInstant("2026-11-09T17:00:00Z")))])
+    }
+
+    @Test func schedulingResultCarriesSuggestionsApartFromThePlan() throws {
+        let old = try JSONCoding.decoder.decode(
+            SchedulingResult.self, from: Data(#"{"placements":[],"unscheduled":[],"late":[]}"#.utf8))
+        #expect(old.optional == [], "older servers omit the key")
+
+        let result = try JSONCoding.decoder.decode(SchedulingResult.self, from: Data("""
+            {"placements":[{"taskId":"t1","start":"2026-11-10T17:00:00.000Z","end":"2026-11-10T18:00:00.000Z","pinned":false}],
+             "unscheduled":[],"late":[],
+             "optional":[{"taskId":"t1","blockId":"evening","start":"2026-11-10T04:00:00.000Z","end":"2026-11-10T05:00:00.000Z"}]}
+            """.utf8))
+        let at = Date(timeIntervalSince1970: 0)
+        #expect(result.placementRows(computedAt: at).count == 1, "a suggestion is not a placement")
+        #expect(result.optionalPlacementRows(computedAt: at, makeId: { "id" }) == [OptionalPlacement(
+            id: "id", taskId: "t1", blockId: "evening",
+            startAt: try #require(JSONCoding.parseInstant("2026-11-10T04:00:00Z")),
+            endAt: try #require(JSONCoding.parseInstant("2026-11-10T05:00:00Z")), computedAt: at)])
     }
 
     @Test func categoryWriteSendsItsAreaAndOmitsAMissingOne() throws {

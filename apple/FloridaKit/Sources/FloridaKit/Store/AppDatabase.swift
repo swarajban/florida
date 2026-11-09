@@ -246,6 +246,26 @@ public final class AppDatabase: Sendable {
             try db.execute(sql: "DELETE FROM syncState WHERE key = 'cursor'")
         }
 
+        migrator.registerMigration("v5") { db in
+            // Blocks the user might work but does not count on (an evening).
+            try db.alter(table: "routineBlock") { t in
+                t.add(column: "optional", .boolean).notNull().defaults(to: false)
+            }
+
+            // Scheduler suggestions for those blocks, replaced wholesale like `placement`.
+            try db.create(table: "optionalPlacement") { t in
+                t.primaryKey("id", .text)
+                t.column("taskId", .text).notNull().indexed()
+                t.column("blockId", .text).notNull()
+                t.column("startAt", .datetime).notNull()
+                t.column("endAt", .datetime).notNull()
+                t.column("computedAt", .datetime).notNull()
+            }
+
+            // A block stored by the previous version has no `optional` yet; fetch the routine again.
+            try db.execute(sql: "DELETE FROM syncState WHERE key = 'cursor'")
+        }
+
         return migrator
     }
 }

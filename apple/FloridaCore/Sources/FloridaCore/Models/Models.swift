@@ -46,7 +46,9 @@ public enum CategoryArea: String, Codable, Hashable, Sendable, CaseIterable {
 
 /// One window of the weekly routine: wall-clock hours on some weekdays, in `UserSettings.timeZone`,
 /// during which tasks of the listed contexts may be scheduled. Time outside every block (sleep,
-/// family, gym) is never scheduled. Server-owned for now; clients read and show it.
+/// family, gym) is never scheduled. An `optional` block (a weekday evening) is never planned on
+/// either; the scheduler only suggests what to do there, as `OptionalPlacement`s. Server-owned for
+/// now; clients read and show it.
 public struct RoutineBlock: Codable, Hashable, Sendable, Identifiable {
     public var id: String
     public var name: String
@@ -58,13 +60,15 @@ public struct RoutineBlock: Codable, Hashable, Sendable, Identifiable {
     public var end: String
     /// Empty means the block is shown but nothing is scheduled in it.
     public var allows: [TaskContext]
+    /// Time the user might work but does not count on: suggested for, never planned on.
+    public var optional: Bool
     public var createdAt: Date
     public var updatedAt: Date
     public var deletedAt: Date?
 
     public init(
         id: String, name: String, days: [Int], start: String, end: String, allows: [TaskContext],
-        createdAt: Date, updatedAt: Date, deletedAt: Date? = nil
+        optional: Bool = false, createdAt: Date, updatedAt: Date, deletedAt: Date? = nil
     ) {
         self.id = id
         self.name = name
@@ -72,9 +76,26 @@ public struct RoutineBlock: Codable, Hashable, Sendable, Identifiable {
         self.start = start
         self.end = end
         self.allows = allows
+        self.optional = optional
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.deletedAt = deletedAt
+    }
+
+    /// Hand-written only so `optional` can default to false when the JSON (an older server) lacks
+    /// it; everything else is as synthesized.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        days = try c.decode([Int].self, forKey: .days)
+        start = try c.decode(String.self, forKey: .start)
+        end = try c.decode(String.self, forKey: .end)
+        allows = try c.decode([TaskContext].self, forKey: .allows)
+        optional = try c.decodeIfPresent(Bool.self, forKey: .optional) ?? false
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        updatedAt = try c.decode(Date.self, forKey: .updatedAt)
+        deletedAt = try c.decodeIfPresent(Date.self, forKey: .deletedAt)
     }
 }
 
@@ -278,6 +299,28 @@ public struct Placement: Codable, Hashable, Sendable, Identifiable {
         self.startAt = startAt
         self.endAt = endAt
         self.pinned = pinned
+        self.computedAt = computedAt
+    }
+}
+
+/// Scheduler output: what to do in an optional routine block (an evening) if the user chooses to
+/// work then. A suggestion, not the plan: the task keeps its `Placement`s, and the same task may be
+/// suggested for several blocks. Derived data; the server replaces all rows on every run.
+public struct OptionalPlacement: Codable, Hashable, Sendable, Identifiable {
+    public var id: String
+    public var taskId: String
+    /// The optional `RoutineBlock` the suggestion sits in.
+    public var blockId: String
+    public var startAt: Date
+    public var endAt: Date
+    public var computedAt: Date
+
+    public init(id: String, taskId: String, blockId: String, startAt: Date, endAt: Date, computedAt: Date) {
+        self.id = id
+        self.taskId = taskId
+        self.blockId = blockId
+        self.startAt = startAt
+        self.endAt = endAt
         self.computedAt = computedAt
     }
 }
@@ -548,8 +591,8 @@ public struct UnscheduledTask: Codable, Hashable, Sendable, Identifiable {
 
 /// `GET /api/sync?since=` response. `routineBlocks`, `schedules`, `categories`, `tasks` and `events`
 /// contain rows changed after `since`, including tombstones (`deletedAt` set). `settings` (nil before
-/// the server is seeded), `placements`, `unscheduled`, `accounts` and `calendars` are always complete
-/// and are meant to be replaced wholesale.
+/// the server is seeded), `placements`, `optionalPlacements`, `unscheduled`, `accounts` and `calendars`
+/// are always complete and are meant to be replaced wholesale.
 public struct SyncResponse: Codable, Sendable {
     /// Server time when the diff was taken; pass back as the next `since`.
     public var cursor: String
@@ -562,6 +605,8 @@ public struct SyncResponse: Codable, Sendable {
     public var tasks: [TaskItem]
     public var events: [CalendarEvent]
     public var placements: [Placement]
+    /// Suggestions for optional routine blocks; empty when the server predates them.
+    public var optionalPlacements: [OptionalPlacement]
     public var accounts: [GoogleAccount]
     public var calendars: [CalendarInfo]
     /// Empty when the server predates the field.
@@ -570,8 +615,8 @@ public struct SyncResponse: Codable, Sendable {
     public init(
         cursor: String, settings: UserSettings? = nil, routineBlocks: [RoutineBlock] = [],
         schedules: [Schedule] = [], categories: [TaskCategory] = [], tasks: [TaskItem] = [],
-        events: [CalendarEvent] = [], placements: [Placement] = [], accounts: [GoogleAccount] = [],
-        calendars: [CalendarInfo] = [], unscheduled: [UnscheduledTask] = []
+        events: [CalendarEvent] = [], placements: [Placement] = [], optionalPlacements: [OptionalPlacement] = [],
+        accounts: [GoogleAccount] = [], calendars: [CalendarInfo] = [], unscheduled: [UnscheduledTask] = []
     ) {
         self.cursor = cursor
         self.settings = settings
@@ -581,6 +626,7 @@ public struct SyncResponse: Codable, Sendable {
         self.tasks = tasks
         self.events = events
         self.placements = placements
+        self.optionalPlacements = optionalPlacements
         self.accounts = accounts
         self.calendars = calendars
         self.unscheduled = unscheduled
@@ -596,6 +642,7 @@ public struct SyncResponse: Codable, Sendable {
         tasks = try container.decode([TaskItem].self, forKey: .tasks)
         events = try container.decode([CalendarEvent].self, forKey: .events)
         placements = try container.decode([Placement].self, forKey: .placements)
+        optionalPlacements = try container.decodeIfPresent([OptionalPlacement].self, forKey: .optionalPlacements) ?? []
         accounts = try container.decode([GoogleAccount].self, forKey: .accounts)
         calendars = try container.decode([CalendarInfo].self, forKey: .calendars)
         unscheduled = try container.decodeIfPresent([UnscheduledTask].self, forKey: .unscheduled) ?? []
@@ -643,14 +690,43 @@ public struct SchedulingResult: Codable, Hashable, Sendable {
         }
     }
 
+    /// A suggestion for an optional routine block; see `OptionalPlacement`.
+    public struct Suggestion: Codable, Hashable, Sendable {
+        public var taskId: String
+        public var blockId: String
+        public var start: Date
+        public var end: Date
+
+        public init(taskId: String, blockId: String, start: Date, end: Date) {
+            self.taskId = taskId
+            self.blockId = blockId
+            self.start = start
+            self.end = end
+        }
+    }
+
     public var placements: [Piece]
     public var unscheduled: [Unscheduled]
     public var late: [Late]
+    /// Suggestions for optional blocks, never part of `placements`; empty from an older server.
+    public var optional: [Suggestion]
 
-    public init(placements: [Piece] = [], unscheduled: [Unscheduled] = [], late: [Late] = []) {
+    public init(
+        placements: [Piece] = [], unscheduled: [Unscheduled] = [], late: [Late] = [], optional: [Suggestion] = []
+    ) {
         self.placements = placements
         self.unscheduled = unscheduled
         self.late = late
+        self.optional = optional
+    }
+
+    /// Hand-written only so `optional` can default to empty when an older server omits it.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        placements = try c.decode([Piece].self, forKey: .placements)
+        unscheduled = try c.decode([Unscheduled].self, forKey: .unscheduled)
+        late = try c.decode([Late].self, forKey: .late)
+        optional = try c.decodeIfPresent([Suggestion].self, forKey: .optional) ?? []
     }
 
     /// The unscheduled tasks as `UnscheduledTask` rows, as `/api/sync` serves them after this run.
@@ -664,6 +740,17 @@ public struct SchedulingResult: Codable, Hashable, Sendable {
     public func placementRows(computedAt: Date, makeId: () -> String = { UUID().uuidString.lowercased() }) -> [Placement] {
         placements.map {
             Placement(id: makeId(), taskId: $0.taskId, startAt: $0.start, endAt: $0.end, pinned: $0.pinned, computedAt: computedAt)
+        }
+    }
+
+    /// Converts the suggestions into `OptionalPlacement` rows, as the server stores them after this run.
+    public func optionalPlacementRows(
+        computedAt: Date, makeId: () -> String = { UUID().uuidString.lowercased() }
+    ) -> [OptionalPlacement] {
+        optional.map {
+            OptionalPlacement(
+                id: makeId(), taskId: $0.taskId, blockId: $0.blockId, startAt: $0.start, endAt: $0.end,
+                computedAt: computedAt)
         }
     }
 }

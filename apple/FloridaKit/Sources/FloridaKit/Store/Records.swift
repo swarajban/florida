@@ -31,6 +31,10 @@ extension Placement: @retroactive FetchableRecord, @retroactive PersistableRecor
     public static let databaseTableName = "placement"
 }
 
+extension OptionalPlacement: @retroactive FetchableRecord, @retroactive PersistableRecord {
+    public static let databaseTableName = "optionalPlacement"
+}
+
 extension CalendarEvent: @retroactive FetchableRecord, @retroactive PersistableRecord {
     public static let databaseTableName = "event"
 }

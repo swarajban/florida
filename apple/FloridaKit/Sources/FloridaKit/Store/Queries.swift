@@ -83,6 +83,16 @@ extension AppDatabase {
         try writer.read { db in try UnscheduledTask.order(Column("taskId")).fetchAll(db) }
     }
 
+    /// The scheduler's suggestions for optional routine blocks, by start. Never part of the plan:
+    /// keep them out of anything that answers "what is scheduled".
+    public func optionalPlacements() throws -> [OptionalPlacement] {
+        try writer.read { db in try Self.optionalPlacements(db) }
+    }
+
+    static func optionalPlacements(_ db: Database) throws -> [OptionalPlacement] {
+        try OptionalPlacement.order(Column("startAt"), Column("taskId")).fetchAll(db)
+    }
+
     /// Placements overlapping `range`, by start.
     public func placements(in range: Range<Date>) throws -> [Placement] {
         try writer.read { db in try Self.placements(db, in: range) }
@@ -391,7 +401,7 @@ extension AppDatabase {
 
 extension AppDatabase {
     /// Merges a `GET /api/sync` response: upserts changed rows, drops tombstoned rows, replaces
-    /// the settings, placement, unscheduled, account and calendar tables, and stores the cursor. Tasks, categories,
+    /// the settings, placement, suggestion, unscheduled, account and calendar tables, and stores the cursor. Tasks, categories,
     /// schedules and events with a queued local write are left alone; the local version is newer and will be pushed.
     public func apply(_ response: SyncResponse) throws {
         try writer.write { db in
@@ -438,6 +448,7 @@ extension AppDatabase {
             }
 
             try Self.replacePlacements(db, with: response.placements)
+            try Self.replaceOptionalPlacements(db, with: response.optionalPlacements)
             try Self.replaceUnscheduled(db, with: response.unscheduled)
 
             _ = try GoogleAccount.deleteAll(db)
@@ -455,7 +466,7 @@ extension AppDatabase {
         }
     }
 
-    /// Replaces the placement and unscheduled tables with the result of a scheduler run.
+    /// Replaces the placement, suggestion and unscheduled tables with the result of a scheduler run.
     public func apply(_ result: SchedulingResult, computedAt: Date) throws {
         try writer.write { db in
             try Self.replaceSchedulerOutput(db, with: result, computedAt: computedAt)
@@ -464,7 +475,15 @@ extension AppDatabase {
 
     static func replaceSchedulerOutput(_ db: Database, with result: SchedulingResult, computedAt: Date) throws {
         try replacePlacements(db, with: result.placementRows(computedAt: computedAt))
+        try replaceOptionalPlacements(db, with: result.optionalPlacementRows(computedAt: computedAt))
         try replaceUnscheduled(db, with: result.unscheduledRows(computedAt: computedAt))
+    }
+
+    static func replaceOptionalPlacements(_ db: Database, with rows: [OptionalPlacement]) throws {
+        _ = try OptionalPlacement.deleteAll(db)
+        for row in rows {
+            try row.insert(db)
+        }
     }
 
     static func replacePlacements(_ db: Database, with placements: [Placement]) throws {

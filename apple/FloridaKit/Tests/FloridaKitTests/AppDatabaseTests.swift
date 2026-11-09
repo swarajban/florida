@@ -55,7 +55,7 @@ import Testing
 
         let db = try AppDatabase(writer: queue)
         let applied = try queue.read { db in try AppDatabase.migrator.appliedMigrations(db) }
-        #expect(applied == ["v1", "v2", "v3", "v4"])
+        #expect(applied == ["v1", "v2", "v3", "v4", "v5"])
         // Rows that predate the context column read as the default.
         #expect(try db.task(id: "t1")?.context == .computer)
         #expect(try db.routineBlocks() == [] && db.userSettings() == nil)
@@ -220,6 +220,45 @@ import Testing
         // A sync from a server without the field empties it, like placements.
         try db.apply(SyncResponse(cursor: "c2"))
         #expect(try db.unscheduled() == [])
+    }
+
+    @Test func suggestionsAreReplacedWholesaleAndStayOutOfThePlan() throws {
+        let db = try AppDatabase.inMemory()
+        let evening = RoutineBlock(
+            id: "evening", name: "Evening", days: [1, 2, 3, 4], start: "20:00", end: "23:00",
+            allows: [.computer, .home], optional: true, createdAt: Fixtures.t0, updatedAt: Fixtures.t0)
+        let at = Fixtures.instant("2026-11-09T17:00:00Z")
+        func suggestion(_ id: String, task: String, start: String, end: String) -> OptionalPlacement {
+            OptionalPlacement(
+                id: id, taskId: task, blockId: "evening", startAt: Fixtures.instant(start), endAt: Fixtures.instant(end),
+                computedAt: at)
+        }
+        // Sent out of order; the same task is suggested on two evenings.
+        let tuesday = suggestion("o2", task: "t1", start: "2026-11-11T04:00:00Z", end: "2026-11-11T05:00:00Z")
+        let monday = suggestion("o1", task: "t1", start: "2026-11-10T04:00:00Z", end: "2026-11-10T05:00:00Z")
+        try db.apply(SyncResponse(
+            cursor: "c1", routineBlocks: [evening], categories: [Fixtures.category()], tasks: [Fixtures.task(id: "t1")],
+            optionalPlacements: [tuesday, monday]))
+
+        #expect(try db.routineBlocks().map(\.optional) == [true])
+        #expect(try db.optionalPlacements() == [monday, tuesday])
+        // Monday evening holds a suggestion, but nothing is scheduled there.
+        #expect(try db.placements(in: Fixtures.allTime) == [])
+        #expect(try db.scheduledBlocks(in: Fixtures.allTime) == [])
+
+        // A scheduler result replaces the table and stamps its rows.
+        let computedAt = Fixtures.instant("2026-11-09T18:00:00Z")
+        try db.apply(SchedulingResult(optional: [
+            .init(taskId: "t1", blockId: "evening", start: Fixtures.instant("2026-11-12T04:00:00Z"),
+                  end: Fixtures.instant("2026-11-12T04:30:00Z")),
+        ]), computedAt: computedAt)
+        let rows = try db.optionalPlacements()
+        #expect(rows.map(\.startAt) == [Fixtures.instant("2026-11-12T04:00:00Z")])
+        #expect(rows.map(\.computedAt) == [computedAt] && rows.map(\.blockId) == ["evening"])
+
+        // A sync from a server without the field empties it, like placements.
+        try db.apply(SyncResponse(cursor: "c2"))
+        #expect(try db.optionalPlacements() == [])
     }
 
     @Test func applySyncResponseStoresTheRoutineSettingsContextAndArea() throws {
