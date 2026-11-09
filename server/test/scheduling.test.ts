@@ -172,6 +172,29 @@ describe('buildSchedulerInput', () => {
 })
 
 describe('runScheduling', () => {
+  it('keeps a block the user is in the middle of where it was', async () => {
+    const { db, close } = await createTestDb()
+    try {
+      await seed(db)
+      // NOW is 09:00 Monday in Los Angeles: the first run puts the hour-long task right at 09:00.
+      await db.insert(tasks).values(taskRow('deep-work', 'inbox'))
+      await runScheduling(db, { HORIZON_DAYS: 28 }, NOW)
+      expect(await db.select({ startAt: placements.startAt, endAt: placements.endAt }).from(placements)).toEqual([
+        { startAt: new Date('2026-11-09T17:00:00Z'), endAt: new Date('2026-11-09T18:00:00Z') },
+      ])
+
+      // Ten minutes in, something unrelated triggers a rerun. A fresh plan would start the block
+      // at 09:15 (the next grid point); the block in progress must stay at 09:00–10:00.
+      const tenMinutesIn = new Date('2026-11-09T17:10:00Z')
+      await runScheduling(db, { HORIZON_DAYS: 28 }, tenMinutesIn)
+      expect(await db.select({ startAt: placements.startAt, endAt: placements.endAt }).from(placements)).toEqual([
+        { startAt: new Date('2026-11-09T17:00:00Z'), endAt: new Date('2026-11-09T18:00:00Z') },
+      ])
+    } finally {
+      await close()
+    }
+  })
+
   it('replaces the unscheduled table wholesale next to placements', async () => {
     const { db, close } = await createTestDb()
     try {

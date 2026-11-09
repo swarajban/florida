@@ -5,7 +5,7 @@ import { and, eq, getTableColumns, isNull, sql } from 'drizzle-orm'
 import type { Config } from './config.js'
 import type { Db } from './db/client.js'
 import { calendars, events, placements, categories, schedules, tasks, unscheduled } from './db/schema.js'
-import type { EventRow, CategoryRow, ScheduleRow, TaskRow } from './db/schema.js'
+import type { EventRow, CategoryRow, PlacementRow, ScheduleRow, TaskRow } from './db/schema.js'
 
 export interface SchedulerSources {
   now: Date
@@ -14,6 +14,8 @@ export interface SchedulerSources {
   categories: CategoryRow[]
   tasks: TaskRow[]
   events: EventRow[]
+  /** The last run's output; the scheduler keeps these blocks where it still can. Omit for a fresh plan. */
+  previous?: PlacementRow[]
 }
 
 /**
@@ -21,7 +23,8 @@ export interface SchedulerSources {
  *
  * A task uses its own `scheduleId` when set, otherwise its category's. Tasks that are deleted,
  * completed, or belong to a deleted category are skipped. Busy time is every live, timed, opaque,
- * not-declined event that overlaps [now, now + horizon).
+ * not-declined event that overlaps [now, now + horizon). Previous placements go through as-is;
+ * the scheduler itself decides which are still valid.
  */
 export function buildSchedulerInput(src: SchedulerSources): SchedulerInput {
   const nowMs = src.now.getTime()
@@ -67,13 +70,22 @@ export function buildSchedulerInput(src: SchedulerSources): SchedulerInput {
     busy.push({ start: e.startAt.toISOString(), end: e.endAt.toISOString() })
   }
 
-  return {
+  const input: SchedulerInput = {
     now: src.now.toISOString(),
     schedules: liveSchedules,
     tasks: openTasks,
     busy,
     horizonDays: src.horizonDays,
   }
+  if (src.previous !== undefined) {
+    input.previous = src.previous.map((p) => ({
+      taskId: p.taskId,
+      start: p.startAt.toISOString(),
+      end: p.endAt.toISOString(),
+      pinned: p.pinned,
+    }))
+  }
+  return input
 }
 
 /** Arbitrary constant; serializes scheduler runs across processes via a transaction-scoped advisory lock. */
@@ -82,6 +94,9 @@ const SCHEDULER_LOCK_SQL = 'select pg_advisory_xact_lock(731104)'
 /**
  * Loads the current state, runs the scheduler, and replaces the `placements` and `unscheduled`
  * tables with the result inside one transaction. Returns the scheduler result so callers can relay it.
+ *
+ * The outgoing `placements` rows are fed back as `previous`, so a run triggered by an unrelated
+ * change (a new event, a task completed elsewhere) keeps the blocks the user is looking at.
  */
 export async function runScheduling(
   db: Db,
@@ -103,6 +118,7 @@ export async function runScheduling(
       .from(events)
       .innerJoin(calendars, eq(events.calendarId, calendars.id))
       .where(and(eq(calendars.selected, true), isNull(events.deletedAt)))
+    const previousRows = await tx.select().from(placements)
 
     const result = schedule(
       buildSchedulerInput({
@@ -112,6 +128,7 @@ export async function runScheduling(
         categories: categoryRows,
         tasks: taskRows,
         events: eventRows,
+        previous: previousRows,
       }),
     )
 
