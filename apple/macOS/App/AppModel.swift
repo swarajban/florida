@@ -42,6 +42,9 @@ final class AppModel {
     var todayAgenda: DayAgenda?
     /// The current minute; the menu bar title and agenda recompute from it.
     var clockNow = Date()
+    /// The time grid's gutter labels in the system's 12/24-hour form, built once and again when
+    /// the locale changes: the canvas must not format dates per frame.
+    private(set) var hourLabels: [(minute: Int, label: String)]
 
     // MARK: Navigation and selection
 
@@ -116,6 +119,7 @@ final class AppModel {
     @ObservationIgnored private var eventsObserver: Task<Void, Never>?
     @ObservationIgnored var agendaObserver: Task<Void, Never>?
     @ObservationIgnored var clockTask: Task<Void, Never>?
+    @ObservationIgnored private var localeObserver: (any NSObjectProtocol)?
     /// The main window, so the menu bar can bring it back instead of opening another.
     @ObservationIgnored weak var mainWindow: NSWindow?
     @ObservationIgnored private var isStarted = false
@@ -126,6 +130,7 @@ final class AppModel {
         let today = calendar.startOfDay(for: Date())
         anchorDate = today
         selectedDay = today
+        hourLabels = DateText.hourLabels(calendar: calendar)
     }
 
     // MARK: Lifecycle
@@ -136,6 +141,7 @@ final class AppModel {
     func start() {
         guard !isStarted else { return }
         isStarted = true
+        observeLocale()
         do {
             let database = try AppDatabase(path: AppDatabase.defaultURL().path(percentEncoded: false))
             self.database = database
@@ -152,6 +158,19 @@ final class AppModel {
             lastSyncError = "Could not read the saved server settings: \(error.localizedDescription)"
         }
         applyConfig(saved)
+    }
+
+    /// Rebuilds the gutter labels when the locale changes, which includes the 12/24-hour setting.
+    /// The block runs on the main queue, so the hop onto the main actor is only asserted.
+    private func observeLocale() {
+        localeObserver = NotificationCenter.default.addObserver(
+            forName: NSLocale.currentLocaleDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.hourLabels = DateText.hourLabels(calendar: self.calendar)
+            }
+        }
     }
 
     // MARK: Range and layout

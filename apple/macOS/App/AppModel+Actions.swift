@@ -8,8 +8,9 @@ enum RepeatableAction: Equatable {
     case doNow
     case doneForNow(minutes: Int)
 
+    /// Delete is left out: the selection moves on after `x`, so `.` would delete the next task.
     static let repeatableCommands: Set<AppCommand> = [
-        .complete, .delete, .pin, .unpin, .snooze,
+        .complete, .pin, .unpin, .snooze,
         .setPriorityAsap, .setPriorityHigh, .setPriorityMedium, .setPriorityLow,
     ]
 }

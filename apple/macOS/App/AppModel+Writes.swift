@@ -2,22 +2,22 @@ import FloridaKit
 import Foundation
 
 // Every write goes to the local store first; the live queries update the views, and a background
-// sync pushes the change. Nothing here awaits anything. Each task write records an undo entry
-// first, so `u` can put the previous version back.
+// sync pushes the change. Nothing here awaits anything. Each task write runs through
+// `recordingUndo`, so `u` can put back the fields it changed.
 
 extension AppModel {
     static let defaultDurationMinutes = 30
 
-    /// Upserts a task locally, remembers the version it replaces for `u`, and syncs in the
+    /// Upserts a task locally, remembers the fields it changes for `u`, and syncs in the
     /// background. `undoLabel` is past tense ("Edited “X”"); returns false when the store refused.
     @discardableResult
     func save(_ task: TaskItem, undoLabel: String? = nil) -> Bool {
         guard let database else { return false }
-        recordUndo(undoLabel ?? "Edited \(Self.quoted(task.title))", taskIds: [task.id])
         do {
-            try database.saveTask(task)
+            try recordingUndo(undoLabel ?? "Edited \(Self.quoted(task.title))", taskId: task.id) {
+                try database.saveTask(task)
+            }
         } catch {
-            undoStack.removeLast()
             statusMessage = "Could not save: \(error.localizedDescription)"
             return false
         }
@@ -33,11 +33,11 @@ extension AppModel {
         }
         guard let database else { return }
         let next = neighbor(of: .task(task.id))
-        recordUndo("Deleted \(Self.quoted(task.title))", taskIds: [task.id])
         do {
-            try database.deleteTask(id: task.id)
+            try recordingUndo("Deleted \(Self.quoted(task.title))", taskId: task.id) {
+                try database.deleteTask(id: task.id)
+            }
         } catch {
-            undoStack.removeLast()
             statusMessage = "Could not delete: \(error.localizedDescription)"
             return
         }
@@ -60,11 +60,11 @@ extension AppModel {
         guard let database else { return }
         let next = neighbor(of: .task(task.id))
         completionFeedback(for: task)
-        recordUndo("Completed \(Self.quoted(task.title))", taskIds: [task.id])
         do {
-            try database.completeTask(id: task.id)
+            try recordingUndo("Completed \(Self.quoted(task.title))", taskId: task.id) {
+                try database.completeTask(id: task.id)
+            }
         } catch {
-            undoStack.removeLast()
             statusMessage = "Could not complete: \(error.localizedDescription)"
             return
         }

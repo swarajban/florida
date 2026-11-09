@@ -21,7 +21,7 @@ struct ScheduleDraft: Equatable {
         timeZone = schedule.timeZone
         var days = Array(repeating: [Window](), count: 7)
         for window in schedule.windows {
-            guard let start = Self.minutes(window.start), let end = Self.minutes(window.end) else { continue }
+            guard let start = ClockTime.minutes(window.start), let end = ClockTime.minutes(window.end) else { continue }
             for day in window.days where days.indices.contains(day) {
                 days[day].append(Window(start: start, end: end))
             }
@@ -39,7 +39,11 @@ struct ScheduleDraft: Equatable {
         }
         return daysByTimes
             .sorted { $0.key.start != $1.key.start ? $0.key.start < $1.key.start : $0.key.end < $1.key.end }
-            .map { ScheduleWindow(days: $0.value.sorted(), start: Self.clock($0.key.start), end: Self.clock($0.key.end)) }
+            .map {
+                ScheduleWindow(
+                    days: $0.value.sorted(), start: ClockTime.string(minutes: $0.key.start),
+                    end: ClockTime.string(minutes: $0.key.end))
+            }
     }
 
     /// Whether saving would change `schedule` (window ids and grouping aside).
@@ -64,29 +68,11 @@ struct ScheduleDraft: Equatable {
     /// The editor's "+" for a day: after the day's last window when there is room, else 9–5.
     mutating func addWindow(on day: Int) {
         let after = days[day].map(\.end).max() ?? 0
-        let window = after > 0 && after + 60 <= Self.lastMinute
-            ? Window(start: after + 60, end: min(after + 180, Self.lastMinute))
+        let window = after > 0 && after + 60 <= ClockTime.lastMinute
+            ? Window(start: after + 60, end: min(after + 180, ClockTime.lastMinute))
             : Window(start: 9 * 60, end: 17 * 60)
         days[day].append(window)
         days[day].sort { $0.start < $1.start }
-    }
-
-    /// The server takes "00:00"…"23:59", so a window can end at 23:59 at the latest.
-    static let lastMinute = 23 * 60 + 59
-
-    /// "09:30" → 570; nil for anything that is not "HH:MM" within a day.
-    static func minutes(_ clock: String) -> Int? {
-        let parts = clock.split(separator: ":")
-        guard parts.count == 2, let hour = Int(parts[0]), let minute = Int(parts[1]),
-              (0...24).contains(hour), (0..<60).contains(minute)
-        else { return nil }
-        return min(hour * 60 + minute, 24 * 60)
-    }
-
-    /// 570 → "09:30".
-    static func clock(_ minutes: Int) -> String {
-        let clamped = min(max(minutes, 0), lastMinute)
-        return String(format: "%02d:%02d", clamped / 60, clamped % 60)
     }
 
     private struct Pair: Hashable {

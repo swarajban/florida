@@ -49,6 +49,8 @@ struct GridLayout {
         let startDayIndex: Int
         let endDayIndex: Int
         let start: Date
+        /// The start of the local day after the event's last one; the bar dims once it has passed.
+        let localEnd: Date
         let title: String
         let tint: Color
     }
@@ -159,7 +161,9 @@ struct GridLayout {
                 guard let source = sources[span.id] else { continue }
                 let block = AllDayBlock(
                     id: span.id, item: source.item, row: span.row, startDayIndex: span.startDayIndex,
-                    endDayIndex: span.endDayIndex, start: source.start, title: source.title, tint: source.tint)
+                    endDayIndex: span.endDayIndex, start: source.start,
+                    localEnd: AllDayDate.localDays(start: source.start, end: source.end, calendar: calendar).upperBound,
+                    title: source.title, tint: source.tint)
                 layout.allDayBlocks.append(block)
                 for index in span.startDayIndex...span.endDayIndex {
                     layout.allDayByDay[index].append(block)

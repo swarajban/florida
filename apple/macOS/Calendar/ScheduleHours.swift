@@ -24,8 +24,8 @@ enum ScheduleHours {
                 let midnight = zoneCalendar.startOfDay(for: date)
                 let weekday = zoneCalendar.component(.weekday, from: date) - 1
                 for window in schedule.windows where window.days.contains(weekday) {
-                    guard let startMinute = ScheduleDraft.minutes(window.start),
-                          let endMinute = ScheduleDraft.minutes(window.end), endMinute > startMinute,
+                    guard let startMinute = ClockTime.minutes(window.start),
+                          let endMinute = ClockTime.minutes(window.end), endMinute > startMinute,
                           let start = instant(minute: startMinute, after: midnight, calendar: zoneCalendar),
                           let end = instant(minute: endMinute, after: midnight, calendar: zoneCalendar)
                     else { continue }

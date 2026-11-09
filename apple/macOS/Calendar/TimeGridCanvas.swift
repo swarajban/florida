@@ -4,7 +4,7 @@ import SwiftUI
 /// Draws one `GridLayout` into a `Canvas`: off-hours shading, hour lines and labels, day
 /// separators, the day tints, free gaps, every block (sliding from its old slot while
 /// `transition` runs, the current one filling as it goes), the focus ring and the "now" line.
-/// Pure drawing from precomputed frames; `now` is the model's minute clock.
+/// Pure drawing from precomputed frames and labels; `now` is the model's minute clock.
 struct TimeGridCanvas: View {
     let layout: GridLayout
     let selection: ItemID?
@@ -15,6 +15,8 @@ struct TimeGridCanvas: View {
     let transition: LayoutTransition?
     let showsProgress: Bool
     let calendar: Calendar
+    /// `AppModel.hourLabels`: formatted once, not per frame.
+    let hourLabels: [(minute: Int, label: String)]
     let grid: TimeGrid
     let gutterWidth: CGFloat
 
@@ -52,7 +54,7 @@ struct TimeGridCanvas: View {
 
     private func drawHourLines(in context: inout GraphicsContext, geometry: GridGeometry) {
         let lineColor = Color(nsColor: .separatorColor)
-        for (minute, label) in DateText.hourLabels(calendar: calendar) {
+        for (minute, label) in hourLabels {
             let y = grid.y(forMinute: minute)
             var line = Path()
             line.move(to: CGPoint(x: gutterWidth, y: y))

@@ -65,7 +65,10 @@ extension AppModel {
         let moved = Set(changed.keys.map { String($0.prefix { $0 != "#" }) }).subtracting(actedOn)
         guard !moved.isEmpty else { return }
         let text = "Moved \(moved.count) task\(moved.count == 1 ? "" : "s")"
-        showGhost(undo == nil ? text : "\(text) · u to undo", for: .seconds(2))
+        // `u` undoes the cause only when the reshuffle followed one of our own writes just now;
+        // a later one came from elsewhere (an event moved, the server re-planned).
+        let followsOurWrite = undo.map { Date().timeIntervalSince($0.at) < 5 } ?? false
+        showGhost(followsOurWrite ? "\(text) · u to undo" : text, for: .seconds(2))
     }
 
     /// "Review doc · 23m": the task block (else timed meeting) happening now and what is left of it.

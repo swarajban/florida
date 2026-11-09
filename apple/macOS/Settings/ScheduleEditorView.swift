@@ -129,12 +129,12 @@ struct ClockField: View {
         let reference = calendar.date(from: DateComponents(year: 2001, month: 1, day: 15)) ?? Date()
         return Binding(
             get: {
-                let clamped = min(max(minutes, 0), ScheduleDraft.lastMinute)
+                let clamped = min(max(minutes, 0), ClockTime.lastMinute)
                 return calendar.date(bySettingHour: clamped / 60, minute: clamped % 60, second: 0, of: reference) ?? reference
             },
             set: { date in
                 let parts = calendar.dateComponents([.hour, .minute], from: date)
-                minutes = min((parts.hour ?? 0) * 60 + (parts.minute ?? 0), ScheduleDraft.lastMinute)
+                minutes = min((parts.hour ?? 0) * 60 + (parts.minute ?? 0), ClockTime.lastMinute)
             })
     }
 }

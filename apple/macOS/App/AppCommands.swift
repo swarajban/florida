@@ -4,6 +4,8 @@ import SwiftUI
 /// The menu bar. Items mirror `MacKeymap.default`; the ⌘ shortcuts shown here are the same chords
 /// the key monitor handles, so a shortcut works whether the main window or Settings is key.
 /// Single-letter keys are not menu shortcuts: a menu key equivalent would also fire while typing.
+/// Main-actor isolated (as the `Commands` conformance implies) so the items can read the model.
+@MainActor
 struct AppCommands: Commands {
     let model: AppModel
 

@@ -31,7 +31,8 @@ struct AllDayStripView: View {
                             block: block,
                             columnWidth: columnWidth,
                             gutterWidth: gutterWidth,
-                            isSelected: model.selection == block.item)
+                            isSelected: model.selection == block.item,
+                            isPast: block.localEnd <= model.clockNow)
                             .onTapGesture(count: 2) {
                                 model.select(block.item, in: .calendar)
                                 model.editSelection()
@@ -62,6 +63,8 @@ private struct AllDayBar: View {
     let columnWidth: CGFloat
     let gutterWidth: CGFloat
     let isSelected: Bool
+    /// The event's last local day has ended (its stored UTC start would dim it a day early).
+    let isPast: Bool
 
     /// Where the bar is drawn in the strip; also the detail popover's anchor.
     static func frame(for block: GridLayout.AllDayBlock, columnWidth: CGFloat, gutterWidth: CGFloat) -> CGRect {
@@ -75,7 +78,7 @@ private struct AllDayBar: View {
 
     var body: some View {
         let frame = Self.frame(for: block, columnWidth: columnWidth, gutterWidth: gutterWidth)
-        let opacity: Double = block.start < Date() ? 0.6 : 0.9
+        let opacity: Double = isPast ? 0.6 : 0.9
         let shape = RoundedRectangle(cornerRadius: 4)
 
         Text(block.title)

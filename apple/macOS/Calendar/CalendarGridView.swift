@@ -29,8 +29,8 @@ struct CalendarGridView: View {
                         TimeGridCanvas(
                             layout: model.gridLayout, selection: model.selection, selectedDay: model.selectedDay,
                             now: model.clockNow, frameDate: timeline.date, transition: model.layoutTransition,
-                            showsProgress: showsProgress, calendar: model.calendar, grid: Self.grid,
-                            gutterWidth: Self.gutterWidth)
+                            showsProgress: showsProgress, calendar: model.calendar, hourLabels: model.hourLabels,
+                            grid: Self.grid, gutterWidth: Self.gutterWidth)
                     }
                     .onTapGesture(count: 2) { point in
                         handleTap(at: point, width: geometry.size.width, isDouble: true)

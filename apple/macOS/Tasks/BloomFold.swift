@@ -3,8 +3,10 @@ import SwiftUI
 /// The removal of a completed task row: its category color blooms over it while it folds up
 /// and fades, all within the list's ~150 ms removal animation.
 struct BloomFold: ViewModifier, Animatable {
-    /// 0 while the row is shown, 1 once it is gone.
-    var progress: Double
+    /// 0 while the row is shown, 1 once it is gone. Nonisolated, which a stored `Sendable`
+    /// property of a main-actor value type may be (SE-0434), so the nonisolated `Animatable`
+    /// accessors below can read and write it from any isolation.
+    nonisolated var progress: Double
     let tint: Color
 
     /// Nonisolated: `Animatable` is, while the `ViewModifier` conformance makes the type
