@@ -34,8 +34,9 @@ interface Context {
  * Places open tasks into free time. Pure and deterministic: the same input always yields the
  * same output, so it can run anywhere (server, device) and be compared across runs.
  *
- * Order of work: pinned tasks first (they are fixed), then flexible tasks sorted by
- * `compareTasks`, each placed into the earliest free time inside its schedule's windows.
+ * Order of work: pinned tasks first (they are fixed), then reserve in-progress work.
+ * Flexible tasks sorted by `compareTasks` reuse valid prior blocks before placing their
+ * remaining work into the earliest free time inside their schedule's windows.
  */
 export function schedule(input: SchedulerInput): SchedulerResult {
   const now = parseInstant(input.now, 'now')
@@ -47,12 +48,11 @@ export function schedule(input: SchedulerInput): SchedulerResult {
   }
   const schedules = new Map(input.schedules.map((s) => [s.id, s]))
 
-  let busy = mergeSpans(
-    input.busy.map((i) => ({
-      start: parseInstant(i.start, 'busy.start'),
-      end: parseInstant(i.end, 'busy.end'),
-    })),
-  )
+  const busySpans = input.busy.map((i) => ({
+    start: parseInstant(i.start, 'busy.start'),
+    end: parseInstant(i.end, 'busy.end'),
+  }))
+  let busy = mergeSpans(busySpans)
   const placements: Placement[] = []
   const unscheduled: Unscheduled[] = []
   const late: Late[] = []
@@ -71,29 +71,54 @@ export function schedule(input: SchedulerInput): SchedulerResult {
     .filter((t) => t.pinnedStart === undefined)
     .sort((a, b) => compareTasks(a, b, schedules))
 
+  const previous = new Map<string, Span[]>(flexible.map((task) => [task.id, []]))
+  for (const block of input.previous ?? []) {
+    previous.get(block.taskId)?.push({
+      start: parseInstant(block.start, 'previous.start'),
+      end: parseInstant(block.end, 'previous.end'),
+    })
+  }
+
+  // Reserve work already underway before new tasks can claim its time.
+  const active = new Map<string, Span[]>()
+  for (const task of flexible) {
+    let remaining = remainingMinutes(task) * MINUTE
+    const spans: Span[] = []
+    const prior = previous.get(task.id) ?? []
+    prior.sort((a, b) => a.start - b.start)
+    for (const block of prior) {
+      if (remaining <= 0 || block.start > now || block.end <= now) continue
+      const span = { start: block.start, end: Math.max(now, Math.min(block.end, block.start + remaining)) }
+      for (const b of busySpans) {
+        if (b.end > b.start && b.start > now && b.start < span.end) span.end = b.start
+      }
+      spans.push(span)
+      busy = addSpan(busy, span)
+      remaining = Math.max(0, remaining - (span.end - span.start))
+    }
+    active.set(task.id, spans)
+  }
+
   for (const task of flexible) {
     const sched = schedules.get(task.scheduleId)
-    if (sched === undefined) {
-      unscheduled.push({
-        taskId: task.id,
-        reason: 'unknown_schedule',
-        unplacedMinutes: remainingMinutes(task),
-      })
-      continue
-    }
-
-    const fit = placeTask(task, sched, ctx, busy)
+    const retained = active.get(task.id) ?? []
+    const remaining = Math.max(0, remainingMinutes(task) * MINUTE - retained.reduce((sum, s) => sum + s.end - s.start, 0))
+    const fit: Fit = sched === undefined
+      ? { spans: retained, remaining, busy, hardLimited: false }
+      : placeTask(task, sched, ctx, busy, previous.get(task.id) ?? [], retained)
     busy = fit.busy
     for (const span of fit.spans) placements.push(toPlacement(task.id, span, false))
 
     if (fit.remaining > 0) {
       unscheduled.push({
         taskId: task.id,
-        reason: fit.hardLimited ? 'no_fit_before_hard_deadline' : 'no_fit_in_horizon',
+        reason: sched === undefined ? 'unknown_schedule'
+          : fit.hardLimited ? 'no_fit_before_hard_deadline' : 'no_fit_in_horizon',
         unplacedMinutes: fit.remaining / MINUTE,
       })
     }
 
+    if (sched === undefined && fit.spans.length === 0) continue
     const due = effectiveDue(task)
     if (due !== undefined && fit.spans.length > 0) {
       const eta = Math.max(...fit.spans.map((s) => s.end))
@@ -108,7 +133,7 @@ export function schedule(input: SchedulerInput): SchedulerResult {
 /**
  * ASAP first; then earliest due day (no deadline last); hard before soft on the same due day;
  * then priority; then creation time. Earliest-deadline-first maximizes deadlines met, and hard
- * deadlines are still guaranteed by the overflow pass in `placeTask`.
+ * deadlines constrain new blocks, including the overflow pass in `placeTask`.
  */
 function compareTasks(a: Task, b: Task, schedules: Map<string, Schedule>): number {
   const aAsap = a.priority === 'asap'
@@ -138,20 +163,39 @@ interface Fit {
   hardLimited: boolean
 }
 
-function placeTask(task: Task, sched: Schedule, ctx: Context, initialBusy: Span[]): Fit {
+function placeTask(
+  task: Task,
+  sched: Schedule,
+  ctx: Context,
+  initialBusy: Span[],
+  previous: Span[],
+  retained: Span[],
+): Fit {
   const remainingTotal = remainingMinutes(task) * MINUTE
   const minChunk =
     Math.min(task.minChunkMinutes ?? Number.POSITIVE_INFINITY, remainingMinutes(task)) * MINUTE
   const earliest = Math.max(
     ctx.now,
     task.startAt === undefined ? ctx.now : parseInstant(task.startAt, 'startAt'),
+    ...retained.map((span) => span.end),
   )
   const hardDue = task.deadlineType === 'hard' ? effectiveDue(task)?.ms : undefined
   const limit = Math.min(ctx.horizonEnd, hardDue ?? Number.POSITIVE_INFINITY)
 
   let busy = initialBusy
-  let remaining = remainingTotal
-  const spans: Span[] = []
+  let remaining = Math.max(0, remainingTotal - retained.reduce((sum, s) => sum + s.end - s.start, 0))
+  const spans: Span[] = [...retained]
+
+  for (const span of previous) {
+    const duration = span.end - span.start
+    if (duration <= 0 || duration > remaining || span.start < earliest || span.end > limit) continue
+    const windows = windowsOn(sched, localDate(span.start, sched.timeZone))
+    if (!windows.some((window) => window.start <= span.start && span.end <= window.end)) continue
+    if (busy.some((b) => b.start < span.end && span.start < b.end)) continue
+    spans.push(span)
+    busy = addSpan(busy, span)
+    remaining -= duration
+  }
 
   const fill = (windowsForDay: (date: LocalDate) => Span[]): void => {
     const firstDay = dayNumber(localDate(earliest, sched.timeZone))

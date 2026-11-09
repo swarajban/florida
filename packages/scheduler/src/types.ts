@@ -49,13 +49,24 @@ export interface Interval {
 }
 
 export interface SchedulerInput {
-  /** ISO 8601 instant. Nothing is placed before it. */
+  /** ISO 8601 instant. New flexible blocks never start before it; in-progress blocks may. */
   now: string
   schedules: Schedule[]
   /** Open tasks only; completed tasks must not be passed. */
   tasks: Task[]
   /** Time that is unavailable: calendar events and anything else that blocks. */
   busy: Interval[]
+  /**
+   * Prior run's placements. Pinned tasks ignore these. In-progress blocks keep their start
+   * and end, counting their full duration toward remaining work; if less work remains, their
+   * end is trimmed, but never before `now`. Busy intervals starting after `now` cut an active
+   * block short at their start; its remaining work is rescheduled. Window and start-date
+   * changes do not move active work. Finished tasks and past blocks are ignored.
+   * Future blocks are reused whole, in task ordering, if they still fit remaining work,
+   * the horizon, schedule windows, start date, hard deadline, and time not already occupied.
+   * Only work not retained is placed into the earliest free slots. Omit for a fresh plan.
+   */
+  previous?: Placement[]
   /** How far ahead of `now` to place tasks. Default 28. */
   horizonDays?: number
   /** Placement grid in minutes; starts snap up to it. Default 15. */
@@ -97,6 +108,6 @@ export interface SchedulerResult {
   /** Sorted by start, then task id. */
   placements: Placement[]
   unscheduled: Unscheduled[]
-  /** Tasks whose ETA passes their due time (soft deadlines; hard deadlines never do). */
+  /** Tasks whose ETA passes their due time. Only retained active work can pass a hard deadline. */
   late: Late[]
 }

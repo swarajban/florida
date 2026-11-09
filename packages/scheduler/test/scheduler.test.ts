@@ -254,6 +254,192 @@ describe('time zones', () => {
   })
 })
 
+describe('plan stability', () => {
+  const at = (time: string): string => iso(`2026-11-09T${time}:00-08:00`)
+  const block = (taskId: string, start: string, end: string) => ({
+    taskId, start: at(start), end: at(end), pinned: false,
+  })
+
+  it('reuses the first run unchanged, including split blocks and tomorrow', () => {
+    const tasks = [
+      task({ id: 'a', durationMinutes: 480, minChunkMinutes: 60 }),
+      task({ id: 'b', priority: 'low' }),
+    ]
+    const first = run(tasks)
+    expect(first.placements).toEqual([
+      block('a', '09:00', '12:00'),
+      block('a', '13:00', '17:00'),
+      { taskId: 'a', start: iso('2026-11-10T09:00:00-08:00'), end: iso('2026-11-10T10:00:00-08:00'), pinned: false },
+      { taskId: 'b', start: iso('2026-11-10T10:00:00-08:00'), end: iso('2026-11-10T11:00:00-08:00'), pinned: false },
+    ])
+    expect(run(tasks, [], { previous: first.placements })).toEqual(first)
+  })
+
+  it('keeps an in-progress block through successive runs, ahead of new ASAP work', () => {
+    const a = task({ id: 'a' })
+    const first = run([a])
+    const ten = run([a], [], { now: at('09:10'), previous: first.placements })
+    expect(ten.placements).toEqual([block('a', '09:00', '10:00')])
+    const forty = run([a, task({ id: 'urgent', priority: 'asap' })], [], {
+      now: at('09:40'), previous: ten.placements,
+    })
+    expect(forty.placements).toEqual([
+      block('a', '09:00', '10:00'), block('urgent', '10:00', '11:00'),
+    ])
+  })
+
+  it.each([
+    [30, '09:30'],
+    [50, '09:20'], // Only ten minutes remain, but the retained end cannot precede now.
+  ])('trims active work with %i completed minutes, never before now', (completedMinutes, end) => {
+    const result = run([task({ id: 'a', completedMinutes })], [], {
+      now: at('09:20'), previous: [block('a', '09:00', '10:00')],
+    })
+    expect(result.placements).toEqual([block('a', '09:00', end)])
+    expect(result.unscheduled).toEqual([])
+  })
+
+  it('frees completed and removed tasks, and ignores elapsed blocks', () => {
+    const result = run([task({ id: 'done', completedMinutes: 60 }), task({ id: 'new' })], [], {
+      now: at('10:00'),
+      previous: [block('done', '09:30', '10:30'), block('removed', '10:00', '11:00'), block('new', '09:00', '10:00')],
+    })
+    expect(result.placements).toEqual([block('new', '10:00', '11:00')])
+  })
+
+  it('counts the full active block and places only the remainder after it', () => {
+    const result = run([task({ id: 'a', durationMinutes: 90 })], [], {
+      now: at('09:40'), previous: [block('a', '09:00', '10:00')],
+    })
+    expect(result.placements).toEqual([block('a', '09:00', '10:00'), block('a', '10:00', '10:30')])
+  })
+
+  it('does not move existing blocks to pack in a new low-priority task', () => {
+    const result = run([task({ id: 'a' }), task({ id: 'b' }), task({ id: 'new', priority: 'low' })], [], {
+      previous: [block('a', '11:00', '12:00'), block('b', '13:00', '14:00')],
+    })
+    expect(result.placements).toEqual([
+      block('new', '09:00', '10:00'), block('a', '11:00', '12:00'), block('b', '13:00', '14:00'),
+    ])
+  })
+
+  it('lets new ASAP work take the earliest slot, moving only the displaced block', () => {
+    const result = run([task({ id: 'a' }), task({ id: 'b' }), task({ id: 'urgent', priority: 'asap' })], [], {
+      now: at('08:00'), previous: [block('a', '09:00', '10:00'), block('b', '11:00', '12:00')],
+    })
+    expect(result.placements).toEqual([
+      block('urgent', '09:00', '10:00'), block('a', '10:00', '11:00'), block('b', '11:00', '12:00'),
+    ])
+  })
+
+  it('allows displacement to cascade in task order when lower-priority blocks are tightly packed', () => {
+    const result = run([task({ id: 'a' }), task({ id: 'b' }), task({ id: 'urgent', priority: 'asap' })], [], {
+      now: at('08:00'), previous: [block('a', '09:00', '10:00'), block('b', '10:00', '11:00')],
+    })
+    expect(result.placements).toEqual([
+      block('urgent', '09:00', '10:00'), block('a', '10:00', '11:00'), block('b', '11:00', '12:00'),
+    ])
+  })
+
+  it('drops a future block that overlaps new busy time instead of keeping a fragment', () => {
+    const result = run([task({ id: 'a' })], [busy(at('09:30'), at('10:00'))], {
+      now: at('08:00'), previous: [block('a', '09:00', '10:00')],
+    })
+    expect(result.placements).toEqual([block('a', '10:00', '11:00')])
+  })
+
+  it('drops blocks outside a changed schedule window', () => {
+    const result = run([task({ id: 'a' })], [], {
+      now: at('08:00'),
+      previous: [block('a', '09:00', '10:00')],
+      schedules: [{ ...WORK, windows: [{ days: [1], start: '11:00', end: '12:00' }] }],
+    })
+    expect(result.placements).toEqual([block('a', '11:00', '12:00')])
+  })
+
+  it('drops a future block before a changed start date', () => {
+    const result = run([task({ id: 'a', startAt: at('10:15') })], [], {
+      previous: [block('a', '10:00', '11:00')],
+    })
+    expect(result.placements).toEqual([block('a', '10:15', '11:15')])
+  })
+
+  it('drops a future block past a hard deadline but reuses a late soft-deadline block', () => {
+    const result = run([
+      task({ id: 'hard', deadlineType: 'hard', dueAt: at('10:00') }),
+      task({ id: 'soft', deadlineType: 'soft', dueAt: at('10:00') }),
+    ], [], { previous: [block('hard', '10:00', '11:00'), block('soft', '11:00', '12:00')] })
+    expect(result.placements).toEqual([block('hard', '09:00', '10:00'), block('soft', '11:00', '12:00')])
+    expect(result.late).toEqual([{ taskId: 'soft', dueAt: at('10:00'), eta: at('12:00') }])
+  })
+
+  it('does not retain future blocks beyond the horizon', () => {
+    const result = run([task({ id: 'a' })], [], {
+      horizonDays: 1,
+      previous: [{ taskId: 'a', start: iso('2026-11-10T10:00:00-08:00'), end: iso('2026-11-10T11:00:00-08:00'), pinned: false }],
+    })
+    expect(result.placements).toEqual([block('a', '09:00', '10:00')])
+  })
+
+  it('retains only whole future blocks when completed minutes shorten the task', () => {
+    const result = run([task({ id: 'a', durationMinutes: 120, completedMinutes: 30, minChunkMinutes: 30 })], [], {
+      previous: [block('a', '10:00', '11:00'), block('a', '13:00', '14:00')],
+    })
+    expect(result.placements).toEqual([block('a', '09:00', '09:30'), block('a', '10:00', '11:00')])
+  })
+
+  it('cuts active work at the first upcoming busy interval and reschedules the remainder', () => {
+    const result = run([task({ id: 'a' })], [
+      busy(at('09:45'), at('10:00')), busy(at('09:30'), at('09:40')),
+    ], {
+      now: at('09:10'), previous: [block('a', '09:00', '10:00')],
+    })
+    // Keep 30 minutes of the original hour. Neither gap before 10:00 fits the remaining 30.
+    expect(result.placements).toEqual([block('a', '09:00', '09:30'), block('a', '10:00', '10:30')])
+    expect(result.unscheduled).toEqual([])
+  })
+
+  it('preserves active work despite already-started busy time or a changed schedule and start date', () => {
+    const result = run([task({ id: 'a', startAt: at('13:00') })], [busy(at('09:30'), at('10:30'))], {
+      now: at('09:40'), previous: [block('a', '09:00', '10:00')],
+      schedules: [{ ...WORK, windows: [] }],
+    })
+    expect(result.placements).toEqual([block('a', '09:00', '10:00')])
+    expect(result.unscheduled).toEqual([])
+  })
+
+  it('keeps active work even if its schedule disappeared, reporting only the unplaced remainder', () => {
+    const result = run([task({ id: 'a', scheduleId: 'missing', durationMinutes: 90 })], [], {
+      now: at('09:40'), previous: [block('a', '09:00', '10:00')],
+    })
+    expect(result.placements).toEqual([block('a', '09:00', '10:00')])
+    expect(result.unscheduled).toEqual([{ taskId: 'a', reason: 'unknown_schedule', unplacedMinutes: 30 }])
+  })
+
+  it('keeps active work past a changed hard deadline and reports its retained ETA', () => {
+    const result = run([task({ id: 'a', deadlineType: 'hard', dueAt: at('09:30') })], [], {
+      now: at('09:40'), previous: [block('a', '09:00', '10:00')],
+    })
+    expect(result.placements).toEqual([block('a', '09:00', '10:00')])
+    expect(result.unscheduled).toEqual([])
+    expect(result.late).toEqual([{ taskId: 'a', dueAt: at('09:30'), eta: at('10:00') }])
+  })
+
+  it('leaves pinned behavior unchanged and ignores stale previous blocks for pinned tasks', () => {
+    const tasks = [
+      task({ id: 'pinned', pinnedStart: at('08:00'), completedMinutes: 30 }),
+      task({ id: 'flex' }),
+    ]
+    const result = run(tasks, [], {
+      previous: [block('pinned', '09:00', '10:00'), block('flex', '08:00', '09:00')],
+    })
+    expect(result).toEqual(run(tasks))
+    expect(result.placements).toEqual([
+      { ...block('pinned', '08:00', '08:30'), pinned: true }, block('flex', '09:00', '10:00'),
+    ])
+  })
+})
+
 describe('input validation', () => {
   it('rejects unparsable instants', () => {
     expect(() => run([task({ id: 'a', dueAt: 'tomorrow', deadlineType: 'soft' })])).toThrow(/dueAt/)
