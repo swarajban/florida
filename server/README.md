@@ -1,7 +1,7 @@
 # @florida/server
 
-Hono + Drizzle API for Florida: stores schedules, categories and tasks, mirrors Google Calendar
-events, runs `@florida/scheduler` after every change, and serves the result to the apps.
+Hono + Drizzle API for Florida: stores the weekly routine, categories and tasks, mirrors Google
+Calendar events, runs `@florida/scheduler` after every change, and serves the result to the apps.
 
 - Production: Node 26 on Fly, Neon Postgres via postgres.js.
 - Tests: the same app against PGlite (in-process Postgres), no network.
@@ -83,14 +83,19 @@ sync and scheduler jobs twice (`fly scale count 1` undoes that).
 
 ### 5. Seed and connect calendars
 
+The release command (`migrate.js`) runs the migrations and then the seed, so a fresh database is
+ready after the first deploy. To seed by hand (for example locally):
+
 ```sh
 fly ssh console -C "node server/dist/seed.js"
 ```
 
-This creates the schedules `work` (Mon–Fri 09:00–12:00, 13:00–17:00 Pacific) and `personal`
-(Mon–Fri 18:00–21:00, Sat–Sun 10:00–18:00 Pacific) and the categories `inbox`, `work` (schedule
-`work`) and `personal` (schedule `personal`). Re-seeding resets the schedules and the inbox but
-never touches `work` or `personal` once they exist, so your edits to them survive.
+The seed creates the settings row (time zone `America/Los_Angeles`), the routine (`home` Mon/Thu/Fri
+09:00–15:30 for computer, errand and home tasks; `office-tue` 10:15–16:20 and `office-wed`
+09:00–16:20 for computer and office tasks), the categories `inbox`, `work` (area `work`) and
+`personal` (area `personal`), and the legacy schedules `work` and `personal` that shipped clients
+still read. Re-seeding resets the legacy schedules and the inbox but never touches the settings,
+the routine, `work` or `personal` once they exist, so your edits to them survive.
 
 Then open these in a browser, signing in with the matching Google account each time:
 
@@ -155,15 +160,16 @@ curl -s -X POST "$PUBLIC_URL/api/google/resync" -H "authorization: Bearer $API_T
 | Route | Purpose |
 | --- | --- |
 | `GET /health` | Liveness, no auth, no database access. |
-| `GET /api/sync?since=` | `{ cursor, schedules, categories, tasks, events, placements, unscheduled, accounts, calendars }`. The first four hold rows with `updatedAt > since` (all rows without `since`), including soft-deleted tombstones; `events` holds only selected calendars' events plus tombstones. `placements`, `unscheduled` (`{ taskId, reason, unplacedMinutes, computedAt }`), `accounts` and `calendars` are always complete (and never contain tokens). Events carry `description`, `conferenceUrl`, `attendees`, `organizer`, `eventType`, `recurringEventId` and `icalUid`. |
+| `GET /api/sync?since=` | `{ cursor, settings, routineBlocks, schedules, categories, tasks, events, placements, unscheduled, accounts, calendars }`. `routineBlocks`, `schedules`, `categories`, `tasks` and `events` hold rows with `updatedAt > since` (all rows without `since`), including soft-deleted tombstones; `events` holds only selected calendars' events plus tombstones. `settings` (`{ id, timeZone, updatedAt }`, or `null` before seeding), `placements`, `unscheduled` (`{ taskId, reason, unplacedMinutes, computedAt }`), `accounts` and `calendars` are always complete (and never contain tokens). Categories carry `area` (`work`, `personal`, or `null` for the inbox); tasks carry `context` (`computer`, `errand`, `home`, `office`; default `computer`, kept when a body omits it). Events carry `description`, `conferenceUrl`, `attendees`, `organizer`, `eventType`, `recurringEventId` and `icalUid`. |
 | `GET /api/events` | Server-sent events: `connected` on open, then one `changed` event after every scheduler run or calendar sync. Clients respond by calling `/api/sync` with their cursor. Keep-alive comment every 25 s. |
-| `PUT/DELETE /api/tasks/:id`, `/api/categories/:id`, `/api/schedules/:id` | Upsert / soft-delete, then rerun the scheduler. Responses include `scheduling: { placements, unscheduled, late }`. The `inbox` category cannot be deleted or renamed (400); deleting another category first moves its tasks to `inbox`. |
+| `PUT/DELETE /api/tasks/:id`, `/api/categories/:id`, `/api/routine-blocks/:id`, `/api/schedules/:id` | Upsert / soft-delete, then rerun the scheduler. Responses include `scheduling: { placements, unscheduled, late }`. The `inbox` category cannot be deleted or renamed (400); deleting another category first moves its tasks to `inbox`. A routine block is `{ name, days (0 = Sunday), start, end ("HH:MM" in the settings zone, start < end), allows: context[] }`; an empty `allows` shows the block but schedules nothing in it. Schedules are superseded by the routine and kept only for shipped clients. |
+| `PUT /api/settings` | `{ timeZone }` (IANA) sets the routine's zone, which is also the default home zone; reruns the scheduler → `{ settings, scheduling }`. |
 | `PATCH /api/tasks/:id` | Change only supplied task fields; omitted fields stay current and `null` clears nullable fields. Returns `{ task, scheduling }`; unknown or tombstoned tasks are 404. Completion/reopen sends only `completedAt` and `completedMinutes`, never a cached series template. |
-| `GET /api/tasks/:id`, `/api/categories/:id`, `/api/schedules/:id`, `/api/events/:id` | The row exactly as `/api/sync` sends it, tombstones included; 404 only for an id that never existed. |
+| `GET /api/tasks/:id`, `/api/categories/:id`, `/api/routine-blocks/:id`, `/api/schedules/:id`, `/api/events/:id` | The row exactly as `/api/sync` sends it, tombstones included; 404 only for an id that never existed. |
 | `PUT /api/events/:id` | `{ calendarId, summary, location, description, startAt, endAt, allDay, responseStatus }` → `{ event, scheduling }`. An unknown id creates the event on Google in `calendarId` (our calendar id; it must be selected and `owner`/`writer`, else 403) and keeps `:id` as the row id; a live row is patched on Google with only the changed fields, and a changed `responseStatus` re-sends Google's attendee list with the user's own entry updated (`sendUpdates=all`) unless Google already holds that answer. A UUID `:id` is also the event's id on Google, so a retried create cannot make a second event. All-day events use UTC-midnight `startAt`/`endAt` (end exclusive; anything else is 400). 400 on validation, 404 for a tombstone. Google's own 400 and 403 pass through with its message and leave the row untouched; its 404/410 (the event was deleted since the last sync) tombstone the row and answer 404 so a refetch sees the tombstone; quota, outages and a revoked refresh token are 502 (retry later). |
 | `DELETE /api/events/:id` | Deletes the event on Google (already gone counts as deleted), tombstones the row, reschedules → `{ scheduling }`. 404 for an unknown id; Google's 403 passes through and leaves the row live. |
 | `POST /api/schedule/run` | Rerun the scheduler. |
-| `POST /api/ai/parse-task` | `{ text, now?, timeZone? }` → `{ draft }`: Claude turns one line of text into a task draft (`title, notes, durationMinutes, minChunkMinutes, priority, deadlineType, dueAt, startAt, pinnedStart, categoryId, rationale`). The client reviews the draft and then `PUT`s the task itself. `timeZone` defaults to the first schedule's zone. 503 without `ANTHROPIC_API_KEY`; 502 when the model call fails. |
+| `POST /api/ai/parse-task` | `{ text, now?, timeZone? }` → `{ draft }`: Claude turns one line of text into a task draft (`title, notes, durationMinutes, minChunkMinutes, priority, deadlineType, dueAt, startAt, pinnedStart, categoryId, rationale`). The client reviews the draft and then `PUT`s the task itself. `timeZone` defaults to the routine's zone (settings). 503 without `ANTHROPIC_API_KEY`; 502 when the model call fails. |
 | `POST /api/ai/suggest-category` | `{ title, notes? }` → `{ categoryId, rationale }`: Claude picks the category the user would file the task under (never `inbox`; `null` when none fits). 503 without `ANTHROPIC_API_KEY`; 502 when the model call fails. |
 | `POST /mcp` | Model Context Protocol endpoint for agents (same bearer token). See below. |
 | `GET /api/google/accounts` | Accounts and calendars (never tokens). |
@@ -251,13 +257,13 @@ Client configuration (Claude Code, Amp, Cursor and friends accept this shape):
 
 | Tool | Does |
 | --- | --- |
-| `list_categories` | Live categories with their `scheduleId`. |
+| `list_categories` | Live categories with their `area` (`work`, `personal`, or `null` for the inbox). |
 | `list_tasks` | Open tasks (soonest due first) with their scheduled blocks; `categoryId?`, `includeCompleted?`, `limit?`. |
 | `get_task` | One task with its blocks. |
-| `create_task` | `categoryId`, `title`, and any task field; `id` defaults to a UUID, `durationMinutes` to 30, `priority` to `medium`, `deadlineType` to `soft` when `dueAt` is set, else `none`. Reschedules; returns the task's blocks plus `unscheduled`/`late`. |
+| `create_task` | `categoryId`, `title`, and any task field; `id` defaults to a UUID, `durationMinutes` to 30, `priority` to `medium`, `deadlineType` to `soft` when `dueAt` is set, else `none`, `context` to `computer`. Reschedules; returns the task's blocks plus `unscheduled`/`late`. |
 | `update_task` | `id` plus any task fields; omitted fields stay, `null` clears. Reschedules. |
 | `complete_task` / `delete_task` | Mark done (credits the full duration) / tombstone. Reschedule. |
-| `get_agenda` | `date?` (YYYY-MM-DD) and `timeZone?`: that day's events from selected calendars (all-day first) (with `description`, `conferenceUrl` and `attendees`) and planned task blocks with titles. Defaults to today in the first schedule's zone. |
+| `get_agenda` | `date?` (YYYY-MM-DD) and `timeZone?`: that day's events from selected calendars (all-day first) (with `description`, `conferenceUrl` and `attendees`) and planned task blocks with titles. Defaults to today in the routine's zone. |
 | `run_scheduler` | Rerun and return every placement. |
 
 Bad references (`unknown categoryId x`, `task x not found`) and invalid arguments come back as

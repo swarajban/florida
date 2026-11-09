@@ -34,11 +34,13 @@ export interface McpDeps {
 const SERVER_INFO = { name: 'florida', version: '0.1.0' }
 
 const INSTRUCTIONS = [
-  'Florida is a single-user task planner and calendar. Tasks belong to categories; every category has a',
-  'schedule (working hours in an IANA time zone). After each change the scheduler places open tasks',
-  'into free time around calendar events and returns placements: suggested work blocks, not calendar',
-  'events. Call list_categories first to learn the category ids, get_agenda to see one day of calendar',
-  'events plus planned task blocks, and list_tasks for what is open. Instants are ISO 8601 strings.',
+  'Florida is a single-user task planner and calendar. Tasks belong to categories (each in the work or',
+  'personal area) and carry a context: computer (anywhere with a laptop), errand (out and about), home',
+  '(only at home) or office (only at the office). A weekly routine says which contexts fit which hours;',
+  'after each change the scheduler places open tasks into routine blocks that allow their context,',
+  'around calendar events, and returns placements: suggested work blocks, not calendar events. Call',
+  'list_categories first to learn the category ids, get_agenda to see one day of calendar events plus',
+  'planned task blocks, and list_tasks for what is open. Instants are ISO 8601 strings.',
   'Tasks accept recurrence: daily, weekly (selected weekdays), or monthly (day of month), each with',
   'an interval, IANA timeZone, startDate, and optional inclusive endDate. Each occurrence completes',
   'independently. Editing a recurring task changes this and future unfinished occurrences; setting',
@@ -60,7 +62,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
     'list_categories',
     {
       title: 'List categories',
-      description: 'Lists live categories with the schedule each one uses.',
+      description: 'Lists live categories with their area (work or personal; the inbox has none).',
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     () =>
@@ -202,7 +204,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
         'Calendar events (from selected calendars) and planned task blocks for one calendar day, all-day events first. Defaults to today in the home time zone.',
       inputSchema: {
         date: calendarDate.optional().describe('YYYY-MM-DD; defaults to today'),
-        timeZone: timeZone.optional().describe('IANA zone the day is measured in; defaults to the first schedule’s zone'),
+        timeZone: timeZone.optional().describe('IANA zone the day is measured in; defaults to the routine’s zone'),
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },

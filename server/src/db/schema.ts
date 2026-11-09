@@ -1,10 +1,43 @@
-import type { DeadlineType, Priority, ScheduleWindow, UnscheduledReason } from '@florida/scheduler'
+import type { DeadlineType, Priority, TaskContext, UnscheduledReason } from '@florida/scheduler'
 import { sql } from 'drizzle-orm'
 import { boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core'
 import type { RecurrenceRule, RecurringTaskTemplate } from '../recurrence.js'
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' })
 
+export type CategoryArea = 'work' | 'personal'
+
+/** The user's one row of preferences; the routine's time zone lives here. Seeded, never deleted. */
+export const settings = pgTable('settings', {
+  id: text('id').primaryKey(),
+  timeZone: text('time_zone').notNull(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+})
+
+/**
+ * The weekly routine: when each kind of task may be worked on, as wall-clock windows in the
+ * settings time zone. Time outside every block (sleep, family, gym) is never scheduled.
+ */
+export const routineBlocks = pgTable('routine_blocks', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  days: jsonb('days').$type<number[]>().notNull(),
+  start: text('start_time').notNull(),
+  end: text('end_time').notNull(),
+  allows: jsonb('allows').$type<TaskContext[]>().notNull(),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+  deletedAt: ts('deleted_at'),
+})
+
+/** A legacy schedule window: weekdays (0 = Sunday) and "HH:MM" bounds in the schedule's zone. */
+export interface ScheduleWindow {
+  days: number[]
+  start: string
+  end: string
+}
+
+/** Superseded by `routineBlocks`; kept while shipped clients still require it in `/api/sync`. */
 export const schedules = pgTable('schedules', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
@@ -19,6 +52,8 @@ export const categories = pgTable('categories', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   color: text('color'),
+  /** Null for the inbox, whose tasks are unfiled. */
+  area: text('area').$type<CategoryArea>(),
   scheduleId: text('schedule_id')
     .notNull()
     .references(() => schedules.id),
@@ -56,6 +91,7 @@ export const tasks = pgTable(
     dueAt: ts('due_at'),
     startAt: ts('start_at'),
     scheduleId: text('schedule_id').references(() => schedules.id),
+    context: text('context').$type<TaskContext>().notNull().default('computer'),
     pinnedStart: ts('pinned_start'),
     recurrence: jsonb('recurrence').$type<RecurrenceRule>(),
     recurrenceSeriesId: text('recurrence_series_id').references(() => taskRecurrences.id),
@@ -181,6 +217,8 @@ export const events = pgTable(
   ],
 )
 
+export type SettingsRow = typeof settings.$inferSelect
+export type RoutineBlockRow = typeof routineBlocks.$inferSelect
 export type ScheduleRow = typeof schedules.$inferSelect
 export type CategoryRow = typeof categories.$inferSelect
 export type TaskRow = typeof tasks.$inferSelect

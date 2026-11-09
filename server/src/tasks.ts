@@ -13,6 +13,7 @@ import { badRequest, isoInstant, notFound, toDate } from './validation.js'
 
 export const priority = z.enum(['asap', 'high', 'medium', 'low'])
 export const deadlineType = z.enum(['hard', 'soft', 'none'])
+export const taskContext = z.enum(['computer', 'errand', 'home', 'office'])
 
 /** Full task body as accepted by `PUT /api/tasks/:id` and the MCP tools. */
 export const taskBody = z.object({
@@ -26,6 +27,11 @@ export const taskBody = z.object({
   dueAt: isoInstant.nullish(),
   startAt: isoInstant.nullish(),
   scheduleId: z.string().min(1).nullish(),
+  context: taskContext
+    .optional()
+    .describe(
+      'Where the task can be done: computer (anywhere with a laptop), errand (out, e.g. a store), home (only at home), office (only at the office). Defaults to computer; omitting it on an edit keeps the stored value.',
+    ),
   pinnedStart: isoInstant.nullish(),
   recurrence: recurrenceRule.nullish(),
   expectedRecurrenceRevision: z.string().min(1).nullish(),
@@ -51,7 +57,7 @@ export async function lockTaskRecurrences(db: Db): Promise<void> {
   await db.execute(sql`select pg_advisory_xact_lock(731105)`)
 }
 
-function taskFields(body: TaskBody, now: Date) {
+function taskFields(body: TaskBody, now: Date, current: TaskRow | undefined) {
   return {
     categoryId: body.categoryId,
     title: body.title,
@@ -63,6 +69,8 @@ function taskFields(body: TaskBody, now: Date) {
     dueAt: toDate(body.dueAt),
     startAt: toDate(body.startAt),
     scheduleId: body.scheduleId ?? null,
+    // Older shipped clients omit context; their edits must not reset a task to the default.
+    context: body.context ?? current?.context ?? 'computer',
     pinnedStart: toDate(body.pinnedStart),
     completedMinutes: body.completedMinutes ?? 0,
     completedAt: toDate(body.completedAt),
@@ -84,6 +92,7 @@ function seriesTemplate(fields: Pick<TaskRow, keyof ReturnType<typeof taskFields
     dueAt: fields.dueAt?.toISOString() ?? null,
     startAt: fields.startAt?.toISOString() ?? null,
     scheduleId: fields.scheduleId,
+    context: fields.context,
     pinnedStart: fields.pinnedStart?.toISOString() ?? null,
   }
 }
@@ -105,7 +114,7 @@ async function writeTask(db: Db, id: string, body: TaskBody, now: Date): Promise
   let recurrenceSeriesId = current?.recurrenceSeriesId ?? null
   let recurrenceDate = current?.recurrenceDate ?? null
   let recurrenceRevision = current?.recurrenceRevision ?? null
-  let fields = taskFields(body, now)
+  let fields = taskFields(body, now, current)
   const [series] = recurrenceSeriesId === null ? [] : await db.select().from(taskRecurrences).where(eq(taskRecurrences.id, recurrenceSeriesId))
 
   if (series?.deletedAt != null) {
@@ -212,6 +221,7 @@ export async function patchTask(db: Db, id: string, patch: TaskPatch, now: Date 
       dueAt: keep(patch.dueAt, iso(current.dueAt)),
       startAt: keep(patch.startAt, iso(current.startAt)),
       scheduleId: keep(patch.scheduleId, current.scheduleId),
+      context: keep(patch.context, current.context),
       pinnedStart: keep(patch.pinnedStart, iso(current.pinnedStart)),
       recurrence: keep(patch.recurrence, current.recurrence),
       // A targeted edit without a precondition (e.g. MCP) explicitly acts on the latest row.

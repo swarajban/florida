@@ -1,18 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import { schedule } from '../src/index.js'
-import type { Interval, Schedule, SchedulerInput, SchedulerResult, Task } from '../src/index.js'
+import type { Interval, Routine, SchedulerInput, SchedulerResult, Task, TaskContext } from '../src/index.js'
 
 const LA = 'America/Los_Angeles'
+const WEEKDAYS = [1, 2, 3, 4, 5]
+const ALL: TaskContext[] = ['computer', 'errand', 'home', 'office']
 
-/** Mon–Fri 09:00–12:00 and 13:00–17:00 Pacific. */
-const WORK: Schedule = {
-  id: 'work',
+/** Mon–Fri 09:00–12:00 and 13:00–17:00 Pacific, open to every kind of task. */
+const WORK: Routine = {
   timeZone: LA,
-  windows: [
-    { days: [1, 2, 3, 4, 5], start: '09:00', end: '12:00' },
-    { days: [1, 2, 3, 4, 5], start: '13:00', end: '17:00' },
+  blocks: [
+    { id: 'am', days: WEEKDAYS, start: '09:00', end: '12:00', allows: ALL },
+    { id: 'pm', days: WEEKDAYS, start: '13:00', end: '17:00', allows: ALL },
   ],
 }
+
+/** Nothing ever goes anywhere. */
+const CLOSED: Routine = { timeZone: LA, blocks: [] }
 
 /** Monday 2026-11-09 09:00 PST (UTC-8). */
 const NOW = '2026-11-09T09:00:00-08:00'
@@ -22,7 +26,7 @@ const busy = (start: string, end: string): Interval => ({ start, end })
 
 function task(overrides: Partial<Task> & { id: string }): Task {
   return {
-    scheduleId: 'work',
+    context: 'computer',
     durationMinutes: 60,
     priority: 'medium',
     deadlineType: 'none',
@@ -32,7 +36,7 @@ function task(overrides: Partial<Task> & { id: string }): Task {
 }
 
 function run(tasks: Task[], busyTime: Interval[] = [], extra: Partial<SchedulerInput> = {}): SchedulerResult {
-  return schedule({ now: NOW, schedules: [WORK], tasks, busy: busyTime, ...extra })
+  return schedule({ now: NOW, routine: WORK, tasks, busy: busyTime, ...extra })
 }
 
 function spansOf(result: SchedulerResult, taskId: string): [string, string][] {
@@ -79,9 +83,75 @@ describe('placement basics', () => {
     expect(result.unscheduled).toEqual([])
   })
 
-  it('reports tasks whose schedule is unknown', () => {
-    const result = run([task({ id: 'a', scheduleId: 'nope' })])
-    expect(result.unscheduled).toEqual([{ taskId: 'a', reason: 'unknown_schedule', unplacedMinutes: 60 }])
+  it('reports tasks whose context no routine block allows, even with a hard deadline', () => {
+    const computerOnly: Routine = { ...WORK, blocks: WORK.blocks.map((b) => ({ ...b, allows: ['computer'] })) }
+    const result = run(
+      [task({ id: 'a', context: 'errand', deadlineType: 'hard', dueAt: '2026-11-10T17:00:00-08:00' }), task({ id: 'b' })],
+      [],
+      { routine: computerOnly },
+    )
+    expect(result.placements.map((p) => p.taskId)).toEqual(['b'])
+    expect(result.unscheduled).toEqual([{ taskId: 'a', reason: 'no_allowed_block', unplacedMinutes: 60 }])
+  })
+})
+
+describe('routine blocks', () => {
+  /** Home days Mon/Thu/Fri, office Tue/Wed with the gym first on Tuesday; nothing evenings or weekends. */
+  const REAL: Routine = {
+    timeZone: LA,
+    blocks: [
+      { id: 'wfh', days: [1, 4, 5], start: '09:00', end: '15:30', allows: ['computer', 'errand', 'home'] },
+      { id: 'gym-home', days: [1, 4, 5], start: '15:30', end: '17:00', allows: [] },
+      { id: 'gym-office', days: [2], start: '09:00', end: '10:15', allows: [] },
+      { id: 'office-tue', days: [2], start: '10:15', end: '16:20', allows: ['computer', 'office'] },
+      { id: 'office-wed', days: [3], start: '09:00', end: '16:20', allows: ['computer', 'office'] },
+    ],
+  }
+  const real = (tasks: Task[], busyTime: Interval[] = [], extra: Partial<SchedulerInput> = {}) =>
+    run(tasks, busyTime, { routine: REAL, ...extra })
+
+  it('places an errand on the next home day, skipping office days', () => {
+    const result = real([task({ id: 'ups', context: 'errand' })], MONDAY_FULL)
+    expect(spansOf(result, 'ups')).toEqual([[iso('2026-11-12T09:00:00-08:00'), iso('2026-11-12T10:00:00-08:00')]])
+  })
+
+  it('places office-only work on the next office day, after the Tuesday gym', () => {
+    const result = real([task({ id: 'badge', context: 'office' })])
+    expect(spansOf(result, 'badge')).toEqual([[iso('2026-11-10T10:15:00-08:00'), iso('2026-11-10T11:15:00-08:00')]])
+  })
+
+  it('never uses the gym, family evenings, or the weekend, even for a block that would otherwise wait', () => {
+    // Friday's home block has only 30 minutes left; the next hour is Monday morning.
+    const result = real([task({ id: 'a', startAt: '2026-11-13T15:00:00-08:00' })])
+    expect(spansOf(result, 'a')).toEqual([[iso('2026-11-16T09:00:00-08:00'), iso('2026-11-16T10:00:00-08:00')]])
+    expect(result.unscheduled).toEqual([])
+  })
+
+  it('places a computer task on Wednesday from 09:00 when Tuesday is full', () => {
+    const tuesday = [busy('2026-11-10T10:15:00-08:00', '2026-11-10T16:20:00-08:00')]
+    const result = real([task({ id: 'a', startAt: '2026-11-10T00:00:00-08:00' })], tuesday)
+    expect(spansOf(result, 'a')).toEqual([[iso('2026-11-11T09:00:00-08:00'), iso('2026-11-11T10:00:00-08:00')]])
+  })
+
+  it('treats overlapping blocks that allow the same context as one stretch of time', () => {
+    const overlapping: Routine = {
+      timeZone: LA,
+      blocks: [
+        { id: 'early', days: [1], start: '09:00', end: '11:00', allows: ['computer'] },
+        { id: 'late', days: [1], start: '10:00', end: '12:00', allows: ['computer'] },
+      ],
+    }
+    const result = run([task({ id: 'a', durationMinutes: 180 })], [], { routine: overlapping })
+    expect(spansOf(result, 'a')).toEqual([[iso('2026-11-09T09:00:00-08:00'), iso('2026-11-09T12:00:00-08:00')]])
+  })
+
+  it('orders due days in the routine time zone', () => {
+    // 23:30 Monday Pacific is Tuesday in UTC; it must still count as due Monday, before a Tuesday-morning task.
+    const result = real([
+      task({ id: 'tue', deadlineType: 'soft', dueAt: '2026-11-10T08:00:00-08:00', priority: 'high' }),
+      task({ id: 'mon', deadlineType: 'soft', dueAt: '2026-11-09T23:30:00-08:00', priority: 'low' }),
+    ])
+    expect(result.placements.map((p) => p.taskId)).toEqual(['mon', 'tue'])
   })
 })
 
@@ -383,11 +453,11 @@ describe('plan stability', () => {
     expect(result.placements).toEqual([block('a', '10:00', '11:00')])
   })
 
-  it('drops blocks outside a changed schedule window', () => {
+  it('drops blocks outside a changed routine block', () => {
     const result = run([task({ id: 'a' })], [], {
       now: at('08:00'),
       previous: [block('a', '09:00', '10:00')],
-      schedules: [{ ...WORK, windows: [{ days: [1], start: '11:00', end: '12:00' }] }],
+      routine: { ...WORK, blocks: [{ id: 'late', days: [1], start: '11:00', end: '12:00', allows: ALL }] },
     })
     expect(result.placements).toEqual([block('a', '11:00', '12:00')])
   })
@@ -434,21 +504,21 @@ describe('plan stability', () => {
     expect(result.unscheduled).toEqual([])
   })
 
-  it('preserves active work despite already-started busy time or a changed schedule and start date', () => {
+  it('preserves active work despite already-started busy time or a changed routine and start date', () => {
     const result = run([task({ id: 'a', startAt: at('13:00') })], [busy(at('09:30'), at('10:30'))], {
       now: at('09:40'), previous: [block('a', '09:00', '10:00')],
-      schedules: [{ ...WORK, windows: [] }],
+      routine: { ...WORK, blocks: [{ id: 'later', days: [1], start: '13:00', end: '17:00', allows: ALL }] },
     })
     expect(result.placements).toEqual([block('a', '09:00', '10:00')])
     expect(result.unscheduled).toEqual([])
   })
 
-  it('keeps active work even if its schedule disappeared, reporting only the unplaced remainder', () => {
-    const result = run([task({ id: 'a', scheduleId: 'missing', durationMinutes: 90 })], [], {
-      now: at('09:40'), previous: [block('a', '09:00', '10:00')],
+  it('keeps active work even if no block allows its context any more, reporting only the unplaced remainder', () => {
+    const result = run([task({ id: 'a', durationMinutes: 90 })], [], {
+      now: at('09:40'), previous: [block('a', '09:00', '10:00')], routine: CLOSED,
     })
     expect(result.placements).toEqual([block('a', '09:00', '10:00')])
-    expect(result.unscheduled).toEqual([{ taskId: 'a', reason: 'unknown_schedule', unplacedMinutes: 30 }])
+    expect(result.unscheduled).toEqual([{ taskId: 'a', reason: 'no_allowed_block', unplacedMinutes: 30 }])
   })
 
   it('keeps active work past a changed hard deadline and reports its retained ETA', () => {
@@ -478,6 +548,6 @@ describe('plan stability', () => {
 describe('input validation', () => {
   it('rejects unparsable instants', () => {
     expect(() => run([task({ id: 'a', dueAt: 'tomorrow', deadlineType: 'soft' })])).toThrow(/dueAt/)
-    expect(() => schedule({ now: 'nope', schedules: [], tasks: [], busy: [] })).toThrow(/now/)
+    expect(() => schedule({ now: 'nope', routine: CLOSED, tasks: [], busy: [] })).toThrow(/now/)
   })
 })

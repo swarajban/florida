@@ -1,20 +1,23 @@
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
-import { placements, schedules, tasks, unscheduled } from '../src/db/schema.js'
-import type { EventRow, CategoryRow, ScheduleRow, TaskRow } from '../src/db/schema.js'
+import { placements, routineBlocks, tasks, unscheduled } from '../src/db/schema.js'
+import type { EventRow, CategoryRow, RoutineBlockRow, TaskRow } from '../src/db/schema.js'
 import { buildSchedulerInput, runScheduling } from '../src/scheduling.js'
 import { seed } from '../src/seed.js'
 import { createTestDb } from './db.js'
 
 const NOW = new Date('2026-11-09T17:00:00Z')
 const T0 = new Date('2026-11-01T00:00:00Z')
+const LA = 'America/Los_Angeles'
 
-function scheduleRow(id: string, over: Partial<ScheduleRow> = {}): ScheduleRow {
+function routineBlockRow(id: string, over: Partial<RoutineBlockRow> = {}): RoutineBlockRow {
   return {
     id,
     name: id,
-    timeZone: 'America/Los_Angeles',
-    windows: [{ days: [1, 2, 3, 4, 5], start: '09:00', end: '17:00' }],
+    days: [1, 2, 3, 4, 5],
+    start: '09:00',
+    end: '17:00',
+    allows: ['computer', 'errand', 'home', 'office'],
     createdAt: T0,
     updatedAt: T0,
     deletedAt: null,
@@ -22,8 +25,19 @@ function scheduleRow(id: string, over: Partial<ScheduleRow> = {}): ScheduleRow {
   }
 }
 
-function categoryRow(id: string, scheduleId: string, over: Partial<CategoryRow> = {}): CategoryRow {
-  return { id, name: id, color: null, scheduleId, sortOrder: 0, createdAt: T0, updatedAt: T0, deletedAt: null, ...over }
+function categoryRow(id: string, over: Partial<CategoryRow> = {}): CategoryRow {
+  return {
+    id,
+    name: id,
+    color: null,
+    area: null,
+    scheduleId: 'work',
+    sortOrder: 0,
+    createdAt: T0,
+    updatedAt: T0,
+    deletedAt: null,
+    ...over,
+  }
 }
 
 function taskRow(id: string, categoryId: string, over: Partial<TaskRow> = {}): TaskRow {
@@ -39,6 +53,7 @@ function taskRow(id: string, categoryId: string, over: Partial<TaskRow> = {}): T
     dueAt: null,
     startAt: null,
     scheduleId: null,
+    context: 'computer',
     pinnedStart: null,
     recurrence: null,
     recurrenceSeriesId: null,
@@ -80,13 +95,13 @@ function eventRow(id: string, over: Partial<EventRow> = {}): EventRow {
   }
 }
 
-const base = { now: NOW, horizonDays: 28, schedules: [scheduleRow('work'), scheduleRow('personal')] }
+const base = { now: NOW, horizonDays: 28, timeZone: LA, routineBlocks: [routineBlockRow('work')] }
 
 describe('buildSchedulerInput', () => {
-  it('maps schedules, tasks and the horizon', () => {
+  it('maps the routine, tasks and the horizon', () => {
     const input = buildSchedulerInput({
       ...base,
-      categories: [categoryRow('inbox', 'work')],
+      categories: [categoryRow('inbox')],
       tasks: [
         taskRow('t1', 'inbox', {
           minChunkMinutes: 30,
@@ -100,11 +115,14 @@ describe('buildSchedulerInput', () => {
     })
     expect(input.now).toBe('2026-11-09T17:00:00.000Z')
     expect(input.horizonDays).toBe(28)
-    expect(input.schedules.map((s) => s.id)).toEqual(['work', 'personal'])
+    expect(input.routine).toEqual({
+      timeZone: LA,
+      blocks: [{ id: 'work', days: [1, 2, 3, 4, 5], start: '09:00', end: '17:00', allows: ['computer', 'errand', 'home', 'office'] }],
+    })
     expect(input.tasks).toEqual([
       {
         id: 't1',
-        scheduleId: 'work',
+        context: 'computer',
         durationMinutes: 60,
         minChunkMinutes: 30,
         priority: 'medium',
@@ -117,24 +135,25 @@ describe('buildSchedulerInput', () => {
     ])
   })
 
-  it("falls back to the category's schedule and lets the task override win", () => {
+  it("carries each task's own context; the category has no say", () => {
     const input = buildSchedulerInput({
       ...base,
-      categories: [categoryRow('inbox', 'work')],
-      tasks: [taskRow('fallback', 'inbox'), taskRow('override', 'inbox', { scheduleId: 'personal' })],
+      categories: [categoryRow('inbox'), categoryRow('work', { area: 'work' })],
+      tasks: [taskRow('desk', 'inbox'), taskRow('ups-return', 'inbox', { context: 'errand' }), taskRow('badge', 'work', { context: 'office' })],
       events: [],
     })
-    expect(input.tasks.map((t) => [t.id, t.scheduleId])).toEqual([
-      ['fallback', 'work'],
-      ['override', 'personal'],
+    expect(input.tasks.map((t) => [t.id, t.context])).toEqual([
+      ['desk', 'computer'],
+      ['ups-return', 'errand'],
+      ['badge', 'office'],
     ])
   })
 
-  it('skips deleted, completed, and orphaned tasks and deleted schedules', () => {
+  it('skips deleted, completed, and orphaned tasks and deleted routine blocks', () => {
     const input = buildSchedulerInput({
       ...base,
-      schedules: [scheduleRow('work'), scheduleRow('old', { deletedAt: NOW })],
-      categories: [categoryRow('inbox', 'work'), categoryRow('archived', 'work', { deletedAt: NOW })],
+      routineBlocks: [routineBlockRow('work'), routineBlockRow('old', { deletedAt: NOW })],
+      categories: [categoryRow('inbox'), categoryRow('archived', { deletedAt: NOW })],
       tasks: [
         taskRow('open', 'inbox'),
         taskRow('deleted', 'inbox', { deletedAt: NOW }),
@@ -144,7 +163,7 @@ describe('buildSchedulerInput', () => {
       ],
       events: [],
     })
-    expect(input.schedules.map((s) => s.id)).toEqual(['work'])
+    expect(input.routine.blocks.map((b) => b.id)).toEqual(['work'])
     expect(input.tasks.map((t) => t.id)).toEqual(['open'])
   })
 
@@ -180,7 +199,8 @@ describe('runScheduling', () => {
     const { db, close } = await createTestDb()
     try {
       await seed(db)
-      // NOW is 09:00 Monday in Los Angeles: the first run puts the hour-long task right at 09:00.
+      // NOW is 09:00 Monday in Los Angeles, the start of the seeded home block: the first run puts
+      // the hour-long task right at 09:00.
       await db.insert(tasks).values(taskRow('deep-work', 'inbox'))
       await runScheduling(db, { HORIZON_DAYS: 28 }, NOW)
       expect(await db.select({ startAt: placements.startAt, endAt: placements.endAt }).from(placements)).toEqual([
@@ -203,25 +223,25 @@ describe('runScheduling', () => {
     const { db, close } = await createTestDb()
     try {
       await seed(db)
-      await db.insert(schedules).values(scheduleRow('doomed'))
       const insert = (row: TaskRow) => db.insert(tasks).values(row)
       await insert(taskRow('fits', 'inbox', { durationMinutes: 30 }))
       // Hard deadline already passed: none of its 45 minutes can be placed before it.
       await insert(taskRow('overdue', 'inbox', { durationMinutes: 45, deadlineType: 'hard', dueAt: new Date('2026-11-08T17:00:00Z') }))
-      // Its schedule disappears below; 90 minutes with 30 already done leaves 60 unplaced.
-      await insert(taskRow('homeless', 'inbox', { durationMinutes: 90, completedMinutes: 30, scheduleId: 'doomed' }))
-      await db.update(schedules).set({ deletedAt: NOW }).where(eq(schedules.id, 'doomed'))
+      // Office-only work with the office days removed from the routine; 90 minutes with 30 already
+      // done leaves 60 unplaced.
+      await insert(taskRow('homeless', 'inbox', { durationMinutes: 90, completedMinutes: 30, context: 'office' }))
+      await db.update(routineBlocks).set({ deletedAt: NOW }).where(inArray(routineBlocks.id, ['office-tue', 'office-wed']))
 
       await runScheduling(db, { HORIZON_DAYS: 28 }, NOW)
       const first = await db.select().from(unscheduled).orderBy(unscheduled.taskId)
       expect(first).toEqual([
-        { taskId: 'homeless', reason: 'unknown_schedule', unplacedMinutes: 60, computedAt: NOW },
+        { taskId: 'homeless', reason: 'no_allowed_block', unplacedMinutes: 60, computedAt: NOW },
         { taskId: 'overdue', reason: 'no_fit_before_hard_deadline', unplacedMinutes: 45, computedAt: NOW },
       ])
       expect((await db.select().from(placements)).map((p) => p.taskId)).toEqual(['fits'])
 
       // Fixing one task and running again drops its row rather than leaving a stale one behind.
-      await db.update(tasks).set({ scheduleId: null }).where(eq(tasks.id, 'homeless'))
+      await db.update(tasks).set({ context: 'computer' }).where(eq(tasks.id, 'homeless'))
       const later = new Date(NOW.getTime() + 60_000)
       await runScheduling(db, { HORIZON_DAYS: 28 }, later)
       expect(await db.select().from(unscheduled)).toEqual([

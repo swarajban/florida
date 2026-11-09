@@ -6,7 +6,7 @@ import { eq, inArray } from 'drizzle-orm'
 import { createApp } from '../src/app.js'
 import { ChangeBus } from '../src/changes.js'
 import type { Db } from '../src/db/client.js'
-import { calendars, categories, events, googleAccounts } from '../src/db/schema.js'
+import { calendars, categories, events, googleAccounts, routineBlocks, settings } from '../src/db/schema.js'
 import type { EventBody } from '../src/events.js'
 import { GoogleApiError, GoogleGoneError, GoogleTokenError, mapEvent } from '../src/google/client.js'
 import type { GoogleEvent, GoogleEventAttendee } from '../src/google/client.js'
@@ -50,14 +50,27 @@ async function api(path: string, init: RequestInit & { json?: unknown } = {}): P
   return app.request(path, { ...rest, headers, ...(json !== undefined ? { body: JSON.stringify(json) } : {}) })
 }
 
-/** True when the instant falls inside the seeded `work` schedule (Mon–Fri 09–12, 13–17 Pacific). */
-function inWorkWindow(iso: string): boolean {
+/** Wall-clock bounds of the seeded routine blocks by weekday (Pacific): home Mon/Thu/Fri, office Tue/Wed. */
+const ROUTINE_HOURS: Record<number, [start: number, end: number]> = {
+  1: [9 * 60, 15 * 60 + 30],
+  2: [10 * 60 + 15, 16 * 60 + 20],
+  3: [9 * 60, 16 * 60 + 20],
+  4: [9 * 60, 15 * 60 + 30],
+  5: [9 * 60, 15 * 60 + 30],
+}
+
+/** True when the instant falls inside one of the seeded routine blocks. */
+function inRoutine(iso: string): boolean {
   const p = localParts(new Date(iso).getTime(), 'America/Los_Angeles')
-  const weekday = weekdayOf(p)
+  const hours = ROUTINE_HOURS[weekdayOf(p)]
+  if (hours === undefined) return false
   const minutes = p.hour * 60 + p.minute
-  const morning = minutes >= 9 * 60 && minutes < 12 * 60
-  const afternoon = minutes >= 13 * 60 && minutes < 17 * 60
-  return weekday >= 1 && weekday <= 5 && (morning || afternoon)
+  return minutes >= hours[0] && minutes < hours[1]
+}
+
+/** Weekday (0 = Sunday) of the instant in Pacific time. */
+function weekdayIn(iso: string): number {
+  return weekdayOf(localParts(new Date(iso).getTime(), 'America/Los_Angeles'))
 }
 
 const taskBody = {
@@ -134,8 +147,8 @@ describe('tasks, sync and tombstones', () => {
     expect(placement).toBeDefined()
     expect(placement?.taskId).toBe('t1')
     expect(placement?.pinned).toBe(false)
-    expect(inWorkWindow(placement!.start)).toBe(true)
-    expect(inWorkWindow(new Date(new Date(placement!.end).getTime() - 60_000).toISOString())).toBe(true)
+    expect(inRoutine(placement!.start)).toBe(true)
+    expect(inRoutine(new Date(new Date(placement!.end).getTime() - 60_000).toISOString())).toBe(true)
     expect(new Date(placement!.end).getTime() - new Date(placement!.start).getTime()).toBe(60 * 60_000)
   })
 
@@ -144,9 +157,11 @@ describe('tasks, sync and tombstones', () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
       cursor: string
+      settings: { id: string; timeZone: string } | null
+      routineBlocks: { id: string; days: number[]; start: string; end: string; allows: string[] }[]
       schedules: { id: string }[]
-      categories: { id: string }[]
-      tasks: { id: string; deletedAt: string | null }[]
+      categories: { id: string; area: string | null }[]
+      tasks: { id: string; context: string; deletedAt: string | null }[]
       events: unknown[]
       placements: { taskId: string }[]
       unscheduled: unknown[]
@@ -154,9 +169,19 @@ describe('tasks, sync and tombstones', () => {
       calendars: unknown[]
     }
     expect(new Date(body.cursor).toISOString()).toBe(body.cursor)
+    expect(body.settings).toMatchObject({ id: 'default', timeZone: 'America/Los_Angeles' })
+    expect(body.routineBlocks.map((b) => [b.id, b.days, b.start, b.end, b.allows]).sort()).toEqual([
+      ['home', [1, 4, 5], '09:00', '15:30', ['computer', 'errand', 'home']],
+      ['office-tue', [2], '10:15', '16:20', ['computer', 'office']],
+      ['office-wed', [3], '09:00', '16:20', ['computer', 'office']],
+    ])
     expect(body.schedules.map((s) => s.id).sort()).toEqual(['personal', 'work'])
-    expect(body.categories.map((p) => p.id).sort()).toEqual(['inbox', 'personal', 'work'])
-    expect(body.tasks).toEqual([expect.objectContaining({ id: 't1', deletedAt: null })])
+    expect(body.categories.map((p) => [p.id, p.area]).sort()).toEqual([
+      ['inbox', null],
+      ['personal', 'personal'],
+      ['work', 'work'],
+    ])
+    expect(body.tasks).toEqual([expect.objectContaining({ id: 't1', context: 'computer', deletedAt: null })])
     expect(body.events).toEqual([])
     expect(body.placements.map((p) => p.taskId)).toEqual(['t1'])
     expect(body.unscheduled).toEqual([])
@@ -165,10 +190,12 @@ describe('tasks, sync and tombstones', () => {
     cursorAfterCreate = body.cursor
   })
 
-  it('GET /api/sync?since=cursor returns no changed rows but the full placements table', async () => {
+  it('GET /api/sync?since=cursor returns no changed rows but the full placements table and settings', async () => {
     const res = await api(`/api/sync?since=${encodeURIComponent(cursorAfterCreate)}`)
     expect(res.status).toBe(200)
-    const body = (await res.json()) as Record<string, unknown[]>
+    const body = (await res.json()) as Record<string, unknown[]> & { settings: unknown }
+    expect(body.settings).toMatchObject({ timeZone: 'America/Los_Angeles' })
+    expect(body.routineBlocks).toEqual([])
     expect(body.schedules).toEqual([])
     expect(body.categories).toEqual([])
     expect(body.tasks).toEqual([])
@@ -221,6 +248,21 @@ describe('tasks, sync and tombstones', () => {
     expect(((await (await api('/api/sync')).json()) as { unscheduled: unknown[] }).unscheduled).toEqual([])
   })
 
+  it('stores the task context, defaulting to computer and keeping it when an older client omits it', async () => {
+    const read = async (res: Response) => ((await res.json()) as { task: { context: string } }).task.context
+
+    expect(await read(await api('/api/tasks/ups-return', { method: 'PUT', json: { ...taskBody, context: 'errand' } }))).toBe('errand')
+    // A shipped client that predates `context` sends the body without it; the stored value must survive its edit.
+    expect(await read(await api('/api/tasks/ups-return', { method: 'PUT', json: { ...taskBody, title: 'UPS return' } }))).toBe('errand')
+    expect(await read(await api('/api/tasks/desk', { method: 'PUT', json: taskBody }))).toBe('computer')
+
+    const bad = await api('/api/tasks/bad', { method: 'PUT', json: { ...taskBody, context: 'moon' } })
+    expect(bad.status).toBe(400)
+    expect(((await bad.json()) as { issues: { path: unknown[] }[] }).issues.map((i) => i.path.join('.'))).toEqual(['context'])
+
+    for (const id of ['ups-return', 'desk']) expect((await api(`/api/tasks/${id}`, { method: 'DELETE' })).status).toBe(200)
+  })
+
   it('upserts schedules and categories, and tombstones schedules', async () => {
     const sched = await api('/api/schedules/deep', {
       method: 'PUT',
@@ -233,10 +275,13 @@ describe('tasks, sync and tombstones', () => {
     })
     expect(badTz.status).toBe(400)
 
-    const proj = await api('/api/categories/side', { method: 'PUT', json: { name: 'Side', scheduleId: 'deep', color: '#ff0' } })
+    const proj = await api('/api/categories/side', { method: 'PUT', json: { name: 'Side', scheduleId: 'deep', color: '#ff0', area: 'work' } })
     expect(proj.status).toBe(200)
-    const catBody = (await proj.json()) as { category: { scheduleId: string; sortOrder: number } }
-    expect(catBody.category).toMatchObject({ scheduleId: 'deep', sortOrder: 0 })
+    const catBody = (await proj.json()) as { category: { scheduleId: string; sortOrder: number; area: string | null } }
+    expect(catBody.category).toMatchObject({ scheduleId: 'deep', sortOrder: 0, area: 'work' })
+    const noArea = await api('/api/categories/side', { method: 'PUT', json: { name: 'Side', scheduleId: 'deep' } })
+    expect(((await noArea.json()) as { category: { area: string | null } }).category.area).toBeNull()
+    expect((await api('/api/categories/side', { method: 'PUT', json: { name: 'Side', scheduleId: 'deep', area: 'hobby' } })).status).toBe(400)
 
     const cursor = ((await (await api('/api/sync')).json()) as { cursor: string }).cursor
     expect((await api('/api/schedules/deep', { method: 'DELETE' })).status).toBe(200)
@@ -291,10 +336,10 @@ describe('categories', () => {
     const res = await api('/api/categories/errands', { method: 'DELETE' })
     expect(res.status).toBe(200)
     const scheduling = ((await res.json()) as { scheduling: { placements: { taskId: string; start: string }[] } }).scheduling
-    // Now under the inbox, the task follows the work schedule instead of the personal one.
+    // Now under the inbox, the task is still placed; only its own context decides where.
     const placement = scheduling.placements.find((p) => p.taskId === 'errand-live')
     expect(placement).toBeDefined()
-    expect(inWorkWindow(placement!.start)).toBe(true)
+    expect(inRoutine(placement!.start)).toBe(true)
 
     const body = (await (await api(`/api/sync?since=${encodeURIComponent(cursor)}`)).json()) as {
       categories: { id: string; deletedAt: string | null }[]
@@ -376,16 +421,112 @@ describe('unseeded database', () => {
   })
 })
 
+describe('routine and settings', () => {
+  type Scheduling = {
+    placements: { taskId: string; start: string }[]
+    unscheduled: { taskId: string; reason: string; unplacedMinutes: number }[]
+  }
+  const seededHome = { name: 'Home', days: [1, 4, 5], start: '09:00', end: '15:30', allows: ['computer', 'errand', 'home'] }
+
+  it('places an errand only in the home block, drops it while that block is deleted, and places it again once restored', async () => {
+    expect((await api('/api/tasks/desk-work', { method: 'PUT', json: { ...taskBody, title: 'Desk work' } })).status).toBe(200)
+    const put = await api('/api/tasks/ups-return', { method: 'PUT', json: { ...taskBody, title: 'UPS return', context: 'errand' } })
+    expect(put.status).toBe(200)
+    const first = ((await put.json()) as { scheduling: Scheduling }).scheduling.placements.find((p) => p.taskId === 'ups-return')
+    expect(first).toBeDefined()
+    expect([1, 4, 5]).toContain(weekdayIn(first!.start))
+    expect(inRoutine(first!.start)).toBe(true)
+
+    const cursor = ((await (await api('/api/sync')).json()) as { cursor: string }).cursor
+    const del = await api('/api/routine-blocks/home', { method: 'DELETE' })
+    expect(del.status).toBe(200)
+    const afterDelete = ((await del.json()) as { scheduling: Scheduling }).scheduling
+    // The computer task still fits the office blocks; only the errand has nowhere to go.
+    expect(afterDelete.placements.map((p) => p.taskId)).toEqual(['desk-work'])
+    expect(afterDelete.unscheduled).toEqual([{ taskId: 'ups-return', reason: 'no_allowed_block', unplacedMinutes: 60 }])
+
+    const synced = (await (await api(`/api/sync?since=${encodeURIComponent(cursor)}`)).json()) as {
+      routineBlocks: { id: string; deletedAt: string | null }[]
+      unscheduled: { taskId: string }[]
+    }
+    expect(synced.routineBlocks).toEqual([expect.objectContaining({ id: 'home', deletedAt: expect.any(String) })])
+    expect(synced.unscheduled.map((u) => u.taskId)).toEqual(['ups-return'])
+    expect(((await (await api('/api/routine-blocks/home')).json()) as { deletedAt: string | null }).deletedAt).toEqual(expect.any(String))
+
+    const restore = await api('/api/routine-blocks/home', { method: 'PUT', json: seededHome })
+    expect(restore.status).toBe(200)
+    const restored = (await restore.json()) as { routineBlock: unknown; scheduling: Scheduling }
+    expect(restored.routineBlock).toMatchObject({ id: 'home', ...seededHome, deletedAt: null })
+    const again = restored.scheduling.placements.find((p) => p.taskId === 'ups-return')
+    expect(again).toBeDefined()
+    expect([1, 4, 5]).toContain(weekdayIn(again!.start))
+    expect(restored.scheduling.unscheduled).toEqual([])
+
+    for (const id of ['ups-return', 'desk-work']) expect((await api(`/api/tasks/${id}`, { method: 'DELETE' })).status).toBe(200)
+  })
+
+  it('rejects a routine block that ends before it starts, names an unknown context, or has an invalid day', async () => {
+    const attempt = async (over: object) =>
+      (await api('/api/routine-blocks/bad', { method: 'PUT', json: { ...seededHome, ...over } })).status
+    expect(await attempt({ start: '16:00', end: '15:30' })).toBe(400)
+    expect(await attempt({ allows: ['moon'] })).toBe(400)
+    expect(await attempt({ days: [7] })).toBe(400)
+    expect(await attempt({ days: [] })).toBe(400)
+    expect(await attempt({ start: '9:00' })).toBe(400)
+    expect((await api('/api/routine-blocks/bad')).status).toBe(404)
+    expect((await api('/api/routine-blocks/bad', { method: 'DELETE' })).status).toBe(404)
+  })
+
+  it('PUT /api/settings validates and stores the routine time zone', async () => {
+    expect((await api('/api/settings', { method: 'PUT', json: { timeZone: 'Mars/Olympus' } })).status).toBe(400)
+    const res = await api('/api/settings', { method: 'PUT', json: { timeZone: 'America/New_York' } })
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { settings: unknown }).settings).toMatchObject({ id: 'default', timeZone: 'America/New_York' })
+    expect(((await (await api('/api/sync')).json()) as { settings: { timeZone: string } }).settings.timeZone).toBe('America/New_York')
+    // Later tests judge placements against the Pacific routine.
+    expect((await api('/api/settings', { method: 'PUT', json: { timeZone: 'America/Los_Angeles' } })).status).toBe(200)
+  })
+})
+
 describe('seed', () => {
+  it('inserts the settings and the routine once and never undoes later edits to them', async () => {
+    const fresh = await createTestDb()
+    try {
+      await seed(fresh.db)
+      expect(await fresh.db.select({ id: settings.id, timeZone: settings.timeZone }).from(settings)).toEqual([
+        { id: 'default', timeZone: 'America/Los_Angeles' },
+      ])
+      const blocks = await fresh.db.select().from(routineBlocks).orderBy(routineBlocks.id)
+      expect(blocks.map((b) => [b.id, b.days, b.start, b.end, b.allows, b.deletedAt])).toEqual([
+        ['home', [1, 4, 5], '09:00', '15:30', ['computer', 'errand', 'home'], null],
+        ['office-tue', [2], '10:15', '16:20', ['computer', 'office'], null],
+        ['office-wed', [3], '09:00', '16:20', ['computer', 'office'], null],
+      ])
+
+      const edited = new Date('2026-11-01T00:00:00Z')
+      await fresh.db.update(settings).set({ timeZone: 'America/Denver', updatedAt: edited })
+      await fresh.db.update(routineBlocks).set({ end: '15:00', updatedAt: edited }).where(eq(routineBlocks.id, 'home'))
+      await fresh.db.update(routineBlocks).set({ deletedAt: edited, updatedAt: edited }).where(eq(routineBlocks.id, 'office-wed'))
+      await seed(fresh.db)
+
+      expect(await fresh.db.select({ timeZone: settings.timeZone }).from(settings)).toEqual([{ timeZone: 'America/Denver' }])
+      const rows = Object.fromEntries((await fresh.db.select().from(routineBlocks)).map((b) => [b.id, b]))
+      expect(rows.home).toMatchObject({ end: '15:00', updatedAt: edited, deletedAt: null })
+      expect(rows['office-wed']).toMatchObject({ deletedAt: edited })
+    } finally {
+      await fresh.close()
+    }
+  })
+
   it('creates work and personal once and keeps later edits on a re-seed, while the inbox is reset', async () => {
     const fresh = await createTestDb()
     try {
       await seed(fresh.db)
       const first = await fresh.db.select().from(categories).orderBy(categories.sortOrder)
-      expect(first.map((p) => [p.id, p.name, p.scheduleId, p.deletedAt])).toEqual([
-        ['inbox', 'Inbox', 'work', null],
-        ['work', 'Work', 'work', null],
-        ['personal', 'Personal', 'personal', null],
+      expect(first.map((p) => [p.id, p.name, p.area, p.scheduleId, p.deletedAt])).toEqual([
+        ['inbox', 'Inbox', null, 'work', null],
+        ['work', 'Work', 'work', 'work', null],
+        ['personal', 'Personal', 'personal', 'personal', null],
       ])
 
       const edited = new Date('2026-11-01T00:00:00Z')

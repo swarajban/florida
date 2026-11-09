@@ -14,14 +14,34 @@ import type { CategorySuggester } from './ai/suggest-category.js'
 import { ChangeBus } from './changes.js'
 import type { Config } from './config.js'
 import type { Db } from './db/client.js'
-import { INBOX_CATEGORY_ID, categoriesWithExamples, defaultTimeZone, scheduleExists } from './db/queries.js'
-import { calendars, events, googleAccounts, placements, categories, schedules, tasks, unscheduled } from './db/schema.js'
+import { INBOX_CATEGORY_ID, SETTINGS_ID, categoriesWithExamples, defaultTimeZone, scheduleExists } from './db/queries.js'
+import {
+  calendars,
+  events,
+  googleAccounts,
+  placements,
+  categories,
+  routineBlocks,
+  schedules,
+  settings,
+  tasks,
+  unscheduled,
+} from './db/schema.js'
 import type { GoogleAccountRow } from './db/schema.js'
 import { eventBody, softDeleteEvent, upsertEvent } from './events.js'
 import { GoogleApiError, GoogleTokenError, authorizationUrl, exchangeCode } from './google/client.js'
 import type { CalendarSyncService } from './google/sync.js'
 import { mountMcp } from './mcp.js'
-import { lockTaskRecurrences, moveRecurringTaskCategory, patchTask, softDeleteTask, taskBody, taskPatch, upsertTask } from './tasks.js'
+import {
+  lockTaskRecurrences,
+  moveRecurringTaskCategory,
+  patchTask,
+  softDeleteTask,
+  taskBody,
+  taskContext,
+  taskPatch,
+  upsertTask,
+} from './tasks.js'
 import { badRequest, clock, isoInstant, notFound, timeZone } from './validation.js'
 
 export interface AppDeps {
@@ -67,12 +87,28 @@ const publicCalendarColumns = {
 const OAUTH_STATE_TTL = 10 * 60_000
 const LABEL_RE = /^[a-z][a-z0-9-]{0,31}$/
 
+const categoryArea = z.enum(['work', 'personal'])
+
 const categoryBody = z.object({
   name: z.string().min(1),
   color: z.string().nullish(),
+  area: categoryArea.nullish(),
   scheduleId: z.string().min(1),
   sortOrder: z.number().int().nullish(),
 })
+
+const routineBlockBody = z
+  .object({
+    name: z.string().min(1),
+    days: z.array(z.number().int().min(0).max(6)).min(1),
+    start: clock,
+    end: clock,
+    /** Empty means the block is shown but nothing is scheduled in it (a gym slot, say). */
+    allows: z.array(taskContext),
+  })
+  .refine((b) => b.start < b.end, 'end must be after start')
+
+const settingsBody = z.object({ timeZone })
 
 const scheduleBody = z.object({
   name: z.string().min(1),
@@ -101,7 +137,7 @@ const parseTaskBody = z.object({
   text: z.string().trim().min(1).max(2000),
   /** Client's current time; defaults to the server clock. */
   now: isoInstant.optional(),
-  /** Client's time zone; defaults to the first live schedule's zone, then UTC. */
+  /** Client's time zone; defaults to the routine's zone (settings), then UTC. */
   timeZone: timeZone.optional(),
 })
 
@@ -177,6 +213,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
     const cursor = new Date()
     const changedAfter = (column: PgColumn) => (since === undefined ? undefined : gt(column, since))
 
+    const routineBlockRows = await db.select().from(routineBlocks).where(changedAfter(routineBlocks.updatedAt))
     const scheduleRows = await db.select().from(schedules).where(changedAfter(schedules.updatedAt))
     const categoryRows = await db.select().from(categories).where(changedAfter(categories.updatedAt))
     const taskRows = await db.select().from(tasks).where(changedAfter(tasks.updatedAt))
@@ -191,9 +228,13 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
     const unscheduledRows = await db.select().from(unscheduled)
     const accountRows = await db.select(publicAccountColumns).from(googleAccounts)
     const calendarRows = await db.select(publicCalendarColumns).from(calendars)
+    // One row, never deleted; null until the database is seeded.
+    const [settingsRow] = await db.select().from(settings)
 
     return c.json({
       cursor: cursor.toISOString(),
+      settings: settingsRow ?? null,
+      routineBlocks: routineBlockRows,
       schedules: scheduleRows,
       categories: categoryRows,
       tasks: taskRows,
@@ -243,6 +284,13 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
     return c.json(category)
   })
 
+  app.get('/api/routine-blocks/:id', async (c) => {
+    const id = c.req.param('id')
+    const [block] = await db.select().from(routineBlocks).where(eq(routineBlocks.id, id))
+    if (block === undefined) throw notFound(`routine block ${id}`)
+    return c.json(block)
+  })
+
   app.get('/api/schedules/:id', async (c) => {
     const id = c.req.param('id')
     const [schedule] = await db.select().from(schedules).where(eq(schedules.id, id))
@@ -288,6 +336,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
     const fields = {
       name: body.name,
       color: body.color ?? null,
+      area: body.area ?? null,
       scheduleId: body.scheduleId,
       sortOrder: body.sortOrder ?? 0,
       updatedAt: new Date(),
@@ -335,7 +384,47 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
     return c.json({ scheduling })
   })
 
-  // ---- Schedules --------------------------------------------------------------------------------
+  // ---- Routine ----------------------------------------------------------------------------------
+
+  app.put('/api/routine-blocks/:id', async (c) => {
+    const id = c.req.param('id')
+    const body = routineBlockBody.parse(await c.req.json())
+    const fields = { ...body, updatedAt: new Date(), deletedAt: null }
+    const [routineBlock] = await db
+      .insert(routineBlocks)
+      .values({ id, ...fields })
+      .onConflictDoUpdate({ target: routineBlocks.id, set: fields })
+      .returning()
+    const scheduling = await reschedule()
+    return c.json({ routineBlock, scheduling })
+  })
+
+  app.delete('/api/routine-blocks/:id', async (c) => {
+    const id = c.req.param('id')
+    const now = new Date()
+    const deleted = await db
+      .update(routineBlocks)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(eq(routineBlocks.id, id))
+      .returning({ id: routineBlocks.id })
+    if (deleted.length === 0) throw notFound(`routine block ${id}`)
+    const scheduling = await reschedule()
+    return c.json({ scheduling })
+  })
+
+  app.put('/api/settings', async (c) => {
+    const body = settingsBody.parse(await c.req.json())
+    const fields = { timeZone: body.timeZone, updatedAt: new Date() }
+    const [row] = await db
+      .insert(settings)
+      .values({ id: SETTINGS_ID, ...fields })
+      .onConflictDoUpdate({ target: settings.id, set: fields })
+      .returning()
+    const scheduling = await reschedule()
+    return c.json({ settings: row, scheduling })
+  })
+
+  // ---- Schedules (superseded by the routine; kept for shipped clients) --------------------------
 
   app.put('/api/schedules/:id', async (c) => {
     const id = c.req.param('id')

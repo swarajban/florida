@@ -1,17 +1,20 @@
 import { randomUUID } from 'node:crypto'
 import { DAY, schedule } from '@florida/scheduler'
-import type { Interval, Schedule, SchedulerInput, SchedulerResult, Task } from '@florida/scheduler'
+import type { Interval, RoutineBlock, SchedulerInput, SchedulerResult, Task } from '@florida/scheduler'
 import { and, eq, getTableColumns, isNull, sql } from 'drizzle-orm'
 import type { Config } from './config.js'
 import type { Db } from './db/client.js'
-import { calendars, events, placements, categories, schedules, tasks, unscheduled } from './db/schema.js'
-import type { EventRow, CategoryRow, PlacementRow, ScheduleRow, TaskRow } from './db/schema.js'
+import { defaultTimeZone } from './db/queries.js'
+import { calendars, events, placements, categories, routineBlocks, tasks, unscheduled } from './db/schema.js'
+import type { EventRow, CategoryRow, PlacementRow, RoutineBlockRow, TaskRow } from './db/schema.js'
 import { materializeRecurringTasks } from './tasks.js'
 
 export interface SchedulerSources {
   now: Date
   horizonDays: number
-  schedules: ScheduleRow[]
+  /** The routine's zone; block times are wall clock in it. */
+  timeZone: string
+  routineBlocks: RoutineBlockRow[]
   categories: CategoryRow[]
   tasks: TaskRow[]
   events: EventRow[]
@@ -22,31 +25,28 @@ export interface SchedulerSources {
 /**
  * Maps database rows to scheduler input. Pure.
  *
- * A task uses its own `scheduleId` when set, otherwise its category's. Tasks that are deleted,
- * completed, or belong to a deleted category are skipped. Busy time is every live, timed, opaque,
- * not-declined event that overlaps [now, now + horizon). Previous placements go through as-is;
- * the scheduler itself decides which are still valid.
+ * Live routine blocks become the routine; each task carries its own `context`, and the scheduler
+ * places it only in blocks that allow it. Tasks that are deleted, completed, or belong to a
+ * deleted category are skipped. Busy time is every live, timed, opaque, not-declined event that
+ * overlaps [now, now + horizon). Previous placements go through as-is; the scheduler itself
+ * decides which are still valid.
  */
 export function buildSchedulerInput(src: SchedulerSources): SchedulerInput {
   const nowMs = src.now.getTime()
   const horizonEnd = nowMs + src.horizonDays * DAY
 
-  const liveSchedules: Schedule[] = src.schedules
-    .filter((s) => s.deletedAt === null)
-    .map((s) => ({ id: s.id, timeZone: s.timeZone, windows: s.windows }))
+  const blocks: RoutineBlock[] = src.routineBlocks
+    .filter((b) => b.deletedAt === null)
+    .map((b) => ({ id: b.id, days: b.days, start: b.start, end: b.end, allows: b.allows }))
 
-  const categorySchedule = new Map(
-    src.categories.filter((p) => p.deletedAt === null).map((p) => [p.id, p.scheduleId] as const),
-  )
+  const liveCategories = new Set(src.categories.filter((p) => p.deletedAt === null).map((p) => p.id))
 
   const openTasks: Task[] = []
   for (const t of src.tasks) {
-    if (t.deletedAt !== null || t.completedAt !== null) continue
-    const categoryScheduleId = categorySchedule.get(t.categoryId)
-    if (categoryScheduleId === undefined) continue
+    if (t.deletedAt !== null || t.completedAt !== null || !liveCategories.has(t.categoryId)) continue
     const task: Task = {
       id: t.id,
-      scheduleId: t.scheduleId ?? categoryScheduleId,
+      context: t.context,
       durationMinutes: t.durationMinutes,
       priority: t.priority,
       deadlineType: t.deadlineType,
@@ -73,7 +73,7 @@ export function buildSchedulerInput(src: SchedulerSources): SchedulerInput {
 
   const input: SchedulerInput = {
     now: src.now.toISOString(),
-    schedules: liveSchedules,
+    routine: { timeZone: src.timeZone, blocks },
     tasks: openTasks,
     busy,
     horizonDays: src.horizonDays,
@@ -109,7 +109,8 @@ export async function runScheduling(
     await tx.execute(sql.raw(SCHEDULER_LOCK_SQL))
     await materializeRecurringTasks(tx, now, config.HORIZON_DAYS)
 
-    const scheduleRows = await tx.select().from(schedules).where(isNull(schedules.deletedAt))
+    const timeZone = await defaultTimeZone(tx)
+    const blockRows = await tx.select().from(routineBlocks).where(isNull(routineBlocks.deletedAt))
     const categoryRows = await tx.select().from(categories).where(isNull(categories.deletedAt))
     const taskRows = await tx
       .select()
@@ -126,7 +127,8 @@ export async function runScheduling(
       buildSchedulerInput({
         now,
         horizonDays: config.HORIZON_DAYS,
-        schedules: scheduleRows,
+        timeZone,
+        routineBlocks: blockRows,
         categories: categoryRows,
         tasks: taskRows,
         events: eventRows,

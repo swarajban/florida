@@ -2,10 +2,11 @@ import type {
   Late,
   Placement,
   Priority,
-  Schedule,
+  Routine,
   SchedulerInput,
   SchedulerResult,
   Task,
+  TaskContext,
   Unscheduled,
 } from './types.js'
 import {
@@ -36,7 +37,7 @@ interface Context {
  *
  * Order of work: pinned tasks first (they are fixed), then reserve in-progress work.
  * Flexible tasks sorted by `compareTasks` reuse valid prior blocks before placing their
- * remaining work into the earliest free time inside their schedule's windows.
+ * remaining work into the earliest free time inside routine blocks that allow their context.
  */
 export function schedule(input: SchedulerInput): SchedulerResult {
   const now = parseInstant(input.now, 'now')
@@ -46,7 +47,7 @@ export function schedule(input: SchedulerInput): SchedulerResult {
     granularity: (input.granularityMinutes ?? 15) * MINUTE,
     overflow: input.overflowWindow ?? { start: '07:00', end: '23:00' },
   }
-  const schedules = new Map(input.schedules.map((s) => [s.id, s]))
+  const routine = input.routine
 
   const busySpans = input.busy.map((i) => ({
     start: parseInstant(i.start, 'busy.start'),
@@ -71,7 +72,7 @@ export function schedule(input: SchedulerInput): SchedulerResult {
 
   const flexible = open
     .filter((t) => t.pinnedStart === undefined)
-    .sort((a, b) => compareTasks(a, b, schedules))
+    .sort((a, b) => compareTasks(a, b, routine.timeZone))
 
   const previous = new Map<string, Span[]>(flexible.map((task) => [task.id, []]))
   for (const block of input.previous ?? []) {
@@ -113,18 +114,18 @@ export function schedule(input: SchedulerInput): SchedulerResult {
   }
 
   for (const task of flexible) {
-    const sched = schedules.get(task.scheduleId)
+    const allowed = routine.blocks.some((b) => b.allows.includes(task.context) && b.days.length > 0)
     const retained = active.get(task.id) ?? { spans: [], work: 0 }
-    const fit: Fit = sched === undefined
-      ? { spans: retained.spans, remaining: Math.max(0, remainingMinutes(task) * MINUTE - retained.work), busy, hardLimited: false }
-      : placeTask(task, sched, ctx, busy, previous.get(task.id) ?? [], retained)
+    const fit: Fit = allowed
+      ? placeTask(task, routine, ctx, busy, previous.get(task.id) ?? [], retained)
+      : { spans: retained.spans, remaining: Math.max(0, remainingMinutes(task) * MINUTE - retained.work), busy, hardLimited: false }
     busy = fit.busy
     for (const span of fit.spans) placements.push(toPlacement(task.id, span, false))
 
     if (fit.remaining > 0) {
       unscheduled.push({
         taskId: task.id,
-        reason: sched === undefined ? 'unknown_schedule'
+        reason: !allowed ? 'no_allowed_block'
           : fit.hardLimited ? 'no_fit_before_hard_deadline' : 'no_fit_in_horizon',
         unplacedMinutes: fit.remaining / MINUTE,
       })
@@ -146,13 +147,13 @@ export function schedule(input: SchedulerInput): SchedulerResult {
  * then priority; then creation time. Earliest-deadline-first maximizes deadlines met, and hard
  * deadlines constrain new blocks, including the overflow pass in `placeTask`.
  */
-function compareTasks(a: Task, b: Task, schedules: Map<string, Schedule>): number {
+function compareTasks(a: Task, b: Task, timeZone: string): number {
   const aAsap = a.priority === 'asap'
   const bAsap = b.priority === 'asap'
   if (aAsap !== bAsap) return aAsap ? -1 : 1
 
-  const aDue = dueDay(a, schedules)
-  const bDue = dueDay(b, schedules)
+  const aDue = dueDay(a, timeZone)
+  const bDue = dueDay(b, timeZone)
   if (aDue !== bDue) return aDue < bDue ? -1 : 1
   if (aDue !== Number.POSITIVE_INFINITY && a.deadlineType !== b.deadlineType) {
     return a.deadlineType === 'hard' ? -1 : 1
@@ -183,7 +184,7 @@ interface Retained {
 
 function placeTask(
   task: Task,
-  sched: Schedule,
+  routine: Routine,
   ctx: Context,
   initialBusy: Span[],
   previous: Span[],
@@ -206,7 +207,7 @@ function placeTask(
   for (const span of previous) {
     const duration = span.end - span.start
     if (duration <= 0 || duration > remaining || span.start < earliest || span.end > limit) continue
-    const windows = windowsOn(sched, localDate(span.start, sched.timeZone))
+    const windows = blocksOn(routine, task.context, localDate(span.start, routine.timeZone))
     if (!windows.some((window) => window.start <= span.start && span.end <= window.end)) continue
     if (busy.some((b) => b.start < span.end && span.start < b.end)) continue
     spans.push(span)
@@ -215,10 +216,10 @@ function placeTask(
   }
 
   const fill = (windowsForDay: (date: LocalDate) => Span[]): void => {
-    const firstDay = dayNumber(localDate(earliest, sched.timeZone))
+    const firstDay = dayNumber(localDate(earliest, routine.timeZone))
     for (let day = firstDay; remaining > 0; day++) {
       const date = dateFromDayNumber(day)
-      if (zonedToUtc(date, 0, sched.timeZone) >= limit) break
+      if (zonedToUtc(date, 0, routine.timeZone) >= limit) break
       for (const window of windowsForDay(date)) {
         const clipped = { start: Math.max(window.start, earliest), end: Math.min(window.end, limit) }
         if (clipped.end <= clipped.start) continue
@@ -237,9 +238,9 @@ function placeTask(
     }
   }
 
-  fill((date) => windowsOn(sched, date))
+  fill((date) => blocksOn(routine, task.context, date))
   if (remaining > 0 && hardDue !== undefined) {
-    fill((date) => [windowSpan(date, ctx.overflow.start, ctx.overflow.end, sched.timeZone)])
+    fill((date) => [windowSpan(date, ctx.overflow.start, ctx.overflow.end, routine.timeZone)])
   }
 
   return {
@@ -250,12 +251,17 @@ function placeTask(
   }
 }
 
-function windowsOn(sched: Schedule, date: LocalDate): Span[] {
+/**
+ * Time on `date` where a task of `context` may go: the union of the routine blocks that allow it.
+ * Overlapping or touching blocks merge, so a task can span them as one piece.
+ */
+function blocksOn(routine: Routine, context: TaskContext, date: LocalDate): Span[] {
   const weekday = weekdayOf(date)
-  return sched.windows
-    .filter((w) => w.days.includes(weekday))
-    .map((w) => windowSpan(date, w.start, w.end, sched.timeZone))
-    .sort((a, b) => a.start - b.start)
+  return mergeSpans(
+    routine.blocks
+      .filter((b) => b.days.includes(weekday) && b.allows.includes(context))
+      .map((b) => windowSpan(date, b.start, b.end, routine.timeZone)),
+  )
 }
 
 function windowSpan(date: LocalDate, start: string, end: string, timeZone: string): Span {
@@ -265,10 +271,9 @@ function windowSpan(date: LocalDate, start: string, end: string, timeZone: strin
   }
 }
 
-function dueDay(task: Task, schedules: Map<string, Schedule>): number {
+function dueDay(task: Task, timeZone: string): number {
   const due = effectiveDue(task)
   if (due === undefined) return Number.POSITIVE_INFINITY
-  const timeZone = schedules.get(task.scheduleId)?.timeZone ?? 'UTC'
   return dayNumber(localDate(due.ms, timeZone))
 }
 

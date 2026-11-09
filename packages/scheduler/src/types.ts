@@ -2,26 +2,38 @@ export type Priority = 'asap' | 'high' | 'medium' | 'low'
 
 export type DeadlineType = 'hard' | 'soft' | 'none'
 
-/** A weekly availability window, expressed as wall-clock time in the schedule's time zone. */
-export interface ScheduleWindow {
-  /** Days of week the window applies to: 0 = Sunday … 6 = Saturday. */
+/**
+ * Where a task can be done. A routine block lists the contexts it allows, so an errand never
+ * lands in office hours and office-only work never lands on a home day.
+ */
+export type TaskContext = 'computer' | 'errand' | 'home' | 'office'
+
+/** A weekly block of the routine, expressed as wall-clock time in the routine's time zone. */
+export interface RoutineBlock {
+  id: string
+  /** Days of week the block applies to: 0 = Sunday … 6 = Saturday. */
   days: number[]
-  /** Start of the window, "HH:MM" in 24-hour time. */
+  /** Start of the block, "HH:MM" in 24-hour time. */
   start: string
-  /** End of the window, "HH:MM" in 24-hour time. Must be after `start` and on the same day. */
+  /** End of the block, "HH:MM" in 24-hour time. Must be after `start` and on the same day. */
   end: string
+  /**
+   * Task contexts that may be placed in this block. Empty for blocks that only document time
+   * nothing goes into (family time, the gym); time outside every allowing block is unavailable.
+   */
+  allows: TaskContext[]
 }
 
-export interface Schedule {
-  id: string
+/** The user's week: when tasks may go, and which kinds. Replaces per-category schedules. */
+export interface Routine {
   /** IANA time zone, e.g. "America/Los_Angeles". */
   timeZone: string
-  windows: ScheduleWindow[]
+  blocks: RoutineBlock[]
 }
 
 export interface Task {
   id: string
-  scheduleId: string
+  context: TaskContext
   durationMinutes: number
   /**
    * Smallest piece the task may be split into. Omit to require one contiguous block.
@@ -51,7 +63,7 @@ export interface Interval {
 export interface SchedulerInput {
   /** ISO 8601 instant. New flexible blocks never start before it; in-progress blocks may. */
   now: string
-  schedules: Schedule[]
+  routine: Routine
   /** Open tasks only; completed tasks must not be passed. */
   tasks: Task[]
   /** Time that is unavailable: calendar events and anything else that blocks. */
@@ -62,11 +74,12 @@ export interface SchedulerInput {
    * covers it, so logging progress mid-block never counts the same minutes twice; the block then
    * runs on only while work remains, and never ends before `now`. Busy intervals starting after
    * `now`, and pinned work that is running or upcoming, cut an active block short; the rest of
-   * its work is rescheduled. Window and start-date changes do not move active work. Finished
+   * its work is rescheduled. Routine and start-date changes do not move active work. Finished
    * tasks and past blocks are ignored: time in a block that ended unlogged is still owed.
    * Future blocks are reused whole, in task ordering, if they still fit remaining work,
-   * the horizon, schedule windows, start date, hard deadline, and time not already occupied.
-   * Only work not retained is placed into the earliest free slots. Omit for a fresh plan.
+   * the horizon, a routine block allowing the task's context, start date, hard deadline, and
+   * time not already occupied. Only work not retained is placed into the earliest free slots.
+   * Omit for a fresh plan.
    */
   previous?: Placement[]
   /** How far ahead of `now` to place tasks. Default 28. */
@@ -74,8 +87,8 @@ export interface SchedulerInput {
   /** Placement grid in minutes; starts snap up to it. Default 15. */
   granularityMinutes?: number
   /**
-   * Daily wall-clock window, in each schedule's time zone, used for hard-deadline tasks that
-   * cannot fit inside their schedule before the deadline. Default 07:00–23:00.
+   * Daily wall-clock window, in the routine's time zone, used for hard-deadline tasks that cannot
+   * fit inside the routine before the deadline. Default 07:00–23:00.
    */
   overflowWindow?: { start: string; end: string }
 }
@@ -90,7 +103,8 @@ export interface Placement {
 export type UnscheduledReason =
   | 'no_fit_in_horizon'
   | 'no_fit_before_hard_deadline'
-  | 'unknown_schedule'
+  /** No routine block allows the task's context, so there is nowhere it could ever go. */
+  | 'no_allowed_block'
 
 export interface Unscheduled {
   taskId: string
