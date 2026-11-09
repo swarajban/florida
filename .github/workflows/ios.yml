@@ -70,16 +70,17 @@ jobs:
         working-directory: apple
         run: |
           # -demoData seeds an in-memory store (apple/iOS/Support/DemoData.swift), so no personal
-          # data or server is involved; -uiTab picks the tab. Both are Debug-only launch arguments.
+          # data or server is involved; -uiTab picks the tab; -uiSheet opens a sheet over it
+          # (apple/iOS/Support/LaunchOptions.swift). All are Debug-only launch arguments.
           xcrun simctl boot "$UDID" || true
           xcrun simctl bootstatus "$UDID" -b
           xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100 --cellularBars 4 || true
           xcrun simctl install "$UDID" build/Build/Products/Debug-iphonesimulator/Florida.app
           mkdir -p screenshots
           shoot() {
-            name=$1; tab=$2
+            name=$1; tab=$2; sheet=${3:-}
             xcrun simctl terminate "$UDID" "$BUNDLE_ID" 2>/dev/null || true
-            xcrun simctl launch "$UDID" "$BUNDLE_ID" -demoData YES -uiTab "$tab"
+            xcrun simctl launch "$UDID" "$BUNDLE_ID" -demoData YES -uiTab "$tab" ${sheet:+-uiSheet "$sheet"}
             sleep 8
             xcrun simctl io "$UDID" screenshot "screenshots/$name.png"
           }
@@ -88,6 +89,8 @@ jobs:
           shoot 01-agenda agenda
           shoot 02-tasks tasks
           shoot 03-settings settings
+          shoot 06-event-detail agenda event
+          shoot 07-ai-draft tasks aitask
           xcrun simctl ui "$UDID" appearance dark
           shoot 04-agenda-dark agenda
           shoot 05-tasks-dark tasks
