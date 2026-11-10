@@ -4,8 +4,8 @@ import GRDB
 // GRDB record conformances for the FloridaCore wire models. The model shapes are the table shapes:
 // every stored property is a column of the same name. Dates use GRDB's default text format
 // ("yyyy-MM-dd HH:mm:ss.SSS" UTC) and `Schedule.windows` is stored as a JSON text column by
-// GRDB's Codable support, as are `CalendarEvent.attendees` and `organizer` and `RoutineBlock.days`
-// and `allows`. The conformances are retroactive on purpose: FloridaCore stays free of GRDB.
+// GRDB's Codable support, as are `CalendarEvent.attendees` and `organizer`, `RoutineBlock.days`,
+// `allows` and `alternates`, and `PlanSummary.missed` and `capacity`. The conformances are retroactive on purpose: FloridaCore stays free of GRDB.
 
 extension RoutineBlock: @retroactive FetchableRecord, @retroactive PersistableRecord {
     public static let databaseTableName = "routineBlock"
@@ -29,6 +29,30 @@ extension TaskItem: @retroactive FetchableRecord, @retroactive PersistableRecord
 
 extension Placement: @retroactive FetchableRecord, @retroactive PersistableRecord {
     public static let databaseTableName = "placement"
+}
+
+extension Project: @retroactive FetchableRecord, @retroactive PersistableRecord {
+    public static let databaseTableName = "project"
+}
+
+extension DayOverride: @retroactive FetchableRecord, @retroactive PersistableRecord {
+    public static let databaseTableName = "dayOverride"
+}
+
+extension ProjectPlacement: @retroactive FetchableRecord, @retroactive PersistableRecord {
+    public static let databaseTableName = "projectPlacement"
+}
+
+extension RoutineOccurrence: @retroactive FetchableRecord, @retroactive PersistableRecord {
+    public static let databaseTableName = "routineOccurrence"
+}
+
+extension PlanSummary: @retroactive FetchableRecord, @retroactive PersistableRecord {
+    public static let databaseTableName = "planSummary"
+}
+
+extension Brief: @retroactive FetchableRecord, @retroactive PersistableRecord {
+    public static let databaseTableName = "brief"
 }
 
 extension OptionalPlacement: @retroactive FetchableRecord, @retroactive PersistableRecord {
@@ -55,7 +79,7 @@ extension CalendarInfo: @retroactive FetchableRecord, @retroactive PersistableRe
 /// (entity, entityId); later task edits merge their intent into the earlier write.
 public struct PendingWrite: Codable, Hashable, Sendable, FetchableRecord, MutablePersistableRecord {
     public enum Entity: String, Codable, Hashable, Sendable {
-        case task, category, schedule, event
+        case task, category, schedule, event, project, dayOverride
     }
 
     public enum Op: String, Codable, Hashable, Sendable {
@@ -105,10 +129,13 @@ public struct DayAgenda: Hashable, Sendable {
     public var day: Date
     public var events: [CalendarEvent]
     public var placements: [ScheduledBlock]
+    /// The day's commitments (the gym) and time held for active projects, by start.
+    public var planBlocks: [PlanBlock]
 
-    public init(day: Date, events: [CalendarEvent], placements: [ScheduledBlock]) {
+    public init(day: Date, events: [CalendarEvent], placements: [ScheduledBlock], planBlocks: [PlanBlock] = []) {
         self.day = day
         self.events = events
         self.placements = placements
+        self.planBlocks = planBlocks
     }
 }

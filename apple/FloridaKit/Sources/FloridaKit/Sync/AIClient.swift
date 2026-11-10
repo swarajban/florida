@@ -28,6 +28,39 @@ public actor AIClient {
         let body = try JSONCoding.encoder.encode(SuggestCategoryBody(title: title, notes: notes))
         return try await api.perform(api.makeRequest(method: "POST", path: "api/ai/suggest-category", body: body))
     }
+
+    /// `POST /api/ai/brief`: has the server write today's brief or this week's review now, from the
+    /// current plan. The server stores it; save the result with `AppDatabase.storeBrief` to show it
+    /// before the next sync.
+    public func writeBrief(_ kind: BriefKind) async throws -> Brief {
+        let body = try JSONCoding.encoder.encode(BriefBody(kind: kind))
+        let response: BriefResponse = try await api.perform(api.makeRequest(method: "POST", path: "api/ai/brief", body: body))
+        return response.brief
+    }
+
+    /// `POST /api/ai/explain`: why the task is planned where it is, or why it is not planned.
+    public func explainPlacement(taskId: String) async throws -> String {
+        let body = try JSONCoding.encoder.encode(ExplainBody(taskId: taskId))
+        let response: ExplainResponse = try await api.perform(
+            api.makeRequest(method: "POST", path: "api/ai/explain", body: body))
+        return response.explanation
+    }
+}
+
+struct BriefBody: Codable {
+    var kind: BriefKind
+}
+
+struct BriefResponse: Codable {
+    var brief: Brief
+}
+
+struct ExplainBody: Codable {
+    var taskId: String
+}
+
+struct ExplainResponse: Codable {
+    var explanation: String
 }
 
 struct ParseTaskBody: Codable {

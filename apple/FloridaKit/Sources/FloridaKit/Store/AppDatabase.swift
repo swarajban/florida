@@ -266,6 +266,83 @@ public final class AppDatabase: Sendable {
             try db.execute(sql: "DELETE FROM syncState WHERE key = 'cursor'")
         }
 
+        migrator.registerMigration("v6") { db in
+            // Projects, and which of them a task belongs to.
+            try db.create(table: "project") { t in
+                t.primaryKey("id", .text)
+                t.column("name", .text).notNull()
+                t.column("status", .text).notNull()
+                t.column("categoryId", .text)
+                t.column("notes", .text)
+                t.column("nextStep", .text)
+                t.column("parallel", .boolean).notNull()
+                t.column("weeklyMinutes", .integer)
+                t.column("sortOrder", .integer).notNull()
+                t.column("createdAt", .datetime).notNull()
+                t.column("updatedAt", .datetime).notNull()
+                t.column("deletedAt", .datetime)
+            }
+            try db.alter(table: "task") { t in
+                t.add(column: "projectId", .text)
+                t.add(column: "attention", .text)
+            }
+
+            // Blocks worked side by side, and a commitment's alternate slots (JSON text like `days`).
+            try db.alter(table: "placement") { t in
+                t.add(column: "lane", .integer)
+            }
+            try db.alter(table: "routineBlock") { t in
+                t.add(column: "alternates", .text)
+            }
+
+            // Single dates that depart from the routine, keyed by local date.
+            try db.create(table: "dayOverride") { t in
+                t.primaryKey("date", .text)
+                t.column("kind", .text).notNull()
+                t.column("note", .text)
+                t.column("createdAt", .datetime).notNull()
+                t.column("updatedAt", .datetime).notNull()
+                t.column("deletedAt", .datetime)
+            }
+
+            // Scheduler output, replaced wholesale like `placement`. `planSummary` holds one row
+            // whose `missed` and `capacity` are JSON text.
+            try db.create(table: "projectPlacement") { t in
+                t.primaryKey("id", .text)
+                t.column("projectId", .text).notNull()
+                t.column("weekOf", .text).notNull()
+                t.column("startAt", .datetime).notNull().indexed()
+                t.column("endAt", .datetime).notNull()
+                t.column("lane", .integer)
+                t.column("computedAt", .datetime).notNull()
+            }
+            try db.create(table: "routineOccurrence") { t in
+                t.primaryKey("id", .text)
+                t.column("blockId", .text).notNull()
+                t.column("startAt", .datetime).notNull().indexed()
+                t.column("endAt", .datetime).notNull()
+                t.column("computedAt", .datetime).notNull()
+            }
+            try db.create(table: "planSummary") { t in
+                t.column("missed", .text).notNull()
+                t.column("capacity", .text).notNull()
+            }
+
+            // The newest daily brief and weekly review, replaced on every sync.
+            try db.create(table: "brief") { t in
+                t.primaryKey("id", .text)
+                t.column("kind", .text).notNull()
+                t.column("date", .text).notNull()
+                t.column("headline", .text).notNull()
+                t.column("body", .text).notNull()
+                t.column("createdAt", .datetime).notNull()
+                t.column("updatedAt", .datetime).notNull()
+            }
+
+            // Tasks and routine blocks stored by the previous version lack the new columns.
+            try db.execute(sql: "DELETE FROM syncState WHERE key = 'cursor'")
+        }
+
         return migrator
     }
 }

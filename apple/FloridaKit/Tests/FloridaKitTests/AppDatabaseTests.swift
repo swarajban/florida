@@ -55,10 +55,13 @@ import Testing
 
         let db = try AppDatabase(writer: queue)
         let applied = try queue.read { db in try AppDatabase.migrator.appliedMigrations(db) }
-        #expect(applied == ["v1", "v2", "v3", "v4", "v5"])
+        #expect(applied == ["v1", "v2", "v3", "v4", "v5", "v6"])
         // Rows that predate the context column read as the default.
         #expect(try db.task(id: "t1")?.context == .computer)
         #expect(try db.routineBlocks() == [] && db.userSettings() == nil)
+        // And those that predate projects are in none, with nothing planned around them.
+        #expect(try db.task(id: "t1")?.projectId == nil && db.task(id: "t1")?.attention == nil)
+        #expect(try db.projects() == [] && db.dayOverrides() == [] && db.planSummary() == PlanSummary())
 
         let event = try #require(try db.events(in: Fixtures.allTime, calendar: Fixtures.utc).first)
         #expect(event.id == "e1" && event.summary == "Standup")

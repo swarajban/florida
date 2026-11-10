@@ -71,8 +71,10 @@ public actor SyncClient {
 
     /// Pushes queued writes in `seq` order. A 401 throws. Any other failure (5xx, transport,
     /// decoding, or the local store) stops the loop and is returned, keeping that row and the rest:
-    /// later writes may depend on it (a task in a category not yet created). Another 4xx resets the
-    /// local row to the server's copy, drops the write into `lastRejectedWrites`, and continues.
+    /// later writes may depend on it (a task in a category not yet created). A 404 that is not the
+    /// server's own (no `{error}` body) means the server predates the route: the write stays queued
+    /// for a newer server and the loop goes on. Another 4xx resets the local row to the server's
+    /// copy, drops the write into `lastRejectedWrites`, and continues.
     private func pushQueue() async throws -> (pushed: Int, failure: (any Error)?) {
         lastRejectedWrites = []
         var pushed = 0
@@ -85,6 +87,8 @@ public actor SyncClient {
                     pushed += 1
                 case 401:
                     throw SyncError.unauthorized
+                case 404 where api.serverError(data) == nil:
+                    continue
                 case 400..<500:
                     try database.resolveDroppedWrite(write, serverCopy: try await fetchServerCopy(of: write))
                     lastRejectedWrites.append(RejectedWrite(write: write, status: response.statusCode, message: api.errorMessage(data)))
@@ -142,6 +146,8 @@ public actor SyncClient {
         case .category: "api/categories"
         case .schedule: "api/schedules"
         case .event: "api/events"
+        case .project: "api/projects"
+        case .dayOverride: "api/day-overrides"
         }
     }
 
@@ -172,6 +178,12 @@ public actor SyncClient {
         case (.event, .put), (.event, .patch):
             let response = try api.decode(EventWriteResponse.self, from: data)
             try database.completePendingWrite(write, record: response.event, scheduling: response.scheduling, computedAt: now)
+        case (.project, .put), (.project, .patch):
+            let response = try api.decode(ProjectWriteResponse.self, from: data)
+            try database.completePendingWrite(write, record: response.project, scheduling: response.scheduling, computedAt: now)
+        case (.dayOverride, .put), (.dayOverride, .patch):
+            let response = try api.decode(DayOverrideWriteResponse.self, from: data)
+            try database.completePendingWrite(write, record: response.dayOverride, scheduling: response.scheduling, computedAt: now)
         case (_, .delete):
             let response = try api.decode(SchedulingResponse.self, from: data)
             try database.completePendingWrite(write, record: nil as TaskItem?, scheduling: response.scheduling, computedAt: now)
@@ -199,6 +211,12 @@ public actor SyncClient {
                 return row.deletedAt == nil ? .live(row) : .tombstoned
             case .event:
                 let row = try api.decode(CalendarEvent.self, from: data)
+                return row.deletedAt == nil ? .live(row) : .tombstoned
+            case .project:
+                let row = try api.decode(Project.self, from: data)
+                return row.deletedAt == nil ? .live(row) : .tombstoned
+            case .dayOverride:
+                let row = try api.decode(DayOverride.self, from: data)
                 return row.deletedAt == nil ? .live(row) : .tombstoned
             }
         case 404 where api.serverError(data) != nil:

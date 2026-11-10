@@ -77,12 +77,42 @@ extension AppDatabase {
     }
 
     /// The agenda for the calendar day containing `day`, as `agenda(for:calendar:)` returns it,
-    /// re-yielded whenever events, placements or tasks change.
+    /// re-yielded whenever events, placements, tasks, the routine or projects change.
     public func observeAgenda(for day: Date, calendar: Calendar) -> AsyncValueObservation<DayAgenda> {
         let range = Self.dayRange(containing: day, calendar: calendar)
         return observe { db in
             try Self.agenda(db, in: range, calendar: calendar)
         }
+    }
+
+    /// Live projects, as `projects()` returns them.
+    public func observeProjects() -> AsyncValueObservation<[Project]> {
+        observe { db in try Self.projects(db) }
+    }
+
+    /// Live day overrides, as `dayOverrides()` returns them.
+    public func observeDayOverrides() -> AsyncValueObservation<[DayOverride]> {
+        observe { db in try Self.dayOverrides(db) }
+    }
+
+    /// Time held for projects, as `projectPlacements()` returns it.
+    public func observeProjectPlacements() -> AsyncValueObservation<[ProjectPlacement]> {
+        observe { db in try Self.projectPlacements(db) }
+    }
+
+    /// The commitments' occurrences, as `routineOccurrences()` returns them.
+    public func observeRoutineOccurrences() -> AsyncValueObservation<[RoutineOccurrence]> {
+        observe { db in try Self.routineOccurrences(db) }
+    }
+
+    /// The plan summary, as `planSummary()` returns it.
+    public func observePlanSummary() -> AsyncValueObservation<PlanSummary> {
+        observe { db in try PlanSummary.fetchOne(db) ?? PlanSummary() }
+    }
+
+    /// The stored briefs, as `briefs()` returns them.
+    public func observeBriefs() -> AsyncValueObservation<[Brief]> {
+        observe { db in try Self.briefs(db) }
     }
 
     public func observeAccounts() -> AsyncValueObservation<[GoogleAccount]> {

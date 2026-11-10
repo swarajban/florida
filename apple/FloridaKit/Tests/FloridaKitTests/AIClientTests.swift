@@ -71,4 +71,39 @@ import Testing
             Issue.record("expected .decoding")
         } catch SyncError.decoding {}
     }
+
+    @Test func writeBriefAsksForAKindAndReturnsTheStoredBrief() async throws {
+        let transport = FakeTransport([.ok(Data("""
+            {"brief":{"id":"b1","kind":"weekly","date":"2026-11-08","headline":"A full week","body":"Gym moved to Wednesday.",
+              "createdAt":"2026-11-08T18:00:00.000Z","updatedAt":"2026-11-08T18:00:00.000Z"}}
+            """.utf8))])
+        let brief = try await AIClient(config: config, transport: transport).writeBrief(.weekly)
+        #expect(brief.kind == .weekly && brief.date == "2026-11-08" && brief.headline == "A full week")
+        #expect(brief.updatedAt == Fixtures.instant("2026-11-08T18:00:00Z"))
+
+        let request = try #require(transport.requests.first)
+        #expect(request.method == "POST" && request.path == "/api/ai/brief")
+        let sent = try #require(request.body)
+        #expect(try JSONSerialization.jsonObject(with: sent) as? [String: String] == ["kind": "weekly"])
+    }
+
+    @Test func explainPlacementSendsTheTaskAndReturnsTheWords() async throws {
+        let transport = FakeTransport([
+            .ok(Data(#"{"explanation":"Thursday is the first office day with 90 free minutes."}"#.utf8)),
+            .error(404, "task gone not found"),
+        ])
+        let client = AIClient(config: config, transport: transport)
+        #expect(try await client.explainPlacement(taskId: "t1") == "Thursday is the first office day with 90 free minutes.")
+        let request = try #require(transport.requests.first)
+        #expect(request.method == "POST" && request.path == "/api/ai/explain")
+        let sent = try #require(request.body)
+        #expect(try JSONSerialization.jsonObject(with: sent) as? [String: String] == ["taskId": "t1"])
+
+        do {
+            _ = try await client.explainPlacement(taskId: "gone")
+            Issue.record("expected .http")
+        } catch SyncError.http(let status, _) {
+            #expect(status == 404)
+        }
+    }
 }

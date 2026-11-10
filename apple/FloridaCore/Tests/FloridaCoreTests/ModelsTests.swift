@@ -328,3 +328,143 @@ import Testing
         #expect(draft.categoryId == "work")
     }
 }
+
+@Suite struct ProjectModelTests {
+    let at = JSONCoding.parseInstant("2026-11-01T00:00:00Z")!
+    let stamps = #""createdAt":"2026-11-01T00:00:00.000Z","updatedAt":"2026-11-01T00:00:00.000Z""#
+    let tables = #""schedules":[],"categories":[],"events":[],"accounts":[],"calendars":[]"#
+
+    @Test func decodesProjectsLanesCommitmentsAndBriefsFromSync() throws {
+        let json = """
+        {"cursor":"c",\(tables),
+          "routineBlocks":[{"id":"gym","name":"Gym","days":[2],"start":"09:00","end":"10:15","allows":[],
+            "alternates":[{"day":3,"start":"09:00","end":"10:15"}],\(stamps),"deletedAt":null}],
+          "projects":[{"id":"florida","name":"Florida","status":"on_hold","categoryId":null,"notes":null,
+            "nextStep":"Ship lanes","parallel":true,"weeklyMinutes":120,"sortOrder":2,\(stamps),"deletedAt":null}],
+          "dayOverrides":[{"date":"2026-11-12","kind":"office","note":"offsite",\(stamps),"deletedAt":null}],
+          "tasks":[{"id":"t1","categoryId":"inbox","title":"Lanes","notes":null,"durationMinutes":60,
+            "minChunkMinutes":null,"priority":"medium","deadlineType":"none","dueAt":null,"startAt":null,
+            "scheduleId":null,"context":"computer","projectId":"florida","attention":"shared","pinnedStart":null,
+            "completedMinutes":0,"completedAt":null,\(stamps),"deletedAt":null}],
+          "placements":[{"id":"p1","taskId":"t1","startAt":"2026-11-09T17:00:00.000Z","endAt":"2026-11-09T18:00:00.000Z",
+            "pinned":false,"lane":1,"computedAt":"2026-11-01T00:00:00.000Z"}],
+          "projectPlacements":[{"id":"pp1","projectId":"florida","weekOf":"2026-11-08",
+            "startAt":"2026-11-09T18:00:00.000Z","endAt":"2026-11-09T19:00:00.000Z","lane":null,
+            "computedAt":"2026-11-01T00:00:00.000Z"}],
+          "routineOccurrences":[{"id":"o1","blockId":"gym","startAt":"2026-11-10T17:00:00.000Z",
+            "endAt":"2026-11-10T18:15:00.000Z","computedAt":"2026-11-01T00:00:00.000Z"}],
+          "missed":[{"blockId":"gym","weekOf":"2026-11-15"}],
+          "capacity":[{"date":"2026-11-09","freeMinutes":{"computer":240,"errand":30,"home":0,"office":15}}],
+          "briefs":[{"id":"b1","kind":"weekly","date":"2026-11-08","headline":"A full week","body":"Three lanes.",\(stamps)}]
+        }
+        """
+        let response = try JSONCoding.decoder.decode(SyncResponse.self, from: Data(json.utf8))
+
+        let gym = try #require(response.routineBlocks.first)
+        #expect(gym.isCommitment)
+        #expect(gym.alternates == [RoutineSlot(day: 3, start: "09:00", end: "10:15")])
+        #expect(response.projects == [Project(
+            id: "florida", name: "Florida", status: .onHold, nextStep: "Ship lanes", parallel: true, weeklyMinutes: 120,
+            sortOrder: 2, createdAt: at, updatedAt: at)])
+        #expect(response.dayOverrides == [DayOverride(date: "2026-11-12", kind: .office, note: "offsite", createdAt: at, updatedAt: at)])
+        #expect(response.dayOverrides.first?.id == "2026-11-12")
+        #expect(response.tasks.first?.projectId == "florida")
+        #expect(response.tasks.first?.attention == .shared)
+        #expect(response.placements.first?.lane == 1)
+        #expect(response.projectPlacements.first?.weekOf == "2026-11-08")
+        #expect(response.projectPlacements.first?.lane == nil)
+        #expect(response.routineOccurrences.first?.blockId == "gym")
+        #expect(response.planSummary == PlanSummary(
+            missed: [MissedCommitment(blockId: "gym", weekOf: "2026-11-15")],
+            capacity: [DayCapacity(date: "2026-11-09", freeMinutes: .init(computer: 240, errand: 30, home: 0, office: 15))]))
+        #expect(response.capacity.first?.freeMinutes[.errand] == 30)
+        #expect(response.briefs.first?.kind == .weekly)
+        #expect(response.briefs.first?.headline == "A full week")
+    }
+
+    @Test func aServerWithoutProjectsStillDecodes() throws {
+        // What production answers until the projects server is deployed: none of the new keys.
+        let old = #"{"cursor":"c",\#(tables),"placements":[{"id":"p1","taskId":"t1","startAt":"2026-11-09T17:00:00.000Z","#
+            + #""endAt":"2026-11-09T18:00:00.000Z","pinned":false,"computedAt":"2026-11-01T00:00:00.000Z"}],"#
+            + #""tasks":[{"id":"t1","categoryId":"inbox","title":"Old","notes":null,"durationMinutes":60,"#
+            + #""minChunkMinutes":null,"priority":"medium","deadlineType":"none","dueAt":null,"startAt":null,"#
+            + #""scheduleId":null,"pinnedStart":null,"completedMinutes":0,"completedAt":null,\#(stamps)}]}"#
+        let response = try JSONCoding.decoder.decode(SyncResponse.self, from: Data(old.utf8))
+        #expect(response.projects.isEmpty && response.dayOverrides.isEmpty && response.briefs.isEmpty)
+        #expect(response.projectPlacements.isEmpty && response.routineOccurrences.isEmpty)
+        #expect(response.planSummary == PlanSummary())
+        #expect(response.tasks.first?.projectId == nil && response.tasks.first?.attention == nil)
+        #expect(response.placements.first?.lane == nil)
+
+        let result = try JSONCoding.decoder.decode(
+            SchedulingResult.self, from: Data(#"{"placements":[],"unscheduled":[],"late":[]}"#.utf8))
+        #expect(result == SchedulingResult())
+    }
+
+    @Test func schedulingResultCarriesLanesProjectTimeAndCommitments() throws {
+        let json = """
+        {"placements":[{"taskId":"t1","start":"2026-11-09T17:00:00.000Z","end":"2026-11-09T18:00:00.000Z","pinned":false,"lane":2}],
+         "unscheduled":[],"late":[],"optional":[],
+         "routine":[{"blockId":"gym","start":"2026-11-10T17:00:00.000Z","end":"2026-11-10T18:15:00.000Z"}],
+         "missed":[{"blockId":"gym","weekOf":"2026-11-15"}],
+         "capacity":[{"date":"2026-11-09","freeMinutes":{"computer":60,"errand":0,"home":0,"office":0}}],
+         "projectPlacements":[{"projectId":"florida","weekOf":"2026-11-08","start":"2026-11-09T18:00:00.000Z",
+           "end":"2026-11-09T19:00:00.000Z","lane":0}]}
+        """
+        let result = try JSONCoding.decoder.decode(SchedulingResult.self, from: Data(json.utf8))
+        var ids = ["a", "b", "c"].makeIterator()
+        let nextId = { ids.next() ?? "?" }
+
+        #expect(result.placementRows(computedAt: at, makeId: nextId).map(\.lane) == [2])
+        let held = try #require(result.projectPlacementRows(computedAt: at, makeId: nextId).first)
+        #expect(held == ProjectPlacement(
+            id: "b", projectId: "florida", weekOf: "2026-11-08",
+            startAt: JSONCoding.parseInstant("2026-11-09T18:00:00Z")!, endAt: JSONCoding.parseInstant("2026-11-09T19:00:00Z")!,
+            lane: 0, computedAt: at))
+        let gym = try #require(result.routineOccurrenceRows(computedAt: at, makeId: nextId).first)
+        #expect(gym.id == "c" && gym.blockId == "gym")
+        #expect(gym.endAt == JSONCoding.parseInstant("2026-11-10T18:15:00Z"))
+        #expect(result.planSummary.missed == [MissedCommitment(blockId: "gym", weekOf: "2026-11-15")])
+        #expect(result.planSummary.capacity.first?.freeMinutes[.computer] == 60)
+    }
+
+    @Test func taskWriteLeavesOutAnUnsetProjectAndAttentionAndSendsSetOnes() throws {
+        var task = TaskItem(id: "t1", categoryId: "inbox", title: "Lanes", durationMinutes: 60, priority: .medium, createdAt: at, updatedAt: at)
+        var object = try #require(JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(TaskWrite(task))) as? [String: Any])
+        #expect(object["projectId"] == nil && object["attention"] == nil, "a missing key keeps the server's value")
+
+        task.projectId = "florida"
+        task.attention = .shared
+        object = try #require(JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(TaskWrite(task))) as? [String: Any])
+        #expect(object["projectId"] as? String == "florida")
+        #expect(object["attention"] as? String == "shared")
+    }
+
+    @Test func projectWriteSendsTheStatusOnTheWireAndOmitsClearedFields() throws {
+        let project = Project(id: "florida", name: "Florida", status: .onHold, parallel: true, sortOrder: 3, createdAt: at, updatedAt: at)
+        let object = try #require(JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(ProjectWrite(project))) as? [String: Any])
+        #expect(object["status"] as? String == "on_hold")
+        #expect(object["parallel"] as? Bool == true)
+        #expect(object["sortOrder"] as? Int == 3)
+        #expect(object["id"] == nil && object["updatedAt"] == nil)
+        for key in ["categoryId", "notes", "nextStep", "weeklyMinutes"] {
+            #expect(object[key] == nil, "a cleared field is left out: \(key)")
+        }
+    }
+
+    @Test func aTaskFollowsItsProjectsAttentionUnlessItSaysOtherwiseOrIsPinned() {
+        let parallel = Project(id: "p", name: "P", parallel: true, createdAt: at, updatedAt: at)
+        let solo = Project(id: "s", name: "S", createdAt: at, updatedAt: at)
+        var task = TaskItem(id: "t1", categoryId: "inbox", title: "x", durationMinutes: 60, priority: .medium, createdAt: at, updatedAt: at)
+
+        #expect(task.attention(in: nil) == .full)
+        #expect(task.attention(in: solo) == .full)
+        #expect(task.attention(in: parallel) == .shared)
+        task.attention = .full
+        #expect(task.attention(in: parallel) == .full)
+        task.attention = .shared
+        #expect(task.attention(in: solo) == .shared)
+        task.pinnedStart = at
+        #expect(task.attention(in: parallel) == .full, "a pinned task has its time to itself")
+    }
+}

@@ -38,6 +38,61 @@ extension AppDatabase {
         }
     }
 
+    /// Live projects, by `sortOrder` then name.
+    public func projects() throws -> [Project] {
+        try writer.read { db in try Self.projects(db) }
+    }
+
+    static func projects(_ db: Database) throws -> [Project] {
+        try Project.filter(Column("deletedAt") == nil).order(Column("sortOrder"), Column("name"), Column("id")).fetchAll(db)
+    }
+
+    public func project(id: String) throws -> Project? {
+        try writer.read { db in try Project.fetchOne(db, id: id) }
+    }
+
+    /// Live day overrides, by date.
+    public func dayOverrides() throws -> [DayOverride] {
+        try writer.read { db in try Self.dayOverrides(db) }
+    }
+
+    static func dayOverrides(_ db: Database) throws -> [DayOverride] {
+        try DayOverride.filter(Column("deletedAt") == nil).order(Column("date")).fetchAll(db)
+    }
+
+    /// Time held for projects, by start. The table only holds what the server keeps: the
+    /// scheduler's horizon and the two weeks before it.
+    public func projectPlacements() throws -> [ProjectPlacement] {
+        try writer.read { db in try Self.projectPlacements(db) }
+    }
+
+    static func projectPlacements(_ db: Database) throws -> [ProjectPlacement] {
+        try ProjectPlacement.order(Column("startAt"), Column("id")).fetchAll(db)
+    }
+
+    /// Where the commitments (the gym) land, by start, from the Sunday of the current week on.
+    public func routineOccurrences() throws -> [RoutineOccurrence] {
+        try writer.read { db in try Self.routineOccurrences(db) }
+    }
+
+    static func routineOccurrences(_ db: Database) throws -> [RoutineOccurrence] {
+        try RoutineOccurrence.order(Column("startAt"), Column("id")).fetchAll(db)
+    }
+
+    /// What the last scheduler run says about the plan as a whole; empty before the first sync.
+    public func planSummary() throws -> PlanSummary {
+        try writer.read { db in try PlanSummary.fetchOne(db) ?? PlanSummary() }
+    }
+
+    /// The stored daily brief and weekly review, newest first.
+    public func briefs() throws -> [Brief] {
+        try writer.read { db in try Self.briefs(db) }
+    }
+
+    static func briefs(_ db: Database) throws -> [Brief] {
+        try Brief.order(Column("date").desc, Column("kind")).fetchAll(db)
+    }
+
     public func accounts() throws -> [GoogleAccount] {
         try writer.read { db in try GoogleAccount.order(Column("email")).fetchAll(db) }
     }
@@ -119,7 +174,8 @@ extension AppDatabase {
         return Dictionary(grouping: placements, by: \.taskId)
     }
 
-    /// Visible events and scheduled task blocks for the calendar day containing `day`.
+    /// Visible events, scheduled task blocks, commitments and project time for the calendar day
+    /// containing `day`.
     public func agenda(for day: Date, calendar: Calendar) throws -> DayAgenda {
         let range = Self.dayRange(containing: day, calendar: calendar)
         return try writer.read { db in try Self.agenda(db, in: range, calendar: calendar) }
@@ -165,7 +221,21 @@ extension AppDatabase {
         DayAgenda(
             day: range.lowerBound,
             events: try events(db, in: range, calendar: calendar),
-            placements: try scheduledBlocks(db, in: range))
+            placements: try scheduledBlocks(db, in: range),
+            planBlocks: try planBlocks(db, in: range))
+    }
+
+    /// The commitments and project time overlapping `range`, by start. Reads all four tables
+    /// every time, so an observation built on it tracks each of them from its first fetch.
+    static func planBlocks(_ db: Database, in range: Range<Date>) throws -> [PlanBlock] {
+        let overlapping = Column("startAt") < range.upperBound && Column("endAt") > range.lowerBound
+        let blocks = try RoutineBlock.fetchAll(db)
+        let projects = try Project.fetchAll(db)
+        return PlanBlock.join(
+            occurrences: try RoutineOccurrence.filter(overlapping).fetchAll(db),
+            projectPlacements: try ProjectPlacement.filter(overlapping).fetchAll(db),
+            blocksById: Dictionary(blocks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }),
+            projectsById: Dictionary(projects.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }))
     }
 
     /// Timed events are compared with `range` as instants; all-day events, stored as UTC
@@ -312,6 +382,8 @@ extension AppDatabase {
         trackDate("startAt", \.startAt)
         track("scheduleId", \.scheduleId)
         track("context", \.context)
+        track("projectId", \.projectId)
+        track("attention", \.attention)
         trackDate("pinnedStart", \.pinnedStart)
         track("completedMinutes", \.completedMinutes)
         trackDate("completedAt", \.completedAt)
@@ -388,6 +460,57 @@ extension AppDatabase {
         }
     }
 
+    /// Saves the project and queues a `put`. Its tasks keep their blocks until the server has
+    /// rescheduled; the push's answer brings the new plan.
+    public func saveProject(_ project: Project, now: Date = Date()) throws {
+        var project = project
+        project.updatedAt = now
+        let body = try JSONCoding.encoder.encode(ProjectWrite(project))
+        try writer.write { db in
+            try project.save(db)
+            try Self.enqueue(db, entity: .project, id: project.id, op: .put, body: body, now: now)
+        }
+    }
+
+    /// Marks the project deleted and queues a `delete`. Its tasks stay, unfiled from it, as the
+    /// server leaves them; no task write is queued, because deleting the project does that there.
+    public func deleteProject(id: String, now: Date = Date()) throws {
+        try writer.write { db in
+            try db.execute(sql: "UPDATE project SET deletedAt = ?, updatedAt = ? WHERE id = ?", arguments: [now, now, id])
+            try db.execute(sql: "UPDATE task SET projectId = NULL WHERE projectId = ?", arguments: [id])
+            try Self.enqueue(db, entity: .project, id: id, op: .delete, body: nil, now: now)
+        }
+    }
+
+    /// Makes `date` ("YYYY-MM-DD" in the routine's zone) a home, office or off day and queues a `put`.
+    public func setDay(_ date: String, kind: DayKind, note: String? = nil, now: Date = Date()) throws {
+        try writer.write { db in
+            let createdAt = try DayOverride.fetchOne(db, id: date)?.createdAt ?? now
+            let override = DayOverride(date: date, kind: kind, note: note, createdAt: createdAt, updatedAt: now)
+            try override.save(db)
+            let body = try JSONCoding.encoder.encode(DayOverrideWrite(override))
+            try Self.enqueue(db, entity: .dayOverride, id: date, op: .put, body: body, now: now)
+        }
+    }
+
+    /// Puts `date` back on its weekday's routine and queues a `delete`. Does nothing for a date
+    /// without an override.
+    public func clearDay(_ date: String, now: Date = Date()) throws {
+        try writer.write { db in
+            guard let override = try DayOverride.fetchOne(db, id: date), override.deletedAt == nil else { return }
+            try db.execute(sql: "UPDATE dayOverride SET deletedAt = ?, updatedAt = ? WHERE date = ?", arguments: [now, now, date])
+            try Self.enqueue(db, entity: .dayOverride, id: date, op: .delete, body: nil, now: now)
+        }
+    }
+
+    /// Stores a brief the server just wrote, replacing the stored one of its kind.
+    public func storeBrief(_ brief: Brief) throws {
+        try writer.write { db in
+            _ = try Brief.filter(Column("kind") == brief.kind.rawValue).deleteAll(db)
+            try brief.save(db)
+        }
+    }
+
     public func saveSchedule(_ schedule: Schedule, now: Date = Date()) throws {
         var schedule = schedule
         schedule.updatedAt = now
@@ -419,8 +542,9 @@ extension AppDatabase {
 
 extension AppDatabase {
     /// Merges a `GET /api/sync` response: upserts changed rows, drops tombstoned rows, replaces
-    /// the settings, placement, suggestion, unscheduled, account and calendar tables, and stores the cursor. Tasks, categories,
-    /// schedules and events with a queued local write are left alone; the local version is newer and will be pushed.
+    /// the settings, scheduler output (placements, suggestions, unscheduled, project time, commitments, plan summary),
+    /// brief, account and calendar tables, and stores the cursor. Tasks, categories, schedules, events, projects and
+    /// day overrides with a queued local write are left alone; the local version is newer and will be pushed.
     public func apply(_ response: SyncResponse) throws {
         try writer.write { db in
             let pending = try Self.pendingEntityIds(db)
@@ -450,6 +574,20 @@ extension AppDatabase {
                     try category.save(db)
                 }
             }
+            for project in response.projects where !pending.contains(.init(entity: .project, id: project.id)) {
+                if project.deletedAt != nil {
+                    try Project.deleteOne(db, id: project.id)
+                } else {
+                    try project.save(db)
+                }
+            }
+            for override in response.dayOverrides where !pending.contains(.init(entity: .dayOverride, id: override.date)) {
+                if override.deletedAt != nil {
+                    try DayOverride.deleteOne(db, id: override.date)
+                } else {
+                    try override.save(db)
+                }
+            }
             for task in response.tasks where !pending.contains(.init(entity: .task, id: task.id)) {
                 if task.deletedAt != nil {
                     try TaskItem.deleteOne(db, id: task.id)
@@ -468,6 +606,10 @@ extension AppDatabase {
             try Self.replacePlacements(db, with: response.placements)
             try Self.replaceOptionalPlacements(db, with: response.optionalPlacements)
             try Self.replaceUnscheduled(db, with: response.unscheduled)
+            try Self.replaceAll(db, with: response.projectPlacements)
+            try Self.replaceAll(db, with: response.routineOccurrences)
+            try Self.replaceAll(db, with: [response.planSummary])
+            try Self.replaceAll(db, with: response.briefs)
             try Self.keepQueuedPins(db, pending: pending)
 
             _ = try GoogleAccount.deleteAll(db)
@@ -485,7 +627,7 @@ extension AppDatabase {
         }
     }
 
-    /// Replaces the placement, suggestion and unscheduled tables with the result of a scheduler run.
+    /// Replaces the scheduler's output tables with the result of a scheduler run.
     public func apply(_ result: SchedulingResult, computedAt: Date) throws {
         try writer.write { db in
             try Self.replaceSchedulerOutput(db, with: result, computedAt: computedAt)
@@ -514,6 +656,22 @@ extension AppDatabase {
         try replacePlacements(db, with: result.placementRows(computedAt: computedAt))
         try replaceOptionalPlacements(db, with: result.optionalPlacementRows(computedAt: computedAt))
         try replaceUnscheduled(db, with: result.unscheduledRows(computedAt: computedAt))
+        // Ended project time is the record of time spent: the server keeps it and a run does not
+        // return it, so only the blocks still ahead are this run's to replace.
+        _ = try ProjectPlacement.filter(Column("endAt") > computedAt).deleteAll(db)
+        for row in result.projectPlacementRows(computedAt: computedAt) {
+            try row.insert(db)
+        }
+        try replaceAll(db, with: result.routineOccurrenceRows(computedAt: computedAt))
+        try replaceAll(db, with: [result.planSummary])
+    }
+
+    /// Replaces every row of a table the server owns outright.
+    static func replaceAll<Record: PersistableRecord>(_ db: Database, with rows: [Record]) throws {
+        _ = try Record.deleteAll(db)
+        for row in rows {
+            try row.insert(db)
+        }
     }
 
     static func replaceOptionalPlacements(_ db: Database, with rows: [OptionalPlacement]) throws {
@@ -619,6 +777,8 @@ extension AppDatabase {
         case .category: _ = try TaskCategory.deleteOne(db, id: id)
         case .schedule: _ = try Schedule.deleteOne(db, id: id)
         case .event: _ = try CalendarEvent.deleteOne(db, id: id)
+        case .project: _ = try Project.deleteOne(db, id: id)
+        case .dayOverride: _ = try DayOverride.deleteOne(db, id: id)
         }
     }
 

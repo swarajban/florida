@@ -44,11 +44,53 @@ public enum CategoryArea: String, Codable, Hashable, Sendable, CaseIterable {
     case work, personal
 }
 
+/// Where a project stands. Only an `active` project's tasks are scheduled.
+public enum ProjectStatus: String, Codable, Hashable, Sendable, CaseIterable {
+    /// Being worked on.
+    case active
+    /// An idea, not started.
+    case thinking
+    /// Started, then set aside.
+    case onHold = "on_hold"
+    case done
+}
+
+/// How much of the user a task takes. A `shared` task can run beside tasks of up to two other
+/// projects (an agent does the work; the user checks in); a `full` one has its time to itself.
+public enum TaskAttention: String, Codable, Hashable, Sendable, CaseIterable {
+    case full, shared
+}
+
+/// What a day is, when a `DayOverride` makes it differ from its weekday's routine.
+public enum DayKind: String, Codable, Hashable, Sendable, CaseIterable {
+    case home, office, off
+}
+
+public enum BriefKind: String, Codable, Hashable, Sendable, CaseIterable {
+    case daily, weekly
+}
+
+/// One more slot a commitment may take in a week; see `RoutineBlock.alternates`.
+public struct RoutineSlot: Codable, Hashable, Sendable {
+    /// 0 = Sunday … 6 = Saturday.
+    public var day: Int
+    /// "HH:MM", 24-hour.
+    public var start: String
+    public var end: String
+
+    public init(day: Int, start: String, end: String) {
+        self.day = day
+        self.start = start
+        self.end = end
+    }
+}
+
 /// One window of the weekly routine: wall-clock hours on some weekdays, in `UserSettings.timeZone`,
 /// during which tasks of the listed contexts may be scheduled. Time outside every block (sleep,
-/// family, gym) is never scheduled. An `optional` block (a weekday evening) is never planned on
-/// either; the scheduler only suggests what to do there, as `OptionalPlacement`s. Server-owned for
-/// now; clients read and show it.
+/// family) is never scheduled. An `optional` block (a weekday evening) is never planned on
+/// either; the scheduler only suggests what to do there, as `OptionalPlacement`s. A block that
+/// allows nothing is a commitment (the gym): nothing is planned over its `RoutineOccurrence`s.
+/// Server-owned for now; clients read and show it.
 public struct RoutineBlock: Codable, Hashable, Sendable, Identifiable {
     public var id: String
     public var name: String
@@ -58,17 +100,20 @@ public struct RoutineBlock: Codable, Hashable, Sendable, Identifiable {
     public var start: String
     /// "HH:MM", 24-hour; after `start` on the same day.
     public var end: String
-    /// Empty means the block is shown but nothing is scheduled in it.
+    /// Empty makes the block a commitment: its time is taken and nothing is scheduled in it.
     public var allows: [TaskContext]
     /// Time the user might work but does not count on: suggested for, never planned on.
     public var optional: Bool
+    /// A commitment's extra weekly occurrence: the first of these slots the calendar leaves free.
+    public var alternates: [RoutineSlot]?
     public var createdAt: Date
     public var updatedAt: Date
     public var deletedAt: Date?
 
     public init(
         id: String, name: String, days: [Int], start: String, end: String, allows: [TaskContext],
-        optional: Bool = false, createdAt: Date, updatedAt: Date, deletedAt: Date? = nil
+        optional: Bool = false, alternates: [RoutineSlot]? = nil, createdAt: Date, updatedAt: Date,
+        deletedAt: Date? = nil
     ) {
         self.id = id
         self.name = name
@@ -77,6 +122,7 @@ public struct RoutineBlock: Codable, Hashable, Sendable, Identifiable {
         self.end = end
         self.allows = allows
         self.optional = optional
+        self.alternates = alternates
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.deletedAt = deletedAt
@@ -93,10 +139,14 @@ public struct RoutineBlock: Codable, Hashable, Sendable, Identifiable {
         end = try c.decode(String.self, forKey: .end)
         allows = try c.decode([TaskContext].self, forKey: .allows)
         optional = try c.decodeIfPresent(Bool.self, forKey: .optional) ?? false
+        alternates = try c.decodeIfPresent([RoutineSlot].self, forKey: .alternates)
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         updatedAt = try c.decode(Date.self, forKey: .updatedAt)
         deletedAt = try c.decodeIfPresent(Date.self, forKey: .deletedAt)
     }
+
+    /// Time that is taken (the gym) rather than time to plan in.
+    public var isCommitment: Bool { allows.isEmpty }
 }
 
 /// The user's one row of preferences; the routine's time zone lives here. Never deleted.
@@ -206,6 +256,10 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
     public var scheduleId: String?
     /// Where the task can be done; the scheduler only uses routine blocks that allow it.
     public var context: TaskContext
+    /// The project the task belongs to, if any. Tasks of a project that is not active are not scheduled.
+    public var projectId: String?
+    /// Nil follows the project: shared when it is `parallel`, else full. See `attention(in:)`.
+    public var attention: TaskAttention?
     /// When set the task is fixed at this instant as one block.
     public var pinnedStart: Date?
     public var completedMinutes: Int
@@ -226,7 +280,8 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
         dueAt: Date? = nil, startAt: Date? = nil, scheduleId: String? = nil, context: TaskContext = .computer,
         pinnedStart: Date? = nil, completedMinutes: Int = 0, completedAt: Date? = nil, createdAt: Date,
         updatedAt: Date, deletedAt: Date? = nil, recurrence: TaskRecurrence? = nil,
-        recurrenceSeriesId: String? = nil, recurrenceDate: String? = nil, recurrenceRevision: String? = nil
+        recurrenceSeriesId: String? = nil, recurrenceDate: String? = nil, recurrenceRevision: String? = nil,
+        projectId: String? = nil, attention: TaskAttention? = nil
     ) {
         self.id = id
         self.categoryId = categoryId
@@ -240,6 +295,8 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
         self.startAt = startAt
         self.scheduleId = scheduleId
         self.context = context
+        self.projectId = projectId
+        self.attention = attention
         self.pinnedStart = pinnedStart
         self.completedMinutes = completedMinutes
         self.completedAt = completedAt
@@ -268,6 +325,8 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
         startAt = try c.decodeIfPresent(Date.self, forKey: .startAt)
         scheduleId = try c.decodeIfPresent(String.self, forKey: .scheduleId)
         context = try c.decodeIfPresent(TaskContext.self, forKey: .context) ?? .computer
+        projectId = try c.decodeIfPresent(String.self, forKey: .projectId)
+        attention = try c.decodeIfPresent(TaskAttention.self, forKey: .attention)
         pinnedStart = try c.decodeIfPresent(Date.self, forKey: .pinnedStart)
         completedMinutes = try c.decode(Int.self, forKey: .completedMinutes)
         completedAt = try c.decodeIfPresent(Date.self, forKey: .completedAt)
@@ -282,6 +341,75 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
 
     public var isOpen: Bool { deletedAt == nil && completedAt == nil }
     public var remainingMinutes: Int { max(0, durationMinutes - completedMinutes) }
+
+    /// The attention the scheduler plans the task with: its own, or else its project's default.
+    /// A pinned task always has its time to itself.
+    public func attention(in project: Project?) -> TaskAttention {
+        if pinnedStart != nil { return .full }
+        return attention ?? (project?.parallel == true ? .shared : .full)
+    }
+}
+
+/// Ongoing work bigger than one task (an app, a migration): a status, an optional next step, and
+/// the tasks filed under it. `parallel` projects can be worked side by side, up to three at once;
+/// `weeklyMinutes` holds that much time for the project every week, as `ProjectPlacement`s.
+public struct Project: Codable, Hashable, Sendable, Identifiable {
+    public var id: String
+    public var name: String
+    public var status: ProjectStatus
+    public var categoryId: String?
+    public var notes: String?
+    /// The one thing to do next, in the user's words.
+    public var nextStep: String?
+    /// Its tasks default to shared attention, so they can run beside other parallel projects.
+    public var parallel: Bool
+    /// Time to hold for the project each week, beyond its tasks; nil holds none.
+    public var weeklyMinutes: Int?
+    public var sortOrder: Int
+    public var createdAt: Date
+    public var updatedAt: Date
+    public var deletedAt: Date?
+
+    public init(
+        id: String, name: String, status: ProjectStatus = .active, categoryId: String? = nil, notes: String? = nil,
+        nextStep: String? = nil, parallel: Bool = false, weeklyMinutes: Int? = nil, sortOrder: Int = 0,
+        createdAt: Date, updatedAt: Date, deletedAt: Date? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.status = status
+        self.categoryId = categoryId
+        self.notes = notes
+        self.nextStep = nextStep
+        self.parallel = parallel
+        self.weeklyMinutes = weeklyMinutes
+        self.sortOrder = sortOrder
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.deletedAt = deletedAt
+    }
+}
+
+/// One date that departs from the weekly routine: worked from home, at the office, or not at all.
+public struct DayOverride: Codable, Hashable, Sendable, Identifiable {
+    /// Local date in `UserSettings.timeZone`, "YYYY-MM-DD".
+    public var date: String
+    public var kind: DayKind
+    public var note: String?
+    public var createdAt: Date
+    public var updatedAt: Date
+    public var deletedAt: Date?
+
+    public var id: String { date }
+
+    public init(date: String, kind: DayKind, note: String? = nil, createdAt: Date, updatedAt: Date, deletedAt: Date? = nil) {
+        self.date = date
+        self.kind = kind
+        self.note = note
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.deletedAt = deletedAt
+    }
 }
 
 /// Scheduler output for one piece of a task. Derived data; the server replaces all rows on every run.
@@ -291,15 +419,148 @@ public struct Placement: Codable, Hashable, Sendable, Identifiable {
     public var startAt: Date
     public var endAt: Date
     public var pinned: Bool
+    /// Nil when the block has its time to itself; 0–2 when it runs beside other projects' blocks.
+    public var lane: Int?
     public var computedAt: Date
 
-    public init(id: String, taskId: String, startAt: Date, endAt: Date, pinned: Bool, computedAt: Date) {
+    public init(
+        id: String, taskId: String, startAt: Date, endAt: Date, pinned: Bool, lane: Int? = nil, computedAt: Date
+    ) {
         self.id = id
         self.taskId = taskId
         self.startAt = startAt
         self.endAt = endAt
         self.pinned = pinned
+        self.lane = lane
         self.computedAt = computedAt
+    }
+}
+
+/// Scheduler output: time held for a project's weekly budget. No task is behind it. Derived data;
+/// the server replaces all rows on every run.
+public struct ProjectPlacement: Codable, Hashable, Sendable, Identifiable {
+    public var id: String
+    public var projectId: String
+    /// Local date of the Sunday starting the week whose budget the block draws on, "YYYY-MM-DD".
+    public var weekOf: String
+    public var startAt: Date
+    public var endAt: Date
+    /// As `Placement.lane`.
+    public var lane: Int?
+    public var computedAt: Date
+
+    public init(
+        id: String, projectId: String, weekOf: String, startAt: Date, endAt: Date, lane: Int? = nil, computedAt: Date
+    ) {
+        self.id = id
+        self.projectId = projectId
+        self.weekOf = weekOf
+        self.startAt = startAt
+        self.endAt = endAt
+        self.lane = lane
+        self.computedAt = computedAt
+    }
+}
+
+/// Scheduler output: where one occurrence of a commitment (the gym) lands. Derived data; the
+/// server replaces all rows on every run.
+public struct RoutineOccurrence: Codable, Hashable, Sendable, Identifiable {
+    public var id: String
+    /// The commitment `RoutineBlock`.
+    public var blockId: String
+    public var startAt: Date
+    public var endAt: Date
+    public var computedAt: Date
+
+    public init(id: String, blockId: String, startAt: Date, endAt: Date, computedAt: Date) {
+        self.id = id
+        self.blockId = blockId
+        self.startAt = startAt
+        self.endAt = endAt
+        self.computedAt = computedAt
+    }
+}
+
+/// A week in which none of a commitment's alternate slots was free.
+public struct MissedCommitment: Codable, Hashable, Sendable {
+    public var blockId: String
+    /// Local date of the Sunday that starts the week, "YYYY-MM-DD".
+    public var weekOf: String
+
+    public init(blockId: String, weekOf: String) {
+        self.blockId = blockId
+        self.weekOf = weekOf
+    }
+}
+
+/// Time still open on one local day after the plan, per task context.
+public struct DayCapacity: Codable, Hashable, Sendable {
+    public struct FreeMinutes: Codable, Hashable, Sendable {
+        public var computer: Int
+        public var errand: Int
+        public var home: Int
+        public var office: Int
+
+        public init(computer: Int = 0, errand: Int = 0, home: Int = 0, office: Int = 0) {
+            self.computer = computer
+            self.errand = errand
+            self.home = home
+            self.office = office
+        }
+
+        public subscript(context: TaskContext) -> Int {
+            switch context {
+            case .computer: computer
+            case .errand: errand
+            case .home: home
+            case .office: office
+            }
+        }
+    }
+
+    /// Local date in `UserSettings.timeZone`, "YYYY-MM-DD".
+    public var date: String
+    public var freeMinutes: FreeMinutes
+
+    public init(date: String, freeMinutes: FreeMinutes) {
+        self.date = date
+        self.freeMinutes = freeMinutes
+    }
+}
+
+/// What the last scheduler run says about the plan as a whole. One row, replaced on every run.
+public struct PlanSummary: Codable, Hashable, Sendable {
+    public var missed: [MissedCommitment]
+    public var capacity: [DayCapacity]
+
+    public init(missed: [MissedCommitment] = [], capacity: [DayCapacity] = []) {
+        self.missed = missed
+        self.capacity = capacity
+    }
+}
+
+/// Claude's words about a plan the scheduler already made: the day's brief or the week's review.
+/// Server-written; the newest of each kind is synced.
+public struct Brief: Codable, Hashable, Sendable, Identifiable {
+    public var id: String
+    public var kind: BriefKind
+    /// The local day (daily) or the Sunday starting the week (weekly), "YYYY-MM-DD".
+    public var date: String
+    public var headline: String
+    public var body: String
+    public var createdAt: Date
+    public var updatedAt: Date
+
+    public init(
+        id: String, kind: BriefKind, date: String, headline: String, body: String, createdAt: Date, updatedAt: Date
+    ) {
+        self.id = id
+        self.kind = kind
+        self.date = date
+        self.headline = headline
+        self.body = body
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
 }
 
@@ -589,10 +850,13 @@ public struct UnscheduledTask: Codable, Hashable, Sendable, Identifiable {
 
 // MARK: - API payloads
 
-/// `GET /api/sync?since=` response. `routineBlocks`, `schedules`, `categories`, `tasks` and `events`
-/// contain rows changed after `since`, including tombstones (`deletedAt` set). `settings` (nil before
-/// the server is seeded), `placements`, `optionalPlacements`, `unscheduled`, `accounts` and `calendars`
-/// are always complete and are meant to be replaced wholesale.
+/// `GET /api/sync?since=` response. `routineBlocks`, `schedules`, `categories`, `projects`,
+/// `dayOverrides`, `tasks` and `events` contain rows changed after `since`, including tombstones
+/// (`deletedAt` set). `settings` (nil before the server is seeded), `placements`,
+/// `optionalPlacements`, `unscheduled`, `projectPlacements`, `routineOccurrences`, `missed`,
+/// `capacity`, `briefs`, `accounts` and `calendars` are always complete and are meant to be
+/// replaced wholesale. Every key added after the first release decodes as empty when an older
+/// server omits it.
 public struct SyncResponse: Codable, Sendable {
     /// Server time when the diff was taken; pass back as the next `since`.
     public var cursor: String
@@ -611,12 +875,23 @@ public struct SyncResponse: Codable, Sendable {
     public var calendars: [CalendarInfo]
     /// Empty when the server predates the field.
     public var unscheduled: [UnscheduledTask]
+    public var projects: [Project]
+    public var dayOverrides: [DayOverride]
+    public var projectPlacements: [ProjectPlacement]
+    public var routineOccurrences: [RoutineOccurrence]
+    public var missed: [MissedCommitment]
+    public var capacity: [DayCapacity]
+    /// The newest daily brief and weekly review; empty until the server has written one.
+    public var briefs: [Brief]
 
     public init(
         cursor: String, settings: UserSettings? = nil, routineBlocks: [RoutineBlock] = [],
         schedules: [Schedule] = [], categories: [TaskCategory] = [], tasks: [TaskItem] = [],
         events: [CalendarEvent] = [], placements: [Placement] = [], optionalPlacements: [OptionalPlacement] = [],
-        accounts: [GoogleAccount] = [], calendars: [CalendarInfo] = [], unscheduled: [UnscheduledTask] = []
+        accounts: [GoogleAccount] = [], calendars: [CalendarInfo] = [], unscheduled: [UnscheduledTask] = [],
+        projects: [Project] = [], dayOverrides: [DayOverride] = [], projectPlacements: [ProjectPlacement] = [],
+        routineOccurrences: [RoutineOccurrence] = [], missed: [MissedCommitment] = [], capacity: [DayCapacity] = [],
+        briefs: [Brief] = []
     ) {
         self.cursor = cursor
         self.settings = settings
@@ -630,6 +905,13 @@ public struct SyncResponse: Codable, Sendable {
         self.accounts = accounts
         self.calendars = calendars
         self.unscheduled = unscheduled
+        self.projects = projects
+        self.dayOverrides = dayOverrides
+        self.projectPlacements = projectPlacements
+        self.routineOccurrences = routineOccurrences
+        self.missed = missed
+        self.capacity = capacity
+        self.briefs = briefs
     }
 
     public init(from decoder: any Decoder) throws {
@@ -646,7 +928,16 @@ public struct SyncResponse: Codable, Sendable {
         accounts = try container.decode([GoogleAccount].self, forKey: .accounts)
         calendars = try container.decode([CalendarInfo].self, forKey: .calendars)
         unscheduled = try container.decodeIfPresent([UnscheduledTask].self, forKey: .unscheduled) ?? []
+        projects = try container.decodeIfPresent([Project].self, forKey: .projects) ?? []
+        dayOverrides = try container.decodeIfPresent([DayOverride].self, forKey: .dayOverrides) ?? []
+        projectPlacements = try container.decodeIfPresent([ProjectPlacement].self, forKey: .projectPlacements) ?? []
+        routineOccurrences = try container.decodeIfPresent([RoutineOccurrence].self, forKey: .routineOccurrences) ?? []
+        missed = try container.decodeIfPresent([MissedCommitment].self, forKey: .missed) ?? []
+        capacity = try container.decodeIfPresent([DayCapacity].self, forKey: .capacity) ?? []
+        briefs = try container.decodeIfPresent([Brief].self, forKey: .briefs) ?? []
     }
+
+    public var planSummary: PlanSummary { PlanSummary(missed: missed, capacity: capacity) }
 }
 
 /// The scheduler's result as returned by every mutating API call (`scheduling`) and `POST /api/schedule/run`.
@@ -656,12 +947,15 @@ public struct SchedulingResult: Codable, Hashable, Sendable {
         public var start: Date
         public var end: Date
         public var pinned: Bool
+        /// As `Placement.lane`.
+        public var lane: Int?
 
-        public init(taskId: String, start: Date, end: Date, pinned: Bool) {
+        public init(taskId: String, start: Date, end: Date, pinned: Bool, lane: Int? = nil) {
             self.taskId = taskId
             self.start = start
             self.end = end
             self.pinned = pinned
+            self.lane = lane
         }
     }
 
@@ -705,29 +999,77 @@ public struct SchedulingResult: Codable, Hashable, Sendable {
         }
     }
 
+    /// One occurrence of a commitment; see `RoutineOccurrence`.
+    public struct Occurrence: Codable, Hashable, Sendable {
+        public var blockId: String
+        public var start: Date
+        public var end: Date
+
+        public init(blockId: String, start: Date, end: Date) {
+            self.blockId = blockId
+            self.start = start
+            self.end = end
+        }
+    }
+
+    /// Time held for a project; see `ProjectPlacement`.
+    public struct ProjectPiece: Codable, Hashable, Sendable {
+        public var projectId: String
+        public var weekOf: String
+        public var start: Date
+        public var end: Date
+        public var lane: Int?
+
+        public init(projectId: String, weekOf: String, start: Date, end: Date, lane: Int? = nil) {
+            self.projectId = projectId
+            self.weekOf = weekOf
+            self.start = start
+            self.end = end
+            self.lane = lane
+        }
+    }
+
     public var placements: [Piece]
     public var unscheduled: [Unscheduled]
     public var late: [Late]
     /// Suggestions for optional blocks, never part of `placements`; empty from an older server.
     public var optional: [Suggestion]
+    /// Where the commitments land. This and the three below are empty from an older server.
+    public var routine: [Occurrence]
+    public var missed: [MissedCommitment]
+    public var capacity: [DayCapacity]
+    public var projectPlacements: [ProjectPiece]
 
     public init(
-        placements: [Piece] = [], unscheduled: [Unscheduled] = [], late: [Late] = [], optional: [Suggestion] = []
+        placements: [Piece] = [], unscheduled: [Unscheduled] = [], late: [Late] = [], optional: [Suggestion] = [],
+        routine: [Occurrence] = [], missed: [MissedCommitment] = [], capacity: [DayCapacity] = [],
+        projectPlacements: [ProjectPiece] = []
     ) {
         self.placements = placements
         self.unscheduled = unscheduled
         self.late = late
         self.optional = optional
+        self.routine = routine
+        self.missed = missed
+        self.capacity = capacity
+        self.projectPlacements = projectPlacements
     }
 
-    /// Hand-written only so `optional` can default to empty when an older server omits it.
+    /// Hand-written only so the keys added after the first release default to empty when an
+    /// older server omits them.
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         placements = try c.decode([Piece].self, forKey: .placements)
         unscheduled = try c.decode([Unscheduled].self, forKey: .unscheduled)
         late = try c.decode([Late].self, forKey: .late)
         optional = try c.decodeIfPresent([Suggestion].self, forKey: .optional) ?? []
+        routine = try c.decodeIfPresent([Occurrence].self, forKey: .routine) ?? []
+        missed = try c.decodeIfPresent([MissedCommitment].self, forKey: .missed) ?? []
+        capacity = try c.decodeIfPresent([DayCapacity].self, forKey: .capacity) ?? []
+        projectPlacements = try c.decodeIfPresent([ProjectPiece].self, forKey: .projectPlacements) ?? []
     }
+
+    public var planSummary: PlanSummary { PlanSummary(missed: missed, capacity: capacity) }
 
     /// The unscheduled tasks as `UnscheduledTask` rows, as `/api/sync` serves them after this run.
     public func unscheduledRows(computedAt: Date) -> [UnscheduledTask] {
@@ -739,7 +1081,29 @@ public struct SchedulingResult: Codable, Hashable, Sendable {
     /// Converts the pieces into `Placement` rows, as the server stores them after this run.
     public func placementRows(computedAt: Date, makeId: () -> String = { UUID().uuidString.lowercased() }) -> [Placement] {
         placements.map {
-            Placement(id: makeId(), taskId: $0.taskId, startAt: $0.start, endAt: $0.end, pinned: $0.pinned, computedAt: computedAt)
+            Placement(
+                id: makeId(), taskId: $0.taskId, startAt: $0.start, endAt: $0.end, pinned: $0.pinned, lane: $0.lane,
+                computedAt: computedAt)
+        }
+    }
+
+    /// Converts the held project time into `ProjectPlacement` rows, as the server stores them after this run.
+    public func projectPlacementRows(
+        computedAt: Date, makeId: () -> String = { UUID().uuidString.lowercased() }
+    ) -> [ProjectPlacement] {
+        projectPlacements.map {
+            ProjectPlacement(
+                id: makeId(), projectId: $0.projectId, weekOf: $0.weekOf, startAt: $0.start, endAt: $0.end,
+                lane: $0.lane, computedAt: computedAt)
+        }
+    }
+
+    /// Converts the commitments' occurrences into `RoutineOccurrence` rows, as the server stores them after this run.
+    public func routineOccurrenceRows(
+        computedAt: Date, makeId: () -> String = { UUID().uuidString.lowercased() }
+    ) -> [RoutineOccurrence] {
+        routine.map {
+            RoutineOccurrence(id: makeId(), blockId: $0.blockId, startAt: $0.start, endAt: $0.end, computedAt: computedAt)
         }
     }
 
@@ -768,6 +1132,10 @@ public struct TaskWrite: Codable, Hashable, Sendable {
     public var startAt: Date?
     public var scheduleId: String?
     public var context: TaskContext
+    /// Left out when nil, which the server reads as "keep"; an edit that clears either sends an
+    /// explicit null through the changed-fields PATCH (`AppDatabase.saveTask`).
+    public var projectId: String?
+    public var attention: TaskAttention?
     public var pinnedStart: Date?
     public var completedMinutes: Int
     public var completedAt: Date?
@@ -787,6 +1155,8 @@ public struct TaskWrite: Codable, Hashable, Sendable {
         startAt = task.startAt
         scheduleId = task.scheduleId
         context = task.context
+        projectId = task.projectId
+        attention = task.attention
         pinnedStart = task.pinnedStart
         completedMinutes = task.completedMinutes
         completedAt = task.completedAt
@@ -807,6 +1177,8 @@ public struct TaskWrite: Codable, Hashable, Sendable {
         try container.encodeIfPresent(startAt, forKey: .startAt)
         try container.encodeIfPresent(scheduleId, forKey: .scheduleId)
         try container.encode(context, forKey: .context)
+        try container.encodeIfPresent(projectId, forKey: .projectId)
+        try container.encodeIfPresent(attention, forKey: .attention)
         try container.encodeIfPresent(pinnedStart, forKey: .pinnedStart)
         try container.encode(completedMinutes, forKey: .completedMinutes)
         try container.encodeIfPresent(completedAt, forKey: .completedAt)
@@ -832,6 +1204,40 @@ public struct CategoryWrite: Codable, Hashable, Sendable {
         area = category.area
         scheduleId = category.scheduleId
         sortOrder = category.sortOrder
+    }
+}
+
+/// Body of `PUT /api/projects/:id`. A nil optional field is left out, which the server reads as cleared.
+public struct ProjectWrite: Codable, Hashable, Sendable {
+    public var name: String
+    public var status: ProjectStatus
+    public var categoryId: String?
+    public var notes: String?
+    public var nextStep: String?
+    public var parallel: Bool
+    public var weeklyMinutes: Int?
+    public var sortOrder: Int
+
+    public init(_ project: Project) {
+        name = project.name
+        status = project.status
+        categoryId = project.categoryId
+        notes = project.notes
+        nextStep = project.nextStep
+        parallel = project.parallel
+        weeklyMinutes = project.weeklyMinutes
+        sortOrder = project.sortOrder
+    }
+}
+
+/// Body of `PUT /api/day-overrides/:date`.
+public struct DayOverrideWrite: Codable, Hashable, Sendable {
+    public var kind: DayKind
+    public var note: String?
+
+    public init(_ override: DayOverride) {
+        kind = override.kind
+        note = override.note
     }
 }
 
@@ -900,6 +1306,18 @@ public struct TaskWriteResponse: Codable, Sendable {
 /// Response of `PUT /api/categories/:id`.
 public struct CategoryWriteResponse: Codable, Sendable {
     public var category: TaskCategory
+    public var scheduling: SchedulingResult
+}
+
+/// Response of `PUT /api/projects/:id`.
+public struct ProjectWriteResponse: Codable, Sendable {
+    public var project: Project
+    public var scheduling: SchedulingResult
+}
+
+/// Response of `PUT /api/day-overrides/:date`.
+public struct DayOverrideWriteResponse: Codable, Sendable {
+    public var dayOverride: DayOverride
     public var scheduling: SchedulingResult
 }
 
