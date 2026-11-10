@@ -94,8 +94,10 @@ extension AppModel {
 
     /// Selects an item; a calendar item also moves the day cursor onto its day. A suggestion says
     /// what it is in the status bar, because it looks like a block and is not on the plan; so do
-    /// the gym, project time, and work that shares its hour.
+    /// the gym, project time, and work that shares its hour. Any selection, a click included,
+    /// ends jump mode.
     func select(_ item: ItemID?) {
+        endJump()
         selection = item
         if focus == .calendar, let item, let day = gridLayout.day(of: item) {
             selectedDay = day

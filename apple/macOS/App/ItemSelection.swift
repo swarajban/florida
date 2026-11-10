@@ -23,6 +23,11 @@ enum ItemID: Hashable, Sendable {
         if case .suggestion = self { return true }
         return false
     }
+
+    var isGap: Bool {
+        if case .gap = self { return true }
+        return false
+    }
 }
 
 /// Which pane `j` / `k` move through.

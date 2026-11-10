@@ -6,11 +6,14 @@ import SwiftUI
 /// `transition` runs, the current one filling as it goes; a suggestion dotted, barely filled,
 /// with a moon; the gym solid and neutral; project time in long dashes), the focus ring and the
 /// "now" line. A block that shares its hour with other parallel work is marked, and says what
-/// runs beside it when it is tall enough.
+/// runs beside it when it is tall enough. In jump mode each labelled block carries its label on
+/// its top-left corner, and its title starts after it.
 /// Pure drawing from precomputed frames and labels; `now` is the model's minute clock.
 struct TimeGridCanvas: View {
     let layout: GridLayout
     let selection: ItemID?
+    /// Jump mode's labels, by item; empty when the mode is off.
+    let jumpLabels: [ItemID: String]
     let selectedDay: Date
     let now: Date
     /// The animation frame's time, which drives `transition`.
@@ -38,6 +41,7 @@ struct TimeGridCanvas: View {
             }
             drawSelectionRing(in: &context, geometry: geometry)
             drawNowLine(in: &context, geometry: geometry)
+            drawJumpLabels(in: &context, geometry: geometry)
         }
         .frame(height: grid.dayHeight)
     }
@@ -151,8 +155,19 @@ struct TimeGridCanvas: View {
             titleRect.size.width -= pinSize + 2
         }
         let title = Text(block.title).font(.system(size: 11, weight: .medium)).foregroundStyle(textColor)
+        var titleLine = titleRect
+        if let label = jumpLabels[block.item] {
+            // The label sits on the block's corner (`drawJumpLabels`), so the title starts after it.
+            let inset = JumpBadge.width(for: label) + 1
+            titleLine.origin.x += inset
+            titleLine.size.width = max(titleLine.size.width - inset, 0)
+        }
+        // Empty when the block is too narrow for a title beside its label.
+        let showsTitle = !titleLine.isEmpty
         if rect.height >= 34 {
-            inner.draw(title, in: CGRect(x: titleRect.minX, y: titleRect.minY, width: titleRect.width, height: 14))
+            if showsTitle {
+                inner.draw(title, in: CGRect(x: titleLine.minX, y: titleLine.minY, width: titleLine.width, height: 14))
+            }
             inner.draw(
                 Text(DateText.timeRange(block.start, block.end)).font(.system(size: 10)).foregroundStyle(textColor.opacity(0.85)),
                 in: CGRect(x: titleRect.minX, y: titleRect.minY + 14, width: titleRect.width, height: 13))
@@ -162,8 +177,8 @@ struct TimeGridCanvas: View {
                     Text(note).font(.system(size: 10)).foregroundStyle(textColor.opacity(0.7)),
                     in: CGRect(x: rect.minX + padding, y: titleRect.minY + 27, width: rect.width - padding * 2, height: 13))
             }
-        } else {
-            inner.draw(title, in: CGRect(x: titleRect.minX, y: rect.minY + 1, width: titleRect.width, height: max(rect.height - 2, 8)))
+        } else if showsTitle {
+            inner.draw(title, in: CGRect(x: titleLine.minX, y: rect.minY + 1, width: titleLine.width, height: max(rect.height - 2, 8)))
         }
         if isCurrent {
             drawTimeLeft(of: block, in: &inner, rect: rect, color: textColor)
@@ -185,6 +200,22 @@ struct TimeGridCanvas: View {
     private static func note(for block: GridLayout.Block) -> String? {
         if let alongside = block.alongside { return alongside }
         return block.kind == .projectTime ? PlanText.projectTime : nil
+    }
+
+    /// Jump mode: every labelled block's label on its top-left corner, drawn last so that no
+    /// neighboring block, ring or line covers one.
+    private func drawJumpLabels(in context: inout GraphicsContext, geometry: GridGeometry) {
+        guard !jumpLabels.isEmpty else { return }
+        for blocks in layout.blocksByDay {
+            for block in blocks {
+                guard let label = jumpLabels[block.item] else { continue }
+                let rect = animatedRect(for: block, geometry: geometry)
+                let badge = CGRect(
+                    x: rect.minX + 2, y: rect.minY + 1, width: JumpBadge.width(for: label), height: JumpBadge.height)
+                context.fill(Path(roundedRect: badge, cornerRadius: JumpBadge.cornerRadius), with: .color(FloridaStyle.ink))
+                context.draw(JumpBadge.text(label), at: CGPoint(x: badge.midX, y: badge.midY))
+            }
+        }
     }
 
     private func drawSelectionRing(in context: inout GraphicsContext, geometry: GridGeometry) {

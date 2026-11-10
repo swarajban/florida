@@ -65,6 +65,19 @@ extension AppModel {
         openEventEditor(event)
     }
 
+    /// `v`: opens the video call of the selected event, or the one whose detail popover is open.
+    func joinMeeting() {
+        guard let event = commandEvent else {
+            statusMessage = "Select an event first"
+            return
+        }
+        guard let url = event.joinURL else {
+            statusMessage = "This event has no meeting link"
+            return
+        }
+        open(url: url)
+    }
+
     /// Opens the editor on the store's copy of `event`, closing its detail popover.
     func openEventEditor(_ event: CalendarEvent) {
         guard requireEditable(event) else { return }

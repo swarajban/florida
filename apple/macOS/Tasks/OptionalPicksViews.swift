@@ -33,10 +33,15 @@ struct OptionalPickRowView: View {
     let takeTitle: String
     let isSelected: Bool
     let isFocused: Bool
+    /// Jump mode's label for this suggestion, shown before its title.
+    let jumpLabel: String?
     let onTake: () -> Void
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
+            if let jumpLabel {
+                JumpBadge(label: jumpLabel)
+            }
             VStack(alignment: .leading, spacing: 3) {
                 Text(pick.task.title)
                     .lineLimit(2)

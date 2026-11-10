@@ -32,7 +32,8 @@ struct AllDayStripView: View {
                             columnWidth: columnWidth,
                             gutterWidth: gutterWidth,
                             isSelected: model.selection == block.item,
-                            isPast: block.localEnd <= model.clockNow)
+                            isPast: block.localEnd <= model.clockNow,
+                            jumpLabel: model.jumpLabel(for: block.item))
                             .onTapGesture(count: 2) {
                                 model.select(block.item, in: .calendar)
                                 model.editSelection()
@@ -65,6 +66,8 @@ private struct AllDayBar: View {
     let isSelected: Bool
     /// The event's last local day has ended (its stored UTC start would dim it a day early).
     let isPast: Bool
+    /// Jump mode's label for this event, shown before its title.
+    let jumpLabel: String?
 
     /// Where the bar is drawn in the strip; also the detail popover's anchor.
     static func frame(for block: GridLayout.AllDayBlock, columnWidth: CGFloat, gutterWidth: CGFloat) -> CGRect {
@@ -81,15 +84,21 @@ private struct AllDayBar: View {
         let opacity: Double = isPast ? 0.6 : 1
         let shape = RoundedRectangle(cornerRadius: 4)
 
-        Text(block.title)
-            .font(.caption)
-            .foregroundStyle(FloridaStyle.ink.opacity(opacity))
-            .lineLimit(1)
-            .padding(.horizontal, 6)
-            .frame(width: frame.width, height: frame.height, alignment: .leading)
-            .background(block.tint.opacity(0.12 * opacity), in: shape)
-            .overlay(shape.strokeBorder(block.tint.opacity(0.4 * opacity), lineWidth: 1))
-            .overlay(shape.strokeBorder(FloridaStyle.ink, lineWidth: isSelected ? 2 : 0))
-            .offset(x: frame.minX, y: frame.minY)
+        HStack(spacing: 4) {
+            if let jumpLabel {
+                JumpBadge(label: jumpLabel)
+            }
+            Text(block.title)
+                .font(.caption)
+                .foregroundStyle(FloridaStyle.ink.opacity(opacity))
+                .lineLimit(1)
+        }
+        .padding(.leading, jumpLabel == nil ? 6 : 2)
+        .padding(.trailing, 6)
+        .frame(width: frame.width, height: frame.height, alignment: .leading)
+        .background(block.tint.opacity(0.12 * opacity), in: shape)
+        .overlay(shape.strokeBorder(block.tint.opacity(0.4 * opacity), lineWidth: 1))
+        .overlay(shape.strokeBorder(FloridaStyle.ink, lineWidth: isSelected ? 2 : 0))
+        .offset(x: frame.minX, y: frame.minY)
     }
 }

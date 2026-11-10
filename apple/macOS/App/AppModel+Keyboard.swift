@@ -14,6 +14,9 @@ extension AppModel {
     /// `inEventPopover` marks events from an event's detail popover, which is its own window:
     /// only the commands that act on the open event run from there (`actsOnOpenEvent`); other
     /// keys stay with the popover's own controls.
+    ///
+    /// Jump mode (`f`) takes every key while its labels are up, except ⌘ chords: see
+    /// `handleJumpKey`.
     func handleKeyDown(_ event: NSEvent, inEventPopover: Bool = false) -> Bool {
         guard let chord = KeyChord(event: event) else { return false }
         let isCommandChord = chord.modifiers.contains(.command)
@@ -22,6 +25,10 @@ extension AppModel {
         if isSheetOpen {
             guard isEscape else { return false }
             cancel()
+            return true
+        }
+
+        if handleJumpKey(chord) {
             return true
         }
 

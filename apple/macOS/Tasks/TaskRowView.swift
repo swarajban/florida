@@ -15,6 +15,8 @@ struct TaskRowView: View {
     let isUntriaged: Bool
     /// The AI's suggested category, if any; clicking it (or ⇥ on the selected row) accepts it.
     let suggestion: TaskCategory?
+    /// Jump mode's label for this task, shown in place of the done circle.
+    let jumpLabel: String?
     let calendar: Calendar
     let onComplete: () -> Void
     let onAcceptSuggestion: () -> Void
@@ -34,6 +36,15 @@ struct TaskRowView: View {
             .help("Mark done (Space)")
             .accessibilityLabel("Mark done")
             .accessibilityIdentifier("task-done-\(task.id)")
+            // Hidden, not removed, under a jump label: the row keeps its layout and hover state.
+            .opacity(jumpLabel == nil ? 1 : 0)
+            .allowsHitTesting(jumpLabel == nil)
+            .overlay {
+                if let jumpLabel {
+                    JumpBadge(label: jumpLabel)
+                        .accessibilityIdentifier("task-jump-\(task.id)")
+                }
+            }
             VStack(alignment: .leading, spacing: 3) {
                 Text(task.title)
                     .lineLimit(2)

@@ -27,7 +27,8 @@ struct CalendarGridView: View {
                     // Paused except while blocks slide; `clockNow` redraws the now line each minute.
                     TimelineView(.animation(minimumInterval: nil, paused: model.layoutTransition == nil)) { timeline in
                         TimeGridCanvas(
-                            layout: model.gridLayout, selection: model.selection, selectedDay: model.selectedDay,
+                            layout: model.gridLayout, selection: model.selection,
+                            jumpLabels: model.jump?.remaining ?? [:], selectedDay: model.selectedDay,
                             now: model.clockNow, frameDate: timeline.date, transition: model.layoutTransition,
                             showsProgress: showsProgress, calendar: model.calendar, hourLabels: model.hourLabels,
                             grid: Self.grid, gutterWidth: Self.gutterWidth)

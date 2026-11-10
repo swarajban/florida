@@ -104,6 +104,8 @@ final class AppModel {
     var isGoToDateOpen = false
     /// Display form of a multi-key sequence in progress, e.g. "g …".
     var pendingKeys = ""
+    /// Jump mode (`f`): the labels on screen, narrowed by the keys typed so far; nil when off.
+    var jump: JumpLabels<ItemID>?
     var statusMessage: String?
     var ghost: Ghost?
     /// Task writes `u` can revert, oldest first.

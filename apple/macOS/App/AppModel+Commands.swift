@@ -25,9 +25,11 @@ extension AppModel {
         case .undo, .move, .acceptSuggestion, .newCategory, .showRoutine, .newTaskEditor,
              .doNow, .doneForNow, .repeatLast, .centerOnNow, .jumpToFirst, .jumpToLast,
              .editEvent, .respondYes, .respondMaybe, .respondNo,
-             .showProjects, .showBrief, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind:
+             .showProjects, .showBrief, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind,
+             .jump, .joinMeeting:
             guard !isSheetOpen else { return }
             statusMessage = nil
+            jump = nil
             switch command {
             case .undo: undo()
             case .move: openMovePicker()
@@ -55,6 +57,8 @@ extension AppModel {
             case .setDayOffice: setDay(selectedDay, kind: .office)
             case .setDayOff: setDay(selectedDay, kind: .off)
             case .clearDayKind: clearDayOverride(on: selectedDay)
+            case .jump: startJump()
+            case .joinMeeting: joinMeeting()
             case .core: break
             }
         }
@@ -65,6 +69,8 @@ extension AppModel {
     func perform(_ command: AppCommand) {
         if isSheetOpen, command != .cancel, command != .sync { return }
         statusMessage = nil
+        // A command from a menu or the toolbar while the jump labels are up replaces them.
+        jump = nil
         if RepeatableAction.repeatableCommands.contains(command), selectedTask != nil {
             lastAction = .command(command)
         }
@@ -116,6 +122,7 @@ extension AppModel {
     func cancel() {
         pendingKeys = ""
         matcher.reset()
+        jump = nil
         if isPaletteOpen {
             closePalette()
         } else if isHelpOpen {

@@ -101,10 +101,15 @@ struct MonthCellView: View {
         // An event spanning several cells shows its detail from the first one.
         let detailId: String? = if case .event(let id) = item, layout.day(of: item) == day { id } else { nil }
         return HStack(spacing: 4) {
-            Circle()
-                .fill(filled ? tint : .clear)
-                .overlay(Circle().strokeBorder(tint, lineWidth: 1))
-                .frame(width: 7, height: 7)
+            if let label = model.jumpLabel(for: item) {
+                // Jump mode: the label takes the dot's place.
+                JumpBadge(label: label)
+            } else {
+                Circle()
+                    .fill(filled ? tint : .clear)
+                    .overlay(Circle().strokeBorder(tint, lineWidth: 1))
+                    .frame(width: 7, height: 7)
+            }
             Text(text)
                 .font(.caption2)
                 .lineLimit(1)

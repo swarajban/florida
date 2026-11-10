@@ -97,6 +97,50 @@ final class SmokeTests: XCTestCase {
         }
     }
 
+    /// Jump mode: `f` labels every item, a label selects its item, and Escape takes the labels
+    /// down. The grid is a canvas the test cannot read, so labels come from the task pane's rows:
+    /// one task that is also on the grid, one that is only in the pane.
+    @MainActor
+    func testJumpLabelsInBothAppearances() throws {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-demoData", "YES", "-uiAppearance", appearance]
+            app.launch()
+            defer { app.terminate() }
+            let window = app.windows.firstMatch
+            XCTAssertTrue(window.waitForExistence(timeout: 15))
+            XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 10))
+
+            app.typeKey("f", modifierFlags: [])
+            let planned = app.staticTexts["task-jump-demo-task-keys"]
+            XCTAssertTrue(planned.waitForExistence(timeout: 5))
+            capture(window, "jump-\(appearance)")
+
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(planned.waitForNonExistence(timeout: 5))
+
+            for (id, title) in [("demo-task-keys", "Rotate AWS access keys"), ("demo-task-vpn", "Renew VPN certificate")] {
+                app.typeKey("f", modifierFlags: [])
+                let label = app.staticTexts["task-jump-\(id)"]
+                XCTAssertTrue(label.waitForExistence(timeout: 5))
+                let keys = try XCTUnwrap(label.value as? String).lowercased()
+                XCTAssertFalse(keys.isEmpty)
+                for key in keys {
+                    app.typeKey(String(key), modifierFlags: [])
+                }
+                XCTAssertTrue(label.waitForNonExistence(timeout: 5))
+
+                // Return edits the selection, so the editor's title says which task the label chose.
+                app.typeKey(.return, modifierFlags: [])
+                let editorTitle = app.textFields.matching(NSPredicate(format: "value == %@", title)).firstMatch
+                XCTAssertTrue(editorTitle.waitForExistence(timeout: 5), "\(keys) should select \(title)")
+                app.typeKey(.escape, modifierFlags: [])
+                XCTAssertTrue(editorTitle.waitForNonExistence(timeout: 5))
+            }
+        }
+    }
+
     @MainActor
     private func capture(_ window: XCUIElement, _ name: String) {
         let attachment = XCTAttachment(screenshot: window.screenshot())

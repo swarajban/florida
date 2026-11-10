@@ -91,7 +91,8 @@ struct TaskPaneView: View {
         let takeTitle = RoutineText.takeTitle(pick.placement, now: model.clockNow, calendar: model.calendar)
         return OptionalPickRowView(
             pick: pick, category: model.categoriesById[pick.task.categoryId], takeTitle: takeTitle,
-            isSelected: model.selection == item, isFocused: model.focus == .tasks
+            isSelected: model.selection == item, isFocused: model.focus == .tasks,
+            jumpLabel: model.jumpLabel(for: item)
         ) {
             model.take(pick)
         }
@@ -119,6 +120,7 @@ struct TaskPaneView: View {
             tint: tint,
             isSelected: model.selection == item, isFocused: model.focus == .tasks,
             isUntriaged: group.isInbox, suggestion: suggestion,
+            jumpLabel: model.jumpLabel(for: item),
             calendar: model.calendar,
             onComplete: { model.complete(task) }
         ) {
