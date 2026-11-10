@@ -11,12 +11,11 @@ struct TaskSection: Identifiable {
     var title: String { category?.name ?? "No category" }
     var isInbox: Bool { category?.isInbox ?? false }
 
-    /// Inbox first, then the other categories in category order, then tasks whose category is
-    /// unknown locally (deleted on another device, not synced yet).
+    /// The categories in list order (Inbox, work, personal, by name within each), then tasks
+    /// whose category is unknown locally (deleted on another device, not synced yet).
     static func sections(categories: [TaskCategory], tasks: [TaskItem]) -> [TaskSection] {
         let grouped = Dictionary(grouping: tasks, by: \.categoryId)
-        let ordered = categories.filter(\.isInbox) + categories.filter { !$0.isInbox }
-        var sections = ordered.map { category in
+        var sections = categories.inListOrder().map { category in
             TaskSection(id: category.id, category: category, tasks: grouped[category.id] ?? [])
         }
         let known = Set(categories.map(\.id))

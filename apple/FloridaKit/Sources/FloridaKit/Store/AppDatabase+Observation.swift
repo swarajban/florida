@@ -6,10 +6,10 @@ import GRDB
 // `for try await` from the main actor and assign the result to observable state.
 
 extension AppDatabase {
-    /// Live categories, by `sortOrder` then name; the same rows as `categories()`.
+    /// Live categories, as `categories()` returns them.
     public func observeCategories() -> AsyncValueObservation<[TaskCategory]> {
         observe { db in
-            try TaskCategory.filter(Column("deletedAt") == nil).order(Column("sortOrder"), Column("name")).fetchAll(db)
+            try Self.categories(db)
         }
     }
 

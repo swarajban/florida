@@ -288,7 +288,7 @@ import Testing
         #expect(try db.userSettings() == settings)
         #expect(try db.routineBlocks() == [mondayEarly, mondayLate, wednesday, sunday], "Monday first, then by start")
         #expect(try db.task(id: "t1")?.context == .errand)
-        #expect(try db.categories().map(\.area) == [.work, nil])
+        #expect(try db.categories().map(\.area) == [nil, .work], "Inbox first, whatever order the server sent")
         let allows = try db.writer.read { db in
             try String.fetchOne(db, sql: "SELECT allows FROM routineBlock WHERE id = 'home'")
         }

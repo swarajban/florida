@@ -1,9 +1,10 @@
 import FloridaKit
 import SwiftUI
 
-/// Categories, pushed from the Tasks tab: Inbox first (fixed), then the others in their order.
-/// Tap to edit; Edit to reorder; swipe or the editor to delete (after a confirmation that says
-/// where the tasks go); + to add.
+/// Categories, pushed from the Tasks tab: Inbox first (fixed), then the work categories, then the
+/// personal ones, each group by name (`TaskCategory.isListedBefore`). The order is not editable:
+/// it is the same in every list and picker. Tap to edit; swipe or the editor to delete (after a
+/// confirmation that says where the tasks go); + to add.
 struct CategoriesView: View {
     @Environment(AppModel.self) private var model
     @State private var editing: CategoryEditorTarget?
@@ -14,30 +15,30 @@ struct CategoriesView: View {
             if let inbox = model.inbox {
                 Section {
                     row(inbox)
-                        .moveDisabled(true)
                 } footer: {
                     Text("New tasks land in Inbox until you file them. It can't be renamed or deleted.")
                 }
             }
-            Section {
-                ForEach(others) { category in
-                    row(category)
-                        .swipeActions(edge: .trailing) {
-                            Button {
-                                deleting = category
-                            } label: {
-                                Label("Delete", systemImage: "trash")
+            ForEach(groups, id: \.title) { group in
+                Section(group.title) {
+                    ForEach(group.categories) { category in
+                        row(category)
+                            .swipeActions(edge: .trailing) {
+                                Button {
+                                    deleting = category
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                                .tint(.red)
                             }
-                            .tint(.red)
-                        }
-                        // On the row, so the dialog opens next to it rather than at the list's edge.
-                        .categoryDeleteConfirmation($deleting.only(category))
+                            // On the row, so the dialog opens next to it rather than at the list's edge.
+                            .categoryDeleteConfirmation($deleting.only(category))
+                    }
                 }
-                .onMove { source, destination in
-                    model.moveCategories(fromOffsets: source, toOffset: destination)
-                }
-            } footer: {
-                if others.isEmpty {
+            }
+            if groups.isEmpty {
+                Section {
+                } footer: {
                     Text("Add a category for each project or area, such as Engineering or Finances.")
                 }
             }
@@ -45,10 +46,6 @@ struct CategoriesView: View {
         .listStyle(.insetGrouped)
         .navigationTitle("Categories")
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                EditButton()
-                    .disabled(others.count < 2)
-            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     editing = .new
@@ -64,8 +61,16 @@ struct CategoriesView: View {
         .toastOverlay()
     }
 
-    private var others: [TaskCategory] {
-        model.categories.filter { !$0.isInbox }
+    /// The categories after Inbox under "Work", "Personal" and, for any not given an area yet,
+    /// "No area", in that order. `model.categories` is already in list order, so each group is
+    /// by name.
+    private var groups: [(title: String, categories: [TaskCategory])] {
+        let others = model.categories.filter { !$0.isInbox }
+        let areas: [CategoryArea?] = [.work, .personal, nil]
+        return areas.compactMap { area in
+            let categories = others.filter { $0.area == area }
+            return categories.isEmpty ? nil : (area?.displayName ?? "No area", categories)
+        }
     }
 
     private func row(_ category: TaskCategory) -> some View {
@@ -95,11 +100,10 @@ struct CategoriesView: View {
         .accessibilityHint("Edits the category")
     }
 
-    /// "Work · 4 open tasks"; a category with no area shows the count alone.
+    /// "4 open tasks"; the section says whether it is work or personal.
     private func subtitle(_ category: TaskCategory) -> String {
         let count = model.openTasks.filter { $0.categoryId == category.id }.count
-        let tasks = "\(count) open \(count == 1 ? "task" : "tasks")"
-        return category.area.map { "\($0.displayName) · \(tasks)" } ?? tasks
+        return "\(count) open \(count == 1 ? "task" : "tasks")"
     }
 }
 

@@ -15,9 +15,10 @@ extension AppModel {
         categoriesById[TaskCategory.inboxId] ?? categories.first(where: \.isInbox) ?? categories.first
     }
 
-    /// Inbox first, then the rest in `sortOrder`.
+    /// The categories as every list and picker shows them: Inbox, then work, then personal, by
+    /// name within each (`TaskCategory.isListedBefore`).
     var orderedCategories: [TaskCategory] {
-        categories.filter(\.isInbox) + categories.filter { !$0.isInbox }
+        categories.inListOrder()
     }
 
     /// Matches a `#hint` to a category name case-insensitively, treating "-" and "_" as spaces:
@@ -97,21 +98,6 @@ extension AppModel {
         }
         showGhost("Deleted \(category.name)")
         scheduleSync()
-    }
-
-    /// Reorders the categories after Inbox (which always stays first) and saves the ones whose
-    /// `sortOrder` changed.
-    func moveCategories(fromOffsets source: IndexSet, toOffset destination: Int) {
-        let current = orderedCategories.filter { !$0.isInbox }
-        // `List.onMove` semantics (SwiftUI's `move(fromOffsets:toOffset:)`, without importing it).
-        var others = current.enumerated().filter { !source.contains($0.offset) }.map(\.element)
-        let insertAt = destination - source.filter { $0 < destination }.count
-        others.insert(contentsOf: source.map { current[$0] }, at: min(max(insertAt, 0), others.count))
-        for (index, category) in others.enumerated() where category.sortOrder != index + 1 {
-            var category = category
-            category.sortOrder = index + 1
-            save(category)
-        }
     }
 
     func taskCount(inCategory id: String) -> Int {

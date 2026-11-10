@@ -31,11 +31,16 @@ extension AppDatabase {
         }
     }
 
-    /// Live categories, by `sortOrder` then name.
+    /// Live categories in the order they are listed: Inbox, work, personal, by name within each
+    /// (`TaskCategory.isListedBefore`).
     public func categories() throws -> [TaskCategory] {
         try writer.read { db in
-            try TaskCategory.filter(Column("deletedAt") == nil).order(Column("sortOrder"), Column("name")).fetchAll(db)
+            try Self.categories(db)
         }
+    }
+
+    static func categories(_ db: Database) throws -> [TaskCategory] {
+        try TaskCategory.filter(Column("deletedAt") == nil).fetchAll(db).inListOrder()
     }
 
     /// Live projects, by `sortOrder` then name.

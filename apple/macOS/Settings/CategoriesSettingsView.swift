@@ -1,9 +1,10 @@
 import FloridaKit
 import SwiftUI
 
-/// Categories: Inbox (fixed) and the rest in drag-to-reorder order, each with its color, name,
-/// task count and whether it is work or personal. Every change saves locally at once and syncs in
-/// the background.
+/// Categories: Inbox (fixed), then work, then personal, by name within each, as in every list and
+/// picker. Each row has its color, name, task count and whether it is work or personal; a row
+/// moves to its place when its name or area changes. Every change saves locally at once and
+/// syncs in the background.
 struct CategoriesSettingsView: View {
     @Environment(AppModel.self) private var model
 
@@ -23,9 +24,6 @@ struct CategoriesSettingsView: View {
                     ForEach(model.orderedCategories.filter { !$0.isInbox }) { category in
                         CategorySettingsRow(category: category)
                     }
-                    .onMove { source, destination in
-                        model.moveCategories(fromOffsets: source, toOffset: destination)
-                    }
                 }
             }
             Divider()
@@ -36,7 +34,7 @@ struct CategoriesSettingsView: View {
                     Label("Add Category", systemImage: "plus")
                 }
                 Spacer()
-                Text("Drag to reorder · deleting moves its tasks to Inbox")
+                Text("Work first, then personal, by name · deleting moves its tasks to Inbox")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

@@ -54,19 +54,6 @@ extension AppModel {
         }
     }
 
-    /// Reorders the categories after Inbox, which always stays first, and saves those whose
-    /// `sortOrder` changed.
-    func moveCategories(fromOffsets source: IndexSet, toOffset destination: Int) {
-        var ordered = categories.filter { !$0.isInbox }
-        ordered.move(fromOffsets: source, toOffset: destination)
-        write { database in
-            for (index, var category) in ordered.enumerated() where category.sortOrder != index + 1 {
-                category.sortOrder = index + 1
-                try database.saveCategory(category)
-            }
-        }
-    }
-
     /// Moves the task to another category; the toast offers Undo.
     func move(_ task: TaskItem, to category: TaskCategory) {
         let previous = storedVersion(of: task)
