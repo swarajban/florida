@@ -110,6 +110,29 @@ public struct PendingWrite: Codable, Hashable, Sendable, FetchableRecord, Mutabl
     public mutating func didInsert(_ inserted: InsertionSuccess) {
         seq = inserted.rowID
     }
+
+    /// Where a push sends this write: a `put` of a schedule, then of a category, then of a project
+    /// goes ahead of every other write. A row can name any of them (a task its project, a project
+    /// its category, a category its schedule), and the server refuses a name it has not seen.
+    /// Queue order alone cannot promise that: saving a project again moves its write behind the
+    /// task filed under it in between.
+    var pushRank: Int {
+        guard op != .delete else { return 3 }
+        switch entity {
+        case .schedule: return 0
+        case .category: return 1
+        case .project: return 2
+        case .task, .event, .dayOverride: return 3
+        }
+    }
+
+    /// The project a queued task write files its task under, when the body names one.
+    var namedProjectId: String? {
+        guard entity == .task, let body, let fields = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
+            return nil
+        }
+        return fields["projectId"] as? String
+    }
 }
 
 /// A scheduled piece of a task together with the task it belongs to.

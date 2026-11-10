@@ -474,10 +474,21 @@ extension AppDatabase {
 
     /// Marks the project deleted and queues a `delete`. Its tasks stay, unfiled from it, as the
     /// server leaves them; no task write is queued, because deleting the project does that there.
+    /// A task write already queued stops naming the project: the server refuses a project it does
+    /// not know ("unknown projectId"), which would drop that task's other edits with it when the
+    /// project itself was never pushed.
     public func deleteProject(id: String, now: Date = Date()) throws {
         try writer.write { db in
             try db.execute(sql: "UPDATE project SET deletedAt = ?, updatedAt = ? WHERE id = ?", arguments: [now, now, id])
             try db.execute(sql: "UPDATE task SET projectId = NULL WHERE projectId = ?", arguments: [id])
+            for var write in try PendingWrite.filter(Column("entity") == PendingWrite.Entity.task.rawValue).fetchAll(db)
+            where write.namedProjectId == id {
+                guard let body = write.body else { continue }
+                var fields = try Self.taskWriteObject(body)
+                fields["projectId"] = NSNull()
+                write.body = try JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys])
+                try write.update(db)
+            }
             try Self.enqueue(db, entity: .project, id: id, op: .delete, body: nil, now: now)
         }
     }

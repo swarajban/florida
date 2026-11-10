@@ -59,7 +59,7 @@ public actor SyncClient {
         return pushed
     }
 
-    /// Pushes queued writes in `seq` order; see `pushQueue()`.
+    /// Pushes queued writes; see `pushQueue()`.
     /// - Returns: the number of writes the server accepted.
     public func push() async throws -> Int {
         let (pushed, failure) = try await pushQueue()
@@ -69,16 +69,23 @@ public actor SyncClient {
         return pushed
     }
 
-    /// Pushes queued writes in `seq` order. A 401 throws. Any other failure (5xx, transport,
-    /// decoding, or the local store) stops the loop and is returned, keeping that row and the rest:
-    /// later writes may depend on it (a task in a category not yet created). A 404 that is not the
-    /// server's own (no `{error}` body) means the server predates the route: the write stays queued
-    /// for a newer server and the loop goes on. Another 4xx resets the local row to the server's
-    /// copy, drops the write into `lastRejectedWrites`, and continues.
+    /// Pushes queued writes, the rows other rows name first (`PendingWrite.pushRank`) and in `seq`
+    /// order otherwise. A 401 throws. Any other failure (5xx, transport, decoding, or the local
+    /// store) stops the loop and is returned, keeping that row and the rest: later writes may
+    /// depend on it (a task in a category not yet created). A 404 that is not the server's own (no
+    /// `{error}` body) means the server predates the route: the write stays queued for a newer
+    /// server and the loop goes on. A task filed under a project that stayed queued this way waits
+    /// with it, unsent: that server would accept the task and drop its project. Another 4xx resets
+    /// the local row to the server's copy, drops the write into `lastRejectedWrites`, and continues.
     private func pushQueue() async throws -> (pushed: Int, failure: (any Error)?) {
         lastRejectedWrites = []
         var pushed = 0
-        for write in try database.pendingWrites() {
+        var projectsLeftQueued: Set<String> = []
+        let queue = try database.pendingWrites().sorted { ($0.pushRank, $0.seq ?? .max) < ($1.pushRank, $1.seq ?? .max) }
+        for write in queue {
+            if let project = write.namedProjectId, projectsLeftQueued.contains(project) {
+                continue
+            }
             do {
                 let (data, response) = try await api.send(request(for: write))
                 switch response.statusCode {
@@ -88,6 +95,9 @@ public actor SyncClient {
                 case 401:
                     throw SyncError.unauthorized
                 case 404 where api.serverError(data) == nil:
+                    if write.entity == .project {
+                        projectsLeftQueued.insert(write.entityId)
+                    }
                     continue
                 case 400..<500:
                     try database.resolveDroppedWrite(write, serverCopy: try await fetchServerCopy(of: write))

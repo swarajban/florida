@@ -42,7 +42,7 @@ import Testing
             blocksById: Self.byId([Self.block("gym", name: "Gym", days: [2], allows: [])]),
             projectsById: Self.byId([Self.project("florida", name: "Florida"), Self.project("infosec", name: "Infosec audit")]))
 
-        #expect(blocks.map(\.id) == ["project:p1", "commitment:o1", "project:p2"])
+        #expect(blocks.map(\.id) == ["project:infosec@1794258000", "commitment:gym@1794330000", "project:florida@1794344400"])
         #expect(blocks.map(\.title) == ["Infosec audit", "Gym", "Florida"])
         #expect(blocks.map(\.kind) == [.project(projectId: "infosec"), .commitment(blockId: "gym"), .project(projectId: "florida")])
         #expect(blocks.map(\.lane) == [nil, nil, 1])
@@ -65,7 +65,38 @@ import Testing
                 Self.project("active"), Self.project("paused", status: .onHold), Self.project("deleted", deletedAt: Self.noon),
             ]))
 
-        #expect(blocks.map(\.id) == ["project:a"])
+        #expect(blocks.map(\.kind) == [.project(projectId: "active")])
+    }
+
+    @Test func idsStayTheSameWhenASchedulerRunReplacesTheRows() {
+        // Every run gives the server's occurrence and project-time rows new random ids.
+        func blocks(afterRun run: String) -> [PlanBlock] {
+            PlanBlock.join(
+                occurrences: [RoutineOccurrence(id: "o-\(run)", blockId: "gym", startAt: Self.at(10, 9), endAt: Self.at(10, 10, 15), computedAt: Self.noon)],
+                projectPlacements: [
+                    ProjectPlacement(id: "a-\(run)", projectId: "florida", weekOf: "2026-11-08", startAt: Self.at(10, 13), endAt: Self.at(10, 14), computedAt: Self.noon),
+                    ProjectPlacement(id: "b-\(run)", projectId: "florida", weekOf: "2026-11-08", startAt: Self.at(11, 13), endAt: Self.at(11, 14), computedAt: Self.noon),
+                ],
+                blocksById: Self.byId([Self.block("gym", name: "Gym", days: [2], allows: [])]),
+                projectsById: Self.byId([Self.project("florida")]))
+        }
+
+        let ids = blocks(afterRun: "first").map(\.id)
+        #expect(ids == blocks(afterRun: "second").map(\.id))
+        // The owner and the start, in whole seconds since 1970: 09:00 and 13:00 in Los Angeles.
+        #expect(ids == ["commitment:gym@1794330000", "project:florida@1794344400", "project:florida@1794430800"])
+    }
+
+    @Test func twoRowsOfOneOwnerAtOneStartAreOneBlock() {
+        // A row left behind by an earlier run must not put the same id on the grid twice.
+        let time = { (id: String, endHour: Int) in
+            ProjectPlacement(id: id, projectId: "florida", weekOf: "2026-11-08", startAt: Self.at(10, 13), endAt: Self.at(10, endHour), computedAt: Self.noon)
+        }
+        let blocks = PlanBlock.join(
+            occurrences: [], projectPlacements: [time("late", 15), time("early", 14)], blocksById: [:],
+            projectsById: Self.byId([Self.project("florida")]))
+        #expect(blocks.map(\.id) == ["project:florida@1794344400"])
+        #expect(blocks.map(\.minutes) == [60])
     }
 
     // MARK: ParallelWork.companions
@@ -116,6 +147,28 @@ import Testing
                 PlanBlock(id: "commitment:g", kind: .commitment(blockId: "gym"), title: "Gym", startAt: Self.at(9, 13), endAt: Self.at(9, 14)),
             ])
         #expect(titles == ["a": ["Audit"], "b": ["Fix test", "Vendor review"], "project:v": ["Audit"]])
+    }
+
+    @Test func companionTitlesNameATaskInChunksAndAProjectInBlocksOnce() {
+        let chunked = TaskItem(
+            id: "chunked", categoryId: "inbox", title: "Chunked", durationMinutes: 60, priority: .medium,
+            deadlineType: .none, createdAt: Self.noon, updatedAt: Self.noon)
+        let chunk = { (id: String, taskId: String, start: Int, end: Int, lane: Int) in
+            Placement(
+                id: id, taskId: taskId, startAt: Self.at(9, 13, start), endAt: Self.at(9, 13, end), pinned: false, lane: lane,
+                computedAt: Self.noon)
+        }
+        let atlas = { (id: String, start: Int, end: Int) in
+            PlanBlock(id: id, kind: .project(projectId: "atlas"), title: "Atlas", startAt: Self.at(9, 13, start), endAt: Self.at(9, 13, end), lane: 2)
+        }
+        var long = chunked
+        long.id = "long"
+        long.title = "Long"
+        let titles = ParallelWork.companionTitles(
+            placements: [chunk("wide", "long", 0, 55, 0), chunk("c1", "chunked", 0, 25, 1), chunk("c2", "chunked", 30, 55, 1)],
+            tasksById: ["long": long, "chunked": chunked],
+            planBlocks: [atlas("project:a1", 0, 30), atlas("project:a2", 30, 55)])
+        #expect(titles["wide"] == ["Chunked", "Atlas"])
     }
 
     @Test func spansThatOnlyTouchAreNotCompanions() {
@@ -173,7 +226,28 @@ import Testing
         #expect(DayKind.of(day: Self.at(12, 8), calendar: calendar, blocks: Self.routine, overrides: [off]) == .home)
     }
 
+    @Test func theDayKeyIsTheGregorianDateWhateverCalendarTheUserKeeps() {
+        // A device set to the Buddhist calendar counts this year as 2569; the server's keys do not.
+        var buddhist = Calendar(identifier: .buddhist)
+        buddhist.timeZone = PacificTestCalendar.calendar.timeZone
+        let lateTuesday = Self.at(10, 23, 30)
+        #expect(DayOverride.key(for: lateTuesday, calendar: buddhist) == "2026-11-10")
+        let off = DayOverride(date: "2026-11-10", kind: .off, createdAt: Self.noon, updatedAt: Self.noon)
+        #expect(DayKind.of(day: lateTuesday, calendar: buddhist, blocks: Self.routine, overrides: [off]) == .off)
+    }
+
     // MARK: Plan summary
+
+    @Test func missedNamesLeaveOutADeletedRoutineBlock() {
+        let summary = PlanSummary(missed: [
+            MissedCommitment(blockId: "gym", weekOf: "2026-11-08"), MissedCommitment(blockId: "swim", weekOf: "2026-11-08"),
+        ])
+        let blocks = Self.byId([
+            Self.block("gym", name: "Gym", days: [2], allows: []),
+            Self.block("swim", name: "Swim", days: [4], allows: [], deletedAt: Self.noon),
+        ])
+        #expect(summary.missedNames(inWeekOf: Self.at(10, 9), blocksById: blocks, calendar: PacificTestCalendar.calendar) == ["Gym"])
+    }
 
     @Test func missedNamesAreForTheSundayWeekOfTheDayOnly() {
         let summary = PlanSummary(

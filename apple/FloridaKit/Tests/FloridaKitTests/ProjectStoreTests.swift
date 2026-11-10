@@ -48,7 +48,7 @@ import Testing
                 endAt: Fixtures.instant("2026-11-10T18:15:00Z"), computedAt: Fixtures.t0)]))
 
         let agenda = try db.agenda(for: Fixtures.instant("2026-11-10T12:00:00Z"), calendar: utc)
-        #expect(agenda.planBlocks.map(\.id) == ["commitment:o1", "project:pp1"])
+        #expect(agenda.planBlocks.map(\.id) == ["commitment:gym@1794330000", "project:florida@1794333600"])
         #expect(agenda.planBlocks.map(\.title) == ["Gym", "Florida"])
         #expect(try db.agenda(for: Fixtures.instant("2026-11-12T12:00:00Z"), calendar: utc).planBlocks.isEmpty)
     }
@@ -171,6 +171,36 @@ import Testing
         #expect(pending.map(\.entity) == [.project] && pending.map(\.op) == [.delete])
     }
 
+    @Test func deletingAProjectUnfilesTheQueuedWritesOfItsTasks() throws {
+        let db = try AppDatabase.inMemory()
+        var moved = Fixtures.task(id: "moved")
+        var elsewhere = Fixtures.task(id: "elsewhere")
+        try db.apply(SyncResponse(cursor: "c", tasks: [moved, elsewhere], projects: [project("taxes")]))
+        // The project and a new task in it are both still queued, with two edits of older tasks.
+        try db.saveProject(project("florida"), now: Fixtures.t0)
+        var new = Fixtures.task(id: "new", title: "Write the pitch")
+        new.projectId = "florida"
+        try db.saveTask(new, now: Fixtures.t0)
+        moved.projectId = "florida"
+        moved.title = "Renamed too"
+        try db.saveTask(moved, now: Fixtures.t0)
+        elsewhere.projectId = "taxes"
+        try db.saveTask(elsewhere, now: Fixtures.t0)
+
+        try db.deleteProject(id: "florida", now: Fixtures.instant("2026-11-08T00:05:00Z"))
+
+        var sent: [String: [String: Any]] = [:]
+        for write in try db.pendingWrites() where write.entity == .task {
+            sent[write.entityId] = try #require(JSONSerialization.jsonObject(with: try #require(write.body)) as? [String: Any])
+        }
+        // The server answers "unknown projectId" to a project it never saw, dropping the whole write.
+        #expect(sent["new"]?["projectId"] is NSNull)
+        #expect(sent["new"]?["title"] as? String == "Write the pitch")
+        #expect(sent["moved"]?["projectId"] is NSNull)
+        #expect(sent["moved"]?["title"] as? String == "Renamed too", "the rest of the edit is kept")
+        #expect(sent["elsewhere"]?["projectId"] as? String == "taxes")
+    }
+
     @Test func settingThenClearingADayCollapsesToOneDelete() throws {
         let db = try AppDatabase.inMemory()
         try db.clearDay("2026-11-12", now: Fixtures.t0)
@@ -268,6 +298,64 @@ import Testing
         #expect(try db.pendingWrites().map(\.entity) == [.project], "kept for a server that has the route")
         #expect(try db.project(id: "florida") != nil)
         #expect(await client.lastRejectedWrites.isEmpty)
+    }
+
+    @Test func aProjectSavedAgainIsStillPushedBeforeTheTaskFiledUnderIt() async throws {
+        let db = try AppDatabase.inMemory()
+        try db.saveProject(project("florida"), now: Fixtures.t0)
+        var task = Fixtures.task(id: "t1")
+        task.projectId = "florida"
+        try db.saveTask(task, now: Fixtures.instant("2026-11-08T00:01:00Z"))
+        // Saving again moves the project's write behind the task's in the queue.
+        var renamed = project("florida")
+        renamed.name = "Florida 2"
+        try db.saveProject(renamed, now: Fixtures.instant("2026-11-08T00:02:00Z"))
+        #expect(try db.pendingWrites().map(\.entity) == [.task, .project])
+        let transport = FakeTransport([
+            .ok(try Fixtures.putResponse("project", renamed)),
+            .ok(try Fixtures.putResponse("task", task)),
+        ])
+        let client = SyncClient(database: db, config: config, transport: transport)
+
+        #expect(try await client.push() == 2)
+        // In queue order the server answers the task with 400 "unknown projectId florida".
+        #expect(transport.requests.map(\.path) == ["/api/projects/florida", "/api/tasks/t1"])
+        #expect(try db.task(id: "t1")?.projectId == "florida")
+        #expect(try db.pendingWrites().isEmpty)
+    }
+
+    @Test func aTaskWaitsUnsentWhileTheServerHasNoRouteForItsProject() async throws {
+        let db = try AppDatabase.inMemory()
+        try db.saveProject(project("florida"), now: Fixtures.t0)
+        var filed = Fixtures.task(id: "filed")
+        filed.projectId = "florida"
+        filed.attention = .shared
+        try db.saveTask(filed, now: Fixtures.instant("2026-11-08T00:01:00Z"))
+        try db.saveTask(Fixtures.task(id: "loose"), now: Fixtures.instant("2026-11-08T00:02:00Z"))
+        // A server from before projects accepts a task and drops the project from it, and its
+        // answer would then replace the local row.
+        let old = FakeTransport([
+            .json(status: 404, body: Data("404 Not Found".utf8)),
+            .ok(try Fixtures.putResponse("task", Fixtures.task(id: "loose"))),
+        ])
+        let client = SyncClient(database: db, config: config, transport: old)
+
+        #expect(try await client.push() == 1)
+        #expect(old.requests.map(\.path) == ["/api/projects/florida", "/api/tasks/loose"])
+        #expect(try db.pendingWrites().map(\.entityId) == ["florida", "filed"])
+        #expect(try db.task(id: "filed")?.projectId == "florida")
+        #expect(try db.task(id: "filed")?.attention == .shared)
+        #expect(await client.lastRejectedWrites.isEmpty)
+
+        // Once the server has projects, both go.
+        let new = FakeTransport([
+            .ok(try Fixtures.putResponse("project", project("florida"))),
+            .ok(try Fixtures.putResponse("task", filed)),
+        ])
+        #expect(try await SyncClient(database: db, config: config, transport: new).push() == 2)
+        #expect(new.requests.map(\.path) == ["/api/projects/florida", "/api/tasks/filed"])
+        #expect(try db.task(id: "filed")?.projectId == "florida")
+        #expect(try db.pendingWrites().isEmpty)
     }
 
     @Test func aProjectTheServerRefusesIsResetToTheServersCopy() async throws {

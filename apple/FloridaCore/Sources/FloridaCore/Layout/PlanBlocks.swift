@@ -40,6 +40,10 @@ public struct PlanBlock: Hashable, Sendable, Identifiable {
     /// Every occurrence and project block whose routine block or project is known, by start then
     /// id. Project time is only drawn for an active project: pausing one takes its time off the
     /// calendar at once instead of waiting for the server's next run.
+    ///
+    /// An id names the owner and the start ("commitment:gym@1794330000", seconds since 1970), not
+    /// the server's row: every scheduler run gives those rows new ids, and a selection must outlive
+    /// a run. Two rows of one owner at one start are one block, the shorter of the two.
     public static func join(
         occurrences: [RoutineOccurrence], projectPlacements: [ProjectPlacement],
         blocksById: [String: RoutineBlock], projectsById: [String: Project]
@@ -47,17 +51,28 @@ public struct PlanBlock: Hashable, Sendable, Identifiable {
         let commitments = occurrences.compactMap { occurrence -> PlanBlock? in
             guard let block = blocksById[occurrence.blockId], block.deletedAt == nil else { return nil }
             return PlanBlock(
-                id: "commitment:\(occurrence.id)", kind: .commitment(blockId: block.id), title: block.name,
+                id: id("commitment", block.id, occurrence.startAt), kind: .commitment(blockId: block.id), title: block.name,
                 startAt: occurrence.startAt, endAt: occurrence.endAt)
         }
         let projectTime = projectPlacements.compactMap { placement -> PlanBlock? in
             guard let project = projectsById[placement.projectId], project.deletedAt == nil, project.status == .active
             else { return nil }
             return PlanBlock(
-                id: "project:\(placement.id)", kind: .project(projectId: project.id), title: project.name,
+                id: id("project", project.id, placement.startAt), kind: .project(projectId: project.id), title: project.name,
                 startAt: placement.startAt, endAt: placement.endAt, lane: placement.lane)
         }
-        return (commitments + projectTime).sorted { ($0.startAt, $0.id) < ($1.startAt, $1.id) }
+        // A row an earlier run left behind would put one id on the grid twice. Keep the shorter:
+        // it claims no time the other row does not.
+        var byId: [String: PlanBlock] = [:]
+        for block in commitments + projectTime {
+            if let kept = byId[block.id], kept.endAt <= block.endAt { continue }
+            byId[block.id] = block
+        }
+        return byId.values.sorted { ($0.startAt, $0.id) < ($1.startAt, $1.id) }
+    }
+
+    private static func id(_ kind: String, _ owner: String, _ startAt: Date) -> String {
+        "\(kind):\(owner)@\(Int(startAt.timeIntervalSince1970.rounded(.down)))"
     }
 }
 
@@ -113,7 +128,11 @@ public enum ParallelWork {
             titles[block.id] = block.title
             spans.append(Span(id: block.id, startAt: block.startAt, endAt: block.endAt, lane: lane))
         }
-        return companions(of: spans).mapValues { ids in ids.compactMap { titles[$0] } }
+        // A task in chunks, or a project in several blocks, is beside this one once.
+        return companions(of: spans).mapValues { ids in
+            var seen: Set<String> = []
+            return ids.compactMap { titles[$0] }.filter { seen.insert($0).inserted }
+        }
     }
 }
 
@@ -148,9 +167,13 @@ extension DayKind {
 }
 
 extension DayOverride {
-    /// The `date` key of the local day of `calendar` containing `day`: "YYYY-MM-DD".
+    /// The `date` key of the local day of `calendar` containing `day`: "YYYY-MM-DD". Always the
+    /// Gregorian date in `calendar`'s time zone, as the server writes it, whatever calendar the
+    /// device keeps.
     public static func key(for day: Date, calendar: Calendar) -> String {
-        let parts = calendar.dateComponents([.year, .month, .day], from: day)
+        var gregorian = Calendar(identifier: .gregorian)
+        gregorian.timeZone = calendar.timeZone
+        let parts = gregorian.dateComponents([.year, .month, .day], from: day)
         let pad = { (value: Int?, width: Int) -> String in
             let digits = String(value ?? 0)
             return String(repeating: "0", count: max(0, width - digits.count)) + digits
@@ -168,7 +191,9 @@ extension PlanSummary {
         let week = DayOverride.key(for: sunday, calendar: calendar)
         return missed
             .filter { $0.weekOf == week }
-            .compactMap { blocksById[$0.blockId]?.name }
+            .compactMap { blocksById[$0.blockId] }
+            .filter { $0.deletedAt == nil }
+            .map(\.name)
             .sorted()
     }
 

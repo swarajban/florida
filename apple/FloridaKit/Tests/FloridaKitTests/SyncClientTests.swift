@@ -39,8 +39,9 @@ import Testing
             placements: [Fixtures.placement(id: "srv", taskId: "t1", start: "2026-11-09T20:00:00Z", end: "2026-11-09T21:00:00Z")])
 
         let transport = FakeTransport([
-            .ok(try Fixtures.putResponse("task", t1, scheduling: afterT1)),
+            // The category was saved after the task and still goes first: a task may name it.
             .ok(try Fixtures.putResponse("category", serverCategory)),
+            .ok(try Fixtures.putResponse("task", t1, scheduling: afterT1)),
             .ok(try Fixtures.deleteResponse(scheduling: afterDelete)),
             try .ok(pulled),
         ])
@@ -51,18 +52,18 @@ import Testing
         let requests = transport.requests
         try #require(requests.count == 4)
 
-        #expect(requests[0].method == "PUT")
-        #expect(requests[0].path == "/api/tasks/t1")
-        #expect(requests[0].headers["Authorization"] == "Bearer secret-token")
-        #expect(requests[0].headers["Content-Type"] == "application/json")
-        #expect(requests[0].body == storedTaskBody)
-        let sentWrite = try JSONCoding.decoder.decode(TaskWrite.self, from: try #require(requests[0].body))
+        #expect(requests[1].method == "PUT")
+        #expect(requests[1].path == "/api/tasks/t1")
+        #expect(requests[1].headers["Authorization"] == "Bearer secret-token")
+        #expect(requests[1].headers["Content-Type"] == "application/json")
+        #expect(requests[1].body == storedTaskBody)
+        let sentWrite = try JSONCoding.decoder.decode(TaskWrite.self, from: try #require(requests[1].body))
         #expect(sentWrite.title == "first")
 
-        #expect(requests[1].method == "PUT")
-        #expect(requests[1].path == "/api/categories/p2")
-        #expect(requests[1].headers["Authorization"] == "Bearer secret-token")
-        let sentCategory = try JSONCoding.decoder.decode(CategoryWrite.self, from: try #require(requests[1].body))
+        #expect(requests[0].method == "PUT")
+        #expect(requests[0].path == "/api/categories/p2")
+        #expect(requests[0].headers["Authorization"] == "Bearer secret-token")
+        let sentCategory = try JSONCoding.decoder.decode(CategoryWrite.self, from: try #require(requests[0].body))
         #expect(sentCategory.sortOrder == 2)
 
         #expect(requests[2].method == "DELETE")
