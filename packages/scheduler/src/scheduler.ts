@@ -1,9 +1,14 @@
 import type {
+  DayCapacity,
+  DayKind,
+  DayOverride,
   Late,
+  MissedCommitment,
   OptionalPlacement,
   Placement,
   Priority,
   Routine,
+  RoutineOccurrence,
   SchedulerInput,
   SchedulerResult,
   Task,
@@ -16,6 +21,7 @@ import {
   type LocalDate,
   dateFromDayNumber,
   dayNumber,
+  isoDate,
   localDate,
   parseClock,
   weekdayOf,
@@ -25,20 +31,108 @@ import { type Span, addSpan, mergeSpans, subtractSpans } from './intervals.js'
 
 const PRIORITY_RANK: Record<Priority, number> = { asap: 0, high: 1, medium: 2, low: 3 }
 
+const CONTEXTS: TaskContext[] = ['computer', 'errand', 'home', 'office']
+const CAPACITY_DAYS = 7
+
 interface Context {
   now: number
   horizonEnd: number
   granularity: number
   overflow: { start: string; end: string }
+  /** The weekday whose routine applies on a date, or undefined on a day off. See `DayOverride`. */
+  weekdayFor: (date: LocalDate) => number | undefined
+}
+
+/** A placed block and the lane it is in; full-attention work is always in lane 0. */
+interface Piece extends Span {
+  lane: number
+}
+
+interface SharedSpan extends Span {
+  /** Shared work with the same group never overlaps: the project, or the task when it has none. */
+  group: string
+}
+
+/**
+ * Time already taken. Nothing overlaps `solid`: calendar events, commitments, pinned and
+ * full-attention work. Shared-attention work sits in `lanes`, side by side, and only keeps
+ * full-attention work and its own group out of the time it covers.
+ */
+interface Capacity {
+  /** Sorted and merged. */
+  solid: Span[]
+  lanes: SharedSpan[][]
+}
+
+const isShared = (task: Task): boolean => task.attention === 'shared' && task.pinnedStart === undefined
+const groupOf = (task: Task): string => task.projectId ?? task.id
+const overlaps = (a: Span, b: Span): boolean => a.start < b.end && b.start < a.end
+
+/** Every occupied instant in any lane: what full-attention work has to avoid. */
+function occupied(cap: Capacity): Span[] {
+  return mergeSpans([...cap.solid, ...cap.lanes.flat()])
+}
+
+/** What `task` has to avoid in `lane`. Full-attention work has a single lane and avoids everything. */
+function takenIn(cap: Capacity, task: Task, lane: number): Span[] {
+  if (!isShared(task)) return occupied(cap)
+  const group = groupOf(task)
+  return mergeSpans([
+    ...cap.solid,
+    ...cap.lanes.flatMap((spans, index) => (index === lane ? spans : spans.filter((s) => s.group === group))),
+  ])
+}
+
+function laneCount(cap: Capacity, task: Task): number {
+  return isShared(task) ? cap.lanes.length : 1
+}
+
+function reserve(cap: Capacity, task: Task, piece: Piece): void {
+  const lane = cap.lanes[piece.lane]
+  if (isShared(task) && lane !== undefined) lane.push({ start: piece.start, end: piece.end, group: groupOf(task) })
+  else cap.solid = addSpan(cap.solid, piece)
+}
+
+/** The lane where `span` is free for `task`: `preferred` when it is, else the lowest. */
+function freeLane(cap: Capacity, task: Task, span: Span, preferred?: number): number | undefined {
+  const lanes = Array.from({ length: laneCount(cap, task) }, (_, lane) => lane)
+  if (preferred !== undefined && lanes.includes(preferred)) lanes.unshift(preferred)
+  return lanes.find((lane) => !takenIn(cap, task, lane).some((taken) => overlaps(taken, span)))
+}
+
+/**
+ * The earliest stretch inside `window` where `task` can take at least `need` ms, across its
+ * lanes; the lowest lane wins a tie, so shared work stacks side by side from lane 0.
+ */
+function earliestSlot(
+  cap: Capacity,
+  task: Task,
+  window: Span,
+  need: number,
+  grid: number,
+): { start: number; available: number; lane: number } | undefined {
+  let best: { start: number; available: number; lane: number } | undefined
+  for (let lane = 0; lane < laneCount(cap, task); lane++) {
+    for (const free of subtractSpans(window, takenIn(cap, task, lane))) {
+      const start = snapUp(free.start, grid)
+      const available = Math.floor((free.end - start) / MINUTE) * MINUTE
+      if (available <= 0 || available < need) continue
+      if (best === undefined || start < best.start) best = { start, available, lane }
+      break
+    }
+  }
+  return best
 }
 
 /**
  * Places open tasks into free time. Pure and deterministic: the same input always yields the
  * same output, so it can run anywhere (server, device) and be compared across runs.
  *
- * Order of work: pinned tasks first (they are fixed), then reserve in-progress work.
- * Flexible tasks sorted by `compareTasks` reuse valid prior blocks before placing their
- * remaining work into the earliest free time inside routine blocks that allow their context.
+ * Order of work: commitments first (the gym, wherever it lands this week), then pinned tasks
+ * (they are fixed), then in-progress work is reserved. Flexible tasks sorted by `compareTasks`
+ * reuse valid prior blocks before placing their remaining work into the earliest free time
+ * inside routine blocks that allow their context. Full-attention work takes its time alone;
+ * shared-attention work of up to `maxParallel` different projects runs side by side in lanes.
  * Optional blocks are never part of that plan; `suggestOptional` fills them afterwards.
  */
 export function schedule(input: SchedulerInput): SchedulerResult {
@@ -48,14 +142,22 @@ export function schedule(input: SchedulerInput): SchedulerResult {
     horizonEnd: now + (input.horizonDays ?? 28) * DAY,
     granularity: (input.granularityMinutes ?? 15) * MINUTE,
     overflow: input.overflowWindow ?? { start: '07:00', end: '23:00' },
+    weekdayFor: weekdayResolver(input.routine, input.dayOverrides ?? []),
   }
   const routine = input.routine
+  const maxParallel = Math.max(1, Math.floor(input.maxParallel ?? 3))
 
   const busySpans = input.busy.map((i) => ({
     start: parseInstant(i.start, 'busy.start'),
     end: parseInstant(i.end, 'busy.end'),
   }))
-  let busy = mergeSpans(busySpans)
+  const committed = commitments(routine, ctx, busySpans)
+  // What an in-progress block gives way to: meetings and commitments that start while it runs.
+  const fixedSpans = [...busySpans, ...committed.occurrences]
+  const cap: Capacity = {
+    solid: mergeSpans(fixedSpans),
+    lanes: Array.from({ length: maxParallel }, () => []),
+  }
   const placements: Placement[] = []
   const unscheduled: Unscheduled[] = []
   const late: Late[] = []
@@ -67,20 +169,21 @@ export function schedule(input: SchedulerInput): SchedulerResult {
     if (task.pinnedStart === undefined) continue
     const start = parseInstant(task.pinnedStart, 'pinnedStart')
     const span = { start, end: start + remainingMinutes(task) * MINUTE }
-    placements.push(toPlacement(task.id, span, true))
+    placements.push(toPlacement(task, { ...span, lane: 0 }, true))
     pinnedSpans.push(span)
-    busy = addSpan(busy, span)
+    cap.solid = addSpan(cap.solid, span)
   }
 
   const flexible = open
     .filter((t) => t.pinnedStart === undefined)
     .sort((a, b) => compareTasks(a, b, routine.timeZone))
 
-  const previous = new Map<string, Span[]>(flexible.map((task) => [task.id, []]))
+  const previous = new Map<string, Prior[]>(flexible.map((task) => [task.id, []]))
   for (const block of input.previous ?? []) {
     previous.get(block.taskId)?.push({
       start: parseInstant(block.start, 'previous.start'),
       end: parseInstant(block.end, 'previous.end'),
+      ...(block.lane === undefined ? {} : { lane: block.lane }),
     })
   }
 
@@ -99,7 +202,7 @@ export function schedule(input: SchedulerInput): SchedulerResult {
       const credit = Math.max(0, now - block.start - logged)
       remaining = Math.max(0, remaining - credit)
       const span = { start: block.start, end: Math.max(now, Math.min(block.end, now + remaining)) }
-      for (const b of busySpans) {
+      for (const b of fixedSpans) {
         if (b.end > b.start && b.start > now && b.start < span.end) span.end = b.start
       }
       // Pinned work is the user's explicit choice: a flexible block never runs over it.
@@ -107,9 +210,11 @@ export function schedule(input: SchedulerInput): SchedulerResult {
         if (p.end > now && p.start < span.end) span.end = Math.max(now, p.start)
       }
       const ahead = span.end - now
-      retained.spans.push(span)
+      // Active work is never moved: it keeps a lane even when stale data has two blocks in it.
+      const piece = { ...span, lane: freeLane(cap, task, span, block.lane) ?? 0 }
+      retained.spans.push(piece)
       retained.work += credit + ahead
-      busy = addSpan(busy, span)
+      reserve(cap, task, piece)
       remaining -= ahead
     }
     active.set(task.id, retained)
@@ -123,11 +228,10 @@ export function schedule(input: SchedulerInput): SchedulerResult {
     )
     const retained = active.get(task.id) ?? { spans: [], work: 0 }
     const fit: Fit = allowed
-      ? placeTask(task, routine, ctx, busy, previous.get(task.id) ?? [], retained)
-      : { spans: retained.spans, remaining: Math.max(0, remainingMinutes(task) * MINUTE - retained.work), busy, hardLimited: false }
-    busy = fit.busy
+      ? placeTask(task, routine, ctx, cap, previous.get(task.id) ?? [], retained)
+      : { spans: retained.spans, remaining: Math.max(0, remainingMinutes(task) * MINUTE - retained.work), hardLimited: false }
     plan.set(task.id, { spans: fit.spans, unplaced: fit.remaining })
-    for (const span of fit.spans) placements.push(toPlacement(task.id, span, false))
+    for (const piece of fit.spans) placements.push(toPlacement(task, piece, false))
 
     if (fit.remaining > 0) {
       unscheduled.push({
@@ -146,13 +250,114 @@ export function schedule(input: SchedulerInput): SchedulerResult {
   }
 
   placements.sort((a, b) => a.start.localeCompare(b.start) || a.taskId.localeCompare(b.taskId))
-  const optional = suggestOptional(flexible, routine, ctx, busy, plan, input.optionalDays ?? 7)
-  return { placements, unscheduled, late, optional }
+  const taken = occupied(cap)
+  const optional = suggestOptional(flexible, routine, ctx, taken, plan, input.optionalDays ?? 7)
+  const routineOccurrences: RoutineOccurrence[] = committed.occurrences
+    .map((o) => ({ blockId: o.blockId, start: toIso(o.start), end: toIso(o.end) }))
+    .sort((a, b) => a.start.localeCompare(b.start) || a.blockId.localeCompare(b.blockId))
+  return {
+    placements,
+    unscheduled,
+    late,
+    optional,
+    routine: routineOccurrences,
+    missed: committed.missed,
+    capacity: capacityByDay(routine, ctx, taken),
+  }
 }
 
 interface Planned {
   spans: Span[]
   unplaced: number
+}
+
+/** A block of the prior run, with the lane it was in when it was shared work. */
+interface Prior extends Span {
+  lane?: number
+}
+
+/**
+ * Maps a date to the weekday whose routine it follows. Without an override that is its own
+ * weekday; an `off` day follows none; a `home` or `office` day that is not already one follows
+ * the first weekday, Monday first, that is.
+ */
+function weekdayResolver(routine: Routine, overrides: DayOverride[]): (date: LocalDate) => number | undefined {
+  const planned = (weekday: number) => routine.blocks.filter((b) => b.optional !== true && b.days.includes(weekday))
+  const kindOf = (weekday: number): DayKind => {
+    const blocks = planned(weekday)
+    if (blocks.some((b) => b.allows.includes('office'))) return 'office'
+    return blocks.some((b) => b.allows.length > 0) ? 'home' : 'off'
+  }
+  const kinds = new Map(overrides.map((o) => [o.date, o.kind]))
+  return (date) => {
+    const weekday = weekdayOf(date)
+    const kind = kinds.get(isoDate(date))
+    if (kind === undefined) return weekday
+    if (kind === 'off') return undefined
+    if (kindOf(weekday) === kind) return weekday
+    return [1, 2, 3, 4, 5, 6, 0].find((candidate) => kindOf(candidate) === kind) ?? weekday
+  }
+}
+
+/**
+ * Occurrences of every commitment, week by week from the Sunday of the current week to the
+ * horizon: one per day in `days`, plus one in the first of its `alternates` that no busy
+ * interval overlaps. Past days of the current week are included so a client can draw the whole
+ * week; pass that week's earlier busy time for them to land where they did.
+ */
+function commitments(
+  routine: Routine,
+  ctx: Context,
+  busy: Span[],
+): { occurrences: (Span & { blockId: string })[]; missed: MissedCommitment[] } {
+  const occurrences: (Span & { blockId: string })[] = []
+  const missed: MissedCommitment[] = []
+  const blocks = routine.blocks.filter((b) => b.allows.length === 0 && b.optional !== true)
+  if (blocks.length === 0) return { occurrences, missed }
+
+  const today = dayNumber(localDate(ctx.now, routine.timeZone))
+  const lastDay = dayNumber(localDate(ctx.horizonEnd, routine.timeZone))
+  for (let sunday = today - weekdayOf(dateFromDayNumber(today)); sunday <= lastDay; sunday += 7) {
+    const week = Array.from({ length: 7 }, (_, offset) => dateFromDayNumber(sunday + offset))
+    for (const block of blocks) {
+      for (const date of week) {
+        const weekday = ctx.weekdayFor(date)
+        if (weekday === undefined || !block.days.includes(weekday)) continue
+        occurrences.push({ blockId: block.id, ...windowSpan(date, block.start, block.end, routine.timeZone) })
+      }
+      const alternates = block.alternates ?? []
+      if (alternates.length === 0) continue
+      const free = alternates
+        .flatMap((slot) =>
+          week
+            .filter((date) => ctx.weekdayFor(date) === slot.day)
+            .map((date) => windowSpan(date, slot.start, slot.end, routine.timeZone)),
+        )
+        .find((span) => span.end > span.start && !busy.some((b) => overlaps(b, span)))
+      if (free === undefined) missed.push({ blockId: block.id, weekOf: isoDate(dateFromDayNumber(sunday)) })
+      else occurrences.push({ blockId: block.id, ...free })
+    }
+  }
+  return { occurrences, missed }
+}
+
+/** Free minutes left on each of the next days, per context, once the plan is in. */
+function capacityByDay(routine: Routine, ctx: Context, taken: Span[]): DayCapacity[] {
+  const firstDay = dayNumber(localDate(ctx.now, routine.timeZone))
+  const days: DayCapacity[] = []
+  for (let day = firstDay; day < firstDay + CAPACITY_DAYS; day++) {
+    const date = dateFromDayNumber(day)
+    const freeMinutes = { computer: 0, errand: 0, home: 0, office: 0 }
+    for (const context of CONTEXTS) {
+      for (const window of blocksOn(routine, ctx, context, date)) {
+        const open = { start: Math.max(window.start, ctx.now), end: window.end }
+        if (open.end <= open.start) continue
+        for (const free of subtractSpans(open, taken)) freeMinutes[context] += Math.floor((free.end - free.start) / MINUTE)
+      }
+    }
+    days.push({ date: isoDate(date), freeMinutes })
+  }
+  return days
 }
 
 /**
@@ -178,6 +383,8 @@ function suggestOptional(
 
   for (let day = firstDay; day < firstDay + days; day++) {
     const date = dateFromDayNumber(day)
+    // Optional time keeps its own weekday on a home or office day; a day off has none.
+    if (ctx.weekdayFor(date) === undefined) continue
     const weekday = weekdayOf(date)
     for (const block of routine.blocks) {
       if (block.optional !== true || !block.days.includes(weekday)) continue
@@ -245,26 +452,26 @@ function compareTasks(a: Task, b: Task, timeZone: string): number {
 }
 
 interface Fit {
-  spans: Span[]
+  spans: Piece[]
   remaining: number
-  busy: Span[]
   /** True when the search was cut off by a hard deadline inside the horizon. */
   hardLimited: boolean
 }
 
 /** In-progress blocks kept from the prior run, and the work (ms) they account for. */
 interface Retained {
-  spans: Span[]
+  spans: Piece[]
   /** Elapsed time credited as worked plus the time the kept blocks still cover after `now`. */
   work: number
 }
 
+/** Places what is left of `task`, reserving each block in `cap`. */
 function placeTask(
   task: Task,
   routine: Routine,
   ctx: Context,
-  initialBusy: Span[],
-  previous: Span[],
+  cap: Capacity,
+  previous: Prior[],
   retained: Retained,
 ): Fit {
   const minChunk =
@@ -277,18 +484,19 @@ function placeTask(
   const hardDue = task.deadlineType === 'hard' ? effectiveDue(task)?.ms : undefined
   const limit = Math.min(ctx.horizonEnd, hardDue ?? Number.POSITIVE_INFINITY)
 
-  let busy = initialBusy
   let remaining = Math.max(0, remainingMinutes(task) * MINUTE - retained.work)
-  const spans: Span[] = [...retained.spans]
+  const spans: Piece[] = [...retained.spans]
 
   for (const span of previous) {
     const duration = span.end - span.start
     if (duration <= 0 || duration > remaining || span.start < earliest || span.end > limit) continue
-    const windows = blocksOn(routine, task.context, localDate(span.start, routine.timeZone))
+    const windows = blocksOn(routine, ctx, task.context, localDate(span.start, routine.timeZone))
     if (!windows.some((window) => window.start <= span.start && span.end <= window.end)) continue
-    if (busy.some((b) => b.start < span.end && span.start < b.end)) continue
-    spans.push(span)
-    busy = addSpan(busy, span)
+    const lane = freeLane(cap, task, span, span.lane)
+    if (lane === undefined) continue
+    const piece = { start: span.start, end: span.end, lane }
+    spans.push(piece)
+    reserve(cap, task, piece)
     remaining -= duration
   }
 
@@ -300,22 +508,21 @@ function placeTask(
       for (const window of windowsForDay(date)) {
         const clipped = { start: Math.max(window.start, earliest), end: Math.min(window.end, limit) }
         if (clipped.end <= clipped.start) continue
-        for (const free of subtractSpans(clipped, busy)) {
-          const start = snapUp(free.start, ctx.granularity)
-          const available = Math.floor((free.end - start) / MINUTE) * MINUTE
-          if (available <= 0 || available < Math.min(minChunk, remaining)) continue
-          const take = Math.min(remaining, available)
-          const span = { start, end: start + take }
-          spans.push(span)
-          busy = addSpan(busy, span)
+        while (remaining > 0) {
+          const slot = earliestSlot(cap, task, clipped, Math.min(minChunk, remaining), ctx.granularity)
+          if (slot === undefined) break
+          const take = Math.min(remaining, slot.available)
+          const piece = { start: slot.start, end: slot.start + take, lane: slot.lane }
+          spans.push(piece)
+          reserve(cap, task, piece)
           remaining -= take
-          if (remaining === 0) return
         }
+        if (remaining === 0) return
       }
     }
   }
 
-  fill((date) => blocksOn(routine, task.context, date))
+  fill((date) => blocksOn(routine, ctx, task.context, date))
   if (remaining > 0 && hardDue !== undefined) {
     fill((date) => [windowSpan(date, ctx.overflow.start, ctx.overflow.end, routine.timeZone)])
   }
@@ -323,18 +530,18 @@ function placeTask(
   return {
     spans,
     remaining,
-    busy,
     hardLimited: hardDue !== undefined && hardDue <= ctx.horizonEnd,
   }
 }
 
 /**
  * Time on `date` where the plan may put a task of `context`: the union of the non-optional
- * routine blocks that allow it. Overlapping or touching blocks merge, so a task can span them as
- * one piece.
+ * routine blocks that allow it, for the weekday the date follows. Overlapping or touching blocks
+ * merge, so a task can span them as one piece.
  */
-function blocksOn(routine: Routine, context: TaskContext, date: LocalDate): Span[] {
-  const weekday = weekdayOf(date)
+function blocksOn(routine: Routine, ctx: Context, context: TaskContext, date: LocalDate): Span[] {
+  const weekday = ctx.weekdayFor(date)
+  if (weekday === undefined) return []
   return mergeSpans(
     routine.blocks
       .filter((b) => b.optional !== true && b.days.includes(weekday) && b.allows.includes(context))
@@ -368,8 +575,10 @@ function snapUp(ms: number, grid: number): number {
   return Math.ceil(ms / grid) * grid
 }
 
-function toPlacement(taskId: string, span: Span, pinned: boolean): Placement {
-  return { taskId, start: toIso(span.start), end: toIso(span.end), pinned }
+function toPlacement(task: Task, piece: Piece, pinned: boolean): Placement {
+  const placement: Placement = { taskId: task.id, start: toIso(piece.start), end: toIso(piece.end), pinned }
+  if (isShared(task)) placement.lane = piece.lane
+  return placement
 }
 
 function toIso(ms: number): string {

@@ -11,6 +11,19 @@ export type TaskContext = 'computer' | 'errand' | 'home' | 'office'
 /** The side of life a task's category belongs to. Only orders suggestions for optional blocks. */
 export type TaskArea = 'work' | 'personal'
 
+/**
+ * How much of the user a task takes. `shared` work mostly runs itself (an agent working on a
+ * project) and can sit beside other shared work; `full` work is done alone.
+ */
+export type Attention = 'full' | 'shared'
+
+/** One weekly slot: a weekday (0 = Sunday … 6 = Saturday) and "HH:MM" bounds on that day. */
+export interface RoutineSlot {
+  day: number
+  start: string
+  end: string
+}
+
 /** A weekly block of the routine, expressed as wall-clock time in the routine's time zone. */
 export interface RoutineBlock {
   id: string
@@ -21,10 +34,18 @@ export interface RoutineBlock {
   /** End of the block, "HH:MM" in 24-hour time. Must be after `start` and on the same day. */
   end: string
   /**
-   * Task contexts that may be placed in this block. Empty for blocks that only document time
-   * nothing goes into (family time, the gym); time outside every allowing block is unavailable.
+   * Task contexts that may be placed in this block; time outside every allowing block is
+   * unavailable. A block that allows nothing is a commitment, such as the gym: its occurrences
+   * are time nothing is planned into, even inside another block, and come back in
+   * `SchedulerResult.routine`.
    */
   allows: TaskContext[]
+  /**
+   * Commitments only: besides its `days`, the block happens once more each week (Sunday to
+   * Saturday), in the first of these slots that no busy interval overlaps. A week whose slots
+   * are all taken goes without, and is listed in `SchedulerResult.missed`.
+   */
+  alternates?: RoutineSlot[]
   /**
    * Time the user might work but does not count on, such as a weekday evening. The plan never
    * uses an optional block; the scheduler only suggests what to do there, in
@@ -40,9 +61,31 @@ export interface Routine {
   blocks: RoutineBlock[]
 }
 
+/** What a day is, when it differs from its weekday's routine. */
+export type DayKind = 'home' | 'office' | 'off'
+
+/**
+ * One date that departs from the routine. An `off` day has no blocks and no commitments. A
+ * `home` or `office` day follows the routine of the first weekday (Monday first) that normally
+ * is one: its blocks, and its commitments. A weekday is an office day when one of its planned
+ * blocks allows `office`, and a home day when it has any other planned block.
+ */
+export interface DayOverride {
+  /** Local date in the routine's time zone, "YYYY-MM-DD". */
+  date: string
+  kind: DayKind
+}
+
 export interface Task {
   id: string
   context: TaskContext
+  /** Default `full`. A pinned task always takes its time alone. */
+  attention?: Attention
+  /**
+   * Shared tasks of one project never run side by side: parallel lanes are for different
+   * projects. A shared task without a project only excludes itself.
+   */
+  projectId?: string
   /** Omit for unfiled tasks, which rank with work. */
   area?: TaskArea
   durationMinutes: number
@@ -104,6 +147,10 @@ export interface SchedulerInput {
   overflowWindow?: { start: string; end: string }
   /** How many local days, starting today, get suggestions for their optional blocks. Default 7. */
   optionalDays?: number
+  /** Dates that depart from the weekly routine. */
+  dayOverrides?: DayOverride[]
+  /** How many shared tasks may run side by side. Default 3. */
+  maxParallel?: number
 }
 
 export interface Placement {
@@ -111,6 +158,34 @@ export interface Placement {
   start: string
   end: string
   pinned: boolean
+  /**
+   * Shared-attention work only: which of the `maxParallel` side-by-side lanes the block is in,
+   * from 0. Blocks that overlap in time are in different lanes and belong to different projects.
+   * In `previous`, a shared block keeps its lane when that lane is still free.
+   */
+  lane?: number
+}
+
+/** One occurrence of a commitment (a routine block that allows nothing). No task is behind it. */
+export interface RoutineOccurrence {
+  blockId: string
+  start: string
+  end: string
+}
+
+/** A week in which none of a commitment's `alternates` was free. */
+export interface MissedCommitment {
+  blockId: string
+  /** Local date of the Sunday that starts the week, "YYYY-MM-DD". */
+  weekOf: string
+}
+
+/** Time still open on one local day after the plan, per task context. */
+export interface DayCapacity {
+  /** Local date in the routine's time zone, "YYYY-MM-DD". */
+  date: string
+  /** Minutes from `now` on in planned blocks allowing the context, with nothing in them. */
+  freeMinutes: Record<TaskContext, number>
 }
 
 /**
@@ -154,4 +229,12 @@ export interface SchedulerResult {
   late: Late[]
   /** Suggestions for optional blocks, sorted by start, then task id. Never counted above. */
   optional: OptionalPlacement[]
+  /**
+   * Commitment occurrences from the Sunday of the current week to the horizon, sorted by start.
+   * Tasks are never placed over them.
+   */
+  routine: RoutineOccurrence[]
+  missed: MissedCommitment[]
+  /** The next 7 local days, today first. */
+  capacity: DayCapacity[]
 }

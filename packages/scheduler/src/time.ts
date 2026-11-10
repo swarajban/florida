@@ -106,6 +106,12 @@ export function dateFromDayNumber(day: number): LocalDate {
   return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() }
 }
 
+/** "YYYY-MM-DD". */
+export function isoDate(date: LocalDate): string {
+  const pad = (n: number, width: number): string => String(n).padStart(width, '0')
+  return `${pad(date.year, 4)}-${pad(date.month, 2)}-${pad(date.day, 2)}`
+}
+
 /** 0 = Sunday … 6 = Saturday. */
 export function weekdayOf(date: LocalDate): number {
   return new Date(Date.UTC(date.year, date.month - 1, date.day)).getUTCDay()

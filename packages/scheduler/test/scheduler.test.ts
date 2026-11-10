@@ -661,6 +661,245 @@ describe('optional blocks', () => {
   })
 })
 
+describe('parallel lanes', () => {
+  const shared = (id: string, projectId: string | undefined, extra: Partial<Task> = {}): Task =>
+    task({ id, attention: 'shared', ...(projectId === undefined ? {} : { projectId }), ...extra })
+  const lanesOf = (result: SchedulerResult): [string, string, string, number | undefined][] =>
+    result.placements.map((p) => [p.taskId, p.start, p.end, p.lane])
+  const at = (time: string): string => iso(`2026-11-09T${time}:00-08:00`)
+
+  it('runs shared work of up to three different projects side by side, and the fourth after', () => {
+    const result = run([
+      shared('a', 'p1', { durationMinutes: 120 }),
+      shared('b', 'p2'),
+      shared('c', 'p3', { durationMinutes: 90 }),
+      shared('d', 'p4'),
+    ])
+    expect(lanesOf(result)).toEqual([
+      ['a', at('09:00'), at('11:00'), 0],
+      ['b', at('09:00'), at('10:00'), 1],
+      ['c', at('09:00'), at('10:30'), 2],
+      // Lane 1 frees first.
+      ['d', at('10:00'), at('11:00'), 1],
+    ])
+  })
+
+  it('never runs two shared tasks of one project side by side', () => {
+    const result = run([shared('a', 'p1'), shared('b', 'p1'), shared('c', 'p2', { durationMinutes: 120 })])
+    expect(lanesOf(result)).toEqual([
+      ['a', at('09:00'), at('10:00'), 0],
+      ['c', at('09:00'), at('11:00'), 1],
+      ['b', at('10:00'), at('11:00'), 0],
+    ])
+  })
+
+  it('lets shared tasks without a project run beside each other', () => {
+    const result = run([shared('a', undefined), shared('b', undefined)])
+    expect(lanesOf(result)).toEqual([
+      ['a', at('09:00'), at('10:00'), 0],
+      ['b', at('09:00'), at('10:00'), 1],
+    ])
+  })
+
+  it('keeps full-attention work, meetings and shared work out of each other', () => {
+    const result = run(
+      [
+        task({ id: 'f', priority: 'high' }),
+        shared('a', 'p1'),
+        shared('b', 'p2'),
+        task({ id: 'g', priority: 'low' }),
+      ],
+      [busy('2026-11-09T10:00:00-08:00', '2026-11-09T10:30:00-08:00')],
+    )
+    expect(lanesOf(result)).toEqual([
+      ['f', at('09:00'), at('10:00'), undefined],
+      ['a', at('10:30'), at('11:30'), 0],
+      ['b', at('10:30'), at('11:30'), 1],
+      // Only 30 minutes are left before lunch; a full task never moves in beside shared work.
+      ['g', at('13:00'), at('14:00'), undefined],
+    ])
+  })
+
+  it('honors a lower parallel limit', () => {
+    const result = run([shared('a', 'p1'), shared('b', 'p2'), shared('c', 'p3')], [], { maxParallel: 2 })
+    expect(lanesOf(result)).toEqual([
+      ['a', at('09:00'), at('10:00'), 0],
+      ['b', at('09:00'), at('10:00'), 1],
+      ['c', at('10:00'), at('11:00'), 0],
+    ])
+  })
+
+  it('takes a pinned shared task out of the lanes', () => {
+    const result = run([
+      shared('pin', 'p1', { pinnedStart: '2026-11-09T09:00:00-08:00' }),
+      shared('a', 'p2'),
+    ])
+    expect(lanesOf(result)).toEqual([
+      ['pin', at('09:00'), at('10:00'), undefined],
+      ['a', at('10:00'), at('11:00'), 0],
+    ])
+  })
+
+  it('keeps a shared block in its lane across runs', () => {
+    const previous = [{ taskId: 'b', start: at('09:00'), end: at('10:00'), pinned: false, lane: 2 }]
+    const result = run([shared('a', 'p1'), shared('b', 'p2')], [], { previous })
+    expect(lanesOf(result)).toEqual([
+      ['a', at('09:00'), at('10:00'), 0],
+      ['b', at('09:00'), at('10:00'), 2],
+    ])
+  })
+
+  it('splits shared work into chunks around a meeting in its own lane only', () => {
+    const result = run(
+      [shared('a', 'p1', { durationMinutes: 150, minChunkMinutes: 60 }), shared('b', 'p2', { durationMinutes: 180 })],
+      [busy('2026-11-09T10:00:00-08:00', '2026-11-09T11:00:00-08:00')],
+    )
+    expect(lanesOf(result)).toEqual([
+      ['a', at('09:00'), at('10:00'), 0],
+      ['a', at('11:00'), at('12:00'), 0],
+      // 30 minutes of `a` are left, less than a chunk, so the last piece may be short.
+      ['a', at('13:00'), at('13:30'), 0],
+      // `b` needs three hours in one piece; lane 1 is open all afternoon beside `a`.
+      ['b', at('13:00'), at('16:00'), 1],
+    ])
+  })
+})
+
+describe('commitments', () => {
+  /** Home Mon/Thu/Fri, office Tue/Wed; the gym after home days and on one office morning. */
+  const GYM: Routine = {
+    timeZone: LA,
+    blocks: [
+      { id: 'home', days: [1, 4, 5], start: '09:00', end: '15:30', allows: ['computer', 'errand', 'home'] },
+      { id: 'office', days: [2, 3], start: '09:00', end: '16:20', allows: ['computer', 'office'] },
+      {
+        id: 'gym',
+        days: [1, 4, 5],
+        start: '15:30',
+        end: '16:45',
+        allows: [],
+        alternates: [
+          { day: 2, start: '09:00', end: '10:15' },
+          { day: 3, start: '09:00', end: '10:15' },
+        ],
+      },
+    ],
+  }
+  const gym = (tasks: Task[], busyTime: Interval[] = [], extra: Partial<SchedulerInput> = {}) =>
+    run(tasks, busyTime, { routine: GYM, horizonDays: 5, ...extra })
+  /** Gym occurrences of the current week as [local day of month, start]. */
+  const gymDays = (result: SchedulerResult): string[] => result.routine.map((o) => o.start)
+  const office = (id: string, day: string): Task => task({ id, context: 'office', startAt: `${day}T00:00:00-08:00` })
+
+  it('puts the weekly office-morning gym on Tuesday and keeps the morning clear', () => {
+    const result = gym([office('badge', '2026-11-10'), office('desk', '2026-11-11')])
+    expect(gymDays(result)).toEqual([
+      iso('2026-11-09T15:30:00-08:00'),
+      iso('2026-11-10T09:00:00-08:00'),
+      iso('2026-11-12T15:30:00-08:00'),
+      iso('2026-11-13T15:30:00-08:00'),
+    ])
+    expect(result.routine[1]).toEqual({
+      blockId: 'gym',
+      start: iso('2026-11-10T09:00:00-08:00'),
+      end: iso('2026-11-10T10:15:00-08:00'),
+    })
+    expect(result.missed).toEqual([])
+    expect(spansOf(result, 'badge')).toEqual([[iso('2026-11-10T10:15:00-08:00'), iso('2026-11-10T11:15:00-08:00')]])
+    expect(spansOf(result, 'desk')).toEqual([[iso('2026-11-11T09:00:00-08:00'), iso('2026-11-11T10:00:00-08:00')]])
+  })
+
+  it('moves the gym to Wednesday when a meeting touches Tuesday morning', () => {
+    const result = gym(
+      [office('badge', '2026-11-10'), office('desk', '2026-11-11')],
+      [busy('2026-11-10T08:30:00-08:00', '2026-11-10T09:15:00-08:00')],
+    )
+    expect(gymDays(result)).toContain(iso('2026-11-11T09:00:00-08:00'))
+    expect(gymDays(result)).not.toContain(iso('2026-11-10T09:00:00-08:00'))
+    expect(spansOf(result, 'badge')).toEqual([[iso('2026-11-10T09:15:00-08:00'), iso('2026-11-10T10:15:00-08:00')]])
+    expect(spansOf(result, 'desk')).toEqual([[iso('2026-11-11T10:15:00-08:00'), iso('2026-11-11T11:15:00-08:00')]])
+  })
+
+  it('reports the week when both mornings are taken, and plans the next week normally', () => {
+    const result = gym(
+      [],
+      [
+        busy('2026-11-10T09:00:00-08:00', '2026-11-10T09:30:00-08:00'),
+        busy('2026-11-11T10:00:00-08:00', '2026-11-11T11:00:00-08:00'),
+      ],
+      { horizonDays: 9 },
+    )
+    expect(result.missed).toEqual([{ blockId: 'gym', weekOf: '2026-11-08' }])
+    expect(gymDays(result)).toEqual([
+      iso('2026-11-09T15:30:00-08:00'),
+      iso('2026-11-12T15:30:00-08:00'),
+      iso('2026-11-13T15:30:00-08:00'),
+      iso('2026-11-16T15:30:00-08:00'),
+      iso('2026-11-17T09:00:00-08:00'),
+      iso('2026-11-19T15:30:00-08:00'),
+      iso('2026-11-20T15:30:00-08:00'),
+    ])
+  })
+
+  it('never plans a task over a commitment inside another block', () => {
+    const inside: Routine = {
+      timeZone: LA,
+      blocks: [
+        { id: 'day', days: [1], start: '09:00', end: '12:00', allows: ['computer'] },
+        { id: 'walk', days: [1], start: '09:30', end: '10:00', allows: [] },
+      ],
+    }
+    const result = run([task({ id: 'a', durationMinutes: 90 })], [], { routine: inside })
+    expect(spansOf(result, 'a')).toEqual([[iso('2026-11-09T10:00:00-08:00'), iso('2026-11-09T11:30:00-08:00')]])
+  })
+
+  it('reports the free minutes of the coming days per context', () => {
+    const result = gym([task({ id: 'a', durationMinutes: 45 })])
+    expect(result.capacity).toHaveLength(7)
+    expect(result.capacity[0]).toEqual({ date: '2026-11-09', freeMinutes: { computer: 345, errand: 345, home: 345, office: 0 } })
+    // Tuesday: the office from 10:15, after the gym.
+    expect(result.capacity[1]).toEqual({ date: '2026-11-10', freeMinutes: { computer: 365, errand: 0, home: 0, office: 365 } })
+    expect(result.capacity[5]).toEqual({ date: '2026-11-14', freeMinutes: { computer: 0, errand: 0, home: 0, office: 0 } })
+  })
+
+  describe('day overrides', () => {
+    it('plans nothing on a day off, not even the gym', () => {
+      const result = gym([task({ id: 'a' })], [], { dayOverrides: [{ date: '2026-11-09', kind: 'off' }] })
+      expect(spansOf(result, 'a')).toEqual([[iso('2026-11-10T10:15:00-08:00'), iso('2026-11-10T11:15:00-08:00')]])
+      expect(gymDays(result)).not.toContain(iso('2026-11-09T15:30:00-08:00'))
+      expect(result.capacity[0]?.freeMinutes.computer).toBe(0)
+    })
+
+    it('treats a work-from-home Tuesday like a home day: errands fit, the gym follows', () => {
+      const result = gym([task({ id: 'ups', context: 'errand' })], MONDAY_FULL, {
+        dayOverrides: [{ date: '2026-11-10', kind: 'home' }],
+      })
+      expect(spansOf(result, 'ups')).toEqual([[iso('2026-11-10T09:00:00-08:00'), iso('2026-11-10T10:00:00-08:00')]])
+      expect(gymDays(result)).toEqual([
+        iso('2026-11-09T15:30:00-08:00'),
+        iso('2026-11-10T15:30:00-08:00'),
+        // The office morning is Wednesday's now.
+        iso('2026-11-11T09:00:00-08:00'),
+        iso('2026-11-12T15:30:00-08:00'),
+        iso('2026-11-13T15:30:00-08:00'),
+      ])
+    })
+
+    it('treats an office Monday like an office day: office work fits after the morning gym', () => {
+      const result = gym([task({ id: 'badge', context: 'office' }), task({ id: 'ups', context: 'errand' })], [], {
+        dayOverrides: [{ date: '2026-11-09', kind: 'office' }],
+      })
+      expect(spansOf(result, 'badge')).toEqual([[iso('2026-11-09T10:15:00-08:00'), iso('2026-11-09T11:15:00-08:00')]])
+      expect(spansOf(result, 'ups')).toEqual([[iso('2026-11-12T09:00:00-08:00'), iso('2026-11-12T10:00:00-08:00')]])
+      expect(gymDays(result)).toEqual([
+        iso('2026-11-09T09:00:00-08:00'),
+        iso('2026-11-12T15:30:00-08:00'),
+        iso('2026-11-13T15:30:00-08:00'),
+      ])
+    })
+  })
+})
+
 describe('input validation', () => {
   it('rejects unparsable instants', () => {
     expect(() => run([task({ id: 'a', dueAt: 'tomorrow', deadlineType: 'soft' })])).toThrow(/dueAt/)
