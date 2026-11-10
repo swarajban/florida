@@ -64,6 +64,12 @@ final class SmokeTests: XCTestCase {
             // The shared hour sits below the brief and the morning.
             agenda.swipeUp()
             capture(agenda, "plan-agenda-lanes-\(appearance)")
+            // Tomorrow is all ahead, so nothing is dimmed: a meeting's card among open task rows.
+            agenda.swipeLeft()
+            waitForText("Architecture sync", in: agenda)
+            // The meeting is after lunch, under the tab bar until the list scrolls.
+            agenda.swipeUp()
+            capture(agenda, "plan-agenda-tomorrow-\(appearance)")
             agenda.terminate()
 
             let day = launch(appearance: appearance, mode: "day")
@@ -99,6 +105,10 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(row.waitForExistence(timeout: 20))
             row.tap()
             XCTAssertTrue(tasks.buttons["Mark done"].waitForExistence(timeout: 20))
+            // Mark done, then both dates, before any scrolling.
+            XCTAssertTrue(element("task-start-add", in: tasks).isHittable)
+            XCTAssertTrue(element("task-due-date", in: tasks).isHittable)
+            capture(tasks, "task-editor-\(appearance)")
             let project = element("task-project", in: tasks)
             for _ in 0..<4 where !(project.exists && project.isHittable) {
                 tasks.swipeUp()
@@ -107,6 +117,43 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(element("task-attention", in: tasks).exists)
             capture(tasks, "task-plan-fields-\(appearance)")
             tasks.terminate()
+        }
+    }
+
+    /// Categories in list order on their own screen and in the task editor's picker, and a start
+    /// date added to an overdue task.
+    @MainActor
+    func testCategoryOrderAndTaskDates() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = launch(appearance: appearance, tab: "tasks")
+            let overdue = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Renew VPN certificate")).firstMatch
+            XCTAssertTrue(overdue.waitForExistence(timeout: 20))
+            app.navigationBars.buttons["Categories"].tap()
+            // Work before personal, each by name. The demo data's stored order has Personal
+            // Finance before Home.
+            let rows = ["Work Engineering", "Work Infosec", "Home", "Personal Finance"].map { name in
+                app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
+            }
+            XCTAssertTrue(rows[0].waitForExistence(timeout: 20))
+            let tops = rows.map(\.frame.minY)
+            XCTAssertEqual(tops, tops.sorted())
+            capture(app, "categories-\(appearance)")
+            app.navigationBars.buttons.firstMatch.tap()
+
+            XCTAssertTrue(overdue.waitForExistence(timeout: 20))
+            overdue.tap()
+            // Due yesterday: a start of today is past it, so the due date moves to tomorrow.
+            let addStart = element("task-start-add", in: app)
+            XCTAssertTrue(addStart.waitForExistence(timeout: 20))
+            addStart.tap()
+            XCTAssertTrue(element("task-start-date", in: app).waitForExistence(timeout: 5))
+            capture(app, "task-editor-start-added-\(appearance)")
+
+            element("task-category", in: app).tap()
+            XCTAssertTrue(app.buttons["Personal Finance"].waitForExistence(timeout: 5))
+            capture(app, "task-category-picker-\(appearance)")
+            app.terminate()
         }
     }
 

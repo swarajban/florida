@@ -89,7 +89,11 @@ on top of the task pane and as dotted blocks in the grid. They are not on the
 plan: `p` or "Do tonight" pins the task to the suggested time, and a pinned
 task's block moves at once, before the server answers. A new task from the
 editor (`⇧N`) starts with a soft due date on the next weekday; a due date is a
-day unless "Add a time" is on. Settings → Routine shows the weekly blocks tasks
+day unless "Add a time" is on. The editor's Dates section holds Start (the task
+is not scheduled before it) above Due, and a start moved to or past the due
+date moves the due date to the day after. Categories are listed in one order
+everywhere: Inbox, work, personal, then those without an area, by name within
+each. Settings → Routine shows the weekly blocks tasks
 are scheduled in; a task's context decides which blocks it may use, and a
 category's Area (Work or Personal) puts personal tasks first in the evening's
 suggestions.
@@ -112,14 +116,19 @@ server's `/api/events` stream and also syncs every 60 s.
 ### iOS (`Florida-iOS`)
 
 Three tabs. **Agenda**: a week strip over the day's all-day events, timed
-events, and scheduled task blocks; swipe to change day, pull to refresh. The
+events, and scheduled task blocks; swipe to change day, pull to refresh. An
+event is a card filled in its calendar's color; a task block is the scheduler's
+suggestion, so it has no fill, a dashed bar (solid once pinned) and an unticked
+circle. The
 evening's suggestions follow the day's plan ("Evening, if you're up for it"),
 each with a "Do tonight" button that pins it; in the day grids they are dotted
 blocks.
 **Tasks**: sections per category, a quick-add field with the same parser and
 chips as the Mac app, swipe to complete or delete, tap to edit. The editor
-leads its scheduling fields with Due date, on for a new task from + (soft, the
-next weekday); due dates are a day and "Add a time" is opt-in. **Settings**:
+opens on Mark done, the title, then Start and Due in one Dates section; Due is
+on for a new task from + (soft, the next weekday), both are whole days unless a
+time is added from the row's menu, and a start moved to or past the due date
+moves the due date to the day after. **Settings**:
 server URL and token, sync now, run the scheduler, refresh Google calendars,
 and the connected accounts with their calendars. Projects, parallel lanes, the
 hatched gym and project-time blocks, day kinds and the briefs work as on the

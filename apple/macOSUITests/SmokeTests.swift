@@ -43,7 +43,7 @@ final class SmokeTests: XCTestCase {
         }
     }
 
-    /// Projects, the brief and the task editor's plan pickers, each opened by its keys.
+    /// Projects, the brief and the task editor, new and on an open task, each opened by its keys.
     @MainActor
     func testPlanScreensInBothAppearances() throws {
         continueAfterFailure = false
@@ -84,6 +84,15 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(app.popUpButtons["task-project"].waitForExistence(timeout: 5))
             XCTAssertTrue(app.popUpButtons["task-attention"].exists)
             capture(window, "task-editor-\(appearance)")
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(app.popUpButtons["task-project"].waitForNonExistence(timeout: 5))
+
+            // An open task: Mark done on top, then both dates. This one was due yesterday, so
+            // a start of today moves its due date to tomorrow.
+            app.staticTexts["Renew VPN certificate"].firstMatch.doubleClick()
+            XCTAssertTrue(app.buttons["Mark done"].waitForExistence(timeout: 5))
+            app.checkBoxes["Start"].click()
+            capture(window, "task-editor-open-\(appearance)")
             app.typeKey(.escape, modifierFlags: [])
         }
     }
