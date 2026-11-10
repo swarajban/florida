@@ -22,13 +22,19 @@ struct TaskRowView: View {
     let onAcceptSuggestion: () -> Void
     @State private var isOverDone = false
 
+    private static let verticalPadding: CGFloat = 9
+    private static let doneSize: CGFloat = 20
+    /// Where the done circle, and so the jump label, sits below the row's top edge: the task pane
+    /// labels a row only while this strip is on screen.
+    static let jumpLabelStrip: ClosedRange<CGFloat> = verticalPadding...(verticalPadding + doneSize)
+
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Button(action: onComplete) {
                 Image(systemName: isOverDone ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 15))
                     .foregroundStyle(isOverDone ? tint : Color.secondary)
-                    .frame(width: 20, height: 20)
+                    .frame(width: Self.doneSize, height: Self.doneSize)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -101,7 +107,7 @@ struct TaskRowView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 9)
+        .padding(.vertical, Self.verticalPadding)
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(isSelected ? FloridaStyle.ink.opacity(isFocused ? 0.08 : 0.04) : .clear))

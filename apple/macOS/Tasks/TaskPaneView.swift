@@ -4,11 +4,14 @@ import SwiftUI
 /// The right-hand task list: today's suggestions for optional routine blocks on top ("Evening, if
 /// you're up for it"), then Inbox (with its triage count) and each category's open tasks; empty
 /// categories stay as one collapsed line. Keeps the selected row scrolled into view as `j` / `k`
-/// move it.
+/// move it, and tells the model which rows are on screen, for jump mode.
 struct TaskPaneView: View {
     @Environment(AppModel.self) private var model
 
     static let width: CGFloat = 320
+    /// About the height of a section header, which stays pinned over the top of the list once it
+    /// has scrolled: a row under it is not on screen.
+    static let pinnedHeaderHeight: CGFloat = 34
 
     var body: some View {
         VStack(spacing: 0) {
@@ -97,6 +100,8 @@ struct TaskPaneView: View {
             model.take(pick)
         }
         .id(item)
+        // Its label sits in the middle of the row, whose height varies: the whole row has to show.
+        .tracksJumpVisibility(of: item, labelStrip: nil, in: model)
         .contextMenu {
             Button(takeTitle) { model.take(pick) }
             Divider()
@@ -127,6 +132,7 @@ struct TaskPaneView: View {
             if let suggestion { model.move(task, to: suggestion) }
         }
         .id(item)
+        .tracksJumpVisibility(of: item, labelStrip: TaskRowView.jumpLabelStrip, in: model)
         .transition(model.completingTaskIds.contains(task.id) ? .bloomFold(tint) : .opacity)
         .contextMenu {
             TaskActionsMenu(task: task)
@@ -137,6 +143,30 @@ struct TaskPaneView: View {
         }
         .onTapGesture {
             model.select(item, in: .tasks)
+        }
+    }
+}
+
+private extension View {
+    /// Keeps `model.paneItemsOnScreen` right for this row of the task pane: `item` is in it while
+    /// the row's jump label would be on screen, which is while `labelStrip` (measured down from
+    /// the row's top; nil for the whole row) is clear of the pinned section header and of the
+    /// pane's bottom edge. The geometry is read on every scrolled frame, but the model hears only
+    /// when the answer changes.
+    func tracksJumpVisibility(of item: ItemID, labelStrip: ClosedRange<CGFloat>?, in model: AppModel) -> some View {
+        let header = TaskPaneView.pinnedHeaderHeight
+        return onGeometryChange(for: Bool.self) { proxy in
+            guard let pane = proxy.bounds(of: .scrollView) else { return false }
+            let row = proxy.frame(in: .scrollView)
+            let strip = labelStrip ?? 0...row.height
+            return JumpViewport(top: header, bottom: pane.height)
+                .shows(top: row.minY + strip.lowerBound, bottom: row.minY + strip.upperBound)
+        } action: { isOnScreen in
+            if isOnScreen {
+                model.paneItemsOnScreen.insert(item)
+            } else {
+                model.paneItemsOnScreen.remove(item)
+            }
         }
     }
 }

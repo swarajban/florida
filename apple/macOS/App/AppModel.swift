@@ -106,6 +106,19 @@ final class AppModel {
     var pendingKeys = ""
     /// Jump mode (`f`): the labels on screen, narrowed by the keys typed so far; nil when off.
     var jump: JumpLabels<ItemID>?
+    /// The stretch of the time grid that was on screen when the labels went up, so a block cut
+    /// off at the top carries its label where it comes into view. Read only while `jump` is set.
+    var jumpGridViewport: JumpViewport?
+    /// The part of the 24-hour time grid on screen, in grid coordinates; `CalendarGridView` keeps
+    /// it as the grid scrolls. Not observed: it changes on every scrolled frame, and nothing is
+    /// drawn from it.
+    @ObservationIgnored var gridVisibleRect = CGRect.zero
+    /// Where the top of the time grid will be once the animated scroll now running ends; nil at
+    /// rest. `f` pressed right after a key that scrolls labels what the scroll is about to show.
+    @ObservationIgnored var gridScrollTarget: CGFloat?
+    /// The task-pane rows whose jump label would be on screen; each row keeps its own entry
+    /// (`tracksJumpVisibility`). Not observed, for the same reason.
+    @ObservationIgnored var paneItemsOnScreen: Set<ItemID> = []
     var statusMessage: String?
     var ghost: Ghost?
     /// Task writes `u` can revert, oldest first.

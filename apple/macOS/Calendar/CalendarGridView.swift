@@ -9,8 +9,6 @@ struct CalendarGridView: View {
     @Environment(AppModel.self) private var model
     @AppStorage(JoyPreference.currentProgress.key) private var showsProgress = true
     @State private var position = ScrollPosition(idType: Int.self, y: CalendarGridView.initialY)
-    /// The part of the 24-hour grid on screen, in grid coordinates.
-    @State private var visibleRect = CGRect.zero
 
     static let grid = TimeGrid(hourHeight: 60, slotMinutes: 15)
     static let gutterWidth: CGFloat = 56
@@ -28,7 +26,8 @@ struct CalendarGridView: View {
                     TimelineView(.animation(minimumInterval: nil, paused: model.layoutTransition == nil)) { timeline in
                         TimeGridCanvas(
                             layout: model.gridLayout, selection: model.selection,
-                            jumpLabels: model.jump?.remaining ?? [:], selectedDay: model.selectedDay,
+                            jumpLabels: model.jump?.remaining ?? [:],
+                            jumpViewport: model.jump == nil ? nil : model.jumpGridViewport, selectedDay: model.selectedDay,
                             now: model.clockNow, frameDate: timeline.date, transition: model.layoutTransition,
                             showsProgress: showsProgress, calendar: model.calendar, hourLabels: model.hourLabels,
                             grid: Self.grid, gutterWidth: Self.gutterWidth)
@@ -47,12 +46,20 @@ struct CalendarGridView: View {
             }
             .scrollPosition($position)
             .onAppear {
+                model.gridScrollTarget = nil
                 position.scrollTo(y: Self.initialY)
             }
             .onScrollGeometryChange(for: CGRect.self) { geometry in
                 geometry.visibleRect
             } action: { _, rect in
-                visibleRect = rect
+                model.gridVisibleRect = rect
+                if let target = model.gridScrollTarget, abs(rect.minY - target) < 0.5 {
+                    model.gridScrollTarget = nil
+                }
+            }
+            .onScrollPhaseChange { _, phase in
+                // A scroll by hand takes over from one a key started, which then never arrives.
+                if phase != .animating { model.gridScrollTarget = nil }
             }
             .onChange(of: model.selection) { _, selection in
                 revealSelection(selection)
@@ -83,6 +90,7 @@ struct CalendarGridView: View {
     /// Scrolls just enough to bring the selected block or gap on the highlighted day on screen;
     /// does nothing when it is already fully visible or is not on the timed grid.
     private func revealSelection(_ selection: ItemID?) {
+        let visibleRect = model.gridVisibleRect
         guard let selection, visibleRect.height > 0,
               let span = model.gridLayout.minuteSpan(of: selection, preferringDay: model.selectedDay)
         else { return }
@@ -95,14 +103,18 @@ struct CalendarGridView: View {
 
     /// Puts `minute` a third of the way down the visible grid, or in the middle when `centered`.
     private func scroll(toMinute minute: Int, centered: Bool, animated: Bool) {
-        let height = visibleRect.height
+        let height = model.gridVisibleRect.height
         let y = CGFloat(Self.grid.y(forMinute: minute)) - height * (centered ? 0.5 : 0.3)
         let clamped = min(max(0, y), max(0, CGFloat(Self.grid.dayHeight) - height))
         if animated {
+            // Jump mode reads the target: `f` pressed while this runs labels what it will show.
+            // The target is cleared when the grid gets there (`onScrollGeometryChange`).
+            model.gridScrollTarget = abs(clamped - model.gridVisibleRect.minY) < 0.5 ? nil : clamped
             withAnimation(.easeInOut(duration: 0.25)) {
                 position.scrollTo(y: clamped)
             }
         } else {
+            model.gridScrollTarget = nil
             position.scrollTo(y: clamped)
         }
     }

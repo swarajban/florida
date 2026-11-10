@@ -7,13 +7,16 @@ import SwiftUI
 /// with a moon; the gym solid and neutral; project time in long dashes), the focus ring and the
 /// "now" line. A block that shares its hour with other parallel work is marked, and says what
 /// runs beside it when it is tall enough. In jump mode each labelled block carries its label on
-/// its top-left corner, and its title starts after it.
+/// its top-left corner, and its title starts after it; a block cut off by the top of the scrolled
+/// grid carries it where the block comes into view.
 /// Pure drawing from precomputed frames and labels; `now` is the model's minute clock.
 struct TimeGridCanvas: View {
     let layout: GridLayout
     let selection: ItemID?
     /// Jump mode's labels, by item; empty when the mode is off.
     let jumpLabels: [ItemID: String]
+    /// The stretch of the grid that was on screen when the labels went up; nil when the mode is off.
+    let jumpViewport: JumpViewport?
     let selectedDay: Date
     let now: Date
     /// The animation frame's time, which drives `transition`.
@@ -156,9 +159,9 @@ struct TimeGridCanvas: View {
         }
         let title = Text(block.title).font(.system(size: 11, weight: .medium)).foregroundStyle(textColor)
         var titleLine = titleRect
-        if let label = jumpLabels[block.item] {
+        if let badge = jumpBadge(for: block, in: rect), badge.frame.minY < titleLine.minY + 14 {
             // The label sits on the block's corner (`drawJumpLabels`), so the title starts after it.
-            let inset = JumpBadge.width(for: label) + 1
+            let inset = badge.frame.width + 1
             titleLine.origin.x += inset
             titleLine.size.width = max(titleLine.size.width - inset, 0)
         }
@@ -208,14 +211,21 @@ struct TimeGridCanvas: View {
         guard !jumpLabels.isEmpty else { return }
         for blocks in layout.blocksByDay {
             for block in blocks {
-                guard let label = jumpLabels[block.item] else { continue }
-                let rect = animatedRect(for: block, geometry: geometry)
-                let badge = CGRect(
-                    x: rect.minX + 2, y: rect.minY + 1, width: JumpBadge.width(for: label), height: JumpBadge.height)
-                context.fill(Path(roundedRect: badge, cornerRadius: JumpBadge.cornerRadius), with: .color(FloridaStyle.ink))
-                context.draw(JumpBadge.text(label), at: CGPoint(x: badge.midX, y: badge.midY))
+                guard let badge = jumpBadge(for: block, in: animatedRect(for: block, geometry: geometry)) else { continue }
+                context.fill(Path(roundedRect: badge.frame, cornerRadius: JumpBadge.cornerRadius), with: .color(FloridaStyle.ink))
+                context.draw(JumpBadge.text(badge.label), at: CGPoint(x: badge.frame.midX, y: badge.frame.midY))
             }
         }
+    }
+
+    /// Jump mode's label for `block`, drawn in `rect`, and where it goes. Nil outside the mode,
+    /// for a block without a label, and for one that was scrolled out of view when the labels
+    /// went up: of a task's several blocks, only the ones on screen carry its label.
+    private func jumpBadge(for block: GridLayout.Block, in rect: CGRect) -> (label: String, frame: CGRect)? {
+        guard let label = jumpLabels[block.item],
+              let top = JumpBadge.top(onBlockFrom: rect.minY, to: rect.maxY, in: jumpViewport)
+        else { return nil }
+        return (label, CGRect(x: rect.minX + 2, y: top, width: JumpBadge.width(for: label), height: JumpBadge.height))
     }
 
     private func drawSelectionRing(in context: inout GraphicsContext, geometry: GridGeometry) {

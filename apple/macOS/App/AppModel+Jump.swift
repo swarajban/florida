@@ -5,6 +5,11 @@ import FloridaKit
 // or `p` on a task; ⇧E, `r y`, `v` or `o` on an event. The labels are FloridaCore's `JumpLabels`;
 // the views draw `jumpLabel(for:)`, so a two-key label shrinks to its second key once the first
 // is typed.
+//
+// "On screen" is taken when `f` is pressed: what the time grid and the task pane are scrolled past
+// gets no label, which keeps the single keys for what can be seen. A scroll that a key started
+// and that is still running counts as finished, so `G` then `f` labels where `G` lands. The
+// labels do not follow later scrolling; Esc and `f` again labels the new view.
 
 extension AppModel {
     /// What is left to type to select `item`: nil outside jump mode, and for an item the keys
@@ -14,20 +19,48 @@ extension AppModel {
     }
 
     /// `f`: labels the calendar's items in `j` / `k` order, then the task pane's, so the calendar
-    /// gets the home row. A task shown in both keeps one label. Free gaps get none: they are
-    /// neither tasks nor events, and would use up the single keys.
+    /// gets the home row. A task shown in both keeps one label, and so does one on screen in only
+    /// one of them. Free gaps get none: they are neither tasks nor events, and would use up the
+    /// single keys.
     func startJump() {
-        let calendarItems = gridLayout.orderedItems.filter { !$0.isGap }
-        let paneItems = isTasksPaneVisible ? orderedTaskItems : []
-        let labels = JumpLabels(items: calendarItems + paneItems)
+        let viewport = gridViewport
+        let paneItems = isTasksPaneVisible ? orderedTaskItems.filter(paneItemsOnScreen.contains) : []
+        let labels = JumpLabels(items: calendarItems(onScreenIn: viewport) + paneItems)
         guard !labels.isEmpty else {
             statusMessage = "Nothing on screen to jump to"
             return
         }
         // The labels are about to move the selection off the event this popover shows.
         eventDetailID = nil
+        jumpGridViewport = viewport
         jump = labels
         statusMessage = "Type a label to select · Esc cancels"
+    }
+
+    /// The stretch of the time grid on screen, or the stretch an animated scroll is on its way
+    /// to. Nil in the month view, which does not scroll, and until the grid has reported where
+    /// it is.
+    private var gridViewport: JumpViewport? {
+        guard viewMode != .month, !gridVisibleRect.isEmpty else { return nil }
+        let top = gridScrollTarget ?? gridVisibleRect.minY
+        return JumpViewport(top: top, bottom: top + gridVisibleRect.height)
+    }
+
+    /// The calendar's items in `j` / `k` order, less the free gaps and the blocks scrolled out of
+    /// `viewport`. All-day bars sit above the scrolling grid, so they always count; a task with
+    /// several blocks counts when one of them can hold a label.
+    private func calendarItems(onScreenIn viewport: JumpViewport?) -> [ItemID] {
+        let items = gridLayout.orderedItems.filter { !$0.isGap }
+        guard let viewport else { return items }
+        var onScreen = Set(gridLayout.allDayBlocks.map(\.item))
+        for block in gridLayout.blocksByDay.joined() {
+            let rows = GridGeometry.rows(
+                startMinute: block.startMinute, endMinute: block.endMinute, grid: CalendarGridView.grid)
+            if JumpBadge.top(onBlockFrom: rows.lowerBound, to: rows.upperBound, in: viewport) != nil {
+                onScreen.insert(block.item)
+            }
+        }
+        return items.filter(onScreen.contains)
     }
 
     /// Leaves jump mode and takes its hint off the status bar.

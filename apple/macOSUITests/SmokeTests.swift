@@ -112,33 +112,75 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(window.waitForExistence(timeout: 15))
             XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 10))
 
+            // Only what is on screen gets a label. The VPN task's row is at the top of the task
+            // pane; the funds task's row is below the fold, and it has no block in these days.
+            let nearTop = app.staticTexts["task-jump-demo-task-vpn"]
+            let atEnd = app.staticTexts["task-jump-demo-task-funds"]
             app.typeKey("f", modifierFlags: [])
-            let planned = app.staticTexts["task-jump-demo-task-keys"]
-            XCTAssertTrue(planned.waitForExistence(timeout: 5))
+            XCTAssertTrue(nearTop.waitForExistence(timeout: 5))
+            XCTAssertFalse(atEnd.exists, "a row scrolled out of view should get no label")
             capture(window, "jump-\(appearance)")
 
             app.typeKey(.escape, modifierFlags: [])
-            XCTAssertTrue(planned.waitForNonExistence(timeout: 5))
+            XCTAssertTrue(nearTop.waitForNonExistence(timeout: 5))
 
-            for (id, title) in [("demo-task-keys", "Rotate AWS access keys"), ("demo-task-vpn", "Renew VPN certificate")] {
-                app.typeKey("f", modifierFlags: [])
-                let label = app.staticTexts["task-jump-\(id)"]
-                XCTAssertTrue(label.waitForExistence(timeout: 5))
-                let keys = try XCTUnwrap(label.value as? String).lowercased()
-                XCTAssertFalse(keys.isEmpty)
-                for key in keys {
-                    app.typeKey(String(key), modifierFlags: [])
-                }
-                XCTAssertTrue(label.waitForNonExistence(timeout: 5))
+            // A task on the calendar and in the pane, then one in the pane only.
+            try jump(to: "demo-task-pr", titled: "Review auth service PR", in: app)
+            try jump(to: "demo-task-vpn", titled: "Renew VPN certificate", in: app)
 
-                // Return edits the selection, so the editor's title says which task the label chose.
-                app.typeKey(.return, modifierFlags: [])
-                let editorTitle = app.textFields.matching(NSPredicate(format: "value == %@", title)).firstMatch
-                XCTAssertTrue(editorTitle.waitForExistence(timeout: 5), "\(keys) should select \(title)")
-                app.typeKey(.escape, modifierFlags: [])
-                XCTAssertTrue(editorTitle.waitForNonExistence(timeout: 5))
+            // Each `f` labels the view as it is then. `G` in the task pane scrolls the list to its end.
+            app.typeKey("g", modifierFlags: [])
+            app.typeKey("t", modifierFlags: [])
+            app.typeKey("g", modifierFlags: .shift)
+            try jump(to: "demo-task-funds", titled: "Rebalance index funds", in: app) {
+                XCTAssertFalse(nearTop.exists, "a row scrolled out of view should get no label")
             }
+
+            // `g g` scrolls the list back to its start. Its first row stops under the pinned
+            // section header, so the check is on the second task.
+            app.typeKey("g", modifierFlags: [])
+            app.typeKey("g", modifierFlags: [])
+            app.typeKey("f", modifierFlags: [])
+            let second = app.staticTexts["task-jump-demo-task-offsite"]
+            XCTAssertTrue(second.waitForExistence(timeout: 5))
+            XCTAssertFalse(atEnd.exists, "a row scrolled out of view should get no label")
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(second.waitForNonExistence(timeout: 5))
+
+            // `G` on the calendar scrolls the grid down to the last block of these days, which
+            // leaves earlier blocks cut off at the top or out of view.
+            app.typeKey("g", modifierFlags: [])
+            app.typeKey("c", modifierFlags: [])
+            app.typeKey("g", modifierFlags: .shift)
+            app.typeKey("f", modifierFlags: [])
+            let anyLabel = app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH 'task-jump-'")).firstMatch
+            XCTAssertTrue(anyLabel.waitForExistence(timeout: 5))
+            capture(window, "jump-scrolled-\(appearance)")
         }
+    }
+
+    /// `f`, then the label on the task's row in the pane: Return edits the selection, so the
+    /// editor's title says which task the label chose. `whileLabelled` runs with the labels up.
+    @MainActor
+    private func jump(
+        to id: String, titled title: String, in app: XCUIApplication, whileLabelled: () -> Void = {}
+    ) throws {
+        app.typeKey("f", modifierFlags: [])
+        let label = app.staticTexts["task-jump-\(id)"]
+        XCTAssertTrue(label.waitForExistence(timeout: 5))
+        whileLabelled()
+        let keys = try XCTUnwrap(label.value as? String).lowercased()
+        XCTAssertFalse(keys.isEmpty)
+        for key in keys {
+            app.typeKey(String(key), modifierFlags: [])
+        }
+        XCTAssertTrue(label.waitForNonExistence(timeout: 5))
+
+        app.typeKey(.return, modifierFlags: [])
+        let editorTitle = app.textFields.matching(NSPredicate(format: "value == %@", title)).firstMatch
+        XCTAssertTrue(editorTitle.waitForExistence(timeout: 5), "\(keys) should select \(title)")
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(editorTitle.waitForNonExistence(timeout: 5))
     }
 
     @MainActor

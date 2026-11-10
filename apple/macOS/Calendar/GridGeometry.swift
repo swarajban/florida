@@ -36,9 +36,16 @@ struct GridGeometry {
     func rect(dayIndex: Int, column: Int, columnCount: Int, startMinute: Int, endMinute: Int) -> CGRect {
         let width = columnWidth / CGFloat(max(columnCount, 1))
         let x = x(forDay: dayIndex) + CGFloat(column) * width
-        let y = grid.y(forMinute: startMinute)
-        let height = grid.y(forMinute: endMinute) - y
-        return CGRect(x: x + 1, y: y + 0.5, width: max(width - 2, 2), height: max(height - 1, 4))
+        let rows = Self.rows(startMinute: startMinute, endMinute: endMinute, grid: grid)
+        return CGRect(x: x + 1, y: rows.lowerBound, width: max(width - 2, 2), height: rows.upperBound - rows.lowerBound)
+    }
+
+    /// Top and bottom of a block's frame. They follow from the grid alone, not from the view's
+    /// width, so `AppModel.startJump` can tell which blocks the scrolled grid is showing.
+    static func rows(startMinute: Int, endMinute: Int, grid: TimeGrid) -> ClosedRange<CGFloat> {
+        let top = CGFloat(grid.y(forMinute: startMinute)) + 0.5
+        let height = CGFloat(grid.y(forMinute: endMinute) - grid.y(forMinute: startMinute))
+        return top...(top + max(height - 1, 4))
     }
 
     /// A free gap spans its whole column, inset a little further than blocks.
