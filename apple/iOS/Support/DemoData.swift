@@ -17,15 +17,26 @@ enum DemoData {
         }
         func task(
             _ id: String, _ categoryId: String, _ title: String, minutes: Int, priority: Priority,
-            due: Date? = nil, hard: Bool = false, notes: String? = nil
+            due: Date? = nil, hard: Bool = false, notes: String? = nil, project: String? = nil
         ) -> TaskItem {
             TaskItem(
                 id: id, categoryId: categoryId, title: title, notes: notes, durationMinutes: minutes,
                 priority: priority, deadlineType: due == nil ? .none : (hard ? .hard : .soft), dueAt: due,
-                createdAt: now, updatedAt: now)
+                createdAt: now, updatedAt: now, projectId: project)
         }
-        func block(_ id: String, _ taskId: String, _ start: Date, _ end: Date) -> Placement {
-            Placement(id: id, taskId: taskId, startAt: start, endAt: end, pinned: false, computedAt: now)
+        func block(_ id: String, _ taskId: String, _ start: Date, _ end: Date, lane: Int? = nil) -> Placement {
+            Placement(id: id, taskId: taskId, startAt: start, endAt: end, pinned: false, lane: lane, computedAt: now)
+        }
+        func project(
+            _ id: String, _ name: String, _ status: ProjectStatus, _ categoryId: String, order: Int,
+            next: String? = nil, parallel: Bool = false, weekly: Int? = nil, notes: String? = nil
+        ) -> Project {
+            Project(
+                id: id, name: name, status: status, categoryId: categoryId, notes: notes, nextStep: next,
+                parallel: parallel, weeklyMinutes: weekly, sortOrder: order, createdAt: now, updatedAt: now)
+        }
+        func dayKey(_ dayOffset: Int) -> String {
+            DayOverride.key(for: at(dayOffset, 12), calendar: calendar)
         }
         func suggestion(_ id: String, _ taskId: String, _ start: Date, _ end: Date) -> OptionalPlacement {
             OptionalPlacement(id: id, taskId: taskId, blockId: evening, startAt: start, endAt: end, computedAt: now)
@@ -53,6 +64,10 @@ enum DemoData {
         let workHours = "demo-work-hours"
         let evenings = "demo-evenings"
         let inbox = TaskCategory.inboxId, engineering = "demo-eng", infosec = "demo-infosec", finance = "demo-finance"
+        let gym = "demo-routine-gym"
+        let authProject = "demo-project-auth", soc2Project = "demo-project-soc2", vendorProject = "demo-project-vendor"
+        let floridaProject = "demo-project-florida"
+        let sinceSunday = calendar.component(.weekday, from: today) - 1
         let work = "demo-cal-work", ooo = "demo-cal-ooo", personal = "demo-cal-personal", birthdays = "demo-cal-birthdays"
 
         return SyncResponse(
@@ -69,6 +84,13 @@ enum DemoData {
                 RoutineBlock(
                     id: evening, name: "Evening", days: [0, 1, 2, 3, 4, 5, 6], start: "20:00", end: "23:00",
                     allows: [.computer, .home], optional: true, createdAt: now, updatedAt: now),
+                // A commitment (it allows nothing): afternoons, plus one office-day morning a week.
+                RoutineBlock(
+                    id: gym, name: "Gym", days: [1, 4, 5], start: "15:30", end: "16:45", allows: [],
+                    alternates: [
+                        RoutineSlot(day: 2, start: "09:00", end: "10:15"), RoutineSlot(day: 3, start: "09:00", end: "10:15"),
+                    ],
+                    createdAt: now, updatedAt: now),
             ],
             schedules: [
                 Schedule(
@@ -92,11 +114,11 @@ enum DemoData {
             ],
             tasks: [
                 task("demo-task-keys", infosec, "Rotate AWS access keys", minutes: 45, priority: .asap, due: at(1, 12), hard: true),
-                task("demo-task-pr", engineering, "Review auth service PR", minutes: 60, priority: .high, due: at(0, 17)),
-                task("demo-task-flaky", engineering, "Fix flaky scheduler test", minutes: 60, priority: .medium, due: at(0, 12)),
+                task("demo-task-pr", engineering, "Review auth service PR", minutes: 60, priority: .high, due: at(0, 17), project: authProject),
+                task("demo-task-flaky", engineering, "Fix flaky scheduler test", minutes: 60, priority: .medium, due: at(0, 12), project: authProject),
                 task("demo-task-roadmap", engineering, "Write Q4 infra roadmap", minutes: 120, priority: .medium, due: at(3, 17),
                      notes: "Cover the Postgres upgrade, the queue migration, and on-call load."),
-                task("demo-task-soc2", infosec, "Collect SOC 2 access-review evidence", minutes: 90, priority: .medium, due: at(5, 17)),
+                task("demo-task-soc2", infosec, "Collect SOC 2 access-review evidence", minutes: 90, priority: .medium, due: at(5, 17), project: soc2Project),
                 task("demo-task-taxes", finance, "Pay Q4 estimated taxes", minutes: 30, priority: .high, due: at(2, 17), hard: true),
                 task("demo-task-funds", finance, "Rebalance index funds", minutes: 45, priority: .low),
                 task("demo-task-dentist", inbox, "Book dentist appointment", minutes: 15, priority: .medium),
@@ -120,13 +142,15 @@ enum DemoData {
                 block("demo-block-postmortem", "demo-task-postmortem", now.addingTimeInterval(-20 * 60), now.addingTimeInterval(25 * 60)),
                 block("demo-block-keys", "demo-task-keys", at(0, 9, 30), at(0, 10, 15)),
                 block("demo-block-pr", "demo-task-pr", at(0, 10, 15), at(0, 11, 15)),
-                block("demo-block-flaky", "demo-task-flaky", at(0, 13, 30), at(0, 14, 30)),
-                block("demo-block-roadmap-1", "demo-task-roadmap", at(0, 15), at(0, 16)),
+                // One hour, three parallel projects: two tasks and the vendor review's own time.
+                block("demo-block-flaky", "demo-task-flaky", at(0, 13, 30), at(0, 14, 30), lane: 0),
+                block("demo-block-soc2-1", "demo-task-soc2", at(0, 13, 30), at(0, 14, 30), lane: 1),
+                block("demo-block-roadmap-1", "demo-task-roadmap", at(0, 15), at(0, 15, 30)),
                 block("demo-block-roadmap-2", "demo-task-roadmap", at(1, 9), at(1, 10)),
-                block("demo-block-soc2", "demo-task-soc2", at(1, 10), at(1, 11, 30)),
+                block("demo-block-soc2", "demo-task-soc2", at(1, 10), at(1, 10, 30)),
                 block("demo-block-dentist", "demo-task-dentist", at(1, 11, 30), at(1, 11, 45)),
                 block("demo-block-taxes", "demo-task-taxes", at(1, 14), at(1, 14, 30)),
-                block("demo-block-funds", "demo-task-funds", at(2, 9), at(2, 9, 45)),
+                block("demo-block-funds", "demo-task-funds", at(3, 9), at(3, 9, 45)),
             ],
             // Personal work first, as the scheduler orders an evening; each task keeps its block above.
             optionalPlacements: [
@@ -148,6 +172,64 @@ enum DemoData {
             unscheduled: [
                 UnscheduledTask(taskId: "demo-task-vpn", reason: "no_fit_in_horizon", unplacedMinutes: 30, computedAt: now),
                 UnscheduledTask(taskId: "demo-task-offsite", reason: "no_fit_before_hard_deadline", unplacedMinutes: 240, computedAt: now),
+            ],
+            projects: [
+                project(authProject, "Auth service migration", .active, engineering, order: 0,
+                        next: "Cut staging over to the new token service", parallel: true,
+                        notes: "Claude drives most of this; I review and unblock."),
+                project(soc2Project, "SOC 2 renewal", .active, infosec, order: 1,
+                        next: "Send the auditor the access-review evidence", parallel: true),
+                project(vendorProject, "Vendor risk review", .active, infosec, order: 2,
+                        next: "Score the three new vendors", parallel: true, weekly: 120),
+                project(floridaProject, "Florida", .active, "demo-home", order: 3,
+                        next: "Projects and parallel lanes", weekly: 120),
+                project("demo-project-network", "Home network rebuild", .thinking, "demo-home", order: 4,
+                        next: "Price out a rack and a UniFi gateway"),
+                project("demo-project-oncall", "On-call handbook", .onHold, engineering, order: 5,
+                        next: "Waiting on the new paging vendor"),
+                project("demo-project-okta", "Okta rollout", .done, infosec, order: 6),
+            ],
+            // The day after tomorrow is off, whatever weekday it falls on.
+            dayOverrides: [DayOverride(date: dayKey(2), kind: .off, note: "School holiday", createdAt: now, updatedAt: now)],
+            projectPlacements: [
+                ProjectPlacement(
+                    id: "demo-time-vendor", projectId: vendorProject, weekOf: dayKey(-sinceSunday),
+                    startAt: at(0, 13, 30), endAt: at(0, 14, 30), lane: 2, computedAt: now),
+                ProjectPlacement(
+                    id: "demo-time-florida", projectId: floridaProject, weekOf: dayKey(-sinceSunday),
+                    startAt: at(1, 15), endAt: at(1, 16), computedAt: now),
+            ],
+            routineOccurrences: [
+                RoutineOccurrence(id: "demo-gym-today", blockId: gym, startAt: at(0, 15, 30), endAt: at(0, 16, 45), computedAt: now),
+                RoutineOccurrence(id: "demo-gym-later", blockId: gym, startAt: at(3, 15, 30), endAt: at(3, 16, 45), computedAt: now),
+            ],
+            // The office-morning session found no free slot this week.
+            missed: [MissedCommitment(blockId: gym, weekOf: dayKey(-sinceSunday))],
+            capacity: [
+                DayCapacity(date: dayKey(0), freeMinutes: .init(computer: 45, errand: 45, home: 45)),
+                DayCapacity(date: dayKey(1), freeMinutes: .init(computer: 150, errand: 150, home: 150)),
+                DayCapacity(date: dayKey(2), freeMinutes: .init()),
+                DayCapacity(date: dayKey(3), freeMinutes: .init(computer: 300, errand: 300, home: 300)),
+            ],
+            briefs: [
+                Brief(
+                    id: "demo-brief-daily", kind: .daily, date: dayKey(0),
+                    headline: "Keys first, then a three-project hour after lunch",
+                    body: """
+                        Rotate the AWS keys right after standup: they are due tomorrow at noon and nothing else today is hard.
+                        From 1:30 run the flaky test fix, the SOC 2 evidence and the vendor review side by side; each is mostly waiting on Claude.
+                        Gym at 3:30. Offsite slides do not fit before tomorrow morning, so cut them down or move the deadline.
+                        """,
+                    createdAt: now, updatedAt: now),
+                Brief(
+                    id: "demo-brief-weekly", kind: .weekly, date: dayKey(-sinceSunday),
+                    headline: "A short week: one day off, taxes due",
+                    body: """
+                        Estimated taxes are the one hard deadline; they sit in tomorrow's plan and in tonight's suggestions.
+                        Auth migration and SOC 2 share most afternoons. Florida gets its two hours tomorrow at 3.
+                        No office-morning gym this week: both mornings are taken by the offsite.
+                        """,
+                    createdAt: now, updatedAt: now),
             ])
     }
 
