@@ -3,7 +3,7 @@ import { ClaudeBriefWriter } from './ai/brief.js'
 import { ClaudeTaskParser } from './ai/parse-task.js'
 import { ClaudeCategorySuggester } from './ai/suggest-category.js'
 import { createApp } from './app.js'
-import { ensureBriefs } from './briefs.js'
+import { briefJob } from './briefs.js'
 import { ChangeBus } from './changes.js'
 import { loadConfig } from './config.js'
 import { createDb } from './db/client.js'
@@ -33,7 +33,7 @@ const stopJobs = startJobs({
   sync,
   reschedule,
   changes,
-  ...(briefWriter === undefined ? {} : { ensureBriefs: () => ensureBriefs(db, briefWriter) }),
+  ...(briefWriter === undefined ? {} : { ensureBriefs: briefJob(db, briefWriter) }),
 })
 
 let shuttingDown = false

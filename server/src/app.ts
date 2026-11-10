@@ -431,6 +431,8 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
         .set({ categoryId: INBOX_CATEGORY_ID, updatedAt: now })
         .where(and(eq(tasks.categoryId, id), isNull(tasks.deletedAt)))
       await moveRecurringTaskCategory(tx, id, INBOX_CATEGORY_ID, now)
+      // A project's category is optional; keeping the tombstone's id would fail its next edit.
+      await tx.update(projects).set({ categoryId: null, updatedAt: now }).where(eq(projects.categoryId, id))
       return true
     })
     if (!deleted) throw notFound(`category ${id}`)

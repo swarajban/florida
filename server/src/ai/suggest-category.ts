@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { type ClaudeConfig, type FetchLike, type JsonSchema, requestJson } from './claude.js'
+import { type ClaudeConfig, type FetchLike, type JsonSchema, modelOutput, requestJson } from './claude.js'
 import { type CategoryContext, formatCategories } from './parse-task.js'
 
 export interface CategorySuggestion {
@@ -57,7 +57,7 @@ export class ClaudeCategorySuggester implements CategorySuggester {
       { ...prompt, schema: CATEGORY_SUGGESTION_JSON_SCHEMA, maxTokens: 256 },
       this.fetchImpl,
     )
-    const suggestion = suggestionSchema.parse(raw)
+    const suggestion = modelOutput(suggestionSchema, raw)
     const known = suggestion.categoryId !== null && categories.some((p) => p.id === suggestion.categoryId)
     return { categoryId: known ? suggestion.categoryId : null, rationale: suggestion.rationale }
   }

@@ -6,7 +6,7 @@ import { eq, inArray } from 'drizzle-orm'
 import { createApp } from '../src/app.js'
 import { ChangeBus } from '../src/changes.js'
 import type { Db } from '../src/db/client.js'
-import { calendars, categories, events, googleAccounts, routineBlocks, settings, taskRecurrences } from '../src/db/schema.js'
+import { calendars, categories, events, googleAccounts, projectPlacements, routineBlocks, settings, taskRecurrences } from '../src/db/schema.js'
 import type { EventBody } from '../src/events.js'
 import { GoogleApiError, GoogleGoneError, GoogleTokenError, mapEvent } from '../src/google/client.js'
 import type { GoogleEvent, GoogleEventAttendee } from '../src/google/client.js'
@@ -1375,11 +1375,17 @@ describe('projects', () => {
     const template = async () => (await db.select().from(taskRecurrences).where(eq(taskRecurrences.id, seriesId)))[0]?.template
     expect(await template()).toMatchObject({ projectId: 'p2', attention: 'shared' })
 
+    // An hour of project time that has already ended: a run keeps those to count the week.
+    const ended = { id: 'p2-ended', projectId: 'p2', weekOf: '2026-11-08', lane: null, computedAt: new Date() }
+    await db.insert(projectPlacements).values({ ...ended, startAt: new Date(Date.now() - 7_200_000), endAt: new Date(Date.now() - 3_600_000) })
+
     const cursor = ((await (await api('/api/sync')).json()) as { cursor: string }).cursor
     await sleep(5)
     const deleted = await api('/api/projects/p2', { method: 'DELETE' })
     expect(deleted.status).toBe(200)
     expect(Object.keys((await deleted.json()) as object)).toEqual(['scheduling'])
+    // Its project time goes with it, the hour already spent included.
+    expect(await db.select().from(projectPlacements).where(eq(projectPlacements.projectId, 'p2'))).toEqual([])
 
     // The tombstone and the unfiled tasks reach clients through an incremental sync.
     const synced = (await (await api(`/api/sync?since=${encodeURIComponent(cursor)}`)).json()) as {
@@ -1400,6 +1406,18 @@ describe('projects', () => {
     expect(((await restored.json()) as { project: WireProject }).project).toMatchObject({ id: 'p2', deletedAt: null, parallel: true })
 
     for (const id of ['p-task', 'p-repeat']) expect((await api(`/api/tasks/${id}`, { method: 'DELETE' })).status).toBe(200)
+  })
+
+  it('a project outlives its category and can still be edited', async () => {
+    expect((await api('/api/categories/p-cat', { method: 'PUT', json: { name: 'Side', scheduleId: 'personal' } })).status).toBe(200)
+    expect((await api('/api/projects/p3', { method: 'PUT', json: { name: 'Garden', categoryId: 'p-cat' } })).status).toBe(200)
+    expect((await api('/api/categories/p-cat', { method: 'DELETE' })).status).toBe(200)
+
+    expect(await api('/api/projects/p3').then((res) => res.json())).toMatchObject({ categoryId: null, deletedAt: null })
+    const patched = await api('/api/projects/p3', { method: 'PATCH', json: { status: 'done' } })
+    expect(patched.status).toBe(200)
+    expect(((await patched.json()) as { project: WireProject }).project).toMatchObject({ id: 'p3', status: 'done' })
+    expect((await api('/api/projects/p3', { method: 'DELETE' })).status).toBe(200)
   })
 })
 

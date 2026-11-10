@@ -97,13 +97,13 @@ export interface SchedulerSources {
   categories: CategoryRow[]
   tasks: TaskRow[]
   events: EventRow[]
-  /** The last run's output; the scheduler keeps these blocks where it still can. Omit for a fresh plan. */
+  /** The last run's output. Only a block underway at `now` is kept where it was. Omit for a fresh plan. */
   previous?: PlacementRow[]
   projects?: ProjectRow[]
   dayOverrides?: DayOverrideRow[]
   /**
-   * Stored project time. Blocks that ended count against their week's budget; the rest go to the
-   * scheduler as previous placements.
+   * Stored project time. Blocks that ended count against their week's budget; one underway goes to
+   * the scheduler as a previous placement.
    */
   projectPlacements?: ProjectPlacementRow[]
   /** Tasks with a project completed since the start of this week; their time counts against its budget. */
@@ -116,9 +116,15 @@ export interface SchedulerSources {
  * Live routine blocks become the routine; each task carries its own `context`, and the scheduler
  * places it only in blocks that allow it. A task takes its `area` from its category, which orders
  * the suggestions for optional blocks. Tasks that are deleted, completed, or belong to a
- * deleted category are skipped. Busy time is every live, timed, opaque, not-declined event that
- * overlaps [now, now + horizon). Previous placements go through as-is; the scheduler itself
- * decides which are still valid.
+ * deleted category are skipped. Busy time is every live, timed, opaque, not-declined event from
+ * the Sunday of the current week to the horizon: the earlier days decide where this week's
+ * commitments landed (a gym session that moved off a booked Tuesday morning stays moved once the
+ * meeting is over).
+ *
+ * Of the previous placements only the blocks underway at `now` go through, so work the user is
+ * in the middle of stays where it is. Everything still ahead is planned afresh on every run:
+ * that is what moves a task when its priority, deadline or length changes, and moves the work
+ * behind it up when a task is finished or a meeting is cancelled.
  *
  * Projects: a task of a live project that is not `active` is skipped, so it waits unplaced until
  * the project is picked up again. A task's attention defaults from its project, and shared work
@@ -130,6 +136,8 @@ export interface SchedulerSources {
 export function buildSchedulerInput(src: SchedulerSources): SchedulerInput {
   const nowMs = src.now.getTime()
   const horizonEnd = nowMs + src.horizonDays * DAY
+  const weekStart = localWeeks(nowMs, src.timeZone, 1)[0]?.start ?? nowMs
+  const underway = (p: { startAt: Date; endAt: Date }): boolean => p.startAt.getTime() <= nowMs && p.endAt.getTime() > nowMs
 
   const blocks: RoutineBlock[] = src.routineBlocks
     .filter((b) => b.deletedAt === null)
@@ -187,7 +195,7 @@ export function buildSchedulerInput(src: SchedulerSources): SchedulerInput {
     if (e.startAt === null || e.endAt === null) continue
     const start = e.startAt.getTime()
     const end = e.endAt.getTime()
-    if (end <= start || end <= nowMs || start >= horizonEnd) continue
+    if (end <= start || end <= weekStart || start >= horizonEnd) continue
     busy.push({ start: e.startAt.toISOString(), end: e.endAt.toISOString() })
   }
 
@@ -202,7 +210,7 @@ export function buildSchedulerInput(src: SchedulerSources): SchedulerInput {
   if (overrides.length > 0) input.dayOverrides = overrides.map((o) => ({ date: o.date, kind: o.kind }))
   if (src.previous !== undefined) {
     input.previous = [
-      ...src.previous.map((p) => ({
+      ...src.previous.filter(underway).map((p) => ({
         taskId: p.taskId,
         start: p.startAt.toISOString(),
         end: p.endAt.toISOString(),
@@ -210,7 +218,7 @@ export function buildSchedulerInput(src: SchedulerSources): SchedulerInput {
         ...(p.lane !== null ? { lane: p.lane } : {}),
       })),
       ...(src.projectPlacements ?? [])
-        .filter((p) => p.endAt.getTime() > nowMs)
+        .filter(underway)
         .map((p) => ({
           taskId: projectTimeId(p.weekOf, p.projectId),
           start: p.startAt.toISOString(),
@@ -319,9 +327,9 @@ const SCHEDULER_LOCK_SQL = 'select pg_advisory_xact_lock(731104)'
  * `project_placements` that have not ended) inside one transaction. Returns the result so
  * callers can relay it.
  *
- * The outgoing `placements` rows are fed back as `previous`, so a run triggered by an unrelated
- * change (a new event, a task completed elsewhere) keeps the blocks the user is looking at.
- * Suggestions for optional blocks are not fed back: they are recomputed from the plan each run.
+ * The outgoing `placements` rows are fed back as `previous`, so a block the user is in the middle
+ * of does not creep forward to the next grid point on every run. Blocks still ahead are planned
+ * afresh (see `buildSchedulerInput`), as are the suggestions for optional blocks.
  */
 export async function runScheduling(
   db: Db,

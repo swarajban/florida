@@ -2,7 +2,7 @@ import { and, eq, isNull, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { Db } from './db/client.js'
 import { categoryExists } from './db/queries.js'
-import { dayOverrides, projects, taskRecurrences, tasks } from './db/schema.js'
+import { dayOverrides, projectPlacements, projects, taskRecurrences, tasks } from './db/schema.js'
 import type { DayOverrideRow, ProjectRow } from './db/schema.js'
 import { lockTaskRecurrences } from './tasks.js'
 import { badRequest, calendarDate, notFound } from './validation.js'
@@ -98,7 +98,8 @@ export async function patchProject(db: Db, id: string, patch: ProjectPatch, now:
 /**
  * Tombstones a project. Its tasks stay, without a project, so they are scheduled like any other
  * task; a repeating task's template lets go of it too, or later occurrences would point at the
- * tombstone. Throws 404 when the id never existed.
+ * tombstone. Its project time goes at once, the hours already spent included: sync sends that
+ * table whole, and nothing counts a deleted project's week. Throws 404 when the id never existed.
  */
 export async function softDeleteProject(db: Db, id: string, now: Date = new Date()): Promise<void> {
   await db.transaction(async (tx) => {
@@ -109,6 +110,7 @@ export async function softDeleteProject(db: Db, id: string, now: Date = new Date
       .where(eq(projects.id, id))
       .returning({ id: projects.id })
     if (deleted.length === 0) throw notFound(`project ${id}`)
+    await tx.delete(projectPlacements).where(eq(projectPlacements.projectId, id))
     await tx.update(tasks).set({ projectId: null, updatedAt: now }).where(eq(tasks.projectId, id))
     const series = await tx
       .select()

@@ -100,20 +100,37 @@ function taskFact(task: TaskRow, plan: Plan) {
 }
 
 /** Open dated tasks that are past due, or whose last planned block ends after they are due. */
-function lateTasks(plan: Plan, now: Date) {
+/**
+ * How many entries of a list that grows with the backlog go to the model. The count goes with
+ * them, so a brief can still say how many there are.
+ */
+const FACT_LIST_LIMIT = 10
+
+/** Tasks past their deadline or planned to finish after it, the longest overdue first. */
+function lateFacts(plan: Plan, now: Date) {
   const eta = new Map<string, Date>()
   for (const p of plan.placements) eta.set(p.taskId, p.endAt)
-  return [...plan.openTasks.values()]
+  const late = [...plan.openTasks.values()]
     .filter((t) => t.dueAt !== null && t.deadlineType !== 'none')
     .filter((t) => t.dueAt!.getTime() < now.getTime() || (eta.get(t.id)?.getTime() ?? 0) > t.dueAt!.getTime())
-    .map((t) => ({ ...taskFact(t, plan), ...(eta.has(t.id) ? { plannedToFinish: stamp(eta.get(t.id)!, plan.timeZone) } : {}) }))
+    .sort((a, b) => a.dueAt!.getTime() - b.dueAt!.getTime() || a.id.localeCompare(b.id))
+  return {
+    late: late
+      .slice(0, FACT_LIST_LIMIT)
+      .map((t) => ({ ...taskFact(t, plan), ...(eta.has(t.id) ? { plannedToFinish: stamp(eta.get(t.id)!, plan.timeZone) } : {}) })),
+    lateCount: late.length,
+  }
 }
 
+/** Tasks the plan has no room for, the most unplaced time first. */
 function unscheduledFacts(plan: Plan) {
-  return plan.unscheduled.flatMap((u) => {
-    const task = plan.openTasks.get(u.taskId)
-    return task === undefined ? [] : [{ title: task.title, reason: u.reason, unplacedMinutes: u.unplacedMinutes }]
-  })
+  const all = plan.unscheduled
+    .flatMap((u) => {
+      const task = plan.openTasks.get(u.taskId)
+      return task === undefined ? [] : [{ title: task.title, reason: u.reason, unplacedMinutes: u.unplacedMinutes }]
+    })
+    .sort((a, b) => b.unplacedMinutes - a.unplacedMinutes || a.title.localeCompare(b.title))
+  return { unscheduled: all.slice(0, FACT_LIST_LIMIT), unscheduledCount: all.length }
 }
 
 /**
@@ -187,8 +204,8 @@ export async function dailyFacts(db: Db, now: Date = new Date()) {
         end: clock(p.endAt, timeZone),
         ...(p.lane !== null ? { lane: p.lane } : {}),
       })),
-    late: lateTasks(plan, now),
-    unscheduled: unscheduledFacts(plan),
+    ...lateFacts(plan, now),
+    ...unscheduledFacts(plan),
     freeMinutesToday: plan.capacity.find((c) => c.date === todayKey)?.freeMinutes ?? null,
     evening: evening.filter((o) => isToday(o.startAt)).flatMap((o) => {
       const task = plan.openTasks.get(o.taskId)
@@ -252,8 +269,8 @@ export async function weeklyFacts(db: Db, now: Date = new Date()) {
     projects: plan.projectRows.filter((p) => p.status === 'active').map(projectFacts),
     waiting: plan.projectRows.filter((p) => p.status === 'on_hold' || p.status === 'thinking').map((p) => ({ name: p.name, status: p.status })),
     completed: { count: completed.length, titles: completed.slice(0, 12).map((t) => t.title) },
-    late: lateTasks(plan, now),
-    unscheduled: unscheduledFacts(plan),
+    ...lateFacts(plan, now),
+    ...unscheduledFacts(plan),
     ahead: {
       hardDeadlines,
       dayOverrides: plan.overrideRows
@@ -341,14 +358,42 @@ export async function ensureBriefs(db: Db, writer: BriefWriter, now: Date = new 
   const timeZone = await defaultTimeZone(db)
   const parts = localParts(now.getTime(), timeZone)
   const minute = parts.hour * 60 + parts.minute
-  const exists = async (kind: BriefKind, date: string) =>
-    (await db.select({ id: briefs.id }).from(briefs).where(and(eq(briefs.kind, kind), eq(briefs.date, date)))).length > 0
+  const exists = async (kind: BriefKind, date: string, since?: Date) =>
+    (
+      await db
+        .select({ id: briefs.id })
+        .from(briefs)
+        .where(and(eq(briefs.kind, kind), eq(briefs.date, date), since === undefined ? undefined : gte(briefs.updatedAt, since)))
+    ).length > 0
   const written: BriefRow[] = []
   if (minute >= DAILY_AT && !(await exists('daily', isoDate(parts)))) written.push(await generateBrief(db, writer, 'daily', now))
-  if (weekdayOf(parts) === 0 && minute >= WEEKLY_AT && !(await exists('weekly', reviewWeekOf(now, timeZone)))) {
+  // A review asked for during the week is filed under the same Sunday and covers only part of
+  // the week, so it does not stand in for this one: only a review written since the week ended does.
+  const weekEnded = new Date(zonedToUtc(parts, 0, timeZone))
+  if (weekdayOf(parts) === 0 && minute >= WEEKLY_AT && !(await exists('weekly', reviewWeekOf(now, timeZone), weekEnded))) {
     written.push(await generateBrief(db, writer, 'weekly', now))
   }
   return written
+}
+
+/** How long the job leaves the model alone after a brief failed to write. */
+const BRIEF_RETRY_AFTER = 60 * MINUTE
+
+/**
+ * `ensureBriefs` for the periodic job. The job runs every few minutes, and a brief that failed is
+ * still missing on the next run, so a failure is followed by an hour without a request.
+ */
+export function briefJob(db: Db, writer: BriefWriter): (now?: Date) => Promise<BriefRow[]> {
+  let retryAt = 0
+  return async (now = new Date()) => {
+    if (now.getTime() < retryAt) return []
+    try {
+      return await ensureBriefs(db, writer, now)
+    } catch (err) {
+      retryAt = now.getTime() + BRIEF_RETRY_AFTER
+      throw err
+    }
+  }
 }
 
 /** The newest brief of each kind, daily first; what `/api/sync` sends. */

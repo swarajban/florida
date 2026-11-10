@@ -1,3 +1,5 @@
+import type { z } from 'zod'
+
 /**
  * Minimal Anthropic Messages API client for structured (JSON schema) output. Plain `fetch`, like
  * the Google client; no SDK. Docs: https://platform.claude.com/docs/en/build-with-claude/structured-outputs
@@ -7,7 +9,11 @@ export interface ClaudeConfig {
   model: string
   /** Override for tests or proxies. Default https://api.anthropic.com */
   baseUrl?: string
+  /** How long to wait for a reply. Default 30 seconds. */
+  timeoutMs?: number
 }
+
+const TIMEOUT_MS = 30_000
 
 export type JsonSchema = Record<string, unknown>
 
@@ -60,6 +66,7 @@ export async function requestJson(
         messages: [{ role: 'user', content: request.user }],
         output_config: { format: { type: 'json_schema', schema: request.schema } },
       }),
+      signal: AbortSignal.timeout(config.timeoutMs ?? TIMEOUT_MS),
     })
   } catch (err) {
     throw new ClaudeError(`request failed: ${err instanceof Error ? err.message : String(err)}`)
@@ -80,4 +87,14 @@ export async function requestJson(
   } catch {
     throw new ClaudeError('model output was not valid JSON')
   }
+}
+
+/**
+ * Checks the JSON the model returned against `schema`. A reply that does not fit is the model's
+ * failure, so it is a `ClaudeError` (502), not a validation error of the caller's request (400).
+ */
+export function modelOutput<S extends z.ZodType>(schema: S, raw: unknown): z.output<S> {
+  const parsed = schema.safeParse(raw)
+  if (!parsed.success) throw new ClaudeError(`model output did not fit the schema: ${parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`)
+  return parsed.data
 }

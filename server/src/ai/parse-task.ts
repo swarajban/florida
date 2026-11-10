@@ -1,6 +1,6 @@
 import { localParts, weekdayOf } from '@florida/scheduler'
 import { z } from 'zod'
-import { type ClaudeConfig, type FetchLike, type JsonSchema, requestJson } from './claude.js'
+import { type ClaudeConfig, type FetchLike, type JsonSchema, modelOutput, requestJson } from './claude.js'
 
 /** What the parser knows about the user's world when interpreting a line of text. */
 export interface ParseTaskContext {
@@ -175,7 +175,7 @@ export class ClaudeTaskParser implements TaskParser {
   async parse(text: string, ctx: ParseTaskContext): Promise<TaskDraft> {
     const prompt = buildPrompt(text, ctx)
     const raw = await requestJson(this.config, { ...prompt, schema: TASK_DRAFT_JSON_SCHEMA }, this.fetchImpl)
-    const draft = draftSchema.parse(raw)
+    const draft = modelOutput(draftSchema, raw)
     const knownCategory = draft.categoryId !== null && ctx.categories.some((p) => p.id === draft.categoryId)
     const knownProject = draft.projectId !== null && (ctx.projects ?? []).some((p) => p.id === draft.projectId)
     return {

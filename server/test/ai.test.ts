@@ -20,7 +20,7 @@ import {
 } from '../src/ai/suggest-category.js'
 import type { CategorySuggester } from '../src/ai/suggest-category.js'
 import { createApp } from '../src/app.js'
-import { dailyFacts, ensureBriefs, explainFacts, generateBrief, latestBriefs, weeklyFacts } from '../src/briefs.js'
+import { briefJob, dailyFacts, ensureBriefs, explainFacts, generateBrief, latestBriefs, weeklyFacts } from '../src/briefs.js'
 import { loadConfig } from '../src/config.js'
 import type { Config } from '../src/config.js'
 import { dayOverrides, projects, tasks } from '../src/db/schema.js'
@@ -452,10 +452,17 @@ describe('ClaudeBriefWriter', () => {
     const down = fakeApi({ status: 529, body: { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } } })
     await expect(new ClaudeBriefWriter(config, down.fetch).write('daily', {})).rejects.toBeInstanceOf(ClaudeError)
     await expect(new ClaudeBriefWriter(config, down.fetch).explain({})).rejects.toBeInstanceOf(ClaudeError)
+    // A reply that does not fit is the model's failure (502), not a bad request (400).
     const blank = fakeApi({ body: messageWith({ headline: '  ', body: 'x' }) })
-    await expect(new ClaudeBriefWriter(config, blank.fetch).write('daily', {})).rejects.toThrow()
+    await expect(new ClaudeBriefWriter(config, blank.fetch).write('daily', {})).rejects.toBeInstanceOf(ClaudeError)
     const wrongKey = fakeApi({ body: messageWith({ reason: 'because' }) })
-    await expect(new ClaudeBriefWriter(config, wrongKey.fetch).explain({})).rejects.toThrow()
+    await expect(new ClaudeBriefWriter(config, wrongKey.fetch).explain({})).rejects.toBeInstanceOf(ClaudeError)
+  })
+
+  it('gives up on a model that never answers', async () => {
+    const hung = (_url: string, init: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(init.signal?.reason)))
+    await expect(new ClaudeBriefWriter({ ...config, timeoutMs: 20 }, hung).explain({})).rejects.toBeInstanceOf(ClaudeError)
   })
 })
 
@@ -587,6 +594,74 @@ describe('briefs', () => {
       ['daily', '2026-11-15', 'daily 4'],
       ['weekly', '2026-11-08', 'weekly 3'],
     ])
+  })
+
+  it('a review asked for during the week does not stand in for the one on Sunday', async () => {
+    const fresh = await createTestDb()
+    try {
+      await seed(fresh.db)
+      // Wednesday's review and the following Sunday's are filed under the same week.
+      const midweek = await generateBrief(fresh.db, writer, 'weekly', new Date('2026-11-11T20:00:00Z'))
+      expect(midweek.date).toBe('2026-11-08')
+      const sunday = await ensureBriefs(fresh.db, writer, new Date('2026-11-16T02:05:00Z'))
+      expect(sunday.map((b) => [b.kind, b.date])).toEqual([
+        ['daily', '2026-11-15'],
+        ['weekly', '2026-11-08'],
+      ])
+      expect(sunday[1]).toMatchObject({ id: midweek.id })
+      expect(sunday[1]?.headline).not.toBe(midweek.headline)
+      expect(await ensureBriefs(fresh.db, writer, new Date('2026-11-16T03:00:00Z'))).toEqual([])
+    } finally {
+      await fresh.close()
+    }
+  })
+
+  it('waits an hour after a failed brief before asking the model again', async () => {
+    const fresh = await createTestDb()
+    try {
+      await seed(fresh.db)
+      let calls = 0
+      const down: BriefWriter = {
+        write: async () => {
+          calls += 1
+          throw new ClaudeError('Anthropic API 529', 529)
+        },
+      }
+      const job = briefJob(fresh.db, down)
+      await expect(job(new Date('2026-11-09T16:30:00Z'))).rejects.toBeInstanceOf(ClaudeError)
+      expect(await job(new Date('2026-11-09T16:40:00Z'))).toEqual([])
+      expect(await job(new Date('2026-11-09T17:29:00Z'))).toEqual([])
+      expect(calls).toBe(1)
+      await expect(job(new Date('2026-11-09T17:30:00Z'))).rejects.toBeInstanceOf(ClaudeError)
+      expect(calls).toBe(2)
+    } finally {
+      await fresh.close()
+    }
+  })
+
+  it('sends the model the ten longest-overdue tasks and how many there are', async () => {
+    const fresh = await createTestDb()
+    try {
+      await seed(fresh.db)
+      const overdue = Array.from({ length: 12 }, (_, i) => ({
+        id: `late-${String(i).padStart(2, '0')}`,
+        title: `Overdue ${i}`,
+        categoryId: 'work',
+        durationMinutes: 30,
+        priority: 'medium' as const,
+        deadlineType: 'hard' as const,
+        // late-00 was due an hour before MONDAY, late-11 twelve hours before.
+        dueAt: new Date(MONDAY.getTime() - (i + 1) * 3_600_000),
+      }))
+      await fresh.db.insert(tasks).values(overdue)
+      for (const facts of [await dailyFacts(fresh.db, MONDAY), await weeklyFacts(fresh.db, MONDAY)]) {
+        expect(facts.lateCount).toBe(12)
+        expect(facts.late.map((t) => t.title)).toEqual([11, 10, 9, 8, 7, 6, 5, 4, 3, 2].map((i) => `Overdue ${i}`))
+        expect(facts).toMatchObject({ unscheduled: [], unscheduledCount: 0 })
+      }
+    } finally {
+      await fresh.close()
+    }
   })
 })
 

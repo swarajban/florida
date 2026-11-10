@@ -413,6 +413,51 @@ describe('runScheduling', () => {
     }
   })
 
+  it('replans the blocks still ahead whenever something changes', async () => {
+    const { db, close } = await createTestDb()
+    try {
+      await seed(db)
+      // 08:00 Monday in Los Angeles, an hour before the home block opens.
+      const early = new Date('2026-11-09T16:00:00Z')
+      const plan = () => db.select({ taskId: placements.taskId, startAt: placements.startAt }).from(placements).orderBy(placements.startAt)
+      await db.insert(tasks).values([
+        taskRow('first', 'inbox', { createdAt: T0 }),
+        taskRow('second', 'inbox', { createdAt: new Date(T0.getTime() + 1000) }),
+        taskRow('third', 'inbox', { createdAt: new Date(T0.getTime() + 2000) }),
+      ])
+      await runScheduling(db, { HORIZON_DAYS: 28 }, early)
+      expect(await plan()).toEqual([
+        { taskId: 'first', startAt: new Date('2026-11-09T17:00:00Z') },
+        { taskId: 'second', startAt: new Date('2026-11-09T18:00:00Z') },
+        { taskId: 'third', startAt: new Date('2026-11-09T19:00:00Z') },
+      ])
+
+      // Made urgent, the last task moves to the front and the others make room.
+      await db.update(tasks).set({ priority: 'asap', updatedAt: early }).where(eq(tasks.id, 'third'))
+      await runScheduling(db, { HORIZON_DAYS: 28 }, early)
+      expect(await plan()).toEqual([
+        { taskId: 'third', startAt: new Date('2026-11-09T17:00:00Z') },
+        { taskId: 'first', startAt: new Date('2026-11-09T18:00:00Z') },
+        { taskId: 'second', startAt: new Date('2026-11-09T19:00:00Z') },
+      ])
+
+      // Made unimportant again, it goes back behind them rather than keeping the slot it had.
+      await db.update(tasks).set({ priority: 'low', updatedAt: early }).where(eq(tasks.id, 'third'))
+      await runScheduling(db, { HORIZON_DAYS: 28 }, early)
+      expect((await plan()).map((p) => p.taskId)).toEqual(['first', 'second', 'third'])
+
+      // Finishing a task frees its hour, and the work behind it moves up.
+      await db.update(tasks).set({ completedAt: early, updatedAt: early }).where(eq(tasks.id, 'first'))
+      await runScheduling(db, { HORIZON_DAYS: 28 }, early)
+      expect(await plan()).toEqual([
+        { taskId: 'second', startAt: new Date('2026-11-09T17:00:00Z') },
+        { taskId: 'third', startAt: new Date('2026-11-09T18:00:00Z') },
+      ])
+    } finally {
+      await close()
+    }
+  })
+
   it('stores evening suggestions apart from the plan and replaces them on every run', async () => {
     const { db, close } = await createTestDb()
     try {
@@ -586,6 +631,10 @@ describe('runScheduling', () => {
       expect(await officeMornings()).toEqual(['2026-11-11T17:00:00.000Z'])
       expect((await db.select().from(planSummary))[0]?.missed).toEqual([])
 
+      // Tuesday 10:30, the meeting over: the session stays on Wednesday instead of jumping back.
+      await runScheduling(db, { HORIZON_DAYS: 28 }, new Date('2026-11-10T18:30:00Z'))
+      expect(await officeMornings()).toEqual(['2026-11-11T17:00:00.000Z'])
+
       await db.insert(events).values(eventRow('wed', { startAt: new Date('2026-11-11T17:00:00Z'), endAt: new Date('2026-11-11T17:30:00Z') }))
       await runScheduling(db, { HORIZON_DAYS: 28 }, NOW)
       expect(await officeMornings()).toEqual([])
@@ -609,14 +658,14 @@ describe('runScheduling', () => {
       const gym = await db.select().from(routineOccurrences).orderBy(routineOccurrences.startAt)
       expect(gym[0]?.startAt.toISOString()).toBe('2026-11-10T17:00:00.000Z')
 
-      // A tombstoned override no longer applies: Monday has its gym session again and takes new
-      // work. `deep-work` keeps the time it was given, as a plan that still holds always does.
+      // A tombstoned override no longer applies: Monday has its gym session again and takes
+      // the work back, the older task first.
       await db.update(dayOverrides).set({ deletedAt: NOW })
       await db.insert(tasks).values(taskRow('new-work', 'inbox', { createdAt: NOW }))
       await runScheduling(db, { HORIZON_DAYS: 28 }, new Date(NOW.getTime() + 60_000))
       expect(await db.select({ taskId: placements.taskId, startAt: placements.startAt }).from(placements).orderBy(placements.startAt)).toEqual([
-        { taskId: 'new-work', startAt: new Date('2026-11-09T17:15:00Z') },
-        { taskId: 'deep-work', startAt: new Date('2026-11-10T18:15:00Z') },
+        { taskId: 'deep-work', startAt: new Date('2026-11-09T17:15:00Z') },
+        { taskId: 'new-work', startAt: new Date('2026-11-09T18:15:00Z') },
       ])
       const restored = await db.select().from(routineOccurrences).orderBy(routineOccurrences.startAt)
       expect(restored[0]?.startAt.toISOString()).toBe('2026-11-09T23:30:00.000Z')
