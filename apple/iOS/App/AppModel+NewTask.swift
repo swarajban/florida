@@ -6,14 +6,17 @@ import Foundation
 // the user taps Add. The local quick-add parser stays the instant default.
 
 extension AppModel {
-    /// A blank task with the quick-add defaults: 30 minutes, medium priority, no deadline, Inbox.
+    /// A blank task for the editor: quick add's 30 minutes, medium priority and Inbox, plus a soft
+    /// due date on the default day, since nearly every task gets one (the editor's Due date switch
+    /// removes it).
     func newTaskTemplate() -> TaskItem {
         let now = Date()
         return TaskItem(
             id: UUID().uuidString.lowercased(),
             categoryId: inbox?.id ?? categories.first?.id ?? TaskCategory.inboxId,
             title: "", durationMinutes: QuickAddTaskBuilder.defaultDurationMinutes,
-            priority: .medium, deadlineType: .none, createdAt: now, updatedAt: now)
+            priority: .medium, deadlineType: .soft, dueAt: TaskDay.defaultDue(now: now, calendar: calendar),
+            createdAt: now, updatedAt: now)
     }
 
     /// Sends `text` to `POST /api/ai/parse-task` and returns the draft as an unsaved task plus

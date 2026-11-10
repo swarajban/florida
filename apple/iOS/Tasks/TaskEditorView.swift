@@ -6,8 +6,9 @@ import SwiftUI
 /// from the + button or an AI parse) the same form adds the task, and an AI parse's rationale
 /// shows on top for review.
 ///
-/// Due and Not before are whole days; "Add a time" shows a clock for the rare task that needs one
-/// (see `TaskDay` for what a day without a time stores).
+/// Due date leads the scheduling fields and is on for a new task; its soft/hard choice only shows
+/// with a date. Due and Not before are whole days; "Add a time" shows a clock for the rare task
+/// that needs one (see `TaskDay` for what a day without a time stores).
 struct TaskEditorView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -55,11 +56,15 @@ struct TaskEditorView: View {
                             Button {
                                 completeFromEditor()
                             } label: {
+                                // The fill is the app tint (ink), which is light in dark mode, so
+                                // the label takes the paper color rather than the style's white.
                                 Label("Mark done", systemImage: "checkmark.circle.fill")
                                     .font(.headline)
-                                    .frame(maxWidth: .infinity, minHeight: 44)
+                                    .frame(maxWidth: .infinity)
+                                    .foregroundStyle(FloridaStyle.paper)
                             }
                             .buttonStyle(.borderedProminent)
+                            .tint(FloridaStyle.ink)
                             .controlSize(.large)
                             .accessibilityHint("Completes the task and closes the editor")
                         } else {
@@ -70,7 +75,7 @@ struct TaskEditorView: View {
                             } label: {
                                 Label("Reopen", systemImage: "arrow.uturn.backward.circle")
                                     .font(.headline)
-                                    .frame(maxWidth: .infinity, minHeight: 44)
+                                    .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.bordered)
                             .controlSize(.large)
@@ -106,6 +111,19 @@ struct TaskEditorView: View {
                 }
 
                 Section("Scheduling") {
+                    Toggle("Due date", isOn: hasDue)
+                    if hasDue.wrappedValue {
+                        DatePicker("Due", selection: dueAt, displayedComponents: .date)
+                        Toggle("Add a time", isOn: hasDueTime)
+                        if hasDueTime.wrappedValue {
+                            DatePicker("Due time", selection: dueAt, displayedComponents: .hourAndMinute)
+                        }
+                        Picker("Deadline", selection: $draft.deadlineType) {
+                            ForEach([DeadlineType.soft, .hard], id: \.self) { type in
+                                Text(type.displayName).tag(type)
+                            }
+                        }
+                    }
                     Stepper(value: $draft.durationMinutes, in: 15...(24 * 60), step: 15) {
                         LabeledContent("Duration", value: Formatting.duration(minutes: draft.durationMinutes))
                     }
@@ -117,18 +135,6 @@ struct TaskEditorView: View {
                     Picker("Context", selection: $draft.context) {
                         ForEach(TaskContext.allCases, id: \.self) { context in
                             Text(context.displayName).tag(context)
-                        }
-                    }
-                    Picker("Deadline", selection: $draft.deadlineType) {
-                        ForEach(DeadlineType.allCases, id: \.self) { type in
-                            Text(type.displayName).tag(type)
-                        }
-                    }
-                    if draft.deadlineType != .none {
-                        DatePicker("Due", selection: dueAt, displayedComponents: .date)
-                        Toggle("Add a time", isOn: hasDueTime)
-                        if hasDueTime.wrappedValue {
-                            DatePicker("Due time", selection: dueAt, displayedComponents: .hourAndMinute)
                         }
                     }
                 }
@@ -196,14 +202,6 @@ struct TaskEditorView: View {
             .onAppear {
                 titleFocused = isNew && draft.title.isEmpty
             }
-            .onChange(of: draft.deadlineType) { _, type in
-                if type == .none {
-                    draft.dueAt = nil
-                    dueTimeChoice = nil
-                } else if draft.dueAt == nil {
-                    draft.dueAt = defaultDueDate
-                }
-            }
         }
     }
 
@@ -213,6 +211,23 @@ struct TaskEditorView: View {
         Binding(
             get: { draft.notes ?? "" },
             set: { draft.notes = $0.isEmpty ? nil : $0 })
+    }
+
+    /// On while the task has a deadline. Switching it on starts a soft one on the default day (or
+    /// the date the task already carries); off clears the date.
+    private var hasDue: Binding<Bool> {
+        Binding(
+            get: { draft.deadlineType != .none },
+            set: { on in
+                if on {
+                    draft.deadlineType = .soft
+                    draft.dueAt = draft.dueAt ?? defaultDueDate
+                } else {
+                    draft.deadlineType = .none
+                    draft.dueAt = nil
+                    dueTimeChoice = nil
+                }
+            })
     }
 
     /// Both Due pickers. Without a time, a new day keeps the whole-day clock the date already had
@@ -297,11 +312,8 @@ struct TaskEditorView: View {
             : draft.recurrence?.validationMessage
     }
 
-    /// Tomorrow, with no time of its own.
     private var defaultDueDate: Date {
-        let calendar = model.calendar
-        let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: Date())) ?? Date()
-        return TaskDay.due(on: tomorrow, calendar: calendar)
+        TaskDay.defaultDue(now: Date(), calendar: model.calendar)
     }
 
     /// The next whole hour from now.

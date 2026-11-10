@@ -20,6 +20,21 @@ import Testing
             == Self.instant("2026-07-11T00:00:00Z"))
     }
 
+    @Test func defaultDueIsTheNextWeekdayWithNoTime() {
+        // Tuesday Nov 10 → Wednesday Nov 11, 17:00 PST.
+        let wednesday = TaskDay.defaultDue(now: PacificTestCalendar.date(2026, 11, 10, 9), calendar: Self.calendar)
+        #expect(wednesday == Self.instant("2026-11-12T01:00:00Z"))
+        #expect(!TaskDay.dueHasTime(wednesday, calendar: Self.calendar))
+        // Thursday 22:30 PST is already Friday in UTC; the next local day is still Friday.
+        #expect(TaskDay.defaultDue(now: PacificTestCalendar.date(2026, 11, 12, 22, 30), calendar: Self.calendar)
+            == Self.instant("2026-11-14T01:00:00Z"))
+        // Friday, Saturday and Sunday all land on Monday Nov 16.
+        for day in 13...15 {
+            #expect(TaskDay.defaultDue(now: PacificTestCalendar.date(2026, 11, day, 14), calendar: Self.calendar)
+                == Self.instant("2026-11-17T01:00:00Z"))
+        }
+    }
+
     @Test func dueHasTimeOnlyAwayFromTheWholeDayDefaults() {
         // What quick add and the AI parser store for "by friday".
         #expect(!TaskDay.dueHasTime(Self.instant("2026-11-14T01:00:00Z"), calendar: Self.calendar))

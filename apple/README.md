@@ -86,8 +86,9 @@ empty slot opens quick add prefilled with that time as a pinned start.
 The scheduler's suggestions for an optional routine block (the evening) sit
 on top of the task pane and as dotted blocks in the grid. They are not on the
 plan: `p` or "Do tonight" pins the task to the suggested time, and a pinned
-task's block moves at once, before the server answers. A due date is a day
-unless "Add a time" is on. Settings → Routine shows the weekly blocks tasks
+task's block moves at once, before the server answers. A new task from the
+editor (`⇧N`) starts with a soft due date on the next weekday; a due date is a
+day unless "Add a time" is on. Settings → Routine shows the weekly blocks tasks
 are scheduled in; a task's context decides which blocks it may use, and a
 category's Area (Work or Personal) puts personal tasks first in the evening's
 suggestions.
@@ -104,8 +105,9 @@ evening's suggestions follow the day's plan ("Evening, if you're up for it"),
 each with a "Do tonight" button that pins it; in the day grids they are dotted
 blocks.
 **Tasks**: sections per category, a quick-add field with the same parser and
-chips as the Mac app, swipe to complete or delete, tap to edit (due dates are
-a day; "Add a time" is opt-in). **Settings**:
+chips as the Mac app, swipe to complete or delete, tap to edit. The editor
+leads its scheduling fields with Due date, on for a new task from + (soft, the
+next weekday); due dates are a day and "Add a time" is opt-in. **Settings**:
 server URL and token, sync now, run the scheduler, refresh Google calendars,
 and the connected accounts with their calendars. The app syncs on launch, when
 it returns to the foreground, and every two minutes while active; after each

@@ -21,6 +21,7 @@ struct RootView: View {
                 .badge((model.storeError == nil && model.lastError == nil ? 0 : 1) + model.rejectedChanges.count)
         }
         .tint(FloridaStyle.ink)
+        .toggleStyle(SystemGreenSwitchStyle())
         .onAppear {
             if model.needsSetup, LaunchOptions.initialTab == nil {
                 model.selectedTab = .settings
@@ -38,6 +39,16 @@ struct RootView: View {
                 model.selectedTab = tab
             }
         }
+    }
+}
+
+/// The app tint is ink, which is near white in dark mode: a switch tinted with it shows a white
+/// knob on a cream track and reads as neither on nor off. Switches keep the system green instead;
+/// the toggle itself is otherwise whatever style it would have been.
+private struct SystemGreenSwitchStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Toggle(configuration)
+            .tint(.green)
     }
 }
 

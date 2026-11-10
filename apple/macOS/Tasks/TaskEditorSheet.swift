@@ -6,8 +6,9 @@ import SwiftUI
 /// server's AI, which fills the form for confirmation. Save writes locally and closes; nothing
 /// waits on the server. An open task has Mark done on top, which saves any edits and completes it.
 ///
-/// Due and Not before are whole days; "Add a time" shows a clock for the rare task that needs one
-/// (see `TaskDay` for what a day without a time stores). A pinned start always has a time.
+/// Due is checked for a new task; its soft/hard choice applies only with a date. Due and Not
+/// before are whole days; "Add a time" shows a clock for the rare task that needs one (see
+/// `TaskDay` for what a day without a time stores). A pinned start always has a time.
 struct TaskEditorSheet: View {
     @Environment(AppModel.self) private var model
     @State private var draft: TaskItem
@@ -28,8 +29,7 @@ struct TaskEditorSheet: View {
     init(task: TaskItem, isNew: Bool) {
         let calendar = Calendar.autoupdatingCurrent
         let today = calendar.startOfDay(for: Date())
-        // Tomorrow, with no time of its own.
-        let defaultDue = TaskDay.due(on: calendar.date(byAdding: .day, value: 1, to: today) ?? today, calendar: calendar)
+        let defaultDue = TaskDay.defaultDue(now: Date(), calendar: calendar)
         let nextHour = calendar.date(bySetting: .minute, value: 0, of: Date().addingTimeInterval(3600)) ?? Date()
         _draft = State(initialValue: task)
         _hasDue = State(initialValue: task.dueAt != nil)
@@ -95,12 +95,13 @@ struct TaskEditorSheet: View {
                             Text(context.displayName).tag(context)
                         }
                     }
-                    Picker("Deadline", selection: $draft.deadlineType) {
-                        ForEach(DeadlineType.allCases, id: \.self) { type in
+                    OptionalDateRow(title: "Due", isOn: $hasDue, date: $dueAt, hasTime: dueHasTime)
+                    Picker("Deadline", selection: deadline) {
+                        ForEach([DeadlineType.soft, .hard], id: \.self) { type in
                             Text(type.displayName).tag(type)
                         }
                     }
-                    OptionalDateRow(title: "Due", isOn: $hasDue, date: $dueAt, hasTime: dueHasTime)
+                    .disabled(!hasDue)
                     OptionalDateRow(title: "Not before", isOn: $hasStart, date: $startAt, hasTime: startHasTime)
                     OptionalDateRow(title: "Pinned start", isOn: $hasPinnedStart, date: $pinnedStart)
                 }
@@ -136,6 +137,14 @@ struct TaskEditorSheet: View {
         Binding(
             get: { draft.notes ?? "" },
             set: { draft.notes = $0.isEmpty ? nil : $0 })
+    }
+
+    /// Soft or hard. A task with a due date always has one of the two and a task without has
+    /// neither (`preparedTask` applies both), so "none" is the Due box, not a choice here.
+    private var deadline: Binding<DeadlineType> {
+        Binding(
+            get: { draft.deadlineType == .hard ? .hard : .soft },
+            set: { draft.deadlineType = $0 })
     }
 
     /// On when the due date carries a time. Without one the date picker moves the day and keeps

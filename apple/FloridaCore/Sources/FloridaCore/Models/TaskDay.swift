@@ -15,6 +15,16 @@ public enum TaskDay {
         return calendar.date(bySettingHour: dueHour, minute: 0, second: 0, of: day) ?? day
     }
 
+    /// The due date offered before the user picks one: the next weekday after `now`, with no time
+    /// of its own. Weekends are skipped because the routine never schedules on them.
+    public static func defaultDue(now: Date, calendar: Calendar) -> Date {
+        var day = calendar.startOfDay(for: now)
+        repeat {
+            day = calendar.date(byAdding: .day, value: 1, to: day) ?? day.addingTimeInterval(86_400)
+        } while calendar.isDateInWeekend(day)
+        return due(on: day, calendar: calendar)
+    }
+
     /// Whether `dueAt` carries a time the user chose, rather than one of the two whole-day defaults.
     public static func dueHasTime(_ dueAt: Date, calendar: Calendar) -> Bool {
         let clock = calendar.dateComponents([.hour, .minute], from: dueAt)
