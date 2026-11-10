@@ -101,6 +101,19 @@ function freeLane(cap: Capacity, task: Task, span: Span, preferred?: number): nu
 }
 
 /**
+ * The lane of a block already underway, which is never moved. When no lane is free for it (a
+ * meeting now covers the block, or stale data has two blocks in one lane) it keeps `preferred`
+ * if no other shared work is there, else takes the lowest lane without any.
+ */
+function activeLane(cap: Capacity, task: Task, span: Span, preferred?: number): number {
+  const free = freeLane(cap, task, span, preferred)
+  if (free !== undefined || !isShared(task)) return free ?? 0
+  const lanes = cap.lanes.map((_, lane) => lane)
+  if (preferred !== undefined && lanes.includes(preferred)) lanes.unshift(preferred)
+  return lanes.find((lane) => !(cap.lanes[lane] ?? []).some((taken) => overlaps(taken, span))) ?? lanes[0] ?? 0
+}
+
+/**
  * The earliest stretch inside `window` where `task` can take at least `need` ms, across its
  * lanes; the lowest lane wins a tie, so shared work stacks side by side from lane 0.
  */
@@ -151,28 +164,25 @@ export function schedule(input: SchedulerInput): SchedulerResult {
     start: parseInstant(i.start, 'busy.start'),
     end: parseInstant(i.end, 'busy.end'),
   }))
-  const committed = commitments(routine, ctx, busySpans)
+  const open = input.tasks.filter((t) => remainingMinutes(t) > 0)
+  const pinned = open.flatMap((task) => {
+    if (task.pinnedStart === undefined) return []
+    const start = parseInstant(task.pinnedStart, 'pinnedStart')
+    return [{ task, span: { start, end: start + remainingMinutes(task) * MINUTE } }]
+  })
+  const pinnedSpans = pinned.map((p) => p.span)
+
+  // A pinned task takes its time as a meeting does, so a commitment's alternate goes elsewhere.
+  const committed = commitments(routine, ctx, [...busySpans, ...pinnedSpans])
   // What an in-progress block gives way to: meetings and commitments that start while it runs.
   const fixedSpans = [...busySpans, ...committed.occurrences]
   const cap: Capacity = {
-    solid: mergeSpans(fixedSpans),
+    solid: mergeSpans([...fixedSpans, ...pinnedSpans]),
     lanes: Array.from({ length: maxParallel }, () => []),
   }
-  const placements: Placement[] = []
+  const placements: Placement[] = pinned.map(({ task, span }) => toPlacement(task, { ...span, lane: 0 }, true))
   const unscheduled: Unscheduled[] = []
   const late: Late[] = []
-
-  const open = input.tasks.filter((t) => remainingMinutes(t) > 0)
-
-  const pinnedSpans: Span[] = []
-  for (const task of open) {
-    if (task.pinnedStart === undefined) continue
-    const start = parseInstant(task.pinnedStart, 'pinnedStart')
-    const span = { start, end: start + remainingMinutes(task) * MINUTE }
-    placements.push(toPlacement(task, { ...span, lane: 0 }, true))
-    pinnedSpans.push(span)
-    cap.solid = addSpan(cap.solid, span)
-  }
 
   const flexible = open
     .filter((t) => t.pinnedStart === undefined)
@@ -210,8 +220,7 @@ export function schedule(input: SchedulerInput): SchedulerResult {
         if (p.end > now && p.start < span.end) span.end = Math.max(now, p.start)
       }
       const ahead = span.end - now
-      // Active work is never moved: it keeps a lane even when stale data has two blocks in it.
-      const piece = { ...span, lane: freeLane(cap, task, span, block.lane) ?? 0 }
+      const piece = { ...span, lane: activeLane(cap, task, span, block.lane) }
       retained.spans.push(piece)
       retained.work += credit + ahead
       reserve(cap, task, piece)
@@ -301,7 +310,7 @@ function weekdayResolver(routine: Routine, overrides: DayOverride[]): (date: Loc
 
 /**
  * Occurrences of every commitment, week by week from the Sunday of the current week to the
- * horizon: one per day in `days`, plus one in the first of its `alternates` that no busy
+ * horizon: one per day in `days`, plus one in the earliest of its `alternates` that no busy
  * interval overlaps. Past days of the current week are included so a client can draw the whole
  * week; pass that week's earlier busy time for them to land where they did.
  */
@@ -333,6 +342,7 @@ function commitments(
             .filter((date) => ctx.weekdayFor(date) === slot.day)
             .map((date) => windowSpan(date, slot.start, slot.end, routine.timeZone)),
         )
+        .sort((a, b) => a.start - b.start)
         .find((span) => span.end > span.start && !busy.some((b) => overlaps(b, span)))
       if (free === undefined) missed.push({ blockId: block.id, weekOf: isoDate(dateFromDayNumber(sunday)) })
       else occurrences.push({ blockId: block.id, ...free })
@@ -516,6 +526,8 @@ function placeTask(
           spans.push(piece)
           reserve(cap, task, piece)
           remaining -= take
+          // The rest of the task follows this piece; a short last piece never slips into a gap before it.
+          clipped.start = piece.end
         }
         if (remaining === 0) return
       }
