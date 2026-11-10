@@ -47,7 +47,20 @@ final class AppModel {
     var unscheduledByTask: [String: UnscheduledTask] = [:]
     /// The scheduler's suggestions for optional routine blocks (weekday evenings), by start.
     var optionalPlacements: [OptionalPlacement] = []
-    /// Events and task blocks of `selectedDay`; nil until the first observation fires.
+    /// Ongoing projects of every status, by `sortOrder` then name (`AppModel+Plan`).
+    var projects: [Project] = []
+    /// Dates that differ from their weekday's routine: home, office or off.
+    var dayOverrides: [DayOverride] = []
+    /// Commitments with no slot and each day's free time, from the scheduler's last run.
+    var planSummary = PlanSummary()
+    /// The latest daily brief and weekly review, newest first.
+    var briefs: [Brief] = []
+    /// The briefs the server is writing right now.
+    var briefsInFlight: Set<BriefKind> = []
+    /// Why the last brief request failed; the brief card shows it in place.
+    var briefError: String?
+    /// Events, task blocks, commitments and project time of `selectedDay`; nil until the first
+    /// observation fires.
     var agenda: DayAgenda?
     var accounts: [GoogleAccount] = []
     var calendars: [CalendarInfo] = []

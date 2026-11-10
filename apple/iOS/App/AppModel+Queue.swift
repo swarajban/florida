@@ -78,6 +78,21 @@ extension AppModel {
                 try database.saveEvent(event)
             case (.event, .delete):
                 try database.deleteEvent(id: change.entityId)
+            case (.project, .put), (.project, .patch):
+                guard let project = try database.project(id: change.entityId), project.deletedAt == nil else {
+                    throw LocalWriteError("The project is gone.")
+                }
+                try database.saveProject(project)
+            case (.project, .delete):
+                try database.deleteProject(id: change.entityId)
+            case (.dayOverride, .put), (.dayOverride, .patch):
+                // The entity id is the date; the store kept the kind the user chose.
+                guard let day = try database.dayOverrides().first(where: { $0.date == change.entityId }) else {
+                    throw LocalWriteError("That day is back on its usual routine.")
+                }
+                try database.setDay(day.date, kind: day.kind, note: day.note)
+            case (.dayOverride, .delete):
+                try database.clearDay(change.entityId)
             }
         }
         if ok {
@@ -102,6 +117,12 @@ extension AppModel {
         case .event:
             let summary = (try? database?.event(id: id))?.summary
             return summary.map { "Event “\($0)”" } ?? "Event \(id.prefix(8))"
+        case .project:
+            let name = project(id: id)?.name ?? (try? database?.project(id: id))?.name
+            return name.map { "Project “\($0)”" } ?? "Project \(id.prefix(8))"
+        case .dayOverride:
+            // The id is the date, "YYYY-MM-DD".
+            return "Day \(id)"
         }
     }
 }

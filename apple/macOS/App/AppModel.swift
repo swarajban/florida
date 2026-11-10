@@ -44,6 +44,23 @@ final class AppModel {
     private(set) var routineBlocks: [RoutineBlock] = []
     /// The server's settings row (the routine's time zone); nil until the first sync.
     private(set) var userSettings: UserSettings?
+    /// Ongoing projects of every status, by `sortOrder` then name (`AppModel+Plan`).
+    private(set) var projects: [Project] = []
+    private(set) var projectsById: [String: Project] = [:]
+    /// Dates that differ from their weekday's routine: home, office or off.
+    private(set) var dayOverrides: [DayOverride] = []
+    private(set) var projectPlacements: [ProjectPlacement] = []
+    private(set) var routineOccurrences: [RoutineOccurrence] = []
+    /// The commitments (the gym) and time held for active projects, joined for the grid, by start.
+    private(set) var planBlocks: [PlanBlock] = []
+    /// Commitments with no slot and each day's free time, from the scheduler's last run.
+    private(set) var planSummary = PlanSummary()
+    /// The latest daily brief and weekly review, newest first.
+    private(set) var briefs: [Brief] = []
+    /// The briefs the server is writing right now.
+    var briefsInFlight: Set<BriefKind> = []
+    /// Why the last brief request failed; the brief panel shows it in place.
+    var briefError: String?
     /// Today's events and task blocks for the menu bar, observed for the current day.
     var todayAgenda: DayAgenda?
     /// The current minute; the menu bar title and agenda recompute from it.
@@ -102,6 +119,14 @@ final class AppModel {
     /// Bumped to ask the time grid to scroll; the grid owns its scroll position.
     var gridScrollRequest: GridScrollRequest?
     var isNewCategoryOpen = false
+    /// The projects overlay (`g p`).
+    var isProjectsOpen = false
+    /// The project open in the editor sheet (a stored one, or the draft of a new one).
+    var projectEditor: Project?
+    /// The brief and weekly review panel (`g b`).
+    var isBriefOpen = false
+    /// The answer to "Why here?" for one task, while its popover is open.
+    var explanation: PlacementExplanation?
     /// The Settings tab to show, and a counter `RootView` watches to open the Settings window.
     var settingsTab: SettingsTab = .server
     var settingsRequest = 0
@@ -234,6 +259,15 @@ final class AppModel {
             now: Date(), calendar: calendar)
     }
 
+    /// Joins the gym's occurrences and project time with their names, then lays the grid out again.
+    private func rebuildPlanBlocks() {
+        planBlocks = PlanBlock.join(
+            occurrences: routineOccurrences, projectPlacements: projectPlacements,
+            blocksById: Dictionary(routineBlocks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }),
+            projectsById: projectsById)
+        rebuildLayout()
+    }
+
     // MARK: Live queries
 
     private func startObserving(_ database: AppDatabase) {
@@ -256,6 +290,29 @@ final class AppModel {
             },
             observe(database.observeRoutineBlocks()) { model, blocks in
                 model.routineBlocks = blocks
+                model.rebuildPlanBlocks()
+            },
+            observe(database.observeProjects()) { model, projects in
+                model.projects = projects
+                model.projectsById = Dictionary(projects.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                model.rebuildPlanBlocks()
+            },
+            observe(database.observeProjectPlacements()) { model, placements in
+                model.projectPlacements = placements
+                model.rebuildPlanBlocks()
+            },
+            observe(database.observeRoutineOccurrences()) { model, occurrences in
+                model.routineOccurrences = occurrences
+                model.rebuildPlanBlocks()
+            },
+            observe(database.observeDayOverrides()) { model, overrides in
+                model.dayOverrides = overrides
+            },
+            observe(database.observePlanSummary()) { model, summary in
+                model.planSummary = summary
+            },
+            observe(database.observeBriefs()) { model, briefs in
+                model.briefs = briefs
             },
             observe(database.observeOptionalPlacements()) { model, suggestions in
                 model.optionalPlacements = suggestions
