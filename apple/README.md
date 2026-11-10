@@ -76,6 +76,7 @@ ones:
 | `c`, `e` or `↩`, `x`, `space` | new task, edit, delete, complete |
 | `p` / `⇧P`, `s`, `⌘1`–`⌘4` | pin / unpin to its slot (on an evening suggestion: do it tonight), snooze to tomorrow, priority ASAP…low |
 | `⇧E`, `r y` / `r m` / `r n` | edit the selected event, RSVP yes / maybe / no |
+| `g p`, `g b`, `y` | projects, today's brief and the weekly review, "Why here?" for the selected task |
 | `o`, `⇧⌘C`, `⌘R`, `esc` | open in Google Calendar, copy link, sync now, cancel |
 
 Quick add parses natural language locally (`QuickAddParser`): "infosec review
@@ -93,6 +94,17 @@ are scheduled in; a task's context decides which blocks it may use, and a
 category's Area (Work or Personal) puts personal tasks first in the evening's
 suggestions.
 
+A task can belong to a project (`g p`: status, next step, hours a week, and
+whether its work may run in parallel). Up to three tasks of different parallel
+projects share an hour; the grid draws them side by side in lane order, and a
+task's Attention field overrides its project. Hatched blocks are the plan's own
+entries, not tasks: the gym from the routine, and project time that fills a
+project's weekly hours. A day's kind (home, office, off) comes from the routine;
+right-click a day header, or run "Set Day" from the palette, to change one day.
+`g b` shows the brief the server's model writes each morning and the weekly
+review, and `y` asks it why the selected task sits where it does. All three need
+`ANTHROPIC_API_KEY` on the server and say so plainly without it.
+
 First run: Settings (`⌘,`) → server URL and bearer token (kept in the Keychain),
 then toggle which calendars to show. While open, the app listens to the
 server's `/api/events` stream and also syncs every 60 s.
@@ -109,7 +121,12 @@ chips as the Mac app, swipe to complete or delete, tap to edit. The editor
 leads its scheduling fields with Due date, on for a new task from + (soft, the
 next weekday); due dates are a day and "Add a time" is opt-in. **Settings**:
 server URL and token, sync now, run the scheduler, refresh Google calendars,
-and the connected accounts with their calendars. The app syncs on launch, when
+and the connected accounts with their calendars. Projects, parallel lanes, the
+hatched gym and project-time blocks, day kinds and the briefs work as on the
+Mac: Projects opens from the Tasks tab, the day's kind is the menu beside the
+date in Agenda, today's brief is the card at the top of Agenda (the weekly
+review opens from it), and "Why here?" is in the task editor under Project and
+Attention. A task row shows its context. The app syncs on launch, when
 it returns to the foreground, and every two minutes while active; after each
 sync it reloads the widget timelines.
 
