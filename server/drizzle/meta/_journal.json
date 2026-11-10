@@ -43,6 +43,13 @@
       "when": 1794261280027,
       "tag": "0005_brown_starjammers",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794288396669,
+      "tag": "0006_conscious_magdalene",
+      "breakpoints": true
     }
   ]
 }

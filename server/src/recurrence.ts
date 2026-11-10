@@ -1,5 +1,5 @@
 import { dateFromDayNumber, dayNumber, localDate, localParts, weekdayOf, zonedToUtc } from '@florida/scheduler'
-import type { DeadlineType, Priority, TaskContext } from '@florida/scheduler'
+import type { Attention, DeadlineType, Priority, TaskContext } from '@florida/scheduler'
 import { z } from 'zod'
 import { calendarDate, formatCalendarDate, parseCalendarDate, timeZone } from './validation.js'
 
@@ -39,6 +39,8 @@ export interface RecurringTaskTemplate {
   startAt: string | null
   scheduleId: string | null
   context: TaskContext
+  projectId: string | null
+  attention: Attention | null
   pinnedStart: string | null
 }
 

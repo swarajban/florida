@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from '../src/app.js'
 import { ChangeBus } from '../src/changes.js'
 import type { Db } from '../src/db/client.js'
-import { calendars, events, googleAccounts, tasks } from '../src/db/schema.js'
+import { briefs, calendars, events, googleAccounts, tasks } from '../src/db/schema.js'
 import { runScheduling } from '../src/scheduling.js'
 import { seed } from '../src/seed.js'
 import { createTestDb } from './db.js'
@@ -157,14 +157,21 @@ describe('transport and auth', () => {
     const body = await rpc('tools/list')
     const tools = (body.result as { tools: { name: string; inputSchema: { type: string; properties?: object } }[] }).tools
     expect(tools.map((t) => t.name).sort()).toEqual([
+      'clear_day',
       'complete_task',
+      'create_project',
       'create_task',
+      'delete_project',
       'delete_task',
       'get_agenda',
+      'get_brief',
       'get_task',
       'list_categories',
+      'list_projects',
       'list_tasks',
       'run_scheduler',
+      'set_day',
+      'update_project',
       'update_task',
     ])
     const create = tools.find((t) => t.name === 'create_task')
@@ -407,6 +414,164 @@ describe('get_agenda', () => {
     const zone = await call('get_agenda', { timeZone: 'Mars/Olympus' })
     expect(zone.isError).toBe(true)
     expect(zone.content[0]?.text).toContain('time zone')
+  })
+})
+
+describe('project and day tools', () => {
+  // The day after the agenda fixtures: an office day whose only event is all-day.
+  const tuesday = dateFromDayNumber(dayNumber(upcomingMonday()) + 1)
+  const wednesday = dateFromDayNumber(dayNumber(tuesday) + 1)
+  const gymEnd = at(tuesday, 10 * 60 + 15).toISOString()
+
+  interface ProjectView {
+    id: string
+    name: string
+    status: string
+    parallel: boolean
+    openTasks?: number
+  }
+  interface Agenda {
+    taskBlocks: { taskId: string; startAt: string; endAt: string; lane: number | null; projectId: string | null }[]
+    projectTime: { projectId: string; project: string; startAt: string; endAt: string; lane: number | null }[]
+    commitments: { name: string; startAt: string; endAt: string }[]
+    dayOverride: { kind: string; note: string | null } | null
+  }
+  const agenda = (date: LocalDate) => data<Agenda>('get_agenda', { date: ymd(date), timeZone: LA })
+  const mine = (out: Agenda) => out.taskBlocks.filter((b) => b.taskId === 'mcp-a' || b.taskId === 'mcp-b')
+  let billingId = ''
+
+  it('create_project generates an id, reschedules and notifies clients; an unknown category is a tool error', async () => {
+    const before = notices
+    const atlas = await data<{ project: ProjectView; scheduling: object }>('create_project', {
+      id: 'mcp-atlas',
+      name: 'Atlas',
+      parallel: true,
+      nextStep: 'Wire the lanes',
+    })
+    expect(atlas.project).toMatchObject({ id: 'mcp-atlas', name: 'Atlas', status: 'active', parallel: true, nextStep: 'Wire the lanes', weeklyMinutes: null })
+    expect(Object.keys(atlas.scheduling)).toEqual(['unscheduled', 'late'])
+    expect(notices).toBe(before + 1)
+
+    const billing = await data<{ project: ProjectView }>('create_project', { name: 'Billing', parallel: true })
+    billingId = billing.project.id
+    expect(billingId).toMatch(/^[0-9a-f-]{36}$/)
+
+    const bad = await call('create_project', { name: 'X', categoryId: 'nope' })
+    expect(bad.isError).toBe(true)
+    expect(bad.content[0]?.text).toBe('unknown categoryId nope')
+    expect((await call('create_project', { name: 'X', status: 'paused' })).isError).toBe(true)
+  })
+
+  it('get_agenda shows two parallel projects side by side in lanes, after the gym', async () => {
+    const task = { categoryId: 'inbox', durationMinutes: 60, priority: 'asap', startAt: at(tuesday, 0).toISOString() }
+    await data('create_task', { ...task, id: 'mcp-a', title: 'Atlas migration', projectId: 'mcp-atlas' })
+    await data('create_task', { ...task, id: 'mcp-b', title: 'Billing export', projectId: billingId })
+    const unknown = await call('create_task', { ...task, title: 'x', projectId: 'nope' })
+    expect(unknown.content[0]?.text).toBe('unknown projectId nope')
+
+    const out = await agenda(tuesday)
+    expect(out.dayOverride).toBeNull()
+    expect(out.commitments).toEqual([{ name: 'Gym', startAt: at(tuesday, 9 * 60).toISOString(), endAt: gymEnd }])
+    const blocks = mine(out)
+    expect(blocks.map((b) => [b.taskId, b.lane, b.projectId])).toEqual([
+      ['mcp-a', 0, 'mcp-atlas'],
+      ['mcp-b', 1, billingId],
+    ])
+    expect(blocks[1]?.startAt).toBe(blocks[0]?.startAt)
+    expect(blocks[0]!.startAt >= gymEnd).toBe(true)
+  })
+
+  it('list_projects counts open tasks and filters by status; update_project takes a project out of the plan and back', async () => {
+    const all = await data<{ projects: ProjectView[] }>('list_projects')
+    expect(all.projects.map((p) => [p.name, p.openTasks])).toEqual([
+      ['Atlas', 1],
+      ['Billing', 1],
+    ])
+
+    const held = await data<{ project: ProjectView }>('update_project', { id: 'mcp-atlas', status: 'on_hold' })
+    // The fields the update does not name are kept.
+    expect(held.project).toMatchObject({ status: 'on_hold', parallel: true, nextStep: 'Wire the lanes' })
+    expect((await data<{ projects: ProjectView[] }>('list_projects', { status: 'active' })).projects.map((p) => p.name)).toEqual(['Billing'])
+    expect((await data<{ projects: ProjectView[] }>('list_projects', { status: 'on_hold' })).projects.map((p) => p.name)).toEqual(['Atlas'])
+    expect((await data<{ task: TaskView }>('get_task', { id: 'mcp-a' })).task.placements).toEqual([])
+    expect((await data<{ task: TaskView }>('get_task', { id: 'mcp-b' })).task.placements).toHaveLength(1)
+
+    await data('update_project', { id: 'mcp-atlas', status: 'active', nextStep: null })
+    expect((await data<{ task: TaskView }>('get_task', { id: 'mcp-a' })).task.placements).toHaveLength(1)
+    const never = await call('update_project', { id: 'never-existed', status: 'done' })
+    expect(never.isError).toBe(true)
+    expect(never.content[0]?.text).toBe('project never-existed not found')
+  })
+
+  it('a weekly budget shows up in get_agenda as project time, clear of the gym', async () => {
+    // Ten hours is more than Monday holds, so some of next week's has to land on Tuesday.
+    await data('create_project', { id: 'mcp-budget', name: 'Budget', weeklyMinutes: 600 })
+    const out = await agenda(tuesday)
+    expect(out.projectTime.length).toBeGreaterThan(0)
+    for (const block of out.projectTime) {
+      expect(block).toMatchObject({ projectId: 'mcp-budget', project: 'Budget', lane: null })
+      expect(block.startAt >= gymEnd).toBe(true)
+      for (const task of out.taskBlocks) expect(block.startAt >= task.endAt || block.endAt <= task.startAt).toBe(true)
+    }
+    // Project time is not a task: nothing reports it as unscheduled or late, and no task list has it.
+    const run = await data<{ scheduling: { placements: { taskId: string }[]; unscheduled: { taskId: string }[]; late: { taskId: string }[] } }>('run_scheduler')
+    for (const list of [run.scheduling.placements, run.scheduling.unscheduled, run.scheduling.late]) {
+      expect(list.filter((entry) => entry.taskId.startsWith('project-time:'))).toEqual([])
+    }
+  })
+
+  it('set_day off clears the date, with its gym, and clear_day puts it back', async () => {
+    const before = notices
+    const set = await data<{ dayOverride: { date: string; kind: string; note: string | null } }>('set_day', {
+      date: ymd(tuesday),
+      kind: 'off',
+      note: 'Dentist',
+    })
+    expect(set.dayOverride).toMatchObject({ date: ymd(tuesday), kind: 'off', note: 'Dentist' })
+    expect(notices).toBe(before + 1)
+    const off = await agenda(tuesday)
+    expect(off).toMatchObject({ dayOverride: { kind: 'off', note: 'Dentist' }, commitments: [], taskBlocks: [], projectTime: [] })
+    // The tasks move to the next day, and so does the office-morning gym session.
+    const next = await agenda(wednesday)
+    expect(mine(next).map((b) => b.taskId)).toEqual(['mcp-a', 'mcp-b'])
+    expect(next.commitments).toEqual([{ name: 'Gym', startAt: at(wednesday, 9 * 60).toISOString(), endAt: at(wednesday, 10 * 60 + 15).toISOString() }])
+
+    expect(await data('clear_day', { date: ymd(tuesday) })).toMatchObject({ cleared: ymd(tuesday) })
+    const back = await agenda(tuesday)
+    expect(back.dayOverride).toBeNull()
+    expect(back.commitments).toHaveLength(1)
+
+    expect((await call('set_day', { date: '2026-02-30', kind: 'off' })).isError).toBe(true)
+    expect((await call('set_day', { date: ymd(tuesday), kind: 'vacation' })).isError).toBe(true)
+    const never = await call('clear_day', { date: '2031-01-01' })
+    expect(never.isError).toBe(true)
+    expect(never.content[0]?.text).toBe('day override 2031-01-01 not found')
+  })
+
+  it('delete_project tombstones the project and leaves its tasks, without a project', async () => {
+    expect(await data('delete_project', { id: 'mcp-atlas' })).toMatchObject({ deleted: 'mcp-atlas' })
+    await data('delete_project', { id: 'mcp-budget' })
+    expect((await data<{ projects: ProjectView[] }>('list_projects')).projects.map((p) => p.name)).toEqual(['Billing'])
+    const [row] = await db.select().from(tasks).where(eq(tasks.id, 'mcp-a'))
+    expect(row).toMatchObject({ projectId: null, deletedAt: null })
+    expect((await agenda(tuesday)).projectTime).toEqual([])
+    const never = await call('delete_project', { id: 'never-existed' })
+    expect(never.isError).toBe(true)
+    expect(never.content[0]?.text).toBe('project never-existed not found')
+  })
+
+  it('get_brief returns the newest brief of each kind', async () => {
+    expect(await data('get_brief')).toEqual({ briefs: [] })
+    await db.insert(briefs).values([
+      { id: 'b-old', kind: 'daily', date: '2026-11-09', headline: 'Yesterday', body: 'Old news' },
+      { id: 'b-new', kind: 'daily', date: '2026-11-10', headline: 'Two projects side by side', body: 'Atlas and Billing from 10:15.' },
+      { id: 'b-week', kind: 'weekly', date: '2026-11-08', headline: 'A full week', body: 'Four gym sessions.' },
+    ])
+    const out = await data<{ briefs: { id: string; kind: string; headline: string }[] }>('get_brief')
+    expect(out.briefs.map((b) => [b.id, b.kind, b.headline])).toEqual([
+      ['b-new', 'daily', 'Two projects side by side'],
+      ['b-week', 'weekly', 'A full week'],
+    ])
   })
 })
 

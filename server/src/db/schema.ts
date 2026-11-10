@@ -1,4 +1,4 @@
-import type { DeadlineType, Priority, TaskContext, UnscheduledReason } from '@florida/scheduler'
+import type { Attention, DayCapacity, DayKind, DeadlineType, MissedCommitment, Priority, RoutineSlot, TaskContext, UnscheduledReason } from '@florida/scheduler'
 import { sql } from 'drizzle-orm'
 import { boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core'
 import type { RecurrenceRule, RecurringTaskTemplate } from '../recurrence.js'
@@ -22,6 +22,10 @@ export const settings = pgTable('settings', {
  *
  * An `optional` block is time the user might work but does not count on (a weekday evening).
  * The plan never uses it; the scheduler only suggests what to do there (`optionalPlacements`).
+ *
+ * A block that allows nothing is a commitment (the gym): nothing is planned over its occurrences,
+ * which the scheduler returns as `routineOccurrences`. Its `alternates` add one more occurrence
+ * a week, in the first of those slots the calendar leaves free.
  */
 export const routineBlocks = pgTable('routine_blocks', {
   id: text('id').primaryKey(),
@@ -31,6 +35,20 @@ export const routineBlocks = pgTable('routine_blocks', {
   end: text('end_time').notNull(),
   allows: jsonb('allows').$type<TaskContext[]>().notNull(),
   optional: boolean('optional').notNull().default(false),
+  alternates: jsonb('alternates').$type<RoutineSlot[]>(),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+  deletedAt: ts('deleted_at'),
+})
+
+/**
+ * One date that departs from the weekly routine: worked from home, at the office, or not at all.
+ * Keyed by its local date in the settings time zone, "YYYY-MM-DD".
+ */
+export const dayOverrides = pgTable('day_overrides', {
+  date: text('date').primaryKey(),
+  kind: text('kind').$type<DayKind>().notNull(),
+  note: text('note'),
   createdAt: ts('created_at').notNull().defaultNow(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
   deletedAt: ts('deleted_at'),
@@ -69,6 +87,30 @@ export const categories = pgTable('categories', {
   deletedAt: ts('deleted_at'),
 })
 
+export type ProjectStatus = 'thinking' | 'active' | 'on_hold' | 'done'
+
+/**
+ * Ongoing work that is more than one task: an app being built, a migration. Only `active`
+ * projects are scheduled: tasks of any other status wait, unplaced. A `parallel` project mostly
+ * runs itself (an agent does the work), so its tasks default to shared attention and may sit
+ * beside other projects' in the plan. `weeklyMinutes` is time to reserve each week even when
+ * the project has no tasks; the scheduler fills what its tasks do not cover with project time.
+ */
+export const projects = pgTable('projects', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  status: text('status').$type<ProjectStatus>().notNull().default('active'),
+  categoryId: text('category_id').references(() => categories.id),
+  notes: text('notes'),
+  nextStep: text('next_step'),
+  parallel: boolean('parallel').notNull().default(false),
+  weeklyMinutes: integer('weekly_minutes'),
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+  deletedAt: ts('deleted_at'),
+})
+
 /** Templates survive completed occurrences. Only actual occurrences are synced as tasks. */
 export const taskRecurrences = pgTable('task_recurrences', {
   id: text('id').primaryKey(),
@@ -98,6 +140,9 @@ export const tasks = pgTable(
     startAt: ts('start_at'),
     scheduleId: text('schedule_id').references(() => schedules.id),
     context: text('context').$type<TaskContext>().notNull().default('computer'),
+    projectId: text('project_id').references(() => projects.id),
+    /** Null follows the project: shared when it is `parallel`, otherwise full. */
+    attention: text('attention').$type<Attention>(),
     pinnedStart: ts('pinned_start'),
     recurrence: jsonb('recurrence').$type<RecurrenceRule>(),
     recurrenceSeriesId: text('recurrence_series_id').references(() => taskRecurrences.id),
@@ -125,8 +170,67 @@ export const placements = pgTable('placements', {
   startAt: ts('start_at').notNull(),
   endAt: ts('end_at').notNull(),
   pinned: boolean('pinned').notNull(),
+  /** Shared-attention work only: which side-by-side lane the block is in, from 0. */
+  lane: integer('lane'),
   computedAt: ts('computed_at').notNull(),
 })
+
+/**
+ * Scheduler output: time reserved for a project beyond its tasks, from its weekly budget. Blocks
+ * that have not ended are replaced on every run. Ended blocks stay for two weeks: there is no
+ * task behind project time to mark done, so a past block is what counts as time spent.
+ */
+export const projectPlacements = pgTable('project_placements', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  /** Local date of the Sunday starting the week whose budget this block draws on. */
+  weekOf: text('week_of').notNull(),
+  startAt: ts('start_at').notNull(),
+  endAt: ts('end_at').notNull(),
+  lane: integer('lane'),
+  computedAt: ts('computed_at').notNull(),
+})
+
+/** Scheduler output: occurrences of commitments (the gym). Derived data, replaced with `placements`. */
+export const routineOccurrences = pgTable('routine_occurrences', {
+  id: text('id').primaryKey(),
+  /** The commitment's routine block; not a foreign key, since the rows are replaced on every run. */
+  blockId: text('block_id').notNull(),
+  startAt: ts('start_at').notNull(),
+  endAt: ts('end_at').notNull(),
+  computedAt: ts('computed_at').notNull(),
+})
+
+/** Scheduler output that is one value, not rows: one row, replaced on every run. */
+export const planSummary = pgTable('plan_summary', {
+  id: text('id').primaryKey(),
+  missed: jsonb('missed').$type<MissedCommitment[]>().notNull(),
+  capacity: jsonb('capacity').$type<DayCapacity[]>().notNull(),
+  computedAt: ts('computed_at').notNull(),
+})
+
+export type BriefKind = 'daily' | 'weekly'
+
+/**
+ * What Claude wrote about a day (the morning brief) or a week (the Sunday review). One row per
+ * kind and local date; regenerating replaces it. Never on the path of a keystroke or a placement.
+ */
+export const briefs = pgTable(
+  'briefs',
+  {
+    id: text('id').primaryKey(),
+    kind: text('kind').$type<BriefKind>().notNull(),
+    /** The local day a daily brief is for; the Sunday starting the week a weekly review covers. */
+    date: text('date').notNull(),
+    headline: text('headline').notNull(),
+    body: text('body').notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('briefs_kind_date_idx').on(t.kind, t.date)],
+)
 
 /**
  * Scheduler output: what to do in an optional routine block if the user chooses to work then.
@@ -242,6 +346,10 @@ export const events = pgTable(
 
 export type SettingsRow = typeof settings.$inferSelect
 export type RoutineBlockRow = typeof routineBlocks.$inferSelect
+export type DayOverrideRow = typeof dayOverrides.$inferSelect
+export type ProjectRow = typeof projects.$inferSelect
+export type ProjectPlacementRow = typeof projectPlacements.$inferSelect
+export type BriefRow = typeof briefs.$inferSelect
 export type ScheduleRow = typeof schedules.$inferSelect
 export type CategoryRow = typeof categories.$inferSelect
 export type TaskRow = typeof tasks.$inferSelect

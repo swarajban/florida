@@ -1,5 +1,15 @@
 import type { Hono } from 'hono'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { isoDate, localDate } from '@florida/scheduler'
+import {
+  BRIEF_JSON_SCHEMA,
+  ClaudeBriefWriter,
+  DAILY_SYSTEM,
+  EXPLAIN_SYSTEM,
+  EXPLANATION_JSON_SCHEMA,
+  WEEKLY_SYSTEM,
+} from '../src/ai/brief.js'
+import type { BriefWriter, PlacementExplainer } from '../src/ai/brief.js'
 import { ClaudeError } from '../src/ai/claude.js'
 import { ClaudeTaskParser, TASK_DRAFT_JSON_SCHEMA, buildPrompt } from '../src/ai/parse-task.js'
 import type { ParseTaskContext, TaskDraft, TaskParser } from '../src/ai/parse-task.js'
@@ -10,13 +20,16 @@ import {
 } from '../src/ai/suggest-category.js'
 import type { CategorySuggester } from '../src/ai/suggest-category.js'
 import { createApp } from '../src/app.js'
+import { dailyFacts, ensureBriefs, explainFacts, generateBrief, latestBriefs, weeklyFacts } from '../src/briefs.js'
 import { loadConfig } from '../src/config.js'
 import type { Config } from '../src/config.js'
-import { tasks } from '../src/db/schema.js'
+import { dayOverrides, projects, tasks } from '../src/db/schema.js'
 import type { Db } from '../src/db/client.js'
 import type { CalendarSyncService } from '../src/google/sync.js'
+import { runScheduling } from '../src/scheduling.js'
 import { seed } from '../src/seed.js'
 import { createTestDb } from './db.js'
+import { FakeSync, testConfig } from './fixtures.js'
 
 const NOW = new Date('2026-11-08T17:00:00Z') // Sunday 09:00 in Los Angeles
 const ctx: ParseTaskContext = {
@@ -39,6 +52,9 @@ const modelDraft: TaskDraft = {
   startAt: null,
   pinnedStart: null,
   categoryId: 'work-eng',
+  context: 'computer',
+  projectId: null,
+  attention: null,
   rationale: 'Friday deadline, two hours, high priority, engineering work.',
 }
 
@@ -135,6 +151,28 @@ describe('ClaudeTaskParser', () => {
 
     const noDate = fakeApi({ body: messageWith({ ...modelDraft, dueAt: null, deadlineType: 'hard' }) })
     expect((await new ClaudeTaskParser(config, noDate.fetch).parse('x', ctx)).deadlineType).toBe('none')
+  })
+
+  it('offers the projects it was given, keeps one of them and drops any other projectId', async () => {
+    const withProjects: ParseTaskContext = {
+      ...ctx,
+      projects: [
+        { id: 'atlas', name: 'Atlas', parallel: true },
+        { id: 'taxes', name: 'Taxes', parallel: false },
+      ],
+    }
+    const known = fakeApi({ body: messageWith({ ...modelDraft, projectId: 'atlas', attention: 'shared' }) })
+    expect(await new ClaudeTaskParser(config, known.fetch).parse('x', withProjects)).toMatchObject({ projectId: 'atlas', attention: 'shared' })
+    const system = (JSON.parse(known.calls[0]!.init.body as string) as { system: string }).system
+    expect(system).toContain('- id "atlas": Atlas (parallel: an agent does most of the work)')
+    // A project that is not parallel is listed by name alone.
+    expect(system.endsWith('- id "taxes": Taxes')).toBe(true)
+
+    const unknown = fakeApi({ body: messageWith({ ...modelDraft, projectId: 'made-up', attention: 'full' }) })
+    expect(await new ClaudeTaskParser(config, unknown.fetch).parse('x', withProjects)).toMatchObject({ projectId: null, attention: 'full' })
+    // Without projects to choose from, none can be named.
+    const none = fakeApi({ body: messageWith({ ...modelDraft, projectId: 'atlas' }) })
+    expect((await new ClaudeTaskParser(config, none.fetch).parse('x', ctx)).projectId).toBeNull()
   })
 
   it('rejects a draft that violates the schema', async () => {
@@ -348,6 +386,280 @@ describe('POST /api/ai/parse-task', () => {
         examples: ['chore 9', 'chore 8', 'chore 7', 'chore 6', 'chore 5', 'chore 4', 'chore 3', 'chore 2'],
       },
     ])
+  })
+
+  it('gives the parser the active projects in their order, and no project that is waiting, done or deleted', async () => {
+    expect(seen.at(-1)!.ctx.projects).toEqual([])
+    await db.insert(projects).values([
+      { id: 'p-billing', name: 'Billing', sortOrder: 2 },
+      { id: 'p-atlas', name: 'Atlas', parallel: true, sortOrder: 1 },
+      { id: 'p-agents', name: 'Agents', sortOrder: 1 },
+      { id: 'p-garden', name: 'Garden', status: 'on_hold' },
+      { id: 'p-idea', name: 'Idea', status: 'thinking' },
+      { id: 'p-shipped', name: 'Shipped', status: 'done' },
+      { id: 'p-gone', name: 'Gone', deletedAt: NOW },
+    ])
+    const res = await withAi.request('/api/ai/parse-task', { method: 'POST', headers: AUTH, body: JSON.stringify({ text: 'x' }) })
+    expect(res.status).toBe(200)
+    expect(seen.at(-1)!.ctx.projects).toEqual([
+      { id: 'p-agents', name: 'Agents', parallel: false },
+      { id: 'p-atlas', name: 'Atlas', parallel: true },
+      { id: 'p-billing', name: 'Billing', parallel: false },
+    ])
+  })
+})
+
+describe('ClaudeBriefWriter', () => {
+  const config = { apiKey: 'sk-test', model: 'claude-test-1' }
+  interface Sent {
+    system: string
+    max_tokens: number
+    messages: { role: string; content: string }[]
+    output_config: { format: { type: string; schema: unknown } }
+  }
+  const sent = (api: ReturnType<typeof fakeApi>): Sent => JSON.parse(api.calls[0]!.init.body as string) as Sent
+
+  it('sends the facts as JSON under the prompt of the brief\'s kind and returns the trimmed text', async () => {
+    const facts = { date: '2026-11-09', plan: [{ title: 'Atlas migration', lane: 0 }] }
+    const text = { headline: ' Two projects side by side this morning ', body: 'Atlas and Billing run together from 10.\nGym at 15:30.\n' }
+    const daily = fakeApi({ body: messageWith(text) })
+    expect(await new ClaudeBriefWriter(config, daily.fetch).write('daily', facts)).toEqual({
+      headline: 'Two projects side by side this morning',
+      body: 'Atlas and Billing run together from 10.\nGym at 15:30.',
+    })
+    expect(sent(daily).system).toBe(DAILY_SYSTEM)
+    expect(sent(daily).messages).toEqual([{ role: 'user', content: JSON.stringify(facts) }])
+    expect(sent(daily).output_config.format).toEqual({ type: 'json_schema', schema: BRIEF_JSON_SCHEMA })
+
+    const weekly = fakeApi({ body: messageWith(text) })
+    await new ClaudeBriefWriter(config, weekly.fetch).write('weekly', facts)
+    expect(sent(weekly).system).toBe(WEEKLY_SYSTEM)
+    expect(WEEKLY_SYSTEM).not.toBe(DAILY_SYSTEM)
+  })
+
+  it('explains a placement in a short answer', async () => {
+    const api = fakeApi({ body: messageWith({ explanation: ' It follows the UPS return, which is due first. ' }) })
+    expect(await new ClaudeBriefWriter(config, api.fetch).explain({ task: { title: 'Billing export' } })).toBe(
+      'It follows the UPS return, which is due first.',
+    )
+    expect(sent(api).system).toBe(EXPLAIN_SYSTEM)
+    expect(sent(api).max_tokens).toBe(400)
+    expect(sent(api).messages).toEqual([{ role: 'user', content: JSON.stringify({ task: { title: 'Billing export' } }) }])
+    expect(sent(api).output_config.format.schema).toEqual(EXPLANATION_JSON_SCHEMA)
+  })
+
+  it('wraps API failures in ClaudeError and rejects empty or malformed text', async () => {
+    const down = fakeApi({ status: 529, body: { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } } })
+    await expect(new ClaudeBriefWriter(config, down.fetch).write('daily', {})).rejects.toBeInstanceOf(ClaudeError)
+    await expect(new ClaudeBriefWriter(config, down.fetch).explain({})).rejects.toBeInstanceOf(ClaudeError)
+    const blank = fakeApi({ body: messageWith({ headline: '  ', body: 'x' }) })
+    await expect(new ClaudeBriefWriter(config, blank.fetch).write('daily', {})).rejects.toThrow()
+    const wrongKey = fakeApi({ body: messageWith({ reason: 'because' }) })
+    await expect(new ClaudeBriefWriter(config, wrongKey.fetch).explain({})).rejects.toThrow()
+  })
+})
+
+describe('briefs', () => {
+  const MONDAY = new Date('2026-11-09T17:00:00Z') // 09:00 in Los Angeles
+  let db: Db
+  let close: () => Promise<void>
+  const written: { kind: string; facts: { date?: string; weekOf?: string } }[] = []
+  const writer: BriefWriter = {
+    write: async (kind, facts) => {
+      written.push({ kind, facts: facts as { date?: string; weekOf?: string } })
+      return { headline: `${kind} ${written.length}`, body: 'Line one\nLine two' }
+    },
+  }
+
+  beforeAll(async () => {
+    ;({ db, close } = await createTestDb())
+    await seed(db)
+    await db.insert(projects).values([
+      { id: 'atlas', name: 'Atlas', status: 'active', parallel: true, weeklyMinutes: 120, nextStep: 'Wire the lanes' },
+      { id: 'billing', name: 'Billing', status: 'active', parallel: true },
+      { id: 'garden', name: 'Garden', status: 'on_hold' },
+    ])
+    const task = { categoryId: 'work', durationMinutes: 60, priority: 'medium', deadlineType: 'none' } as const
+    await db.insert(tasks).values([
+      { ...task, id: 'a', title: 'Atlas migration', projectId: 'atlas' },
+      { ...task, id: 'b', title: 'Billing export', projectId: 'billing' },
+      // Due Thursday 17:00 Pacific.
+      { ...task, id: 'c', title: 'Return UPS parcel', categoryId: 'personal', context: 'errand', deadlineType: 'hard', dueAt: new Date('2026-11-13T01:00:00Z') },
+      { ...task, id: 'd', title: 'Shipped it', projectId: 'atlas', completedAt: new Date('2026-11-09T16:30:00Z'), completedMinutes: 60 },
+      { ...task, id: 'e', title: 'Print badge', context: 'office' },
+    ])
+    await db.insert(dayOverrides).values({ date: '2026-11-12', kind: 'off', note: 'Dentist' })
+    await runScheduling(db, { HORIZON_DAYS: 28 }, MONDAY)
+  })
+
+  afterAll(() => close())
+
+  it('the daily facts are today\'s plan with its lanes, the gym and what is left of the day', async () => {
+    expect(await dailyFacts(db, MONDAY)).toMatchObject({
+      date: '2026-11-09',
+      weekday: 'Monday',
+      writtenAt: '09:00',
+      day: 'home',
+      // Thursday is off, so the week's other sessions are the office morning and Friday.
+      gym: {
+        today: [{ name: 'Gym', start: '15:30', end: '16:45' }],
+        restOfWeek: ['Tue 2026-11-10 09:00', 'Fri 2026-11-13 15:30'],
+        missedThisWeek: false,
+      },
+      meetings: [],
+      plan: [
+        { title: 'Return UPS parcel', deadline: 'hard', due: 'Thu 2026-11-12 17:00', start: '09:00', end: '10:00' },
+        { title: 'Atlas migration', project: 'Atlas', start: '10:00', end: '11:00', lane: 0 },
+        { title: 'Billing export', project: 'Billing', start: '10:00', end: '11:00', lane: 1 },
+      ],
+      // Atlas has its two hours this week: one finished task and one open one.
+      projectTime: [],
+      late: [],
+      unscheduled: [],
+      // 09:00–15:30 less the errand and the hour the two lanes share.
+      freeMinutesToday: { computer: 270, errand: 270, home: 270, office: 0 },
+    })
+    // The office task waits for Tuesday, so it is not in Monday's plan.
+    expect(JSON.stringify(await dailyFacts(db, MONDAY))).not.toContain('Print badge')
+    expect(await dailyFacts(db, new Date('2026-11-12T17:00:00Z'))).toMatchObject({ day: 'off', dayNote: 'Dentist', gym: { today: [] }, plan: [] })
+  })
+
+  it('the weekly facts count time per project and say whether the week is over', async () => {
+    const friday = await weeklyFacts(db, new Date('2026-11-13T22:00:00Z'))
+    expect(friday).toMatchObject({
+      weekOf: '2026-11-08',
+      weekIsOver: false,
+      projects: [
+        { name: 'Atlas', parallel: true, weeklyBudgetMinutes: 120, minutesSpent: 60, tasksCompleted: 1, openTasks: 1, nextStep: 'Wire the lanes' },
+        { name: 'Billing', weeklyBudgetMinutes: null, minutesSpent: 0, tasksCompleted: 0, openTasks: 1 },
+      ],
+      waiting: [{ name: 'Garden', status: 'on_hold' }],
+      completed: { count: 1, titles: ['Shipped it'] },
+      // Still open a day after it was due.
+      late: [{ title: 'Return UPS parcel', due: 'Thu 2026-11-12 17:00' }],
+    })
+    // Written on Sunday evening, the review is of the week that just ended.
+    expect(await weeklyFacts(db, new Date('2026-11-16T02:00:00Z'))).toMatchObject({ weekOf: '2026-11-08', weekIsOver: true, completed: { count: 1 } })
+    // On Monday it is of the new week, where nothing is finished yet.
+    expect(await weeklyFacts(db, new Date('2026-11-16T17:00:00Z'))).toMatchObject({ weekOf: '2026-11-15', weekIsOver: false, completed: { count: 0 } })
+  })
+
+  it('the facts behind a placement name what is planned ahead of the task and what runs beside it', async () => {
+    expect(await explainFacts(db, 'b', MONDAY)).toMatchObject({
+      now: 'Mon 2026-11-09 09:00',
+      task: { title: 'Billing export', project: 'Billing', projectStatus: 'active', context: 'computer', attention: 'shared', durationMinutes: 60 },
+      planned: [{ start: 'Mon 2026-11-09 10:00', end: '11:00', lane: 1 }],
+      unscheduled: null,
+      plannedAheadOfIt: { count: 1, first: [{ title: 'Return UPS parcel', deadline: 'hard' }] },
+      runsBeside: ['Atlas migration'],
+    })
+    const office = await explainFacts(db, 'e', MONDAY)
+    expect(office.routineHoursAllowingItsContext.map((b) => b.days)).toEqual([['Tuesday'], ['Wednesday']])
+    expect(office.planned[0]?.start).toBe('Tue 2026-11-10 10:15')
+    await expect(explainFacts(db, 'never-existed', MONDAY)).rejects.toThrow('task never-existed not found')
+  })
+
+  it('writes the daily brief once from 08:30 and the weekly review once on Sunday from 18:00', async () => {
+    expect(await ensureBriefs(db, writer, new Date('2026-11-09T16:29:00Z'))).toEqual([])
+    expect(await latestBriefs(db)).toEqual([])
+
+    const morning = await ensureBriefs(db, writer, new Date('2026-11-09T16:30:00Z'))
+    expect(morning).toMatchObject([{ kind: 'daily', date: '2026-11-09', headline: 'daily 1', body: 'Line one\nLine two' }])
+    expect(await ensureBriefs(db, writer, new Date('2026-11-09T19:00:00Z'))).toEqual([])
+    // Monday's weekday is not Sunday, however late it is.
+    expect(await ensureBriefs(db, writer, new Date('2026-11-10T07:30:00Z'))).toEqual([])
+    expect(written).toMatchObject([{ kind: 'daily', facts: { date: '2026-11-09' } }])
+
+    // Sunday 17:59 Pacific: the day's brief is due, the review is not.
+    const sunday = await ensureBriefs(db, writer, new Date('2026-11-16T01:59:00Z'))
+    expect(sunday.map((b) => [b.kind, b.date])).toEqual([['daily', '2026-11-15']])
+    const review = await ensureBriefs(db, writer, new Date('2026-11-16T02:00:00Z'))
+    expect(review.map((b) => [b.kind, b.date])).toEqual([['weekly', '2026-11-08']])
+    expect(written.at(-1)).toMatchObject({ kind: 'weekly', facts: { weekOf: '2026-11-08' } })
+    expect(await ensureBriefs(db, writer, new Date('2026-11-16T03:00:00Z'))).toEqual([])
+    expect(written).toHaveLength(3)
+
+    // Asking again rewrites the same brief in place; sync sends the newest of each kind.
+    const rewritten = await generateBrief(db, writer, 'daily', new Date('2026-11-16T04:00:00Z'))
+    expect(rewritten).toMatchObject({ id: sunday[0]!.id, date: '2026-11-15', headline: 'daily 4', createdAt: sunday[0]!.createdAt })
+    expect(rewritten.updatedAt.getTime()).toBeGreaterThan(sunday[0]!.updatedAt.getTime())
+    expect((await latestBriefs(db)).map((b) => [b.kind, b.date, b.headline])).toEqual([
+      ['daily', '2026-11-15', 'daily 4'],
+      ['weekly', '2026-11-08', 'weekly 3'],
+    ])
+  })
+})
+
+describe('POST /api/ai/brief and /api/ai/explain', () => {
+  const AUTH = { authorization: `Bearer ${testConfig.API_TOKEN}`, 'content-type': 'application/json' }
+  let db: Db
+  let close: () => Promise<void>
+  let app: Hono
+  let without: Hono
+  let failing: Hono
+  const explained: { task: { title: string } }[] = []
+  const writer: BriefWriter & PlacementExplainer = {
+    write: async (kind) => ({ headline: `The ${kind} brief`, body: 'Line one\nLine two' }),
+    explain: async (facts) => {
+      explained.push(facts as { task: { title: string } })
+      return 'It is the only thing planned.'
+    },
+  }
+  const post = (target: Hono, path: string, body: unknown) => target.request(path, { method: 'POST', headers: AUTH, body: JSON.stringify(body) })
+
+  beforeAll(async () => {
+    ;({ db, close } = await createTestDb())
+    await seed(db)
+    await db.insert(tasks).values({ id: 't1', categoryId: 'work', title: 'Write the report', durationMinutes: 60, priority: 'medium', deadlineType: 'none' })
+    const deps = { db, config: testConfig, sync: new FakeSync(), reschedule: () => runScheduling(db, testConfig) }
+    await deps.reschedule()
+    app = createApp({ ...deps, briefWriter: writer })
+    without = createApp(deps)
+    const broken = () => Promise.reject(new ClaudeError('overloaded'))
+    failing = createApp({ ...deps, briefWriter: { write: broken, explain: broken } })
+  })
+
+  afterAll(() => close())
+
+  it('answer 503 when AI is not configured and 502 when the model fails', async () => {
+    for (const [path, body] of [['/api/ai/brief', { kind: 'daily' }], ['/api/ai/explain', { taskId: 't1' }]] as const) {
+      const res = await post(without, path, body)
+      expect(res.status).toBe(503)
+      expect(await res.json()).toEqual({ error: 'ai is not configured (set ANTHROPIC_API_KEY)' })
+      expect((await post(failing, path, body)).status).toBe(502)
+    }
+    const synced = await without.request('/api/sync', { headers: AUTH })
+    expect(((await synced.json()) as { briefs: unknown[] }).briefs).toEqual([])
+  })
+
+  it('writes the brief asked for, stores it and sends it with every sync', async () => {
+    expect((await post(app, '/api/ai/brief', { kind: 'monthly' })).status).toBe(400)
+    expect((await post(app, '/api/ai/brief', {})).status).toBe(400)
+
+    const res = await post(app, '/api/ai/brief', { kind: 'daily' })
+    expect(res.status).toBe(200)
+    const { brief } = (await res.json()) as { brief: { id: string; date: string } }
+    expect(brief).toMatchObject({ kind: 'daily', headline: 'The daily brief', body: 'Line one\nLine two' })
+    expect(brief.date).toBe(isoDate(localDate(Date.now(), 'America/Los_Angeles')))
+
+    const weekly = await post(app, '/api/ai/brief', { kind: 'weekly' })
+    expect(((await weekly.json()) as { brief: unknown }).brief).toMatchObject({ kind: 'weekly', headline: 'The weekly brief' })
+
+    // A second request rewrites today's brief instead of adding one.
+    const again = await post(app, '/api/ai/brief', { kind: 'daily' })
+    expect(((await again.json()) as { brief: { id: string } }).brief.id).toBe(brief.id)
+    const cursor = ((await (await app.request('/api/sync', { headers: AUTH })).json()) as { cursor: string }).cursor
+    const synced = await app.request(`/api/sync?since=${encodeURIComponent(cursor)}`, { headers: AUTH })
+    expect(((await synced.json()) as { briefs: { kind: string }[] }).briefs.map((b) => b.kind)).toEqual(['daily', 'weekly'])
+  })
+
+  it('explains where a task is planned, and answers 404 for a task it does not know', async () => {
+    const res = await post(app, '/api/ai/explain', { taskId: 't1' })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ explanation: 'It is the only thing planned.' })
+    expect(explained).toMatchObject([{ task: { title: 'Write the report' } }])
+    expect((await post(app, '/api/ai/explain', { taskId: 'never-existed' })).status).toBe(404)
+    expect((await post(app, '/api/ai/explain', {})).status).toBe(400)
   })
 })
 

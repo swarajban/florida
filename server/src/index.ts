@@ -1,7 +1,9 @@
 import { serve } from '@hono/node-server'
+import { ClaudeBriefWriter } from './ai/brief.js'
 import { ClaudeTaskParser } from './ai/parse-task.js'
 import { ClaudeCategorySuggester } from './ai/suggest-category.js'
 import { createApp } from './app.js'
+import { ensureBriefs } from './briefs.js'
 import { ChangeBus } from './changes.js'
 import { loadConfig } from './config.js'
 import { createDb } from './db/client.js'
@@ -16,15 +18,23 @@ const changes = new ChangeBus()
 const reschedule = () => runScheduling(db, config)
 const claude =
   config.ANTHROPIC_API_KEY === undefined ? undefined : { apiKey: config.ANTHROPIC_API_KEY, model: config.ANTHROPIC_MODEL }
+const briefWriter = claude === undefined ? undefined : new ClaudeBriefWriter(claude)
 const aiDeps =
-  claude === undefined ? {} : { ai: new ClaudeTaskParser(claude), categorySuggester: new ClaudeCategorySuggester(claude) }
+  claude === undefined || briefWriter === undefined
+    ? {}
+    : { ai: new ClaudeTaskParser(claude), categorySuggester: new ClaudeCategorySuggester(claude), briefWriter }
 const app = createApp({ db, config, sync, reschedule, changes, ...aiDeps })
 if (claude === undefined) console.log('[server] ANTHROPIC_API_KEY not set; /api/ai/* disabled')
 
 const server = serve({ fetch: app.fetch, port: config.PORT }, (info) => {
   console.log(`[server] listening on port ${info.port}, public URL ${config.PUBLIC_URL}`)
 })
-const stopJobs = startJobs({ sync, reschedule, changes })
+const stopJobs = startJobs({
+  sync,
+  reschedule,
+  changes,
+  ...(briefWriter === undefined ? {} : { ensureBriefs: () => ensureBriefs(db, briefWriter) }),
+})
 
 let shuttingDown = false
 function shutdown(signal: string): void {

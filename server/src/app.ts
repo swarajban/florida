@@ -8,21 +8,28 @@ import { html } from 'hono/html'
 import { streamSSE } from 'hono/streaming'
 import { HTTPException } from 'hono/http-exception'
 import { ZodError, z } from 'zod'
+import type { BriefWriter, PlacementExplainer } from './ai/brief.js'
 import { ClaudeError } from './ai/claude.js'
 import type { TaskParser } from './ai/parse-task.js'
 import type { CategorySuggester } from './ai/suggest-category.js'
+import { explainPlacement, generateBrief, latestBriefs } from './briefs.js'
 import { ChangeBus } from './changes.js'
 import type { Config } from './config.js'
 import type { Db } from './db/client.js'
 import { INBOX_CATEGORY_ID, SETTINGS_ID, categoriesWithExamples, defaultTimeZone, scheduleExists } from './db/queries.js'
 import {
   calendars,
+  categories,
+  dayOverrides,
   events,
   googleAccounts,
   optionalPlacements,
   placements,
-  categories,
+  planSummary,
+  projectPlacements,
+  projects,
   routineBlocks,
+  routineOccurrences,
   schedules,
   settings,
   tasks,
@@ -34,6 +41,16 @@ import { GoogleApiError, GoogleTokenError, authorizationUrl, exchangeCode } from
 import type { CalendarSyncService } from './google/sync.js'
 import { mountMcp } from './mcp.js'
 import {
+  clearDayOverride,
+  dayOverrideBody,
+  patchProject,
+  projectBody,
+  projectPatch,
+  setDayOverride,
+  softDeleteProject,
+  upsertProject,
+} from './projects.js'
+import {
   lockTaskRecurrences,
   moveRecurringTaskCategory,
   patchTask,
@@ -43,7 +60,7 @@ import {
   taskPatch,
   upsertTask,
 } from './tasks.js'
-import { badRequest, clock, isoInstant, notFound, timeZone } from './validation.js'
+import { badRequest, calendarDate, clock, isoInstant, notFound, timeZone } from './validation.js'
 
 export interface AppDeps {
   db: Db
@@ -56,6 +73,8 @@ export interface AppDeps {
   ai?: TaskParser
   /** Category suggestions (Claude). When absent, `/api/ai/suggest-category` answers 503. */
   categorySuggester?: CategorySuggester
+  /** Daily briefs, weekly reviews and placement explanations (Claude). When absent, those routes answer 503. */
+  briefWriter?: BriefWriter & PlacementExplainer
   /** Delay before a webhook-triggered calendar sync runs; pings within it coalesce. Default 2 s. */
   webhookDebounceMs?: number
   /** Interval between SSE keep-alive comments. Default 25 s. */
@@ -108,8 +127,23 @@ const routineBlockBody = z
     allows: z.array(taskContext),
     /** Suggested, never planned (an evening). Omitted by clients that predate it: the stored value stays. */
     optional: z.boolean().optional(),
+    /**
+     * Commitments only: one more occurrence a week, in the first slot the calendar leaves free.
+     * Omitted keeps the stored value; null clears it.
+     */
+    alternates: z
+      .array(
+        z
+          .object({ day: z.number().int().min(0).max(6), start: clock, end: clock })
+          .refine((s) => s.start < s.end, 'end must be after start'),
+      )
+      .nullish(),
   })
   .refine((b) => b.start < b.end, 'end must be after start')
+
+const briefBody = z.object({ kind: z.enum(['daily', 'weekly']) })
+
+const explainBody = z.object({ taskId: z.string().min(1) })
 
 const settingsBody = z.object({ timeZone })
 
@@ -219,6 +253,8 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
     const routineBlockRows = await db.select().from(routineBlocks).where(changedAfter(routineBlocks.updatedAt))
     const scheduleRows = await db.select().from(schedules).where(changedAfter(schedules.updatedAt))
     const categoryRows = await db.select().from(categories).where(changedAfter(categories.updatedAt))
+    const projectRows = await db.select().from(projects).where(changedAfter(projects.updatedAt))
+    const dayOverrideRows = await db.select().from(dayOverrides).where(changedAfter(dayOverrides.updatedAt))
     const taskRows = await db.select().from(tasks).where(changedAfter(tasks.updatedAt))
     // Events of deselected calendars stay server-side; their tombstones still go out so clients drop them.
     const eventRows = await db
@@ -230,6 +266,10 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
     const placementRows = await db.select().from(placements)
     const optionalPlacementRows = await db.select().from(optionalPlacements)
     const unscheduledRows = await db.select().from(unscheduled)
+    const projectPlacementRows = await db.select().from(projectPlacements)
+    const routineOccurrenceRows = await db.select().from(routineOccurrences)
+    const [summary] = await db.select().from(planSummary)
+    const briefRows = await latestBriefs(db)
     const accountRows = await db.select(publicAccountColumns).from(googleAccounts)
     const calendarRows = await db.select(publicCalendarColumns).from(calendars)
     // One row, never deleted; null until the database is seeded.
@@ -241,11 +281,18 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
       routineBlocks: routineBlockRows,
       schedules: scheduleRows,
       categories: categoryRows,
+      projects: projectRows,
+      dayOverrides: dayOverrideRows,
       tasks: taskRows,
       events: eventRows,
       placements: placementRows,
       optionalPlacements: optionalPlacementRows,
       unscheduled: unscheduledRows,
+      projectPlacements: projectPlacementRows,
+      routineOccurrences: routineOccurrenceRows,
+      missed: summary?.missed ?? [],
+      capacity: summary?.capacity ?? [],
+      briefs: briefRows,
       accounts: accountRows,
       calendars: calendarRows,
     })
@@ -391,6 +438,56 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
     return c.json({ scheduling })
   })
 
+  // ---- Projects ---------------------------------------------------------------------------------
+
+  app.get('/api/projects/:id', async (c) => {
+    const id = c.req.param('id')
+    const [project] = await db.select().from(projects).where(eq(projects.id, id))
+    if (project === undefined) throw notFound(`project ${id}`)
+    return c.json(project)
+  })
+
+  app.put('/api/projects/:id', async (c) => {
+    const project = await upsertProject(db, c.req.param('id'), projectBody.parse(await c.req.json()))
+    const scheduling = await reschedule()
+    return c.json({ project, scheduling })
+  })
+
+  app.patch('/api/projects/:id', async (c) => {
+    const project = await patchProject(db, c.req.param('id'), projectPatch.parse(await c.req.json()))
+    const scheduling = await reschedule()
+    return c.json({ project, scheduling })
+  })
+
+  // The project's tasks stay, unfiled from it; clients see them change through `updatedAt`.
+  app.delete('/api/projects/:id', async (c) => {
+    await softDeleteProject(db, c.req.param('id'))
+    const scheduling = await reschedule()
+    return c.json({ scheduling })
+  })
+
+  // ---- Day overrides ----------------------------------------------------------------------------
+
+  app.get('/api/day-overrides/:date', async (c) => {
+    const date = c.req.param('date')
+    const [dayOverride] = await db.select().from(dayOverrides).where(eq(dayOverrides.date, date))
+    if (dayOverride === undefined) throw notFound(`day override ${date}`)
+    return c.json(dayOverride)
+  })
+
+  app.put('/api/day-overrides/:date', async (c) => {
+    const date = calendarDate.parse(c.req.param('date'))
+    const dayOverride = await setDayOverride(db, date, dayOverrideBody.parse(await c.req.json()))
+    const scheduling = await reschedule()
+    return c.json({ dayOverride, scheduling })
+  })
+
+  app.delete('/api/day-overrides/:date', async (c) => {
+    await clearDayOverride(db, c.req.param('date'))
+    const scheduling = await reschedule()
+    return c.json({ scheduling })
+  })
+
   // ---- Routine ----------------------------------------------------------------------------------
 
   app.put('/api/routine-blocks/:id', async (c) => {
@@ -498,6 +595,11 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
       now: body.now === undefined ? new Date() : new Date(body.now),
       timeZone: body.timeZone ?? (await defaultTimeZone(db)),
       categories: await categoriesWithExamples(db),
+      projects: await db
+        .select({ id: projects.id, name: projects.name, parallel: projects.parallel })
+        .from(projects)
+        .where(and(isNull(projects.deletedAt), eq(projects.status, 'active')))
+        .orderBy(projects.sortOrder, projects.name),
     })
     return c.json({ draft })
   })
@@ -510,6 +612,22 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
     const options = (await categoriesWithExamples(db)).filter((p) => p.id !== INBOX_CATEGORY_ID)
     const suggestion = await deps.categorySuggester.suggest({ title: body.title, notes: body.notes ?? null }, options)
     return c.json({ categoryId: suggestion.categoryId, rationale: suggestion.rationale })
+  })
+
+  // Writes (or rewrites) today's brief or this week's review now; the jobs write them on schedule.
+  app.post('/api/ai/brief', async (c) => {
+    if (deps.briefWriter === undefined) throw aiNotConfigured()
+    const { kind } = briefBody.parse(await c.req.json())
+    const brief = await generateBrief(db, deps.briefWriter, kind)
+    changes.publish()
+    return c.json({ brief })
+  })
+
+  // Why a task is planned where it is. Asked for on demand, never while placing.
+  app.post('/api/ai/explain', async (c) => {
+    if (deps.briefWriter === undefined) throw aiNotConfigured()
+    const { taskId } = explainBody.parse(await c.req.json())
+    return c.json({ explanation: await explainPlacement(db, deps.briefWriter, taskId) })
   })
 
   // ---- Google -----------------------------------------------------------------------------------

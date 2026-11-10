@@ -9,6 +9,16 @@ export interface ParseTaskContext {
   timeZone: string
   /** Live categories; the parser picks `categoryId` from these or returns null. */
   categories: CategoryContext[]
+  /** Active projects; the parser picks `projectId` from these or returns null. */
+  projects?: ProjectContext[]
+}
+
+/** A project as the model sees it. */
+export interface ProjectContext {
+  id: string
+  name: string
+  /** True when the project's work mostly runs itself, so its tasks are shared-attention by default. */
+  parallel: boolean
 }
 
 /** A category as the model sees it: what the user calls it and what they have filed under it. */
@@ -31,6 +41,11 @@ export interface TaskDraft {
   startAt: string | null
   pinnedStart: string | null
   categoryId: string | null
+  /** Where the task can be done. */
+  context: 'computer' | 'errand' | 'home' | 'office'
+  projectId: string | null
+  /** Null follows the project; set only when the text itself says how much attention the task takes. */
+  attention: 'full' | 'shared' | null
   /** One sentence on how the text was read, for the UI to show next to the draft. */
   rationale: string
 }
@@ -52,6 +67,9 @@ const draftSchema = z.object({
   startAt: instant.nullable(),
   pinnedStart: instant.nullable(),
   categoryId: z.string().nullable(),
+  context: z.enum(['computer', 'errand', 'home', 'office']),
+  projectId: z.string().nullable(),
+  attention: z.enum(['full', 'shared']).nullable(),
   rationale: z.string(),
 })
 
@@ -69,6 +87,13 @@ export const TASK_DRAFT_JSON_SCHEMA: JsonSchema = {
     startAt: { type: ['string', 'null'], description: 'ISO 8601 instant before which the task must not start, or null' },
     pinnedStart: { type: ['string', 'null'], description: 'ISO 8601 instant when the task must happen exactly, or null' },
     categoryId: { type: ['string', 'null'], description: 'One of the given category ids, or null when none fits' },
+    context: { type: 'string', enum: ['computer', 'errand', 'home', 'office'], description: 'Where the task can be done' },
+    projectId: { type: ['string', 'null'], description: 'One of the given project ids, or null when the task belongs to none' },
+    attention: {
+      type: ['string', 'null'],
+      enum: ['full', 'shared', null],
+      description: 'shared or full only when the text says so; otherwise null',
+    },
     rationale: { type: 'string', description: 'One sentence explaining the interpretation' },
   },
   required: [
@@ -82,6 +107,9 @@ export const TASK_DRAFT_JSON_SCHEMA: JsonSchema = {
     'startAt',
     'pinnedStart',
     'categoryId',
+    'context',
+    'projectId',
+    'attention',
     'rationale',
   ],
   additionalProperties: false,
@@ -109,8 +137,13 @@ export function buildPrompt(text: string, ctx: ParseTaskContext): { system: stri
     '- Keep the title short and strip the parsed metadata from it; put leftover detail in notes.',
     '- Estimate durationMinutes when none is given (typical quick task 30, meeting prep 45, writing 90).',
     '- Choose categoryId only from the list below, filing the task where the user filed similar recent tasks; null when nothing fits.',
+    '- context is where the task can be done: errand when it means going somewhere (a store, the post office, a return, a pickup); home when it needs being at home (laundry, a repair, waiting for a delivery); office when it needs being at the office in person; otherwise computer, which covers calls, email and anything done on a laptop.',
+    '- Choose projectId only from the projects below, and only when the text names the project or is plainly part of it; otherwise null.',
+    '- attention is shared when the text says an agent does the work or that it can run in the background or in parallel, full when it says the task needs the user’s whole focus, and null otherwise.',
     'Categories:',
     formatCategories(ctx.categories),
+    'Projects:',
+    formatProjects(ctx.projects ?? []),
   ].join('\n')
 
   return { system, user: text }
@@ -127,6 +160,11 @@ export function formatCategories(categories: CategoryContext[]): string {
     .join('\n')
 }
 
+function formatProjects(projects: ProjectContext[]): string {
+  if (projects.length === 0) return '(none)'
+  return projects.map((p) => `- id "${p.id}": ${p.name}${p.parallel ? ' (parallel: an agent does most of the work)' : ''}`).join('\n')
+}
+
 /** Parses a line of text with Claude using structured output and validates the result. */
 export class ClaudeTaskParser implements TaskParser {
   constructor(
@@ -139,9 +177,11 @@ export class ClaudeTaskParser implements TaskParser {
     const raw = await requestJson(this.config, { ...prompt, schema: TASK_DRAFT_JSON_SCHEMA }, this.fetchImpl)
     const draft = draftSchema.parse(raw)
     const knownCategory = draft.categoryId !== null && ctx.categories.some((p) => p.id === draft.categoryId)
+    const knownProject = draft.projectId !== null && (ctx.projects ?? []).some((p) => p.id === draft.projectId)
     return {
       ...draft,
       categoryId: knownCategory ? draft.categoryId : null,
+      projectId: knownProject ? draft.projectId : null,
       // A deadline type without a date (or vice versa) is contradictory; the date wins.
       deadlineType: draft.dueAt === null ? 'none' : draft.deadlineType === 'none' ? 'soft' : draft.deadlineType,
     }

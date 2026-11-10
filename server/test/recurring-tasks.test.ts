@@ -112,6 +112,28 @@ describe('recurring tasks through the API and real scheduler', () => {
     expect(await series(first.recurrenceSeriesId)).toEqual(occurrences)
   })
 
+  it('files every occurrence under the project and attention of the task it repeats, and follows a later edit', async () => {
+    for (const id of ['series-atlas', 'series-billing']) {
+      expect((await request(`/api/projects/${id}`, 'PUT', { name: id, parallel: true })).status).toBe(200)
+    }
+    const first = await put('project-series', { ...base, projectId: 'series-atlas', attention: 'full', recurrence: MONTHLY })
+    const filed = (await series(first.recurrenceSeriesId)) as (WireTask & { projectId: string | null; attention: string | null })[]
+    expect(filed).toHaveLength(5)
+    expect(filed.map((task) => [task.projectId, task.attention])).toEqual(Array.from({ length: 5 }, () => ['series-atlas', 'full']))
+
+    // Moving one occurrence to another project moves the ones after it, like any other edit of a series.
+    await put(filed[1]!.id, { ...filed[1]!, projectId: 'series-billing', attention: null })
+    const moved = (await series(first.recurrenceSeriesId)) as typeof filed
+    expect(moved.filter((task) => task.deletedAt === null).map((task) => [task.recurrenceDate, task.projectId, task.attention])).toEqual([
+      ['2028-01-31', 'series-atlas', 'full'],
+      ['2028-02-29', 'series-billing', null],
+      ['2028-03-31', 'series-billing', null],
+      ['2028-04-30', 'series-billing', null],
+      ['2028-05-31', 'series-billing', null],
+    ])
+    expect((await request(`/api/tasks/${first.id}`, 'DELETE')).status).toBe(200)
+  })
+
   it('retries a recurring creation without duplicating the series or losing generated start/due dates', async () => {
     const body = { ...base, recurrence: { ...MONTHLY, dayOfMonth: 15 } }
     const first = await put('retry-series', body)

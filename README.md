@@ -4,8 +4,8 @@ A personal replacement for [Motion](https://www.usemotion.com/): work and person
 
 The full design, decisions, and milestones live in the design document in the project thread. Short version:
 
-- `packages/scheduler/` — pure, deterministic TypeScript scheduler. Places open tasks into free time around calendar events by ASAP → due day → hard/soft → priority, honoring the weekly routine (which task contexts fit which hours), start dates, minimum chunks, pinned tasks, hard-deadline overflow, and a horizon. No I/O, no dependencies.
-- `server/` — Hono + Drizzle API on one always-on Fly machine with Neon Postgres. Mirrors Google Calendar via push notifications, owns tasks/categories/routine, runs the scheduler, serves a sync API for the apps and an MCP endpoint (`/mcp`) for agents.
+- `packages/scheduler/` — pure, deterministic TypeScript scheduler. Places open tasks into free time around calendar events by ASAP → due day → hard/soft → priority, honoring the weekly routine (which task contexts fit which hours, commitments such as the gym, one-day overrides), projects (status, weekly time budgets, up to three parallel projects side by side in lanes), start dates, minimum chunks, pinned tasks, hard-deadline overflow, and a horizon. No I/O, no dependencies.
+- `server/` — Hono + Drizzle API on one always-on Fly machine with Neon Postgres. Mirrors Google Calendar via push notifications, owns tasks/categories/projects/routine, runs the scheduler, has Claude write a daily brief and weekly review of the plan, serves a sync API for the apps and an MCP endpoint (`/mcp`) for agents.
 - `apple/` — SwiftUI apps for macOS and iOS plus a WidgetKit extension, generated with XcodeGen from `apple/project.yml`, sharing the `FloridaCore` (models, quick-add parser, keyboard engine, grid layout math) and `FloridaKit` (GRDB SQLite store, sync client) Swift packages.
 
 ## Develop

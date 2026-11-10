@@ -11,16 +11,29 @@ const WEEKDAYS = [1, 2, 3, 4, 5]
 const SETTINGS = { id: SETTINGS_ID, timeZone: LA }
 
 /**
- * Home days Mon/Thu/Fri end when the gym run starts at 15:30; office days are Tue (after the
- * morning gym) and Wed, until the 16:20 drive to school pickup. Early mornings, evenings, and
+ * Home days Mon/Thu/Fri end when the gym run starts at 15:30; office days are Tue and Wed, until
+ * the 16:20 drive to school pickup. The gym is a commitment: Mon/Thu/Fri afternoons, plus one
+ * office morning a week, Tuesday unless the calendar has something there, then Wednesday. Early mornings, evenings, and
  * weekends are family time and have no block, so nothing is ever scheduled there. Mon–Thu after
  * 20:00 is optional: sometimes worked, never planned on, so it only gets suggestions.
  */
 const SEED_ROUTINE: (typeof routineBlocks.$inferInsert)[] = [
   { id: 'home', name: 'Home', days: [1, 4, 5], start: '09:00', end: '15:30', allows: ['computer', 'errand', 'home'] },
-  { id: 'office-tue', name: 'Office', days: [2], start: '10:15', end: '16:20', allows: ['computer', 'office'] },
+  { id: 'office-tue', name: 'Office', days: [2], start: '09:00', end: '16:20', allows: ['computer', 'office'] },
   { id: 'office-wed', name: 'Office', days: [3], start: '09:00', end: '16:20', allows: ['computer', 'office'] },
   { id: 'evening', name: 'Evening', days: [1, 2, 3, 4], start: '20:00', end: '23:00', allows: ['computer', 'home'], optional: true },
+  {
+    id: 'gym',
+    name: 'Gym',
+    days: [1, 4, 5],
+    start: '15:30',
+    end: '16:45',
+    allows: [],
+    alternates: [
+      { day: 2, start: '09:00', end: '10:15' },
+      { day: 3, start: '09:00', end: '10:15' },
+    ],
+  },
 ]
 
 const SEED_SCHEDULES: { id: string; name: string; timeZone: string; windows: ScheduleWindow[] }[] = [

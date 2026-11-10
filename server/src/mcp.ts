@@ -9,9 +9,31 @@ import type { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import type { Db } from './db/client.js'
+import { latestBriefs } from './briefs.js'
 import { defaultTimeZone } from './db/queries.js'
-import { calendars, events, placements, categories, tasks } from './db/schema.js'
+import {
+  calendars,
+  categories,
+  dayOverrides,
+  events,
+  placements,
+  projectPlacements,
+  projects,
+  routineBlocks,
+  routineOccurrences,
+  tasks,
+} from './db/schema.js'
 import type { PlacementRow, TaskRow } from './db/schema.js'
+import {
+  clearDayOverride,
+  dayOverrideBody,
+  patchProject,
+  projectBody,
+  projectPatch,
+  setDayOverride,
+  softDeleteProject,
+  upsertProject,
+} from './projects.js'
 import {
   completeTask,
   deadlineType,
@@ -41,6 +63,14 @@ const INSTRUCTIONS = [
   'around calendar events, and returns placements: suggested work blocks, not calendar events. Call',
   'list_categories first to learn the category ids, get_agenda to see one day of calendar events plus',
   'planned task blocks, and list_tasks for what is open. Instants are ISO 8601 strings.',
+  'Projects are ongoing work bigger than one task, each thinking, active, on_hold or done; only tasks',
+  'of active projects are scheduled, and a project with weeklyMinutes gets project time planned for',
+  'what its tasks do not cover. Work that mostly runs itself (an agent does it) is shared attention:',
+  'a parallel project, or a task with attention shared. Up to three shared blocks of different',
+  'projects are planned side by side, each in its own lane. Call list_projects for project ids.',
+  'The gym is a commitment in the routine that nothing is planned over. set_day marks one date as',
+  'worked from home, at the office, or off, when it differs from its weekday; clear_day undoes it.',
+  'get_brief returns the latest morning brief and weekly review.',
   'Tasks accept recurrence: daily, weekly (selected weekdays), or monthly (day of month), each with',
   'an interval, IANA timeZone, startDate, and optional inclusive endDate. Each occurrence completes',
   'independently. Editing a recurring task changes this and future unfinished occurrences; setting',
@@ -197,11 +227,135 @@ export function buildMcpServer(deps: McpDeps): McpServer {
   )
 
   server.registerTool(
+    'list_projects',
+    {
+      title: 'List projects',
+      description: 'Lists live projects with their status, next step, weekly budget and number of open tasks.',
+      inputSchema: {
+        status: z.enum(['thinking', 'active', 'on_hold', 'done']).optional().describe('Only projects with this status'),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    ({ status }) =>
+      run(async () => {
+        const conditions = [isNull(projects.deletedAt)]
+        if (status !== undefined) conditions.push(eq(projects.status, status))
+        const rows = await db
+          .select()
+          .from(projects)
+          .where(and(...conditions))
+          .orderBy(projects.sortOrder, projects.name)
+        const open = await db
+          .select({ projectId: tasks.projectId })
+          .from(tasks)
+          .where(and(isNull(tasks.deletedAt), isNull(tasks.completedAt)))
+        return ok({
+          projects: rows.map((p) => ({ ...p, openTasks: open.filter((t) => t.projectId === p.id).length })),
+        })
+      }),
+  )
+
+  server.registerTool(
+    'create_project',
+    {
+      title: 'Create project',
+      description: 'Creates a project and reschedules. Add tasks to it by setting their projectId.',
+      inputSchema: {
+        ...projectBody.shape,
+        id: z.string().min(1).optional().describe('Client-chosen id; a UUID is generated when omitted'),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    },
+    ({ id, ...body }) =>
+      run(async () => {
+        const project = await upsertProject(db, id ?? randomUUID(), body)
+        const scheduling = await reschedule()
+        return ok({ project, scheduling: summary(scheduling) })
+      }),
+  )
+
+  server.registerTool(
+    'update_project',
+    {
+      title: 'Update project',
+      description:
+        'Changes the given fields and reschedules. Omitted fields keep their value; null clears. Setting status to on_hold, thinking or done takes the project’s tasks out of the plan; active puts them back.',
+      inputSchema: { id: z.string().min(1).describe('Project id'), ...projectPatch.shape },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    ({ id, ...patch }) =>
+      run(async () => {
+        const project = await patchProject(db, id, patch)
+        const scheduling = await reschedule()
+        return ok({ project, scheduling: summary(scheduling) })
+      }),
+  )
+
+  server.registerTool(
+    'delete_project',
+    {
+      title: 'Delete project',
+      description: 'Deletes a project (tombstone) and reschedules. Its tasks stay, without a project. To stop work without losing the project, set its status to on_hold or done instead.',
+      inputSchema: { id: z.string().min(1).describe('Project id') },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+    },
+    ({ id }) =>
+      run(async () => {
+        await softDeleteProject(db, id)
+        const scheduling = await reschedule()
+        return ok({ deleted: id, scheduling: summary(scheduling) })
+      }),
+  )
+
+  server.registerTool(
+    'set_day',
+    {
+      title: 'Set day',
+      description:
+        'Marks one date as different from its weekday’s routine and reschedules: home (work from home), office (go in), or off (nothing planned, no gym). Replaces an earlier setting for that date.',
+      inputSchema: { date: calendarDate.describe('YYYY-MM-DD in the routine’s time zone'), ...dayOverrideBody.shape },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    ({ date, ...body }) =>
+      run(async () => {
+        const dayOverride = await setDayOverride(db, date, body)
+        const scheduling = await reschedule()
+        return ok({ dayOverride, scheduling: summary(scheduling) })
+      }),
+  )
+
+  server.registerTool(
+    'clear_day',
+    {
+      title: 'Clear day',
+      description: 'Puts a date back on its weekday’s routine and reschedules.',
+      inputSchema: { date: calendarDate.describe('YYYY-MM-DD in the routine’s time zone') },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    ({ date }) =>
+      run(async () => {
+        await clearDayOverride(db, date)
+        const scheduling = await reschedule()
+        return ok({ cleared: date, scheduling: summary(scheduling) })
+      }),
+  )
+
+  server.registerTool(
+    'get_brief',
+    {
+      title: 'Get brief',
+      description: 'The latest morning brief and weekly review, as written by the planner. Empty until the first one is written.',
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    () => run(async () => ok({ briefs: await latestBriefs(db) })),
+  )
+
+  server.registerTool(
     'get_agenda',
     {
       title: 'Get agenda',
       description:
-        'Calendar events (from selected calendars) and planned task blocks for one calendar day, all-day events first. Defaults to today in the home time zone.',
+        'One calendar day: calendar events (from selected calendars, all-day first), planned task blocks (those with a lane run side by side), project time, commitments such as the gym, and the day’s override if it has one. Defaults to today in the home time zone.',
       inputSchema: {
         date: calendarDate.optional().describe('YYYY-MM-DD; defaults to today'),
         timeZone: timeZone.optional().describe('IANA zone the day is measured in; defaults to the routine’s zone'),
@@ -257,14 +411,41 @@ export function buildMcpServer(deps: McpDeps): McpServer {
             title: tasks.title,
             categoryId: tasks.categoryId,
             priority: tasks.priority,
+            projectId: tasks.projectId,
             startAt: placements.startAt,
             endAt: placements.endAt,
             pinned: placements.pinned,
+            lane: placements.lane,
           })
           .from(placements)
           .innerJoin(tasks, eq(placements.taskId, tasks.id))
           .where(and(lt(placements.startAt, end), gt(placements.endAt, start)))
           .orderBy(asc(placements.startAt))
+
+        const projectTime = await db
+          .select({
+            projectId: projectPlacements.projectId,
+            project: projects.name,
+            startAt: projectPlacements.startAt,
+            endAt: projectPlacements.endAt,
+            lane: projectPlacements.lane,
+          })
+          .from(projectPlacements)
+          .innerJoin(projects, eq(projectPlacements.projectId, projects.id))
+          .where(and(lt(projectPlacements.startAt, end), gt(projectPlacements.endAt, start)))
+          .orderBy(asc(projectPlacements.startAt))
+
+        const commitments = await db
+          .select({ name: routineBlocks.name, startAt: routineOccurrences.startAt, endAt: routineOccurrences.endAt })
+          .from(routineOccurrences)
+          .innerJoin(routineBlocks, eq(routineOccurrences.blockId, routineBlocks.id))
+          .where(and(lt(routineOccurrences.startAt, end), gt(routineOccurrences.endAt, start)))
+          .orderBy(asc(routineOccurrences.startAt))
+
+        const [override] = await db
+          .select({ kind: dayOverrides.kind, note: dayOverrides.note })
+          .from(dayOverrides)
+          .where(and(eq(dayOverrides.date, formatCalendarDate(date)), isNull(dayOverrides.deletedAt)))
 
         return ok({
           date: formatCalendarDate(date),
@@ -273,6 +454,9 @@ export function buildMcpServer(deps: McpDeps): McpServer {
           end,
           events: eventRows,
           taskBlocks: blockRows,
+          projectTime,
+          commitments,
+          dayOverride: override ?? null,
         })
       }),
   )

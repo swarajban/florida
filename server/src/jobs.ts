@@ -1,5 +1,6 @@
 import type { SchedulerResult } from '@florida/scheduler'
 import type { ChangeBus } from './changes.js'
+import type { BriefRow } from './db/schema.js'
 import type { CalendarSyncService } from './google/sync.js'
 
 export interface JobDeps {
@@ -7,6 +8,8 @@ export interface JobDeps {
   reschedule: () => Promise<SchedulerResult>
   /** Notified after every scheduler run so `/api/events` subscribers pull. */
   changes?: Pick<ChangeBus, 'publish'>
+  /** Writes the daily brief and weekly review that are due and missing; absent when Claude is not configured. */
+  ensureBriefs?: () => Promise<BriefRow[]>
 }
 
 const MINUTE = 60_000
@@ -17,6 +20,8 @@ const WATCH_INTERVAL = 6 * HOUR
 const SYNC_INTERVAL = 60 * MINUTE
 /** Moves tasks whose placements slipped into the past forward even when nothing else changed. */
 const RESCHEDULE_INTERVAL = 15 * MINUTE
+/** How often to check whether the morning brief or the Sunday review is due. */
+const BRIEF_INTERVAL = 10 * MINUTE
 
 /** Starts the periodic jobs and returns a function that stops them. */
 export function startJobs(deps: JobDeps): () => void {
@@ -49,16 +54,24 @@ export function startJobs(deps: JobDeps): () => void {
     await reschedule()
   }
 
+  const briefs = async (): Promise<void> => {
+    const written = (await deps.ensureBriefs?.()) ?? []
+    if (written.length > 0) deps.changes?.publish()
+  }
+
   const timers: NodeJS.Timeout[] = [
     setTimeout(() => {
       void run('startup', async () => {
         await deps.sync.ensureAllWatches()
         await syncAndReschedule()
+        // After the first plan, so a brief written at startup describes a current one.
+        await briefs()
       })
     }, STARTUP_DELAY),
     setInterval(() => void run('watches', () => deps.sync.ensureAllWatches()), WATCH_INTERVAL),
     setInterval(() => void run('sync', syncAndReschedule), SYNC_INTERVAL),
     setInterval(() => void run('reschedule', reschedule), RESCHEDULE_INTERVAL),
+    setInterval(() => void run('briefs', briefs), BRIEF_INTERVAL),
   ]
 
   return () => {

@@ -4,7 +4,7 @@ import { and, eq, gt, gte, isNull, ne, sql } from 'drizzle-orm'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import type { Db } from './db/client.js'
-import { categoryExists, scheduleExists } from './db/queries.js'
+import { categoryExists, projectExists, scheduleExists } from './db/queries.js'
 import { taskRecurrences, tasks } from './db/schema.js'
 import type { TaskRow } from './db/schema.js'
 import { addCalendarDays, localDay, nextOccurrence, occurrenceDates, occurrenceFields, recurrenceRule } from './recurrence.js'
@@ -14,6 +14,7 @@ import { badRequest, isoInstant, notFound, toDate } from './validation.js'
 export const priority = z.enum(['asap', 'high', 'medium', 'low'])
 export const deadlineType = z.enum(['hard', 'soft', 'none'])
 export const taskContext = z.enum(['computer', 'errand', 'home', 'office'])
+export const attention = z.enum(['full', 'shared'])
 
 /** Full task body as accepted by `PUT /api/tasks/:id` and the MCP tools. */
 export const taskBody = z.object({
@@ -31,6 +32,16 @@ export const taskBody = z.object({
     .optional()
     .describe(
       'Where the task can be done: computer (anywhere with a laptop), errand (out, e.g. a store), home (only at home), office (only at the office). Defaults to computer; omitting it on an edit keeps the stored value.',
+    ),
+  projectId: z
+    .string()
+    .min(1)
+    .nullish()
+    .describe('The project this task belongs to, or null for none. Tasks of a project that is not active are not scheduled. Omitting it on an edit keeps the stored value.'),
+  attention: attention
+    .nullish()
+    .describe(
+      'full: needs the user alone. shared: mostly runs itself (an agent does the work) and may be planned beside up to two other shared tasks of other projects. null follows the project (shared when it is parallel). Omitting it on an edit keeps the stored value.',
     ),
   pinnedStart: isoInstant.nullish(),
   recurrence: recurrenceRule.nullish(),
@@ -71,6 +82,9 @@ function taskFields(body: TaskBody, now: Date, current: TaskRow | undefined) {
     scheduleId: body.scheduleId ?? null,
     // Older shipped clients omit context; their edits must not reset a task to the default.
     context: body.context ?? current?.context ?? 'computer',
+    // Likewise: absent keeps, null clears.
+    projectId: body.projectId === undefined ? (current?.projectId ?? null) : body.projectId,
+    attention: body.attention === undefined ? (current?.attention ?? null) : body.attention,
     pinnedStart: toDate(body.pinnedStart),
     completedMinutes: body.completedMinutes ?? 0,
     completedAt: toDate(body.completedAt),
@@ -93,6 +107,8 @@ function seriesTemplate(fields: Pick<TaskRow, keyof ReturnType<typeof taskFields
     startAt: fields.startAt?.toISOString() ?? null,
     scheduleId: fields.scheduleId,
     context: fields.context,
+    projectId: fields.projectId,
+    attention: fields.attention,
     pinnedStart: fields.pinnedStart?.toISOString() ?? null,
   }
 }
@@ -108,6 +124,7 @@ async function writeTask(db: Db, id: string, body: TaskBody, now: Date): Promise
   if (body.scheduleId != null && !(await scheduleExists(db, body.scheduleId))) {
     throw badRequest(`unknown scheduleId ${body.scheduleId}`)
   }
+  if (body.projectId != null && !(await projectExists(db, body.projectId))) throw badRequest(`unknown projectId ${body.projectId}`)
   const [current] = await db.select().from(tasks).where(eq(tasks.id, id))
   // Older shipped clients omit recurrence; ordinary edits/completions must not switch repeats off.
   let recurrence = body.recurrence === undefined ? current?.recurrence ?? null : body.recurrence
@@ -222,6 +239,8 @@ export async function patchTask(db: Db, id: string, patch: TaskPatch, now: Date 
       startAt: keep(patch.startAt, iso(current.startAt)),
       scheduleId: keep(patch.scheduleId, current.scheduleId),
       context: keep(patch.context, current.context),
+      projectId: keep(patch.projectId, current.projectId),
+      attention: keep(patch.attention, current.attention),
       pinnedStart: keep(patch.pinnedStart, iso(current.pinnedStart)),
       recurrence: keep(patch.recurrence, current.recurrence),
       // A targeted edit without a precondition (e.g. MCP) explicitly acts on the latest row.

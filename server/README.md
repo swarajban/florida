@@ -55,9 +55,10 @@ openssl rand -hex 32   # API_TOKEN
 openssl rand -hex 32   # TOKEN_ENCRYPTION_KEY
 ```
 
-Optional: an Anthropic API key (`ANTHROPIC_API_KEY`) enables `POST /api/ai/parse-task` and
-`POST /api/ai/suggest-category`; the model defaults to `claude-sonnet-5-5` (`ANTHROPIC_MODEL`). Without the key the rest of the server works
-unchanged and the AI route answers 503.
+Optional: an Anthropic API key (`ANTHROPIC_API_KEY`) enables the `POST /api/ai/*` routes and the
+daily brief and weekly review; the model defaults to `claude-sonnet-5-5` (`ANTHROPIC_MODEL`).
+Without the key the rest of the server works unchanged, the AI routes answer 503 and no brief is
+written. Claude only writes text about a plan the scheduler already made; it never places a task.
 
 ### 4. Deploy to Fly
 
@@ -91,8 +92,10 @@ fly ssh console -C "node server/dist/seed.js"
 ```
 
 The seed creates the settings row (time zone `America/Los_Angeles`), the routine (`home` Mon/Thu/Fri
-09:00–15:30 for computer, errand and home tasks; `office-tue` 10:15–16:20 and `office-wed`
-09:00–16:20 for computer and office tasks), the categories `inbox`, `work` (area `work`) and
+09:00–15:30 for computer, errand and home tasks; `office-tue` and `office-wed` 09:00–16:20 for
+computer and office tasks; the optional `evening` Mon–Thu 20:00–23:00; and the `gym` commitment
+Mon/Thu/Fri 15:30–16:45 plus one office morning a week, 09:00–10:15 on Tuesday, or on Wednesday
+when Tuesday's slot is taken), the categories `inbox`, `work` (area `work`) and
 `personal` (area `personal`), and the legacy schedules `work` and `personal` that shipped clients
 still read. Re-seeding resets the inbox but never touches the settings, the routine, the legacy
 schedules, `work` or `personal` once they exist, so your edits to them survive.
@@ -160,9 +163,11 @@ curl -s -X POST "$PUBLIC_URL/api/google/resync" -H "authorization: Bearer $API_T
 | Route | Purpose |
 | --- | --- |
 | `GET /health` | Liveness, no auth, no database access. |
-| `GET /api/sync?since=` | `{ cursor, settings, routineBlocks, schedules, categories, tasks, events, placements, unscheduled, accounts, calendars }`. `routineBlocks`, `schedules`, `categories`, `tasks` and `events` hold rows with `updatedAt > since` (all rows without `since`), including soft-deleted tombstones; `events` holds only selected calendars' events plus tombstones. `settings` (`{ id, timeZone, updatedAt }`, or `null` before seeding), `placements`, `unscheduled` (`{ taskId, reason, unplacedMinutes, computedAt }`), `accounts` and `calendars` are always complete (and never contain tokens). Categories carry `area` (`work`, `personal`, or `null` for the inbox); tasks carry `context` (`computer`, `errand`, `home`, `office`; default `computer`, kept when a body omits it). Events carry `description`, `conferenceUrl`, `attendees`, `organizer`, `eventType`, `recurringEventId` and `icalUid`. |
+| `GET /api/sync?since=` | `{ cursor, settings, routineBlocks, schedules, categories, projects, dayOverrides, tasks, events, placements, optionalPlacements, unscheduled, projectPlacements, routineOccurrences, missed, capacity, briefs, accounts, calendars }`. `routineBlocks`, `schedules`, `categories`, `projects`, `dayOverrides`, `tasks` and `events` hold rows with `updatedAt > since` (all rows without `since`), including soft-deleted tombstones; `events` holds only selected calendars' events plus tombstones. `settings` (`{ id, timeZone, updatedAt }`, or `null` before seeding), `placements` (each with `lane`: `null` for a block that has the hour to itself, else 0–2 for blocks worked side by side), `optionalPlacements` (suggestions for optional blocks; never part of the plan), `unscheduled` (`{ taskId, reason, unplacedMinutes, computedAt }`), `projectPlacements` (`{ id, projectId, weekOf, startAt, endAt, lane }`: time held for a project's weekly budget), `routineOccurrences` (`{ id, blockId, startAt, endAt }`: where each commitment such as the gym lands), `missed` (`{ blockId, weekOf }`: a week whose alternate slot found no room), `capacity` (`{ date, freeMinutes: { computer, errand, home, office } }` per day), `briefs` (the newest `daily` and `weekly`), `accounts` and `calendars` are always complete (and never contain tokens). Categories carry `area` (`work`, `personal`, or `null` for the inbox); tasks carry `context` (`computer`, `errand`, `home`, `office`; default `computer`, kept when a body omits it), `projectId` and `attention` (`full`, `shared`, or `null` to follow the project: `shared` when it is `parallel`). Events carry `description`, `conferenceUrl`, `attendees`, `organizer`, `eventType`, `recurringEventId` and `icalUid`. |
 | `GET /api/events` | Server-sent events: `connected` on open, then one `changed` event after every scheduler run or calendar sync. Clients respond by calling `/api/sync` with their cursor. Keep-alive comment every 25 s. |
-| `PUT/DELETE /api/tasks/:id`, `/api/categories/:id`, `/api/routine-blocks/:id`, `/api/schedules/:id` | Upsert / soft-delete, then rerun the scheduler. Responses include `scheduling: { placements, unscheduled, late }`. The `inbox` category cannot be deleted or renamed (400); deleting another category first moves its tasks to `inbox`. A routine block is `{ name, days (0 = Sunday), start, end ("HH:MM" in the settings zone, start < end), allows: context[] }`; an empty `allows` shows the block but schedules nothing in it. Schedules are superseded by the routine and kept only for shipped clients. |
+| `PUT/DELETE /api/tasks/:id`, `/api/categories/:id`, `/api/routine-blocks/:id`, `/api/schedules/:id` | Upsert / soft-delete, then rerun the scheduler. Responses include `scheduling: { placements, unscheduled, late }`. The `inbox` category cannot be deleted or renamed (400); deleting another category first moves its tasks to `inbox`. A routine block is `{ name, days (0 = Sunday), start, end ("HH:MM" in the settings zone, start < end), allows: context[] }`; an empty `allows` makes the block a commitment (the gym): nothing is planned over it, and `alternates: [{ day, start, end }]` adds one more occurrence a week in the first of those slots the calendar leaves free. `optional: true` marks time that only gets suggestions. Schedules are superseded by the routine and kept only for shipped clients. |
+| `GET/PUT/PATCH/DELETE /api/projects/:id` | A project is ongoing work: `{ name, status (thinking, active, on_hold, done), categoryId?, notes?, nextStep?, parallel, weeklyMinutes?, sortOrder }` → `{ project, scheduling }`. Only an `active` project's tasks are scheduled. `parallel` lets its tasks share an hour with up to two other parallel projects (lanes 0–2; a project never runs beside itself). `weeklyMinutes` holds that much time for it each week, this week and next, as `projectPlacements`. PUT clears omitted nullable fields and keeps `status`, `parallel` and `sortOrder`; PATCH changes only what it names. DELETE tombstones the project and unfiles its tasks. An unknown `categoryId` is 400. |
+| `GET/PUT/DELETE /api/day-overrides/:date` | One date (`YYYY-MM-DD` in the settings zone) that departs from the routine: `{ kind: home \| office \| off, note? }` → `{ dayOverride, scheduling }`. `home` and `office` give the date that kind of day's blocks; `off` gives it none, so its commitments move too. Clearing an override leaves already-placed tasks where they are. |
 | `PUT /api/settings` | `{ timeZone }` (IANA) sets the routine's zone, which is also the default home zone; reruns the scheduler → `{ settings, scheduling }`. |
 | `PATCH /api/tasks/:id` | Change only supplied task fields; omitted fields stay current and `null` clears nullable fields. Returns `{ task, scheduling }`; unknown or tombstoned tasks are 404. Completion/reopen sends only `completedAt` and `completedMinutes`, never a cached series template. |
 | `GET /api/tasks/:id`, `/api/categories/:id`, `/api/routine-blocks/:id`, `/api/schedules/:id`, `/api/events/:id` | The row exactly as `/api/sync` sends it, tombstones included; 404 only for an id that never existed. |
@@ -171,6 +176,8 @@ curl -s -X POST "$PUBLIC_URL/api/google/resync" -H "authorization: Bearer $API_T
 | `POST /api/schedule/run` | Rerun the scheduler. |
 | `POST /api/ai/parse-task` | `{ text, now?, timeZone? }` → `{ draft }`: Claude turns one line of text into a task draft (`title, notes, durationMinutes, minChunkMinutes, priority, deadlineType, dueAt, startAt, pinnedStart, categoryId, rationale`). The client reviews the draft and then `PUT`s the task itself. `timeZone` defaults to the routine's zone (settings). 503 without `ANTHROPIC_API_KEY`; 502 when the model call fails. |
 | `POST /api/ai/suggest-category` | `{ title, notes? }` → `{ categoryId, rationale }`: Claude picks the category the user would file the task under (never `inbox`; `null` when none fits). 503 without `ANTHROPIC_API_KEY`; 502 when the model call fails. |
+| `POST /api/ai/brief` | `{ kind: daily \| weekly }` → `{ brief }` (`{ id, kind, date, headline, body }`): Claude writes the brief from the current plan and stores it, replacing that date's. The server also writes the daily brief from 08:30 and the weekly review on Sunday from 18:00 (settings zone, checked every 10 minutes). 503 without `ANTHROPIC_API_KEY`; 502 when the model call fails. |
+| `POST /api/ai/explain` | `{ taskId }` → `{ explanation }`: why the task sits where it does (or why it is unscheduled), from the scheduler's own facts. 404 for an unknown task; 503/502 as above. |
 | `POST /mcp` | Model Context Protocol endpoint for agents (same bearer token). See below. |
 | `GET /api/google/accounts` | Accounts and calendars (never tokens). |
 | `PATCH /api/calendars/:id` | `{ selected }` toggles whether a calendar blocks time and reaches the apps. Deselecting tombstones its events; selecting re-downloads it in the background. |
@@ -260,10 +267,14 @@ Client configuration (Claude Code, Amp, Cursor and friends accept this shape):
 | `list_categories` | Live categories with their `area` (`work`, `personal`, or `null` for the inbox). |
 | `list_tasks` | Open tasks (soonest due first) with their scheduled blocks; `categoryId?`, `includeCompleted?`, `limit?`. |
 | `get_task` | One task with its blocks. |
-| `create_task` | `categoryId`, `title`, and any task field; `id` defaults to a UUID, `durationMinutes` to 30, `priority` to `medium`, `deadlineType` to `soft` when `dueAt` is set, else `none`, `context` to `computer`. Reschedules; returns the task's blocks plus `unscheduled`/`late`. |
+| `create_task` | `categoryId`, `title`, and any task field; `id` defaults to a UUID, `durationMinutes` to 30, `priority` to `medium`, `deadlineType` to `soft` when `dueAt` is set, else `none`, `context` to `computer`; `projectId?` and `attention?` file it under a project. Reschedules; returns the task's blocks plus `unscheduled`/`late`. |
 | `update_task` | `id` plus any task fields; omitted fields stay, `null` clears. Reschedules. |
 | `complete_task` / `delete_task` | Mark done (credits the full duration) / tombstone. Reschedule. |
-| `get_agenda` | `date?` (YYYY-MM-DD) and `timeZone?`: that day's events from selected calendars (all-day first) (with `description`, `conferenceUrl` and `attendees`) and planned task blocks with titles. Defaults to today in the routine's zone. |
+| `get_agenda` | `date?` (YYYY-MM-DD) and `timeZone?`: that day's events from selected calendars (all-day first) (with `description`, `conferenceUrl` and `attendees`) and planned task blocks with titles, `lane` and `projectId`, plus `projectTime` (held project hours), `commitments` (the gym) and `dayOverride`. Defaults to today in the routine's zone. |
+| `list_projects` | Live projects with `openTasks`; `status?` filters. |
+| `create_project` / `update_project` / `delete_project` | `name` plus any project field (`id` defaults to a UUID, `status` to `active`) / `id` plus the fields to change (`null` clears) / tombstone and unfile its tasks. Reschedule. |
+| `set_day` / `clear_day` | `date` and `kind` (`home`, `office`, `off`), `note?` / `date`: override one date's routine, or put it back. Reschedule. |
+| `get_brief` | The newest daily brief and weekly review, as stored. It does not call the model. |
 | `run_scheduler` | Rerun and return every placement. |
 
 Bad references (`unknown categoryId x`, `task x not found`) and invalid arguments come back as

@@ -1,8 +1,22 @@
 import { eq, inArray } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
-import { optionalPlacements, placements, routineBlocks, tasks, unscheduled } from '../src/db/schema.js'
-import type { EventRow, CategoryRow, RoutineBlockRow, TaskRow } from '../src/db/schema.js'
-import { buildSchedulerInput, runScheduling } from '../src/scheduling.js'
+import {
+  calendars,
+  dayOverrides,
+  events,
+  googleAccounts,
+  optionalPlacements,
+  placements,
+  planSummary,
+  projectPlacements,
+  projects,
+  routineBlocks,
+  routineOccurrences,
+  tasks,
+  unscheduled,
+} from '../src/db/schema.js'
+import type { EventRow, CategoryRow, ProjectPlacementRow, ProjectRow, RoutineBlockRow, TaskRow } from '../src/db/schema.js'
+import { buildSchedulerInput, runScheduling, splitProjectTime } from '../src/scheduling.js'
 import { seed } from '../src/seed.js'
 import { createTestDb } from './db.js'
 
@@ -19,6 +33,7 @@ function routineBlockRow(id: string, over: Partial<RoutineBlockRow> = {}): Routi
     end: '17:00',
     allows: ['computer', 'errand', 'home', 'office'],
     optional: false,
+    alternates: null,
     createdAt: T0,
     updatedAt: T0,
     deletedAt: null,
@@ -55,6 +70,8 @@ function taskRow(id: string, categoryId: string, over: Partial<TaskRow> = {}): T
     startAt: null,
     scheduleId: null,
     context: 'computer',
+    projectId: null,
+    attention: null,
     pinnedStart: null,
     recurrence: null,
     recurrenceSeriesId: null,
@@ -67,6 +84,28 @@ function taskRow(id: string, categoryId: string, over: Partial<TaskRow> = {}): T
     deletedAt: null,
     ...over,
   }
+}
+
+function projectRow(id: string, over: Partial<ProjectRow> = {}): ProjectRow {
+  return {
+    id,
+    name: id,
+    status: 'active',
+    categoryId: null,
+    notes: null,
+    nextStep: null,
+    parallel: false,
+    weeklyMinutes: null,
+    sortOrder: 0,
+    createdAt: T0,
+    updatedAt: T0,
+    deletedAt: null,
+    ...over,
+  }
+}
+
+function projectTimeRow(id: string, projectId: string, weekOf: string, start: string, end: string): ProjectPlacementRow {
+  return { id, projectId, weekOf, startAt: new Date(start), endAt: new Date(end), lane: null, computedAt: T0 }
 }
 
 function eventRow(id: string, over: Partial<EventRow> = {}): EventRow {
@@ -124,6 +163,7 @@ describe('buildSchedulerInput', () => {
       {
         id: 't1',
         context: 'computer',
+        attention: 'full',
         durationMinutes: 60,
         minChunkMinutes: 30,
         priority: 'medium',
@@ -211,6 +251,140 @@ describe('buildSchedulerInput', () => {
       { start: '2026-11-09T16:30:00.000Z', end: '2026-11-09T17:30:00.000Z' },
       { start: '2026-11-10T18:00:00.000Z', end: '2026-11-10T19:00:00.000Z' },
     ])
+  })
+
+  it('leaves out tasks of a project that is not active, and takes attention from the project unless the task sets it', () => {
+    const input = buildSchedulerInput({
+      ...base,
+      categories: [categoryRow('inbox')],
+      projects: [
+        projectRow('agents', { parallel: true }),
+        projectRow('paused', { status: 'on_hold' }),
+        projectRow('idea', { status: 'thinking' }),
+        projectRow('shipped', { status: 'done' }),
+        projectRow('gone', { status: 'on_hold', deletedAt: NOW }),
+      ],
+      tasks: [
+        taskRow('follows', 'inbox', { projectId: 'agents' }),
+        taskRow('focus', 'inbox', { projectId: 'agents', attention: 'full' }),
+        taskRow('own-chunk', 'inbox', { projectId: 'agents', minChunkMinutes: 30 }),
+        taskRow('pinned', 'inbox', { projectId: 'agents', pinnedStart: new Date('2026-11-10T18:00:00Z') }),
+        taskRow('waiting', 'inbox', { projectId: 'paused' }),
+        taskRow('someday', 'inbox', { projectId: 'idea' }),
+        taskRow('leftover', 'inbox', { projectId: 'shipped' }),
+        // A deleted project holds nothing back: its task is planned like any other.
+        taskRow('orphan', 'inbox', { projectId: 'gone' }),
+        taskRow('loose', 'inbox', { attention: 'shared' }),
+      ],
+      events: [],
+    })
+    expect(input.tasks.map((t) => [t.id, t.attention, t.projectId, t.minChunkMinutes])).toEqual([
+      // Shared work without a chunk of its own splits into hour-long pieces, so lanes can interleave.
+      ['follows', 'shared', 'agents', 60],
+      ['focus', 'full', 'agents', undefined],
+      ['own-chunk', 'shared', 'agents', 30],
+      ['pinned', 'shared', 'agents', undefined],
+      ['orphan', 'full', undefined, undefined],
+      ['loose', 'shared', undefined, 60],
+    ])
+  })
+
+  it('adds project time for the part of a weekly budget that open tasks and time already spent do not cover', () => {
+    // NOW is a Monday: the local week runs from Sunday 2026-11-08 to Sunday 2026-11-15, both at
+    // 08:00Z (Pacific standard time).
+    const input = buildSchedulerInput({
+      ...base,
+      categories: [categoryRow('inbox'), categoryRow('eng', { area: 'work' })],
+      projects: [
+        projectRow('atlas', { weeklyMinutes: 300, categoryId: 'eng' }),
+        projectRow('agents', { weeklyMinutes: 120, parallel: true }),
+        projectRow('small', { weeklyMinutes: 60 }),
+        projectRow('paused', { weeklyMinutes: 300, status: 'on_hold' }),
+        projectRow('unbudgeted'),
+      ],
+      tasks: [
+        // 60 of its 90 minutes are still open.
+        taskRow('atlas-open', 'inbox', { projectId: 'atlas', durationMinutes: 90, completedMinutes: 30 }),
+        taskRow('agents-open', 'inbox', { projectId: 'agents', durationMinutes: 200 }),
+        taskRow('small-open', 'inbox', { projectId: 'small', durationMinutes: 40 }),
+      ],
+      events: [],
+      projectPlacements: [
+        // Ended this week: 45 minutes spent.
+        projectTimeRow('spent', 'atlas', '2026-11-08', '2026-11-09T16:00:00Z', '2026-11-09T16:45:00Z'),
+        // Last week's does not count against this week, and a block still ahead is not spent yet.
+        projectTimeRow('last-week', 'atlas', '2026-11-01', '2026-11-06T17:00:00Z', '2026-11-06T18:00:00Z'),
+        projectTimeRow('ahead', 'atlas', '2026-11-08', '2026-11-10T19:00:00Z', '2026-11-10T20:00:00Z'),
+      ],
+      completedProjectTasks: [
+        taskRow('atlas-done', 'inbox', { projectId: 'atlas', durationMinutes: 50, completedAt: new Date('2026-11-08T20:00:00Z') }),
+        // Saturday evening Pacific: before this week began.
+        taskRow('atlas-old', 'inbox', { projectId: 'atlas', durationMinutes: 500, completedAt: new Date('2026-11-08T04:00:00Z') }),
+      ],
+    })
+    const projectTime = input.tasks.filter((t) => t.id.startsWith('project-time:'))
+    expect(projectTime.map((t) => [t.id, t.durationMinutes, t.attention, t.startAt, t.dueAt, t.area])).toEqual([
+      // 300 − 45 spent − 50 completed − 60 open = 145, rounded down to the quarter hour.
+      ['project-time:2026-11-08:atlas', 135, 'full', undefined, '2026-11-15T08:00:00.000Z', 'work'],
+      ['project-time:2026-11-15:atlas', 300, 'full', '2026-11-15T08:00:00.000Z', '2026-11-22T08:00:00.000Z', 'work'],
+      // 200 open minutes use up this week's 120 and 80 of next week's; 40 are left, rounded to 30.
+      ['project-time:2026-11-15:agents', 30, 'shared', '2026-11-15T08:00:00.000Z', '2026-11-22T08:00:00.000Z', undefined],
+      // 60 − 40 leaves 20 this week: too little to plan. Next week has the whole hour.
+      ['project-time:2026-11-15:small', 60, 'full', '2026-11-15T08:00:00.000Z', '2026-11-22T08:00:00.000Z', undefined],
+    ])
+    for (const t of projectTime) {
+      expect(t).toMatchObject({ priority: 'low', deadlineType: 'soft', context: 'computer', projectId: t.id.slice('project-time:2026-11-08:'.length) })
+    }
+  })
+})
+
+describe('splitProjectTime', () => {
+  it('moves project time out of the plan, keeps only blocks inside their own week, and never reports it', () => {
+    const block = (taskId: string, start: string, end: string, lane?: number) => ({
+      taskId,
+      start,
+      end,
+      pinned: false,
+      ...(lane === undefined ? {} : { lane }),
+    })
+    const result = splitProjectTime(
+      {
+        placements: [
+          block('t1', '2026-11-09T17:00:00.000Z', '2026-11-09T18:00:00.000Z'),
+          block('project-time:2026-11-08:atlas', '2026-11-10T19:00:00.000Z', '2026-11-10T20:00:00.000Z', 1),
+          // Saturday 23:30 Pacific is already Sunday in UTC, but still in the week that began on the 8th.
+          block('project-time:2026-11-08:atlas', '2026-11-15T07:30:00.000Z', '2026-11-15T08:00:00.000Z'),
+          // The scheduler could only fit this after its week ended: the budget is not carried over.
+          block('project-time:2026-11-08:atlas', '2026-11-16T17:00:00.000Z', '2026-11-16T18:00:00.000Z'),
+          block('project-time:2026-11-15:with:colon', '2026-11-16T18:00:00.000Z', '2026-11-16T19:00:00.000Z'),
+        ],
+        unscheduled: [
+          { taskId: 'project-time:2026-11-08:atlas', reason: 'no_fit_in_horizon', unplacedMinutes: 30 },
+          { taskId: 't2', reason: 'no_allowed_block', unplacedMinutes: 60 },
+        ],
+        late: [
+          { taskId: 'project-time:2026-11-08:atlas', dueAt: '2026-11-15T08:00:00.000Z', eta: '2026-11-16T18:00:00.000Z' },
+          { taskId: 't1', dueAt: '2026-11-09T17:30:00.000Z', eta: '2026-11-09T18:00:00.000Z' },
+        ],
+        optional: [
+          { taskId: 'project-time:2026-11-08:atlas', blockId: 'evening', start: '2026-11-10T04:00:00.000Z', end: '2026-11-10T05:00:00.000Z' },
+          { taskId: 't1', blockId: 'evening', start: '2026-11-10T05:00:00.000Z', end: '2026-11-10T06:00:00.000Z' },
+        ],
+        routine: [],
+        missed: [],
+        capacity: [],
+      },
+      LA,
+    )
+    expect(result.placements.map((p) => p.taskId)).toEqual(['t1'])
+    expect(result.projectPlacements).toEqual([
+      { projectId: 'atlas', weekOf: '2026-11-08', start: '2026-11-10T19:00:00.000Z', end: '2026-11-10T20:00:00.000Z', lane: 1 },
+      { projectId: 'atlas', weekOf: '2026-11-08', start: '2026-11-15T07:30:00.000Z', end: '2026-11-15T08:00:00.000Z' },
+      { projectId: 'with:colon', weekOf: '2026-11-15', start: '2026-11-16T18:00:00.000Z', end: '2026-11-16T19:00:00.000Z' },
+    ])
+    expect(result.unscheduled.map((u) => u.taskId)).toEqual(['t2'])
+    expect(result.late.map((l) => l.taskId)).toEqual(['t1'])
+    expect(result.optional.map((o) => o.taskId)).toEqual(['t1'])
   })
 })
 
@@ -311,6 +485,141 @@ describe('runScheduling', () => {
       expect(await db.select().from(unscheduled)).toEqual([
         { taskId: 'overdue', reason: 'no_fit_before_hard_deadline', unplacedMinutes: 45, computedAt: later },
       ])
+    } finally {
+      await close()
+    }
+  })
+
+  it('stores lanes, the gym and each day\'s capacity, and keeps project time that has ended as time spent', async () => {
+    const { db, close } = await createTestDb()
+    try {
+      await seed(db)
+      await db.insert(projects).values([projectRow('atlas', { parallel: true, weeklyMinutes: 120 }), projectRow('billing', { parallel: true })])
+      await db.insert(tasks).values([
+        taskRow('atlas-task', 'inbox', { projectId: 'atlas' }),
+        taskRow('billing-task', 'inbox', { projectId: 'billing', createdAt: new Date('2026-11-02T00:00:00Z') }),
+      ])
+      const result = await runScheduling(db, { HORIZON_DAYS: 28 }, NOW)
+
+      // Atlas reserves two hours a week and its task covers one, so one hour of project time is
+      // planned this week and the full two next week. Project time is due by the end of its week,
+      // so it is planned ahead of the undated tasks: 09:00 Monday. The Atlas task follows it (a
+      // project never runs beside itself) and the Billing task runs alongside, in the next lane.
+      const lanes = () =>
+        db.select({ taskId: placements.taskId, startAt: placements.startAt, lane: placements.lane }).from(placements).orderBy(placements.lane)
+      expect(await lanes()).toEqual([
+        { taskId: 'atlas-task', startAt: new Date('2026-11-09T18:00:00Z'), lane: 0 },
+        { taskId: 'billing-task', startAt: NOW, lane: 1 },
+      ])
+
+      const minutesByWeek = async () => {
+        const rows = await db.select().from(projectPlacements).orderBy(projectPlacements.startAt)
+        const byWeek: Record<string, number> = {}
+        for (const p of rows) {
+          expect(p.projectId).toBe('atlas')
+          byWeek[p.weekOf] = (byWeek[p.weekOf] ?? 0) + (p.endAt.getTime() - p.startAt.getTime()) / 60_000
+        }
+        return { rows, byWeek }
+      }
+      const first = await minutesByWeek()
+      expect(first.byWeek).toEqual({ '2026-11-08': 60, '2026-11-15': 120 })
+      expect(first.rows[0]).toMatchObject({ startAt: NOW, endAt: new Date('2026-11-09T18:00:00Z'), lane: 0 })
+      expect(result.projectPlacements).toHaveLength(first.rows.length)
+      expect(result.placements.map((p) => p.taskId).sort()).toEqual(['atlas-task', 'billing-task'])
+
+      // The gym: Monday 15:30, the office morning on Tuesday, then Thursday and Friday afternoon.
+      const gym = await db.select().from(routineOccurrences).orderBy(routineOccurrences.startAt)
+      expect(gym.slice(0, 4).map((o) => [o.blockId, o.startAt.toISOString(), o.endAt.toISOString()])).toEqual([
+        ['gym', '2026-11-09T23:30:00.000Z', '2026-11-10T00:45:00.000Z'],
+        ['gym', '2026-11-10T17:00:00.000Z', '2026-11-10T18:15:00.000Z'],
+        ['gym', '2026-11-12T23:30:00.000Z', '2026-11-13T00:45:00.000Z'],
+        ['gym', '2026-11-13T23:30:00.000Z', '2026-11-14T00:45:00.000Z'],
+      ])
+
+      const [summary] = await db.select().from(planSummary)
+      expect(summary?.missed).toEqual([])
+      expect(summary?.capacity.map((c) => c.date)).toEqual([
+        '2026-11-09',
+        '2026-11-10',
+        '2026-11-11',
+        '2026-11-12',
+        '2026-11-13',
+        '2026-11-14',
+        '2026-11-15',
+      ])
+      // Tuesday is empty: the office block is 09:00–16:20 (440 minutes) less the 75-minute gym.
+      expect(summary?.capacity[1]?.freeMinutes).toEqual({ computer: 365, errand: 0, home: 0, office: 365 })
+      // Saturday has no block at all.
+      expect(summary?.capacity[5]?.freeMinutes).toEqual({ computer: 0, errand: 0, home: 0, office: 0 })
+
+      // 11:30 Monday. The hour of project time is over, so it is this week's time spent: with the
+      // task still open, the budget is used up and no more project time is planned this week.
+      const later = new Date('2026-11-09T19:30:00Z')
+      await runScheduling(db, { HORIZON_DAYS: 28 }, later)
+      const second = await minutesByWeek()
+      expect(second.byWeek).toEqual({ '2026-11-08': 60, '2026-11-15': 120 })
+      expect(second.rows[0]).toEqual(first.rows[0])
+
+      // Two weeks after it ended, the record is dropped.
+      await runScheduling(db, { HORIZON_DAYS: 28 }, new Date('2026-11-24T17:00:00Z'))
+      expect((await db.select().from(projectPlacements)).map((p) => p.id)).not.toContain(first.rows[0]?.id)
+    } finally {
+      await close()
+    }
+  })
+
+  it('moves the office-morning gym to Wednesday when Tuesday is taken, and records the week when both are', async () => {
+    const { db, close } = await createTestDb()
+    try {
+      await seed(db)
+      await db.insert(googleAccounts).values({ id: 'acc', email: 'me@example.com', label: 'work', refreshTokenEnc: 'x' })
+      await db.insert(calendars).values({ id: 'cal', accountId: 'acc', googleId: 'me@example.com', summary: 'Work', accessRole: 'owner' })
+      const officeMornings = async () => {
+        const rows = await db.select().from(routineOccurrences).orderBy(routineOccurrences.startAt)
+        // 09:00 Pacific is 17:00Z; the afternoon sessions start at 23:30Z.
+        return rows.map((o) => o.startAt.toISOString()).filter((start) => start.endsWith('T17:00:00.000Z') && start < '2026-11-15')
+      }
+
+      // A Tuesday 09:30 meeting overlaps the 09:00–10:15 session.
+      await db.insert(events).values(eventRow('tue', { startAt: new Date('2026-11-10T17:30:00Z'), endAt: new Date('2026-11-10T18:00:00Z') }))
+      await runScheduling(db, { HORIZON_DAYS: 28 }, NOW)
+      expect(await officeMornings()).toEqual(['2026-11-11T17:00:00.000Z'])
+      expect((await db.select().from(planSummary))[0]?.missed).toEqual([])
+
+      await db.insert(events).values(eventRow('wed', { startAt: new Date('2026-11-11T17:00:00Z'), endAt: new Date('2026-11-11T17:30:00Z') }))
+      await runScheduling(db, { HORIZON_DAYS: 28 }, NOW)
+      expect(await officeMornings()).toEqual([])
+      expect((await db.select().from(planSummary))[0]?.missed).toEqual([{ blockId: 'gym', weekOf: '2026-11-08' }])
+    } finally {
+      await close()
+    }
+  })
+
+  it('plans nothing, and no gym, on a day that is marked off', async () => {
+    const { db, close } = await createTestDb()
+    try {
+      await seed(db)
+      await db.insert(tasks).values(taskRow('deep-work', 'inbox'))
+      await db.insert(dayOverrides).values({ date: '2026-11-09', kind: 'off' })
+      await runScheduling(db, { HORIZON_DAYS: 28 }, NOW)
+      // Tuesday at the office, straight after the 09:00–10:15 gym session.
+      expect(await db.select({ taskId: placements.taskId, startAt: placements.startAt }).from(placements)).toEqual([
+        { taskId: 'deep-work', startAt: new Date('2026-11-10T18:15:00Z') },
+      ])
+      const gym = await db.select().from(routineOccurrences).orderBy(routineOccurrences.startAt)
+      expect(gym[0]?.startAt.toISOString()).toBe('2026-11-10T17:00:00.000Z')
+
+      // A tombstoned override no longer applies: Monday has its gym session again and takes new
+      // work. `deep-work` keeps the time it was given, as a plan that still holds always does.
+      await db.update(dayOverrides).set({ deletedAt: NOW })
+      await db.insert(tasks).values(taskRow('new-work', 'inbox', { createdAt: NOW }))
+      await runScheduling(db, { HORIZON_DAYS: 28 }, new Date(NOW.getTime() + 60_000))
+      expect(await db.select({ taskId: placements.taskId, startAt: placements.startAt }).from(placements).orderBy(placements.startAt)).toEqual([
+        { taskId: 'new-work', startAt: new Date('2026-11-09T17:15:00Z') },
+        { taskId: 'deep-work', startAt: new Date('2026-11-10T18:15:00Z') },
+      ])
+      const restored = await db.select().from(routineOccurrences).orderBy(routineOccurrences.startAt)
+      expect(restored[0]?.startAt.toISOString()).toBe('2026-11-09T23:30:00.000Z')
     } finally {
       await close()
     }

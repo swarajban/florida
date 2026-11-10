@@ -1,12 +1,15 @@
 import { and, eq, isNull, lte, sql } from 'drizzle-orm'
 import type { Db } from './client.js'
-import { categories, schedules, settings, tasks } from './schema.js'
+import { categories, projects, schedules, settings, tasks } from './schema.js'
 
 /** The seeded category new and orphaned tasks land in; it cannot be renamed or deleted. */
 export const INBOX_CATEGORY_ID = 'inbox'
 
 /** Id of the only `settings` row. */
 export const SETTINGS_ID = 'default'
+
+/** Id of the only `plan_summary` row. */
+export const PLAN_SUMMARY_ID = 'default'
 
 /** True when a live (not soft-deleted) category has this id. */
 export async function categoryExists(db: Db, id: string): Promise<boolean> {
@@ -24,6 +27,16 @@ export async function scheduleExists(db: Db, id: string): Promise<boolean> {
     .select({ id: schedules.id })
     .from(schedules)
     .where(and(eq(schedules.id, id), isNull(schedules.deletedAt)))
+    .limit(1)
+  return rows.length > 0
+}
+
+/** True when a live (not soft-deleted) project has this id. */
+export async function projectExists(db: Db, id: string): Promise<boolean> {
+  const rows = await db
+    .select({ id: projects.id })
+    .from(projects)
+    .where(and(eq(projects.id, id), isNull(projects.deletedAt)))
     .limit(1)
   return rows.length > 0
 }

@@ -1,12 +1,12 @@
 import { setTimeout as sleep } from 'node:timers/promises'
-import { localParts, weekdayOf } from '@florida/scheduler'
+import { dateFromDayNumber, dayNumber, isoDate, localDate, localParts, weekdayOf } from '@florida/scheduler'
 import type { Hono } from 'hono'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { eq, inArray } from 'drizzle-orm'
 import { createApp } from '../src/app.js'
 import { ChangeBus } from '../src/changes.js'
 import type { Db } from '../src/db/client.js'
-import { calendars, categories, events, googleAccounts, routineBlocks, settings } from '../src/db/schema.js'
+import { calendars, categories, events, googleAccounts, routineBlocks, settings, taskRecurrences } from '../src/db/schema.js'
 import type { EventBody } from '../src/events.js'
 import { GoogleApiError, GoogleGoneError, GoogleTokenError, mapEvent } from '../src/google/client.js'
 import type { GoogleEvent, GoogleEventAttendee } from '../src/google/client.js'
@@ -53,7 +53,7 @@ async function api(path: string, init: RequestInit & { json?: unknown } = {}): P
 /** Wall-clock bounds of the seeded routine blocks by weekday (Pacific): home Mon/Thu/Fri, office Tue/Wed. */
 const ROUTINE_HOURS: Record<number, [start: number, end: number]> = {
   1: [9 * 60, 15 * 60 + 30],
-  2: [10 * 60 + 15, 16 * 60 + 20],
+  2: [9 * 60, 16 * 60 + 20],
   3: [9 * 60, 16 * 60 + 20],
   4: [9 * 60, 15 * 60 + 30],
   5: [9 * 60, 15 * 60 + 30],
@@ -72,6 +72,9 @@ function inRoutine(iso: string): boolean {
 function weekdayIn(iso: string): number {
   return weekdayOf(localParts(new Date(iso).getTime(), 'America/Los_Angeles'))
 }
+
+/** A run that plans no task; it still carries the gym, the missed list and each day's capacity. */
+const noScheduling = { placements: [], unscheduled: [], late: [], optional: [], projectPlacements: [] }
 
 const taskBody = {
   categoryId: 'inbox',
@@ -173,8 +176,9 @@ describe('tasks, sync and tombstones', () => {
     expect(body.settings).toMatchObject({ id: 'default', timeZone: 'America/Los_Angeles' })
     expect(body.routineBlocks.map((b) => [b.id, b.days, b.start, b.end, b.allows, b.optional]).sort()).toEqual([
       ['evening', [1, 2, 3, 4], '20:00', '23:00', ['computer', 'home'], true],
+      ['gym', [1, 4, 5], '15:30', '16:45', [], false],
       ['home', [1, 4, 5], '09:00', '15:30', ['computer', 'errand', 'home'], false],
-      ['office-tue', [2], '10:15', '16:20', ['computer', 'office'], false],
+      ['office-tue', [2], '09:00', '16:20', ['computer', 'office'], false],
       ['office-wed', [3], '09:00', '16:20', ['computer', 'office'], false],
     ])
     expect(body.schedules.map((s) => s.id).sort()).toEqual(['personal', 'work'])
@@ -303,7 +307,7 @@ describe('tasks, sync and tombstones', () => {
   it('POST /api/schedule/run returns a scheduler result', async () => {
     const res = await api('/api/schedule/run', { method: 'POST' })
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ placements: [], unscheduled: [], late: [], optional: [] })
+    expect(await res.json()).toMatchObject(noScheduling)
   })
 })
 
@@ -544,8 +548,9 @@ describe('seed', () => {
       const blocks = await fresh.db.select().from(routineBlocks).orderBy(routineBlocks.id)
       expect(blocks.map((b) => [b.id, b.days, b.start, b.end, b.allows, b.optional, b.deletedAt])).toEqual([
         ['evening', [1, 2, 3, 4], '20:00', '23:00', ['computer', 'home'], true, null],
+        ['gym', [1, 4, 5], '15:30', '16:45', [], false, null],
         ['home', [1, 4, 5], '09:00', '15:30', ['computer', 'errand', 'home'], false, null],
-        ['office-tue', [2], '10:15', '16:20', ['computer', 'office'], false, null],
+        ['office-tue', [2], '09:00', '16:20', ['computer', 'office'], false, null],
         ['office-wed', [3], '09:00', '16:20', ['computer', 'office'], false, null],
       ])
 
@@ -751,7 +756,7 @@ describe('google', () => {
     const res = await api('/api/google/sync', { method: 'POST' })
     expect(res.status).toBe(200)
     expect(fake.syncAllCalls).toBe(1)
-    expect(await res.json()).toEqual({ placements: [], unscheduled: [], late: [], optional: [] })
+    expect(await res.json()).toMatchObject(noScheduling)
   })
 
   it('POST /api/google/resync drops the sync tokens of selected calendars only, then runs a full sync', async () => {
@@ -762,7 +767,7 @@ describe('google', () => {
     const before = fake.syncAllCalls
     const res = await api('/api/google/resync', { method: 'POST' })
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ placements: [], unscheduled: [], late: [], optional: [] })
+    expect(await res.json()).toMatchObject(noScheduling)
     expect(fake.syncAllCalls).toBe(before + 1)
     const tokens = await db
       .select({ id: calendars.id, syncToken: calendars.syncToken })
@@ -887,7 +892,6 @@ describe('calendar event writes', () => {
   let ev1 = { ...write }
   let notices = 0
   let unsubscribe = () => {}
-  const noScheduling = { placements: [], unscheduled: [], late: [], optional: [] }
 
   beforeAll(async () => {
     await db.insert(googleAccounts).values({ id: 'acc-ev', email: 'ev@example.com', label: 'ev', refreshTokenEnc: 'opaque' })
@@ -909,7 +913,7 @@ describe('calendar event writes', () => {
     const res = await api('/api/events/ev-1', { method: 'PUT', json: write })
     expect(res.status).toBe(200)
     const body = (await res.json()) as { event: Record<string, unknown>; scheduling: unknown }
-    expect(body.scheduling).toEqual(noScheduling)
+    expect(body.scheduling).toMatchObject(noScheduling)
     expect(notices).toBe(before + 1)
     expect(body.event).toMatchObject({
       id: 'ev-1',
@@ -1239,7 +1243,7 @@ describe('calendar event writes', () => {
     const before = notices
     const res = await api('/api/events/ev-2', { method: 'DELETE' })
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ scheduling: noScheduling })
+    expect(await res.json()).toMatchObject({ scheduling: noScheduling })
     expect(notices).toBe(before + 1)
     expect(fake.eventWrites).toEqual([{ method: 'delete', calendarId: 'ev@example.com', googleId: 'g-2' }])
     expect(fake.googleEvents.has('g-2')).toBe(false)
@@ -1268,5 +1272,214 @@ describe('calendar event writes', () => {
     fake.nextWriteError = new GoogleApiError(403, JSON.stringify({ error: { message: 'Forbidden' } }))
     expect((await api('/api/events/ev-1', { method: 'DELETE' })).status).toBe(403)
     expect(((await (await api('/api/events/ev-1')).json()) as { deletedAt: string | null }).deletedAt).toBeNull()
+  })
+})
+
+describe('projects', () => {
+  interface WireProject {
+    id: string
+    status: string
+    updatedAt: string
+    deletedAt: string | null
+  }
+
+  it('PUT creates and replaces a project, PATCH changes only what it names, and both validate', async () => {
+    expect((await api('/api/projects/p-bad', { method: 'PUT', json: { name: '' } })).status).toBe(400)
+    expect((await api('/api/projects/p-bad', { method: 'PUT', json: { name: 'X', status: 'paused' } })).status).toBe(400)
+    expect((await api('/api/projects/p-bad', { method: 'PUT', json: { name: 'X', weeklyMinutes: -30 } })).status).toBe(400)
+    const unknown = await api('/api/projects/p-bad', { method: 'PUT', json: { name: 'X', categoryId: 'nope' } })
+    expect(unknown.status).toBe(400)
+    expect(await unknown.json()).toEqual({ error: 'unknown categoryId nope' })
+    expect((await api('/api/projects/p-bad')).status).toBe(404)
+    expect((await api('/api/projects/p-bad', { method: 'PATCH', json: { status: 'done' } })).status).toBe(404)
+
+    const created = await api('/api/projects/p1', { method: 'PUT', json: { name: 'Florida' } })
+    expect(created.status).toBe(200)
+    const body = (await created.json()) as { project: WireProject; scheduling: Record<string, unknown> }
+    expect(body.project).toMatchObject({
+      id: 'p1',
+      name: 'Florida',
+      status: 'active',
+      categoryId: null,
+      notes: null,
+      nextStep: null,
+      parallel: false,
+      weeklyMinutes: null,
+      sortOrder: 0,
+      deletedAt: null,
+    })
+    expect(Object.keys(body.scheduling).sort()).toEqual([
+      'capacity',
+      'late',
+      'missed',
+      'optional',
+      'placements',
+      'projectPlacements',
+      'routine',
+      'unscheduled',
+    ])
+
+    const patched = await api('/api/projects/p1', {
+      method: 'PATCH',
+      json: { status: 'on_hold', nextStep: 'Ship lanes', parallel: true, weeklyMinutes: 120, categoryId: 'personal', sortOrder: 3 },
+    })
+    expect(patched.status).toBe(200)
+    const held = { name: 'Florida', status: 'on_hold', nextStep: 'Ship lanes', parallel: true, weeklyMinutes: 120, categoryId: 'personal', sortOrder: 3 }
+    expect(((await patched.json()) as { project: WireProject }).project).toMatchObject(held)
+
+    // `null` clears a field; a field the patch does not name keeps its value.
+    const cleared = await api('/api/projects/p1', { method: 'PATCH', json: { nextStep: null, notes: 'Motion replacement' } })
+    expect(((await cleared.json()) as { project: WireProject }).project).toMatchObject({ ...held, nextStep: null, notes: 'Motion replacement' })
+    const badPatch = await api('/api/projects/p1', { method: 'PATCH', json: { categoryId: 'nope' } })
+    expect(badPatch.status).toBe(400)
+    expect(await api('/api/projects/p1').then((res) => res.json())).toMatchObject({ ...held, nextStep: null, notes: 'Motion replacement' })
+
+    // A PUT is the whole project: the nullable fields it leaves out are cleared, while status,
+    // parallel and sortOrder, which always have a value, stay as they were.
+    const replaced = await api('/api/projects/p1', { method: 'PUT', json: { name: 'Florida v2' } })
+    expect(((await replaced.json()) as { project: WireProject }).project).toMatchObject({
+      name: 'Florida v2',
+      status: 'on_hold',
+      parallel: true,
+      sortOrder: 3,
+      categoryId: null,
+      notes: null,
+      nextStep: null,
+      weeklyMinutes: null,
+    })
+  })
+
+  it('a task names a live project, and deleting the project unfiles its tasks and its repeating tasks', async () => {
+    const bad = await api('/api/tasks/p-task', { method: 'PUT', json: { ...taskBody, projectId: 'nope' } })
+    expect(bad.status).toBe(400)
+    expect(await bad.json()).toEqual({ error: 'unknown projectId nope' })
+    expect((await api('/api/tasks/p-task', { method: 'PUT', json: { ...taskBody, attention: 'half' } })).status).toBe(400)
+
+    expect((await api('/api/projects/p2', { method: 'PUT', json: { name: 'Agents', parallel: true } })).status).toBe(200)
+    const filed = await api('/api/tasks/p-task', { method: 'PUT', json: { ...taskBody, projectId: 'p2', attention: 'full' } })
+    expect(filed.status).toBe(200)
+    expect(((await filed.json()) as { task: unknown }).task).toMatchObject({ projectId: 'p2', attention: 'full' })
+    // An older client's write names neither field: both keep their stored value.
+    const older = await api('/api/tasks/p-task', { method: 'PUT', json: { ...taskBody, title: 'Renamed' } })
+    expect(((await older.json()) as { task: unknown }).task).toMatchObject({ title: 'Renamed', projectId: 'p2', attention: 'full' })
+    const followed = await api('/api/tasks/p-task', { method: 'PATCH', json: { attention: null } })
+    expect(((await followed.json()) as { task: unknown }).task).toMatchObject({ projectId: 'p2', attention: null })
+
+    const weekly = { frequency: 'week', interval: 1, timeZone: 'America/Los_Angeles', startDate: '2030-01-07', weekdays: [1] }
+    const repeating = await api('/api/tasks/p-repeat', {
+      method: 'PUT',
+      json: { ...taskBody, projectId: 'p2', attention: 'shared', recurrence: weekly },
+    })
+    expect(repeating.status).toBe(200)
+    const seriesId = ((await repeating.json()) as { task: { recurrenceSeriesId: string } }).task.recurrenceSeriesId
+    const template = async () => (await db.select().from(taskRecurrences).where(eq(taskRecurrences.id, seriesId)))[0]?.template
+    expect(await template()).toMatchObject({ projectId: 'p2', attention: 'shared' })
+
+    const cursor = ((await (await api('/api/sync')).json()) as { cursor: string }).cursor
+    await sleep(5)
+    const deleted = await api('/api/projects/p2', { method: 'DELETE' })
+    expect(deleted.status).toBe(200)
+    expect(Object.keys((await deleted.json()) as object)).toEqual(['scheduling'])
+
+    // The tombstone and the unfiled tasks reach clients through an incremental sync.
+    const synced = (await (await api(`/api/sync?since=${encodeURIComponent(cursor)}`)).json()) as {
+      projects: WireProject[]
+      tasks: { id: string; projectId: string | null; attention: string | null; deletedAt: string | null }[]
+    }
+    expect(synced.projects).toEqual([expect.objectContaining({ id: 'p2', deletedAt: expect.any(String) })])
+    expect(synced.tasks.find((t) => t.id === 'p-task')).toMatchObject({ projectId: null, attention: null, deletedAt: null })
+    expect(synced.tasks.find((t) => t.id === 'p-repeat')).toMatchObject({ projectId: null, attention: 'shared', deletedAt: null })
+    expect(await template()).toMatchObject({ projectId: null, attention: 'shared' })
+
+    // The tombstone reads back, cannot be patched or named by a task, and a PUT brings it back.
+    expect(((await (await api('/api/projects/p2')).json()) as WireProject).deletedAt).toEqual(expect.any(String))
+    expect((await api('/api/projects/p2', { method: 'PATCH', json: { status: 'done' } })).status).toBe(404)
+    expect((await api('/api/tasks/p-task', { method: 'PATCH', json: { projectId: 'p2' } })).status).toBe(400)
+    expect((await api('/api/projects/never-existed', { method: 'DELETE' })).status).toBe(404)
+    const restored = await api('/api/projects/p2', { method: 'PUT', json: { name: 'Agents' } })
+    expect(((await restored.json()) as { project: WireProject }).project).toMatchObject({ id: 'p2', deletedAt: null, parallel: true })
+
+    for (const id of ['p-task', 'p-repeat']) expect((await api(`/api/tasks/${id}`, { method: 'DELETE' })).status).toBe(200)
+  })
+})
+
+describe('day overrides', () => {
+  interface Capacity {
+    date: string
+    freeMinutes: { computer: number; errand: number; home: number; office: number }
+  }
+
+  /** The first Saturday or Sunday after today (Pacific): a day the routine plans nothing on. */
+  function nextWeekendDay(): string {
+    const today = dayNumber(localDate(Date.now(), 'America/Los_Angeles'))
+    for (let day = today + 1; ; day++) {
+      const date = dateFromDayNumber(day)
+      if (weekdayOf(date) === 0 || weekdayOf(date) === 6) return isoDate(date)
+    }
+  }
+
+  it('PUT sets what a date is and the plan follows; DELETE puts the date back on its weekday', async () => {
+    const date = nextWeekendDay()
+    expect((await api('/api/day-overrides/next-tuesday', { method: 'PUT', json: { kind: 'off' } })).status).toBe(400)
+    expect((await api('/api/day-overrides/2026-02-30', { method: 'PUT', json: { kind: 'off' } })).status).toBe(400)
+    expect((await api(`/api/day-overrides/${date}`, { method: 'PUT', json: { kind: 'vacation' } })).status).toBe(400)
+    expect((await api(`/api/day-overrides/${date}`)).status).toBe(404)
+    expect((await api(`/api/day-overrides/${date}`, { method: 'DELETE' })).status).toBe(404)
+
+    const capacityOn = (scheduling: { capacity: Capacity[] }) => scheduling.capacity.find((c) => c.date === date)?.freeMinutes
+    const before = (await (await api('/api/sync')).json()) as { cursor: string; capacity: Capacity[]; dayOverrides: unknown[] }
+    expect(before.dayOverrides).toEqual([])
+    expect(capacityOn(before)).toEqual({ computer: 0, errand: 0, home: 0, office: 0 })
+
+    // A weekend day worked from home follows Monday's routine: 09:00–15:30, where anything but
+    // office work fits.
+    const set = await api(`/api/day-overrides/${date}`, { method: 'PUT', json: { kind: 'home', note: 'Catching up' } })
+    expect(set.status).toBe(200)
+    const body = (await set.json()) as { dayOverride: unknown; scheduling: { capacity: Capacity[]; routine: { blockId: string; start: string }[] } }
+    expect(body.dayOverride).toMatchObject({ date, kind: 'home', note: 'Catching up', deletedAt: null })
+    expect(capacityOn(body.scheduling)).toEqual({ computer: 390, errand: 390, home: 390, office: 0 })
+    const gymDays = (routine: { blockId: string; start: string }[]) =>
+      routine.filter((r) => r.blockId === 'gym').map((r) => isoDate(localDate(new Date(r.start).getTime(), 'America/Los_Angeles')))
+    expect(gymDays(body.scheduling.routine)).toContain(date)
+
+    // A second PUT replaces the first; the note it leaves out is cleared.
+    const off = await api(`/api/day-overrides/${date}`, { method: 'PUT', json: { kind: 'off' } })
+    const offBody = (await off.json()) as typeof body
+    expect(offBody.dayOverride).toMatchObject({ date, kind: 'off', note: null })
+    expect(capacityOn(offBody.scheduling)).toEqual({ computer: 0, errand: 0, home: 0, office: 0 })
+    expect(gymDays(offBody.scheduling.routine)).not.toContain(date)
+    expect(await (await api(`/api/day-overrides/${date}`)).json()).toMatchObject({ date, kind: 'off' })
+
+    await sleep(5)
+    expect((await api(`/api/day-overrides/${date}`, { method: 'PUT', json: { kind: 'home' } })).status).toBe(200)
+    const cleared = await api(`/api/day-overrides/${date}`, { method: 'DELETE' })
+    expect(cleared.status).toBe(200)
+    expect(capacityOn(((await cleared.json()) as { scheduling: { capacity: Capacity[] } }).scheduling)).toEqual({ computer: 0, errand: 0, home: 0, office: 0 })
+    const synced = (await (await api(`/api/sync?since=${encodeURIComponent(before.cursor)}`)).json()) as { dayOverrides: unknown[] }
+    expect(synced.dayOverrides).toEqual([expect.objectContaining({ date, kind: 'home', deletedAt: expect.any(String) })])
+  })
+
+  it('GET /api/sync carries the plan\'s project time, gym sessions, capacity and briefs in full on every sync', async () => {
+    const cursor = ((await (await api('/api/sync')).json()) as { cursor: string }).cursor
+    const res = (await (await api(`/api/sync?since=${encodeURIComponent(cursor)}`)).json()) as {
+      projects: unknown[]
+      dayOverrides: unknown[]
+      projectPlacements: unknown[]
+      routineOccurrences: { blockId: string; startAt: string; endAt: string }[]
+      missed: unknown[]
+      capacity: Capacity[]
+      briefs: unknown[]
+    }
+    expect(res.projects).toEqual([])
+    expect(res.dayOverrides).toEqual([])
+    expect(res.projectPlacements).toEqual([])
+    expect(res.briefs).toEqual([])
+    expect(res.missed).toEqual(expect.any(Array))
+    expect(res.capacity).toHaveLength(7)
+    expect(res.routineOccurrences.length).toBeGreaterThan(0)
+    for (const o of res.routineOccurrences) {
+      expect(o.blockId).toBe('gym')
+      expect(new Date(o.endAt).getTime() - new Date(o.startAt).getTime()).toBe(75 * 60_000)
+    }
   })
 })
