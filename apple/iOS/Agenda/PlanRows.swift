@@ -2,9 +2,9 @@ import FloridaKit
 import SwiftUI
 
 /// A commitment the scheduler placed (the gym) or time it holds for a project, in the day
-/// timeline. Laid out like a task block, but with an outlined bar where a task's is solid and a
-/// meeting's is filled, and the plan's symbol before the title: scheduled time that is neither a
-/// task nor a meeting. Project time says so under the title.
+/// timeline. Laid out like a task block, but with an outlined bar where a task's is dashed and a
+/// meeting is a filled card, and the plan's symbol where a task has its circle: scheduled time
+/// that is neither a task nor a meeting. Project time says so under the title.
 struct PlanBlockRow: View {
     /// Where the title starts: the time column, the bar, and the spacing on both sides of it.
     static let titleInset: CGFloat = TimeColumn.width + 12 + HeldTimeBar.width + 12

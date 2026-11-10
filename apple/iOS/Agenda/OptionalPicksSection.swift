@@ -19,6 +19,13 @@ struct OptionalPicksSection: View {
                     onEdit: { onEdit(pick.task) }, onTake: { model.take(pick) })
                     .listRowBackground(FloridaStyle.paper)
             }
+            // The last row, not the section's footer: a plain list draws a footer as a bar in the
+            // system background with body-size text, a white slab on the paper.
+            Text("Suggestions only: none of this is on the plan.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .listRowSeparator(.hidden)
+                .listRowBackground(FloridaStyle.paper)
         } header: {
             HStack(spacing: 6) {
                 Image(systemName: "moon.stars")
@@ -29,8 +36,6 @@ struct OptionalPicksSection: View {
             .textCase(nil)
             .accessibilityLabel(
                 "\(RoutineText.picksTitle(group)), \(Formatting.spokenDuration(minutes: group.totalMinutes))")
-        } footer: {
-            Text("Suggestions only: none of this is on the plan.")
         }
     }
 }

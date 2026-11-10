@@ -435,14 +435,17 @@ struct AgendaView: View {
                             .listRowBackground(FloridaStyle.paper)
                     case .item(.event(let event)):
                         eventRow(event)
+                            .timelineSeparator()
                             .listRowBackground(FloridaStyle.paper)
                     case .item(.block(let block)):
                         blockRow(block, beside: beside[block.placement.id])
                     case .item(.plan(let block)):
                         planRow(block, beside: beside[block.id])
+                            .timelineSeparator()
                             .listRowBackground(FloridaStyle.paper)
                     case .item(.ghost(let ghost)):
                         GhostRow(ghost: ghost, category: model.category(id: ghost.categoryId))
+                            .timelineSeparator()
                             .listRowBackground(FloridaStyle.paper)
                     }
                 }
@@ -519,6 +522,7 @@ struct AgendaView: View {
                     isOver: AgendaItem.block(block).isOver(at: now))
             }
         }
+        .timelineSeparator()
         .listRowBackground(BloomBackground(color: Color.category(category), active: isBlooming, base: FloridaStyle.paper))
         if block.task.completedAt == nil {
             row.taskActions(
