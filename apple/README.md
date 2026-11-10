@@ -69,13 +69,14 @@ ones:
 | Keys | Action |
 | --- | --- |
 | `h` / `l`, `⇧H` / `⇧L`, `t`, `g d` | previous/next day, previous/next week, today, go to date |
-| `d` `3` `w` `m` | day, 3-day, week, month view |
+| `d` `3` `w` `⇧M` | day, 3-day, week, month view |
 | `j` / `k` | move the selection through the focused panel |
+| `f` | jump: label every task and event on screen, then type a label to select it |
 | `⌘T`, `g t` / `g c` | toggle the task pane, focus tasks / calendar |
 | `⌘K`, `/` or `⌘F` | command palette (quick add; type `>` for commands), search |
 | `c`, `e` or `↩`, `x`, `space` | new task, edit, delete, complete |
 | `p` / `⇧P`, `s`, `⌘1`–`⌘4` | pin / unpin to its slot (on an evening suggestion: do it tonight), snooze to tomorrow, priority ASAP…low |
-| `⇧E`, `r y` / `r m` / `r n` | edit the selected event, RSVP yes / maybe / no |
+| `⇧E`, `r y` / `r m` / `r n`, `v` | edit the selected event, RSVP yes / maybe / no, join its video call |
 | `g p`, `g b`, `y` | projects, today's brief and the weekly review, "Why here?" for the selected task |
 | `o`, `⇧⌘C`, `⌘R`, `esc` | open in Google Calendar, copy link, sync now, cancel |
 
