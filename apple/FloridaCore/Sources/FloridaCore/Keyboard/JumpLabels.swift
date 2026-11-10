@@ -63,3 +63,33 @@ public struct JumpLabels<Item: Hashable & Sendable>: Sendable {
         return .pending
     }
 }
+
+/// The stretch of a scrolling view that is on screen, top to bottom, in the same coordinates as
+/// what is measured against it. Jump mode labels only what is on screen: a label nobody can see
+/// uses up a key.
+public struct JumpViewport: Hashable, Sendable {
+    public var top: Double
+    public var bottom: Double
+
+    public init(top: Double, bottom: Double) {
+        self.top = top
+        self.bottom = bottom
+    }
+
+    /// Whether a label with one fixed place, from `top` to `bottom` (a list row's), is all on
+    /// screen.
+    public func shows(top: Double, bottom: Double) -> Bool {
+        top >= self.top && bottom <= self.bottom
+    }
+
+    /// Where the top of a `labelHeight`-point label goes on something that runs from `top` to
+    /// `bottom` and can carry it anywhere down its length (a calendar block): at its own top when
+    /// that is on screen, else at the top of the viewport. Nil when the part on screen is too
+    /// short for the label; something shorter than the label has to be on screen whole.
+    public func labelTop(onItemFrom top: Double, to bottom: Double, labelHeight: Double) -> Double? {
+        let visibleTop = max(top, self.top)
+        let visibleBottom = min(bottom, self.bottom)
+        guard visibleBottom - visibleTop >= min(labelHeight, bottom - top) else { return nil }
+        return visibleTop
+    }
+}

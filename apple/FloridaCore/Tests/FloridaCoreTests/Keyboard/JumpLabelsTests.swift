@@ -93,3 +93,47 @@ import Testing
         #expect(!JumpLabels(items: ["one"]).isEmpty)
     }
 }
+
+@Suite struct JumpViewportTests {
+    /// A time grid at a point a minute, scrolled to show 07:00 to 17:00.
+    private let viewport = JumpViewport(top: 420, bottom: 1020)
+
+    @Test func aBlockWhollyOnScreenCarriesItsLabelOnItsTop() {
+        #expect(viewport.labelTop(onItemFrom: 540, to: 600, labelHeight: 14) == 540)
+        #expect(viewport.labelTop(onItemFrom: 420, to: 1020, labelHeight: 14) == 420)
+    }
+
+    @Test func aBlockCutOffAtTheTopCarriesItAtTheTopOfTheViewport() {
+        #expect(viewport.labelTop(onItemFrom: 360, to: 480, labelHeight: 14) == 420)
+        // All day long: the label still has one place.
+        #expect(viewport.labelTop(onItemFrom: 0, to: 1440, labelHeight: 14) == 420)
+        // 14 points of it show, which is just enough; 13 are not.
+        #expect(viewport.labelTop(onItemFrom: 360, to: 434, labelHeight: 14) == 420)
+        #expect(viewport.labelTop(onItemFrom: 360, to: 433, labelHeight: 14) == nil)
+    }
+
+    @Test func aBlockCutOffAtTheBottomNeedsRoomForTheLabel() {
+        #expect(viewport.labelTop(onItemFrom: 1006, to: 1100, labelHeight: 14) == 1006)
+        #expect(viewport.labelTop(onItemFrom: 1007, to: 1100, labelHeight: 14) == nil)
+    }
+
+    @Test func aBlockScrolledAwayGetsNone() {
+        #expect(viewport.labelTop(onItemFrom: 300, to: 420, labelHeight: 14) == nil)
+        #expect(viewport.labelTop(onItemFrom: 1020, to: 1080, labelHeight: 14) == nil)
+        #expect(viewport.labelTop(onItemFrom: 1200, to: 1260, labelHeight: 14) == nil)
+    }
+
+    @Test func aBlockShorterThanTheLabelHasToShowWhole() {
+        #expect(viewport.labelTop(onItemFrom: 500, to: 510, labelHeight: 14) == 500)
+        #expect(viewport.labelTop(onItemFrom: 415, to: 425, labelHeight: 14) == nil)
+        #expect(viewport.labelTop(onItemFrom: 1011, to: 1021, labelHeight: 14) == nil)
+    }
+
+    @Test func aLabelWithOnePlaceHasToBeAllOnScreen() {
+        #expect(viewport.shows(top: 420, bottom: 440))
+        #expect(!viewport.shows(top: 419, bottom: 439))
+        #expect(viewport.shows(top: 1000, bottom: 1020))
+        #expect(!viewport.shows(top: 1001, bottom: 1021))
+        #expect(!viewport.shows(top: 100, bottom: 120))
+    }
+}
