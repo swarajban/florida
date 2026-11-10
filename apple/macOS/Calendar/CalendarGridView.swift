@@ -124,6 +124,8 @@ struct CalendarGridView: View {
         let day = layout.days[dayIndex]
         model.focus = .calendar
         model.selectDay(day)
+        // The status bar's note was about the block this click deselects.
+        model.statusMessage = nil
         model.select(nil)
         if isDouble {
             let minute = Self.grid.snappedMinute(forY: point.y)

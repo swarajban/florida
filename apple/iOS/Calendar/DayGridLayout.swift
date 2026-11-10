@@ -3,8 +3,9 @@ import SwiftUI
 
 /// Everything the hour grid draws for its visible days, built once per data change by
 /// `DayGridView` from the days' agendas (`AppModel.gridDays`), so the views only turn frames into
-/// positions. Column packing comes from `DayLayout`, the all-day rows from `AllDayLayout`; this is
-/// the iOS counterpart of the Mac's `GridLayout`.
+/// positions. Column packing comes from `DayLayout` (with parallel work put in lane order by
+/// `LaneColumns`), the all-day rows from `AllDayLayout`; this is the iOS counterpart of the Mac's
+/// `GridLayout`.
 struct DayGridLayout: Equatable {
     /// What a block stands for; handed back on tap and read by the drop.
     enum Item: Hashable {
@@ -13,6 +14,8 @@ struct DayGridLayout: Equatable {
         case ghost(GhostBlock)
         /// What the scheduler suggests for an optional routine block; not on the plan.
         case suggestion(OptionalPicks.Pick)
+        /// A commitment (the gym) or time held for a project: on the plan, but not a task.
+        case plan(PlanBlock)
     }
 
     /// A timed block in one day column.
@@ -53,7 +56,16 @@ struct DayGridLayout: Equatable {
             return false
         }
 
-        var canMove: Bool { !isDone && !isGhost && !isSuggestion }
+        /// The commitment or project time the block stands for; nil for every other block.
+        var planBlock: PlanBlock? {
+            if case .plan(let plan) = item { return plan }
+            return nil
+        }
+
+        var isPlan: Bool { planBlock != nil }
+
+        /// Plan blocks never move: the scheduler places them.
+        var canMove: Bool { !isDone && !isGhost && !isSuggestion && !isPlan }
 
         /// Minutes the block is drawn as in its column.
         var spanMinutes: Int { endMinute - startMinute }
@@ -85,11 +97,15 @@ struct DayGridLayout: Equatable {
     /// (the pin is local, the scheduler has not run) is drawn as the scheduler will place it: one
     /// pinned block of its remaining minutes at `pinnedStart`. `suggestions` (optional routine
     /// blocks) are packed with the rest, so one never hides under an event added since the
-    /// scheduler ran.
+    /// scheduler ran. The agendas' plan blocks (commitments and project time) are packed with the
+    /// rest too; work that shares its time (a `lane` on the placement or the plan block) is
+    /// drawn side by side in lane order. `projectTint` colors a project's time by project id;
+    /// a commitment is drawn in ink, the color of no calendar and no category.
     static func build(
         days: [Date], agendas: [DayAgenda], ghosts: [GhostBlock], suggestions: [OptionalPicks.Pick] = [],
         blooming: Set<String>, minimumMinutes: Int, calendar: Calendar,
-        eventStyle: (CalendarEvent) -> EventStyle, categoryTint: (String) -> Color
+        eventStyle: (CalendarEvent) -> EventStyle, categoryTint: (String) -> Color,
+        projectTint: (String) -> Color
     ) -> DayGridLayout {
         var layout = DayGridLayout()
         layout.days = days
@@ -103,6 +119,8 @@ struct DayGridLayout: Equatable {
         var seenEvents: Set<String> = []
         var placements: [ScheduledBlock] = []
         var seenPlacements: Set<String> = []
+        var planBlocks: [PlanBlock] = []
+        var seenPlanBlocks: Set<String> = []
         for day in days {
             guard let agenda = agendas.first(where: { $0.day == day }) else { continue }
             for event in agenda.events where seenEvents.insert(event.id).inserted {
@@ -111,9 +129,14 @@ struct DayGridLayout: Equatable {
             for block in agenda.placements where seenPlacements.insert(block.placement.id).inserted {
                 placements.append(block)
             }
+            for block in agenda.planBlocks where seenPlanBlocks.insert(block.id).inserted {
+                planBlocks.append(block)
+            }
         }
 
         var sources: [String: Source] = [:]
+        /// The lane of each task block and plan block that has one, by source id.
+        var lanes: [String: Int] = [:]
         var timed: [LayoutItem<String>] = []
         var allDay: [LayoutItem<String>] = []
 
@@ -161,6 +184,22 @@ struct DayGridLayout: Equatable {
                 tint: categoryTint(task.categoryId), rim: nil, isPinned: placement.pinned,
                 isDone: task.completedAt != nil || blooming.contains(task.id))
             timed.append(LayoutItem(id: placement.id, start: placement.startAt, end: placement.endAt))
+            lanes[placement.id] = placement.lane
+        }
+
+        // `PlanBlock.id` carries a kind prefix, so it never collides with an event or placement id.
+        for plan in planBlocks {
+            guard plan.endAt > range.lowerBound, plan.startAt < range.upperBound else { continue }
+            let tint: Color
+            switch plan.kind {
+            case .commitment: tint = FloridaStyle.ink
+            case .project(let projectId): tint = projectTint(projectId)
+            }
+            sources[plan.id] = Source(
+                item: .plan(plan), start: plan.startAt, end: plan.endAt, title: plan.title, tint: tint, rim: nil,
+                isPinned: false, isDone: false)
+            timed.append(LayoutItem(id: plan.id, start: plan.startAt, end: plan.endAt))
+            lanes[plan.id] = plan.lane
         }
 
         // A ghost whose placement is still live (same id) is drawn once, as the placement.
@@ -199,7 +238,8 @@ struct DayGridLayout: Equatable {
         for (index, day) in days.enumerated() {
             let dayEnd = nextDayStart(after: day, calendar: calendar)
             let items = timed.filter { $0.start < dayEnd && $0.end > day }
-            for frame in DayLayout.layout(items, day: day, calendar: calendar, minimumMinutes: minimumMinutes) {
+            let frames = DayLayout.layout(items, day: day, calendar: calendar, minimumMinutes: minimumMinutes)
+            for frame in LaneColumns.ordered(frames, lanes: lanes) {
                 guard let source = sources[frame.id] else { continue }
                 layout.blocks.append(Block(
                     id: "\(index)-\(frame.id)", item: source.item, dayIndex: index, column: frame.column,
@@ -233,7 +273,8 @@ struct DayGridLayout: Equatable {
         return summary.isEmpty ? "(No title)" : summary
     }
 
-    /// What a block is made from, keyed by event, placement, ghost or suggestion id while building.
+    /// What a block is made from, keyed by event, placement, plan block, ghost or suggestion id
+    /// while building.
     private struct Source {
         var item: Item
         var start: Date

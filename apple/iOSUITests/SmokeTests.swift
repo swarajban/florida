@@ -52,6 +52,73 @@ final class SmokeTests: XCTestCase {
         large.terminate()
     }
 
+    /// Projects, parallel lanes, the gym, the brief and the task editor's plan fields.
+    @MainActor
+    func testPlanScreensInBothAppearances() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let agenda = launch(appearance: appearance)
+            XCTAssertTrue(element("agenda-brief", in: agenda).waitForExistence(timeout: 20))
+            XCTAssertTrue(element("agenda-day-kind", in: agenda).exists)
+            capture(agenda, "plan-agenda-\(appearance)")
+            // The shared hour sits below the brief and the morning.
+            agenda.swipeUp()
+            capture(agenda, "plan-agenda-lanes-\(appearance)")
+            agenda.terminate()
+
+            let day = launch(appearance: appearance, mode: "day")
+            // A plan block's identifier ends in its start time, which follows the day the test runs.
+            XCTAssertTrue(element(startingWith: "grid-plan-commitment:", in: day).waitForExistence(timeout: 20))
+            let lanes = element(startingWith: "grid-plan-project:demo-project-vendor@", in: day)
+            XCTAssertTrue(lanes.exists)
+            // The grid opens around now. Drag it by the hour labels, slowly so it does not
+            // coast, until the shared hour and the gym are clear of the tab bar.
+            let height = day.windows.firstMatch.frame.height
+            for _ in 0..<6 where lanes.frame.maxY > height * 0.6 {
+                let from = day.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.8))
+                let to = day.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.6))
+                from.press(forDuration: 0.05, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.3)
+            }
+            capture(day, "plan-day-grid-\(appearance)")
+            day.terminate()
+
+            let projects = launch(appearance: appearance, tab: "tasks", sheet: "projects")
+            waitForText("Home network rebuild", in: projects)
+            XCTAssertTrue(element("project-row-demo-project-auth", in: projects).exists)
+            capture(projects, "projects-\(appearance)")
+            projects.terminate()
+
+            let editor = launch(appearance: appearance, tab: "tasks", sheet: "project")
+            XCTAssertTrue(element("project-name", in: editor).waitForExistence(timeout: 20))
+            XCTAssertTrue(element("project-parallel", in: editor).exists)
+            capture(editor, "project-editor-\(appearance)")
+            editor.terminate()
+
+            let tasks = launch(appearance: appearance, tab: "tasks")
+            let row = tasks.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Fix flaky scheduler test")).firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 20))
+            row.tap()
+            XCTAssertTrue(tasks.buttons["Mark done"].waitForExistence(timeout: 20))
+            let project = element("task-project", in: tasks)
+            for _ in 0..<4 where !(project.exists && project.isHittable) {
+                tasks.swipeUp()
+            }
+            XCTAssertTrue(project.isHittable)
+            XCTAssertTrue(element("task-attention", in: tasks).exists)
+            capture(tasks, "task-plan-fields-\(appearance)")
+            tasks.terminate()
+        }
+    }
+
+    @MainActor
+    private func element(_ identifier: String, in app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+    }
+
+    private func element(startingWith prefix: String, in app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", prefix)).firstMatch
+    }
+
     @MainActor
     private func launch(
         appearance: String = "light", tab: String = "agenda", sheet: String? = nil, mode: String = "list", largeText: Bool = false

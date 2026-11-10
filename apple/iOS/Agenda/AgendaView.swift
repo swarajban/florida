@@ -8,6 +8,11 @@ import SwiftUI
 /// Today also shows the current block's progress, free gaps, finished blocks as ghosts and
 /// "Day cleared", each behind a `JoySetting`. Under the list, a day with an optional routine block
 /// shows what the scheduler would do in it ("Evening, if you're up for it").
+///
+/// The plan's other parts show here too: the day's kind (home, office, off) under the mode toggle,
+/// the daily brief at the top of today's list, the day's open time and this week's missed
+/// commitments under it, commitments and project time as timeline rows, and "Alongside …" under
+/// every block that shares its time with other work.
 struct AgendaView: View {
     @Environment(AppModel.self) private var model
     @State private var editingTask: TaskItem?
@@ -15,6 +20,7 @@ struct AgendaView: View {
     @State private var selectedEvent: CalendarEvent?
     @State private var newEvent: CalendarEvent?
     @State private var showsDayPicker = false
+    @State private var showsWeeklyReview = false
     @State private var openedLaunchSheet = false
     @State private var doneForNowTask: TaskItem?
     @State private var movingTask: TaskItem?
@@ -74,6 +80,9 @@ struct AgendaView: View {
             }
             .sheet(isPresented: $showsDayPicker) {
                 DayPickerSheet(selectedDay: model.selectedDay)
+            }
+            .sheet(isPresented: $showsWeeklyReview) {
+                WeeklyReviewSheet()
             }
             .sheet(item: $editingTask) { task in
                 TaskEditorView(task: task)
@@ -135,6 +144,35 @@ struct AgendaView: View {
         TimelineRow.rows(for: items, now: isToday ? now : nil, showsGaps: showsGaps)
     }
 
+    /// For each task block (by `Placement.id`) and project block (by `PlanBlock.id`) of the day
+    /// that shares its time, the titles of the work beside it. A finished task's block is no
+    /// longer work: it gets no caption and is not named in another's.
+    private var companions: [String: [String]] {
+        guard let agenda = model.agenda else { return [:] }
+        let open = agenda.placements.filter { $0.task.completedAt == nil }
+        return ParallelWork.companionTitles(
+            placements: open.map(\.placement),
+            tasksById: Dictionary(open.map { ($0.task.id, $0.task) }, uniquingKeysWith: { first, _ in first }),
+            planBlocks: agenda.planBlocks)
+    }
+
+    /// "1h 30m free": the selected day's open computer time, which is what `PlanText.free` reports.
+    private var freeText: String? {
+        model.freeMinutes(on: model.selectedDay).flatMap { PlanText.free($0.computer) }
+    }
+
+    /// The commitments with no slot this week, said once: on today.
+    private var missedText: String? {
+        guard isToday else { return nil }
+        let names = model.missedCommitments(inWeekOf: model.selectedDay)
+        return names.isEmpty ? nil : PlanText.missed(names)
+    }
+
+    /// Nothing on the day: no events, blocks or suggestions.
+    private var isEmptyDay: Bool {
+        items.isEmpty && allDayEvents.isEmpty && picks.isEmpty
+    }
+
     /// Suggestions for the day's optional routine blocks; not part of the timeline above.
     private var picks: [OptionalPicks] {
         model.optionalPicks(on: model.selectedDay, now: now)
@@ -163,7 +201,7 @@ struct AgendaView: View {
     // MARK: - Heading and toolbar
 
     /// "Monday" over "November 9, 2026" (tap for the month grid), with the list / day / 3-day
-    /// toggle on the right.
+    /// toggle on the right and the day's kind under it, level with the date.
     private var dayHeading: some View {
         HStack(alignment: .center, spacing: 12) {
             Button {
@@ -188,7 +226,10 @@ struct AgendaView: View {
             .accessibilityLabel("Go to day")
             .accessibilityValue(model.selectedDay.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
             .accessibilityHint("Opens a month calendar")
-            modePicker
+            VStack(alignment: .trailing, spacing: 0) {
+                modePicker
+                dayKindMenu
+            }
         }
         .padding(.horizontal, 20)
         .padding(.top, 12)
@@ -206,6 +247,53 @@ struct AgendaView: View {
         .pickerStyle(.segmented)
         .fixedSize()
         .accessibilityIdentifier("agenda-mode")
+    }
+
+    /// What the selected day is ("Home day"), drawn like the date beside it. The menu makes the day
+    /// a home, office or off day; a day that was changed can go back to its weekday's routine, and
+    /// reads in ink until it does.
+    private var dayKindMenu: some View {
+        let day = model.selectedDay
+        let kind = model.dayKind(of: day)
+        let isChanged = model.dayOverride(on: day) != nil
+        return Menu {
+            Picker("Day", selection: Binding(get: { kind }, set: { model.setDay(day, kind: $0) })) {
+                ForEach(DayKind.allCases, id: \.self) { option in
+                    Label(option.label, systemImage: option.symbolName)
+                        .tag(option)
+                }
+            }
+            if isChanged {
+                Button {
+                    model.clearDayOverride(on: day)
+                } label: {
+                    Label("Back to the routine", systemImage: "arrow.uturn.backward")
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: kind.symbolName)
+                    .accessibilityHidden(true)
+                Text(kind.label)
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.bold))
+                    .accessibilityHidden(true)
+            }
+            .font(.subheadline)
+            .foregroundStyle(isChanged ? FloridaStyle.ink : Color.secondary)
+            .lineLimit(1)
+            .padding(.top, 6)
+            .padding(.bottom, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        // The label's bottom padding is touch area only: it lies over the heading's own.
+        .padding(.bottom, -8)
+        // The toggle above does not grow with the text size, so the heading stays one block.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        .accessibilityValue(isChanged ? "Changed for this day" : "From the routine")
+        .accessibilityHint("Changes what kind of day this is")
+        .accessibilityIdentifier("agenda-day-kind")
     }
 
     /// Which calendars show, grouped by Google account. Flipping one updates the store at once and
@@ -290,7 +378,8 @@ struct AgendaView: View {
     }
 
     private var timeline: some View {
-        List {
+        let beside = companions
+        return List {
             if model.hasProblem {
                 Section {
                     SyncErrorBanner()
@@ -301,6 +390,24 @@ struct AgendaView: View {
                     Label("Not connected. Add the server URL and token in Settings.", systemImage: "exclamationmark.triangle")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                }
+            }
+            // What the plan says about the day, before the day itself. Both rows line up with the
+            // heading above (20 points) and take less height than a default row would.
+            if isToday || freeText != nil {
+                Section {
+                    if isToday {
+                        BriefCard(onShowWeek: { showsWeeklyReview = true })
+                            .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 4, trailing: 20))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(FloridaStyle.paper)
+                    }
+                    if freeText != nil || missedText != nil {
+                        DayPlanNotes(free: freeText, missed: missedText)
+                            .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(FloridaStyle.paper)
+                    }
                 }
             }
             if !allDayEvents.isEmpty {
@@ -330,11 +437,21 @@ struct AgendaView: View {
                         eventRow(event)
                             .listRowBackground(FloridaStyle.paper)
                     case .item(.block(let block)):
-                        blockRow(block)
+                        blockRow(block, beside: beside[block.placement.id])
+                    case .item(.plan(let block)):
+                        planRow(block, beside: beside[block.id])
+                            .listRowBackground(FloridaStyle.paper)
                     case .item(.ghost(let ghost)):
                         GhostRow(ghost: ghost, category: model.category(id: ghost.categoryId))
                             .listRowBackground(FloridaStyle.paper)
                     }
+                }
+                // Today's list starts with the brief, so the empty day is said under it, not over it.
+                if isEmptyDay && isToday {
+                    nothingScheduled
+                        .frame(maxWidth: .infinity)
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(FloridaStyle.paper)
                 }
             } header: {
                 if showsDayCleared && model.isDayCleared {
@@ -354,12 +471,9 @@ struct AgendaView: View {
         .background(FloridaStyle.paper)
         .animation(.snappy, value: model.isDayCleared)
         .overlay {
-            if items.isEmpty && allDayEvents.isEmpty && picks.isEmpty {
-                ContentUnavailableView(
-                    "Nothing scheduled",
-                    systemImage: "calendar",
-                    description: Text("No events or task blocks on this day."))
-                .allowsHitTesting(false)
+            if isEmptyDay && !isToday {
+                nothingScheduled
+                    .allowsHitTesting(false)
             }
         }
         .refreshable {
@@ -376,20 +490,35 @@ struct AgendaView: View {
         )
     }
 
+    private var nothingScheduled: some View {
+        ContentUnavailableView(
+            "Nothing scheduled",
+            systemImage: "calendar",
+            description: Text("No events or task blocks on this day."))
+    }
+
     /// A task block: tap to edit, swipe or long-press for its actions. A block of a task that is
-    /// already done has none.
+    /// already done has none. `beside` names the work that shares its time, said under the block
+    /// and outside its button, so the button reads to VoiceOver and UI tests as it always did.
     @ViewBuilder
-    private func blockRow(_ block: ScheduledBlock) -> some View {
+    private func blockRow(_ block: ScheduledBlock, beside: [String]?) -> some View {
         let category = model.category(id: block.task.categoryId)
         let isBlooming = model.blooming[block.task.id] != nil
-        let row = Button {
-            editingTask = block.task
-        } label: {
-            BlockRow(block: block, category: category, now: now, showsProgress: showsProgress && isToday)
-                .strikethrough(isBlooming || block.task.completedAt != nil)
-                .foregroundStyle(.primary)
+        let row = VStack(alignment: .leading, spacing: 0) {
+            Button {
+                editingTask = block.task
+            } label: {
+                BlockRow(block: block, category: category, now: now, showsProgress: showsProgress && isToday)
+                    .strikethrough(isBlooming || block.task.completedAt != nil)
+                    .foregroundStyle(.primary)
+            }
+            .accessibilityHint("Edits the task")
+            if let beside {
+                AlongsideCaption(
+                    id: block.placement.id, titles: beside, inset: BlockRow.titleInset,
+                    isOver: AgendaItem.block(block).isOver(at: now))
+            }
         }
-        .accessibilityHint("Edits the task")
         .listRowBackground(BloomBackground(color: Color.category(category), active: isBlooming, base: FloridaStyle.paper))
         if block.task.completedAt == nil {
             row.taskActions(
@@ -398,6 +527,26 @@ struct AgendaView: View {
         } else {
             row
         }
+    }
+
+    /// A commitment or project time, with the work that shares its time under it. Nothing opens
+    /// from it.
+    private func planRow(_ block: PlanBlock, beside: [String]?) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            PlanBlockRow(block: block, category: category(of: block), now: now)
+            if let beside {
+                AlongsideCaption(
+                    id: block.id, titles: beside, inset: PlanBlockRow.titleInset,
+                    isOver: AgendaItem.plan(block).isOver(at: now))
+            }
+        }
+    }
+
+    /// The category of the project the block holds time for, for its color; nil for a commitment
+    /// and for a project without a category.
+    private func category(of block: PlanBlock) -> TaskCategory? {
+        guard case .project(let projectId) = block.kind else { return nil }
+        return model.project(id: projectId)?.categoryId.flatMap { model.category(id: $0) }
     }
 
     /// Tapping an event opens its detail sheet.

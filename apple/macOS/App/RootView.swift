@@ -1,6 +1,26 @@
 import FloridaKit
 import SwiftUI
 
+/// Projects, the brief and "Why here?". A modifier of its own: with these in `RootView.body` the
+/// chain there is too long for the type checker.
+private struct PlanSheets: ViewModifier {
+    @Environment(AppModel.self) private var model
+
+    func body(content: Content) -> some View {
+        @Bindable var model = model
+        content
+            .sheet(isPresented: $model.isProjectsOpen) {
+                ProjectsSheet()
+            }
+            .sheet(isPresented: $model.isBriefOpen) {
+                BriefSheet()
+            }
+            .sheet(item: $model.explanation) { _ in
+                ExplanationSheet()
+            }
+    }
+}
+
 /// The main window: calendar on the left, tasks on the right, a status bar below, and the
 /// palette and help as overlays. Shows the setup screen until a server token is saved.
 struct RootView: View {
@@ -37,6 +57,7 @@ struct RootView: View {
         .sheet(item: $model.eventEditor) { request in
             EventEditorSheet(event: request.event, isNew: request.isNew)
         }
+        .modifier(PlanSheets())
         .confirmationDialog(
             "Delete this occurrence and stop repeating?",
             isPresented: Binding(
@@ -96,10 +117,26 @@ struct RootView: View {
                     .help("Go to today (\(MacKeymap.default.shortcut(for: .core(.today))))")
                     .accessibilityLabel("Go to today")
                     Spacer()
+                    Button {
+                        model.run(.showBrief)
+                    } label: {
+                        Label("Brief", systemImage: "sun.horizon")
+                    }
+                    .help("Today's brief and the weekly review (\(MacKeymap.default.shortcut(for: .showBrief)))")
+                    .accessibilityIdentifier("open-brief")
+                    Button {
+                        model.run(.showProjects)
+                    } label: {
+                        Label("Projects", systemImage: PlanText.projectSymbol)
+                    }
+                    .help("Projects (\(MacKeymap.default.shortcut(for: .showProjects)))")
+                    .accessibilityIdentifier("open-projects")
                     Text("⌘K  Commands")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
                 Divider()

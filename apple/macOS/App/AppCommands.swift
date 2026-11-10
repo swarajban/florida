@@ -34,6 +34,9 @@ struct AppCommands: Commands {
             Divider()
             Button("Calendar") { model.perform(.goToCalendar) }
             Button("Tasks") { model.perform(.goToTasks) }
+            Divider()
+            Button("Projects") { model.run(.showProjects) }
+            Button("Brief") { model.run(.showBrief) }
         }
 
         // Named "Calendar" because SwiftUI already adds a "View" menu (Enter Full Screen).
@@ -42,6 +45,15 @@ struct AppCommands: Commands {
             Button("3 Days") { model.perform(.viewThreeDays) }
             Button("Week") { model.perform(.viewWeek) }
             Button("Month") { model.perform(.viewMonth) }
+            Divider()
+            // The highlighted day: where it is worked from, which decides what fits on it.
+            Menu("Set Day") {
+                Button("Home") { model.run(.setDayHome) }
+                Button("Office") { model.run(.setDayOffice) }
+                Button("Off") { model.run(.setDayOff) }
+                Divider()
+                Button("Follow the Routine") { model.run(.clearDayKind) }
+            }
             Divider()
             Button("Toggle Tasks") { model.perform(.toggleTasks) }
                 .keyboardShortcut("t")
@@ -68,6 +80,7 @@ struct AppCommands: Commands {
                 Button("Unpin") { model.perform(.unpin) }
                 Button("Push to Tomorrow") { model.perform(.snooze) }
                 Button("Move to…") { model.run(.move) }
+                Button("Why Here?") { model.run(.explain) }
                 Button("Repeat Last Action") { model.run(.repeatLast) }
                     .disabled(model.lastAction == nil)
                 Button("Accept Suggested Category") { model.run(.acceptSuggestion) }

@@ -11,6 +11,10 @@ struct GridLayout {
             case task(pinned: Bool)
             /// What the scheduler suggests for an optional routine block; not on the plan.
             case suggestion
+            /// A commitment the routine placed (the gym): held time that is not a task.
+            case commitment
+            /// Time the scheduler holds for a project without a task.
+            case projectTime
         }
 
         /// Placement id or event id; unique per block, unlike `item` for multi-block tasks.
@@ -31,6 +35,16 @@ struct GridLayout {
         let slotKey: String
         /// Events: a hairline rim in the account's hue, when that touch is on.
         let rim: Color?
+        /// Titles of the work in the other lanes of this block's time; empty unless it is shared.
+        let companions: [String]
+        /// "Alongside …" naming `companions`, worded when the layout is built so that drawing
+        /// formats nothing; nil unless the block is shared.
+        let alongside: String?
+
+        var isEvent: Bool { kind == .event }
+
+        /// The gym or project time: on the plan, but not a task or an event.
+        var isPlanBlock: Bool { kind == .commitment || kind == .projectTime }
 
         var isTask: Bool {
             if case .task = kind { return true }
@@ -113,8 +127,12 @@ struct GridLayout {
     /// `suggestions` (optional routine blocks) are packed with the events and task blocks, so one
     /// never hides under an event added since the scheduler ran. They count as taken time for the
     /// free gaps: a gap offers what is left around them.
+    ///
+    /// `planBlocks` (the gym, project time) are packed the same way. Work that shares an hour keeps
+    /// its lanes in order, left to right, and each block knows what runs beside it.
     static func build(
         days: [Date], events: [CalendarEvent], placements: [Placement], suggestions: [OptionalPicks.Pick] = [],
+        planBlocks: [PlanBlock] = [], projectsById: [String: Project] = [:],
         tasksById: [String: TaskItem],
         categoriesById: [String: TaskCategory], calendarsById: [String: CalendarInfo], schedules: [Schedule],
         options: Options, lineLimit: Int?, now: Date, calendar: Calendar
@@ -146,6 +164,8 @@ struct GridLayout {
                 timed.append(LayoutItem(id: event.id, start: start, end: end))
             }
         }
+        /// Lane of each laned block, for `LaneColumns`.
+        var lanes: [String: Int] = [:]
         var blockNumbers: [String: Int] = [:]
         for placement in placements {
             let number = blockNumbers[placement.taskId, default: 0]
@@ -159,6 +179,25 @@ struct GridLayout {
                 tint: categoriesById[task.categoryId]?.tint ?? .defaultCategory, slotKey: "\(task.id)#\(number)",
                 rim: nil)
             timed.append(LayoutItem(id: placement.id, start: placement.startAt, end: placement.endAt))
+            lanes[placement.id] = placement.lane
+        }
+        for block in planBlocks {
+            guard block.endAt > firstDay, block.startAt < rangeEnd else { continue }
+            let kind: Block.Kind
+            let tint: Color
+            switch block.kind {
+            case .commitment:
+                kind = .commitment
+                tint = FloridaStyle.ink
+            case .project(let projectId):
+                kind = .projectTime
+                tint = projectsById[projectId]?.categoryId.flatMap { categoriesById[$0]?.tint } ?? .defaultCategory
+            }
+            sources[block.id] = Source(
+                item: .plan(block.id), kind: kind, start: block.startAt, end: block.endAt, title: block.title,
+                tint: tint, slotKey: block.id, rim: nil)
+            timed.append(LayoutItem(id: block.id, start: block.startAt, end: block.endAt))
+            lanes[block.id] = block.lane
         }
         for pick in suggestions {
             let placement = pick.placement
@@ -171,6 +210,8 @@ struct GridLayout {
                 slotKey: id, rim: nil)
             timed.append(LayoutItem(id: id, start: placement.startAt, end: placement.endAt))
         }
+
+        let companions = ParallelWork.companionTitles(placements: placements, tasksById: tasksById, planBlocks: planBlocks)
 
         let rows = AllDayLayout.rows(allDay, days: days, calendar: calendar)
         layout.allDayRowCount = rows.count
@@ -193,13 +234,16 @@ struct GridLayout {
         layout.blocksByDay = days.enumerated().map { index, day in
             let dayEnd = DateNavigation.shift(day, by: 1, calendar: calendar)
             let items = timed.filter { $0.start < dayEnd && $0.end > day }
-            return DayLayout.layout(items, day: day, calendar: calendar).compactMap { frame in
+            let frames = DayLayout.layout(items, day: day, calendar: calendar)
+            return LaneColumns.ordered(frames, lanes: lanes).compactMap { frame in
                 guard let source = sources[frame.id] else { return nil }
+                let beside = companions[frame.id] ?? []
                 return Block(
                     id: frame.id, item: source.item, kind: source.kind, dayIndex: index, column: frame.column,
                     columnCount: frame.columnCount, startMinute: frame.startMinute, endMinute: frame.endMinute,
                     start: source.start, end: source.end, title: source.title, tint: source.tint,
-                    slotKey: source.slotKey, rim: source.rim)
+                    slotKey: source.slotKey, rim: source.rim, companions: beside,
+                    alongside: beside.isEmpty ? nil : PlanText.alongside(beside))
             }
         }
 

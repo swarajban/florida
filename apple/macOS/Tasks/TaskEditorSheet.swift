@@ -73,6 +73,13 @@ struct TaskEditorSheet: View {
                             Text(category.name).tag(category.id)
                         }
                     }
+                    OptionalDateRow(title: "Due", isOn: $hasDue, date: $dueAt, hasTime: dueHasTime)
+                    Picker("Deadline", selection: deadline) {
+                        ForEach([DeadlineType.soft, .hard], id: \.self) { type in
+                            Text(type.displayName).tag(type)
+                        }
+                    }
+                    .disabled(!hasDue)
                     LabeledContent("Duration") {
                         HStack {
                             TextField("Minutes", value: $draft.durationMinutes, format: .number)
@@ -95,13 +102,29 @@ struct TaskEditorSheet: View {
                             Text(context.displayName).tag(context)
                         }
                     }
-                    OptionalDateRow(title: "Due", isOn: $hasDue, date: $dueAt, hasTime: dueHasTime)
-                    Picker("Deadline", selection: deadline) {
-                        ForEach([DeadlineType.soft, .hard], id: \.self) { type in
-                            Text(type.displayName).tag(type)
+                    Picker("Project", selection: $draft.projectId) {
+                        Text("None").tag(String?.none)
+                        if let id = draft.projectId, model.project(id: id)?.deletedAt != nil || model.project(id: id) == nil {
+                            // Keeps the picker from going blank while a delete is still syncing.
+                            Text("Deleted project").tag(String?.some(id))
+                        }
+                        ForEach(model.projectSections) { section in
+                            Section(section.status.label) {
+                                ForEach(section.projects) { project in
+                                    Text(project.name).tag(String?.some(project.id))
+                                }
+                            }
                         }
                     }
-                    .disabled(!hasDue)
+                    .accessibilityIdentifier("task-project")
+                    Picker("Attention", selection: $draft.attention) {
+                        Text(defaultAttentionLabel).tag(TaskAttention?.none)
+                        ForEach(TaskAttention.allCases, id: \.self) { attention in
+                            Text(attention.displayName).tag(TaskAttention?.some(attention))
+                        }
+                    }
+                    .help("Work that can run in parallel shares an hour with up to two other such tasks.")
+                    .accessibilityIdentifier("task-attention")
                     OptionalDateRow(title: "Not before", isOn: $hasStart, date: $startAt, hasTime: startHasTime)
                     OptionalDateRow(title: "Pinned start", isOn: $hasPinnedStart, date: $pinnedStart)
                 }
@@ -137,6 +160,14 @@ struct TaskEditorSheet: View {
         Binding(
             get: { draft.notes ?? "" },
             set: { draft.notes = $0.isEmpty ? nil : $0 })
+    }
+
+    /// "Project's default (can run in parallel)": what the task gets without a setting of its own.
+    private var defaultAttentionLabel: String {
+        var unset = draft
+        unset.attention = nil
+        let inherited = unset.attention(in: model.project(id: draft.projectId)).displayName.lowercased()
+        return draft.projectId == nil ? "Default (\(inherited))" : "Project's default (\(inherited))"
     }
 
     /// Soft or hard. A task with a due date always has one of the two and a task without has

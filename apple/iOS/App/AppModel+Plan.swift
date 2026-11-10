@@ -74,10 +74,12 @@ extension AppModel {
         return dayOverrides.first { $0.date == key && $0.deletedAt == nil }
     }
 
-    /// Makes `day` a home, office or off day; the scheduler re-plans it on the next sync.
+    /// Makes `day` a home, office or off day, keeping its note; the scheduler re-plans it on the
+    /// next sync.
     func setDay(_ day: Date, kind: DayKind) {
         let key = DayOverride.key(for: day, calendar: calendar)
-        if write({ try $0.setDay(key, kind: kind) }) {
+        let note = dayOverride(on: day)?.note
+        if write({ try $0.setDay(key, kind: kind, note: note) }) {
             showToast(Toast(message: "\(Self.dayName(day, calendar: calendar)) is \(kind.sentenceLabel)", systemImage: kind.symbolName, style: .info))
         }
     }
@@ -115,26 +117,33 @@ extension AppModel {
     /// The latest weekly review.
     var weeklyBrief: Brief? { briefs.first { $0.kind == .weekly } }
 
-    /// Whether `brief` is for today (a daily brief) rather than an earlier day's left over.
+    /// Whether `brief` is for today (a daily brief) rather than an earlier day's left over. The
+    /// server dates a daily brief in the routine's time zone (UTC without a settings row), where
+    /// the date can differ from this device's, so today in either zone counts.
     func isCurrent(_ brief: Brief) -> Bool {
-        brief.kind == .weekly || brief.date == DayOverride.key(for: Date(), calendar: calendar)
+        if brief.kind == .weekly { return true }
+        let now = Date()
+        var routine = Calendar(identifier: .gregorian)
+        routine.timeZone = TimeZone(identifier: userSettings?.timeZone ?? "UTC") ?? calendar.timeZone
+        return brief.date == DayOverride.key(for: now, calendar: calendar)
+            || brief.date == DayOverride.key(for: now, calendar: routine)
     }
 
     /// Has the server write the brief now from the current plan and stores it. Failures land in
-    /// `briefError`, which the brief card shows in place.
+    /// `briefErrors` under `kind`, which that kind's view shows in place.
     func writeBrief(_ kind: BriefKind) async {
         guard !briefsInFlight.contains(kind) else { return }
         guard let aiClient, let database else {
-            briefError = "Connect to the server in Settings to get a brief."
+            briefErrors[kind] = "Connect to the server in Settings to get a brief."
             return
         }
         briefsInFlight.insert(kind)
-        briefError = nil
+        briefErrors[kind] = nil
         defer { briefsInFlight.remove(kind) }
         do {
             try database.storeBrief(try await aiClient.writeBrief(kind))
         } catch {
-            briefError = Self.describeAI(error, doing: "write the brief")
+            briefErrors[kind] = Self.describeAI(error, doing: "write the brief")
         }
     }
 
@@ -154,6 +163,10 @@ extension AppModel {
     private static func describeAI(_ error: any Error, doing what: String) -> String {
         switch error {
         case SyncError.http(503, _): "AI is off on the server (no Anthropic API key)."
+        // The route answers 404 with `{error: "task … not found"}` for a task the server has not
+        // received yet; a server without the route answers a bare 404.
+        case SyncError.http(404, let body) where body.hasPrefix("task "):
+            "The server does not have this task yet. Sync, then ask again."
         case SyncError.http(404, _): "The server needs an update before it can \(what)."
         default: "Could not \(what): \(describe(error))"
         }

@@ -9,6 +9,8 @@ import SwiftUI
 /// Due date leads the scheduling fields and is on for a new task; its soft/hard choice only shows
 /// with a date. Due and Not before are whole days; "Add a time" shows a clock for the rare task
 /// that needs one (see `TaskDay` for what a day without a time stores).
+///
+/// Project, attention and "Why here?" follow the scheduling fields (`TaskPlanSection`).
 struct TaskEditorView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -18,6 +20,8 @@ struct TaskEditorView: View {
     /// The "Add a time" switches once the user has touched them; until then each follows its date.
     @State private var dueTimeChoice: Bool?
     @State private var startTimeChoice: Bool?
+    /// The "Why here?" answer, kept here so it outlives its row scrolling off screen.
+    @State private var explanation = TaskPlanSection.Explanation.idle
     @FocusState private var titleFocused: Bool
     private let original: TaskItem
     private let isNew: Bool
@@ -138,6 +142,8 @@ struct TaskEditorView: View {
                         }
                     }
                 }
+
+                TaskPlanSection(task: $draft, original: original, isNew: isNew, explanation: $explanation)
 
                 Section {
                     Toggle("Earliest start", isOn: hasStart)
@@ -345,6 +351,10 @@ struct TaskEditorView: View {
     private var preparedTask: TaskItem {
         var task = draft
         task.title = trimmedTitle
+        // A project deleted while the editor was open: the server refuses a task that names it.
+        if model.project(id: task.projectId) == nil {
+            task.projectId = nil
+        }
         if task.deadlineType == .none && task.recurrence == nil {
             task.dueAt = nil
         }

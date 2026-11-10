@@ -4,7 +4,7 @@ import SwiftUI
 /// The Tasks tab: quick-add field on top, then Inbox (with its triage count and AI chips) and
 /// every other category, empty ones collapsed to their header. Swipe or long-press a row for its
 /// actions (`TaskActions`, all with Undo), tap to edit, pull to sync. The toolbar adds a task and
-/// opens Categories.
+/// opens Projects and Categories.
 struct TasksView: View {
     @Environment(AppModel.self) private var model
     @State private var quickAddText = ""
@@ -14,7 +14,7 @@ struct TasksView: View {
     @State private var openedLaunchSheet = false
     @State private var movingTask: TaskItem?
     @State private var doneForNowTask: TaskItem?
-    @State private var path: [TasksRoute] = []
+    @State private var path: [TasksRoute] = TasksRoute.launchPath
 
     var body: some View {
         let now = Date()
@@ -59,6 +59,14 @@ struct TasksView: View {
                     }
                 }
                 Section {
+                    NavigationLink(value: TasksRoute.projects) {
+                        Label("Projects", systemImage: PlanText.projectSymbol)
+                    }
+                    .accessibilityIdentifier("tasks-projects-link")
+                } footer: {
+                    Text("Ongoing work bigger than one task, such as an app or a migration: active, on hold, done, or still an idea.")
+                }
+                Section {
                     NavigationLink(value: TasksRoute.categories) {
                         Label("Categories", systemImage: "folder")
                     }
@@ -93,6 +101,15 @@ struct TasksView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
+                        path = [.projects]
+                    } label: {
+                        Image(systemName: PlanText.projectSymbol)
+                    }
+                    .accessibilityLabel("Projects")
+                    .accessibilityIdentifier("tasks-projects")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
                         path = [.categories]
                     } label: {
                         Image(systemName: "folder.badge.gearshape")
@@ -103,6 +120,7 @@ struct TasksView: View {
             .navigationDestination(for: TasksRoute.self) { route in
                 switch route {
                 case .categories: CategoriesView()
+                case .projects: ProjectsView()
                 }
             }
             .sheet(item: $editor, onDismiss: clearQuickAddIfAdded) { request in
@@ -150,4 +168,15 @@ struct TasksView: View {
 /// Screens pushed from the Tasks tab's toolbar.
 enum TasksRoute: Hashable {
     case categories
+    case projects
+
+    /// Where the tab starts. Screenshot and UI-test runs open on Projects with `-uiSheet projects`,
+    /// and with `-uiSheet project`, where `ProjectsView` then opens its editor on the first active
+    /// project. Any other launch starts on the task list.
+    static var launchPath: [TasksRoute] {
+        switch LaunchOptions.initialSheet {
+        case "projects", "project": [.projects]
+        default: []
+        }
+    }
 }

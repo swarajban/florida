@@ -51,6 +51,12 @@ extension AppModel {
         return .task(task.id)
     }
 
+    /// The gym or project time under the focus ring.
+    var selectedPlanBlock: PlanBlock? {
+        guard case .plan(let id)? = selection else { return nil }
+        return planBlocks.first { $0.id == id }
+    }
+
     var selectedEvent: CalendarEvent? {
         guard case .event(let id)? = selection else { return nil }
         return events.first { $0.id == id }
@@ -78,14 +84,17 @@ extension AppModel {
         select(items[index])
     }
 
-    /// A click in one pane: moves the focus there and selects the item.
+    /// A click in one pane: moves the focus there and selects the item. The status bar's note on
+    /// the last selection goes first, as it does on a key press; `select` then says its own.
     func select(_ item: ItemID, in panel: Panel) {
         focus = panel
+        statusMessage = nil
         select(item)
     }
 
     /// Selects an item; a calendar item also moves the day cursor onto its day. A suggestion says
-    /// what it is in the status bar, because it looks like a block and is not on the plan.
+    /// what it is in the status bar, because it looks like a block and is not on the plan; so do
+    /// the gym, project time, and work that shares its hour.
     func select(_ item: ItemID?) {
         selection = item
         if focus == .calendar, let item, let day = gridLayout.day(of: item) {
@@ -94,6 +103,26 @@ extension AppModel {
         if let pick = selectedSuggestion {
             let take = RoutineText.takeTitle(pick.placement, now: Date(), calendar: calendar)
             statusMessage = "Suggestion, not on the plan · P: \(take.lowercased())"
+        } else if let note = planNote(for: item) {
+            statusMessage = note
+        }
+    }
+
+    /// What the status bar says about a calendar block the grid cannot spell out in a narrow
+    /// lane: what the gym or project time is, and what runs beside shared work.
+    private func planNote(for item: ItemID?) -> String? {
+        guard focus == .calendar, let item else { return nil }
+        let blocks = gridLayout.blocksByDay.joined().filter { $0.item == item }
+        guard let block = blocks.first(where: { !$0.companions.isEmpty }) ?? blocks.first else { return nil }
+        let alongside = block.companions.isEmpty ? nil : PlanText.alongside(block.companions)
+        switch block.kind {
+        case .commitment:
+            return "\(block.title), from your routine · Return: edit the routine"
+        case .projectTime:
+            return (["Time held for \(block.title)"] + [alongside].compactMap { $0 } + ["Return: projects"])
+                .joined(separator: " · ")
+        case .event, .task, .suggestion:
+            return alongside
         }
     }
 }

@@ -25,8 +25,9 @@ enum LaunchOptions {
     }
 
     /// A sheet to open over the initial tab once the demo data is loaded: `event` (the design
-    /// review's detail on the Agenda tab), `daypicker` (the month grid over the Agenda tab) or
-    /// `aitask` (an AI-parsed task under review on Tasks).
+    /// review's detail on the Agenda tab), `daypicker` (the month grid over the Agenda tab),
+    /// `aitask` (an AI-parsed task under review on Tasks), `projects` (the Projects list on Tasks)
+    /// or `project` (the editor on its first active project).
     static var initialSheet: String? {
         #if DEBUG
         return UserDefaults.standard.string(forKey: "uiSheet")

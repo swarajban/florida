@@ -1,7 +1,7 @@
 import Foundation
 
 /// What the focus ring is on: one task (every placement of it lights up), one Google event, a
-/// free gap, or a suggestion.
+/// free gap, a suggestion, or a block the plan holds for the gym or a project.
 enum ItemID: Hashable, Sendable {
     case task(String)
     case event(String)
@@ -11,6 +11,8 @@ enum ItemID: Hashable, Sendable {
     /// block on the grid and, today, a row on top of the task pane. It stands for its task: task
     /// commands act on that task, and `p` pins it at the suggested start.
     case suggestion(String)
+    /// The gym or project time on the grid (`PlanBlock.id`): on the plan, but nothing to edit.
+    case plan(String)
 
     var isTask: Bool {
         if case .task = self { return true }

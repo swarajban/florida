@@ -57,8 +57,8 @@ final class AppModel {
     var briefs: [Brief] = []
     /// The briefs the server is writing right now.
     var briefsInFlight: Set<BriefKind> = []
-    /// Why the last brief request failed; the brief card shows it in place.
-    var briefError: String?
+    /// Why the last request for each kind of brief failed; that kind's view shows it in place.
+    var briefErrors: [BriefKind: String] = [:]
     /// Events, task blocks, commitments and project time of `selectedDay`; nil until the first
     /// observation fires.
     var agenda: DayAgenda?

@@ -8,13 +8,18 @@ import UIKit
 /// the chrome with one small view per block on top. Frames come from `DayGridLayout`, rebuilt
 /// only when the data changes; points from `DayGridGeometry`. Tap a block to open it, tap empty
 /// grid to create there, hold a block for a moment and drag to move it (`BlockMoveGesture`); a
-/// horizontal swipe moves one day, whatever the page shows.
+/// horizontal swipe moves one day, whatever the page shows. Plan blocks (a commitment, project
+/// time) are drawn with the rest and stay where the scheduler put them: no hold, no drag.
 struct DayGridView: View {
     let dayCount: Int
     let onSelectEvent: (CalendarEvent) -> Void
     let onEditTask: (TaskItem) -> Void
     /// Tapping an empty slot: the caller opens a new-event editor starting there.
     let onCreateAt: (Date) -> Void
+    /// Tapping a plan block: the gym (`PlanBlock.Kind.commitment`) or project time
+    /// (`.project(projectId:)`). Nothing happens until a caller passes this, for example to open
+    /// the project's editor.
+    var onSelectPlanBlock: (PlanBlock) -> Void = { _ in }
 
     @Environment(AppModel.self) private var model
     @Environment(\.locale) private var locale
@@ -39,6 +44,9 @@ struct DayGridView: View {
 
     static let gutterWidth: CGFloat = 52
     static let slotMinutes = 15
+    /// A plan block narrower than this (one sharing its time in a three-day grid) drops its
+    /// symbol and keeps the width for its title.
+    static let planSymbolWidth: CGFloat = 72
 
     /// Where the grid opens before its height is known: the current hour, a little above the
     /// middle, at the default hour height. The first layout pass corrects it (`scrollToStart`).
@@ -103,7 +111,12 @@ struct DayGridView: View {
                 days: inputs.days, agendas: inputs.agendas, ghosts: inputs.ghosts, suggestions: inputs.suggestions,
                 blooming: inputs.blooming, minimumMinutes: inputs.minimumMinutes, calendar: model.calendar,
                 eventStyle: { EventStyle(event: $0, calendars: inputs.calendars, accounts: inputs.accounts) },
-                categoryTint: { id in Color.category(inputs.categories.first { $0.id == id }) })
+                categoryTint: { id in Color.category(inputs.categories.first { $0.id == id }) },
+                // Project time takes its project's category color, as the project's tasks do.
+                projectTint: { id in
+                    let categoryId = inputs.projects.first(where: { $0.id == id })?.categoryId
+                    return Color.category(inputs.categories.first(where: { $0.id == categoryId }))
+                })
         }
         .onChange(of: locale) { _, _ in
             hourLabels = HourLabels.make(calendar: model.calendar)
@@ -164,21 +177,24 @@ struct DayGridView: View {
                 let rect = geometry.rect(for: block)
                 DayGridBlockView(
                     block: block, timeText: block.timeText, showsTime: rect.height >= geometry.timeTextHeight,
-                    isPast: block.end <= now)
+                    isPast: block.end <= now, showsSymbol: rect.width >= Self.planSymbolWidth,
+                    showsThirdLine: rect.height >= geometry.timeTextHeight * 2)
                     .frame(width: rect.width, height: rect.height)
                     .offset(x: rect.minX, y: rect.minY)
                     .opacity(drag?.block.id == block.id ? 0.3 : 1)
                     // The hold is attached first so it outranks the tap: a quick tap opens the
                     // block (the hold fails when the finger lifts early), a completed hold does
-                    // not also open it on release.
-                    .gesture(BlockMoveGesture(
-                        onLift: { lift(block, geometry: geometry) },
-                        onMove: { follow($0, geometry: geometry, days: days) },
-                        onDrop: { translation in
-                            follow(translation, geometry: geometry, days: days)
-                            drop()
-                        },
-                        onCancel: { cancelDrag() }))
+                    // not also open it on release. A plan block gets no hold at all.
+                    .modifier(HoldToMove(
+                        isEnabled: !block.isPlan,
+                        gesture: BlockMoveGesture(
+                            onLift: { lift(block, geometry: geometry) },
+                            onMove: { follow($0, geometry: geometry, days: days) },
+                            onDrop: { translation in
+                                follow(translation, geometry: geometry, days: days)
+                                drop()
+                            },
+                            onCancel: { cancelDrag() })))
                     .onTapGesture {
                         open(block)
                     }
@@ -212,6 +228,8 @@ struct DayGridView: View {
         var suggestions: [OptionalPicks.Pick]
         var blooming: Set<String>
         var categories: [TaskCategory]
+        /// For the color of project time: its project's category.
+        var projects: [Project]
         var calendars: [CalendarInfo]
         var accounts: [GoogleAccount]
         var minimumMinutes: Int
@@ -224,8 +242,9 @@ struct DayGridView: View {
             // selected day is today, which a 3-day grid opened on yesterday breaks).
             ghosts: JoySetting.ghosts.isOn ? model.ghostBlocks : [],
             suggestions: days.flatMap { model.optionalPicks(on: $0).flatMap(\.picks) },
-            blooming: Set(model.blooming.keys), categories: model.categories, calendars: model.calendars,
-            accounts: model.accounts, minimumMinutes: DayGridGeometry.minimumMinutes(for: grid))
+            blooming: Set(model.blooming.keys), categories: model.categories, projects: model.projects,
+            calendars: model.calendars, accounts: model.accounts,
+            minimumMinutes: DayGridGeometry.minimumMinutes(for: grid))
     }
 
     // MARK: - Scrolling
@@ -297,6 +316,8 @@ struct DayGridView: View {
             }
         case .suggestion(let pick):
             takingSuggestion = pick
+        case .plan(let plan):
+            onSelectPlanBlock(plan)
         }
     }
 
@@ -346,7 +367,7 @@ struct DayGridView: View {
         case .event(let event):
             guard model.canEdit(event) else { return }
             model.reschedule(event, start: current.start, end: current.end)
-        case .ghost, .suggestion:
+        case .ghost, .suggestion, .plan:
             break
         }
     }
@@ -359,6 +380,21 @@ struct DayGridView: View {
             drag = nil
         }
         swipeBlocked = false
+    }
+}
+
+/// Hold-and-drag for the blocks that can be carried. A plan block gets no recognizer at all, so a
+/// touch that starts on one can only scroll the grid or tap.
+private struct HoldToMove: ViewModifier {
+    let isEnabled: Bool
+    let gesture: BlockMoveGesture
+
+    func body(content: Content) -> some View {
+        if isEnabled {
+            content.gesture(gesture)
+        } else {
+            content
+        }
     }
 }
 

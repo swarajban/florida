@@ -12,6 +12,7 @@ struct TaskActionsMenu: View {
         Button("Do Now") { act { model.run(.doNow) } }
         Button("Push to Tomorrow") { act { model.perform(.snooze) } }
         Button("Move to…") { act { model.run(.move) } }
+        Button("Why Here?") { act { model.run(.explain) } }
         Divider()
         Button("Edit…") { act { model.perform(.edit) } }
         Button("Delete") { act { model.perform(.delete) } }

@@ -30,6 +30,14 @@ enum MacCommand: Hashable, Sendable {
     case editEvent
     /// `r y` / `r m` / `r n`: answer the invitation of the selected or open event.
     case respondYes, respondMaybe, respondNo
+    /// `g p`: the projects overlay.
+    case showProjects
+    /// `g b`: today's brief and the weekly review.
+    case showBrief
+    /// `y`: asks why the selected task is planned where it is.
+    case explain
+    /// Makes the highlighted day a home, office or off day, or puts it back on the routine.
+    case setDayHome, setDayOffice, setDayOff, clearDayKind
 
     /// Grouping in the help overlay, reusing the shared sections.
     var section: AppCommand.Section {
@@ -38,8 +46,9 @@ enum MacCommand: Hashable, Sendable {
         case .undo, .move, .acceptSuggestion, .newTaskEditor, .doNow, .doneForNow, .repeatLast,
              .editEvent, .respondYes, .respondMaybe, .respondNo:
             .editing
-        case .newCategory, .showRoutine: .actions
+        case .newCategory, .showRoutine, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind: .actions
         case .centerOnNow, .jumpToFirst, .jumpToLast: .navigation
+        case .showProjects, .showBrief: .panels
         }
     }
 
@@ -63,6 +72,13 @@ enum MacCommand: Hashable, Sendable {
         case .respondYes: "RSVP: Yes"
         case .respondMaybe: "RSVP: Maybe"
         case .respondNo: "RSVP: No"
+        case .showProjects: "Projects"
+        case .showBrief: "Brief"
+        case .explain: "Why here?"
+        case .setDayHome: "Set day: Home"
+        case .setDayOffice: "Set day: Office"
+        case .setDayOff: "Set day: Off"
+        case .clearDayKind: "Set day: Follow the routine"
         }
     }
 
@@ -83,6 +99,7 @@ enum MacCommand: Hashable, Sendable {
         .newTaskEditor, .doNow, .doneForNow, .repeatLast, .undo, .move, .acceptSuggestion,
         .editEvent, .respondYes, .respondMaybe, .respondNo,
         .newCategory, .showRoutine, .centerOnNow, .jumpToFirst, .jumpToLast,
+        .showProjects, .showBrief, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind,
     ]
 
     /// The palette lists everything except Escape.

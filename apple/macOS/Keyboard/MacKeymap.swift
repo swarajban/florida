@@ -44,6 +44,9 @@ struct MacKeymap: Sendable {
         ("r y", .respondYes),
         ("r m", .respondMaybe),
         ("r n", .respondNo),
+        ("g p", .showProjects),
+        ("g b", .showBrief),
+        ("y", .explain),
     ]
 
     static let `default`: MacKeymap = {

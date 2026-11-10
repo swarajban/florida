@@ -45,6 +45,10 @@ struct TaskRowView: View {
                             .accessibilityLabel("\(marker) priority")
                     }
                     Text(DateText.duration(minutes: task.durationMinutes))
+                    // The pane is narrow: the symbol alone, named on hover and to VoiceOver.
+                    Image(systemName: task.context.symbolName)
+                        .help("\(task.context.displayName) context")
+                        .accessibilityLabel("\(task.context.displayName) context")
                     if let dueAt = task.dueAt {
                         Label(
                             DateText.due(dueAt, calendar: calendar),

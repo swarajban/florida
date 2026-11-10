@@ -1,17 +1,20 @@
 import FloridaKit
 import Foundation
 
-/// One row of the day timeline: a calendar event, a scheduled task block, or the ghost of a
-/// block finished today, with a common start and end so the kinds can be merged and sorted.
+/// One row of the day timeline: a calendar event, a scheduled task block, a plan block (a
+/// commitment such as the gym, or time held for a project), or the ghost of a block finished
+/// today, with a common start and end so the kinds can be merged and sorted.
 enum AgendaItem: Identifiable, Hashable {
     case event(CalendarEvent)
     case block(ScheduledBlock)
+    case plan(PlanBlock)
     case ghost(GhostBlock)
 
     var id: String {
         switch self {
         case .event(let event): "event-\(event.id)"
         case .block(let block): "block-\(block.placement.id)"
+        case .plan(let block): "plan-\(block.id)"
         case .ghost(let ghost): "ghost-\(ghost.id)"
         }
     }
@@ -20,6 +23,7 @@ enum AgendaItem: Identifiable, Hashable {
         switch self {
         case .event(let event): event.startAt ?? .distantPast
         case .block(let block): block.placement.startAt
+        case .plan(let block): block.startAt
         case .ghost(let ghost): ghost.start
         }
     }
@@ -28,7 +32,17 @@ enum AgendaItem: Identifiable, Hashable {
         switch self {
         case .event(let event): event.endAt ?? start
         case .block(let block): block.placement.endAt
+        case .plan(let block): block.endAt
         case .ghost(let ghost): ghost.end
+        }
+    }
+
+    /// The lane of work that shares its time with other work (0–2); nil for everything else.
+    var lane: Int? {
+        switch self {
+        case .block(let block): block.placement.lane
+        case .plan(let block): block.lane
+        case .event, .ghost: nil
         }
     }
 
@@ -39,6 +53,8 @@ enum AgendaItem: Identifiable, Hashable {
             return summary
         case .block(let block):
             return block.task.title
+        case .plan(let block):
+            return block.title
         case .ghost(let ghost):
             return ghost.title
         }
@@ -52,13 +68,28 @@ enum AgendaItem: Identifiable, Hashable {
         end <= now
     }
 
-    /// Timed events, task blocks and ghosts of the day, by start then end.
+    /// Timed events, task blocks, plan blocks and ghosts of the day, by start then end. Work in
+    /// lanes that starts together reads in lane order whatever its ends, as the day grid draws it.
     static func timed(from agenda: DayAgenda, ghosts: [GhostBlock] = []) -> [AgendaItem] {
         let events = agenda.events.filter { !$0.allDay }.map(AgendaItem.event)
         let blocks = agenda.placements.map(AgendaItem.block)
-        return (events + blocks + ghosts.map(AgendaItem.ghost)).sorted { lhs, rhs in
-            lhs.start != rhs.start ? lhs.start < rhs.start : lhs.end < rhs.end
+        let plan = agenda.planBlocks.map(AgendaItem.plan)
+        var items = (events + blocks + plan + ghosts.map(AgendaItem.ghost)).sorted { lhs, rhs in
+            if lhs.start != rhs.start { return lhs.start < rhs.start }
+            if lhs.end != rhs.end { return lhs.end < rhs.end }
+            return (lhs.lane ?? -1) < (rhs.lane ?? -1)
         }
+        // The items with a lane then trade places among themselves into lane order. A second
+        // pass, not a "lane before end" rule in the sort: that rule for laned pairs only
+        // contradicts itself once an item without a lane starts with them and ends between them.
+        let laned = items.indices.filter { items[$0].lane != nil }
+        let inLaneOrder = laned.map { items[$0] }.sorted { lhs, rhs in
+            (lhs.start, lhs.lane ?? 0, lhs.end) < (rhs.start, rhs.lane ?? 0, rhs.end)
+        }
+        for (index, item) in zip(laned, inLaneOrder) {
+            items[index] = item
+        }
+        return items
     }
 
     /// All-day events of the day, in store order.

@@ -8,6 +8,7 @@ extension AppModel {
     var isSheetOpen: Bool {
         editorTask != nil || isGoToDateOpen || isNewCategoryOpen || doneForNow != nil || recurringTaskToDelete != nil
             || eventEditor != nil || eventToDelete != nil
+            || isProjectsOpen || projectEditor != nil || isBriefOpen || explanation != nil
     }
 
     /// Asks `RootView` to open the Settings window on `tab`.
@@ -23,7 +24,8 @@ extension AppModel {
             perform(shared)
         case .undo, .move, .acceptSuggestion, .newCategory, .showRoutine, .newTaskEditor,
              .doNow, .doneForNow, .repeatLast, .centerOnNow, .jumpToFirst, .jumpToLast,
-             .editEvent, .respondYes, .respondMaybe, .respondNo:
+             .editEvent, .respondYes, .respondMaybe, .respondNo,
+             .showProjects, .showBrief, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind:
             guard !isSheetOpen else { return }
             statusMessage = nil
             switch command {
@@ -43,6 +45,16 @@ extension AppModel {
             case .respondYes: respondToEvent("accepted")
             case .respondMaybe: respondToEvent("tentative")
             case .respondNo: respondToEvent("declined")
+            case .showProjects: isProjectsOpen = true
+            case .showBrief:
+                // An earlier failure is stale by the time the sheet is reopened.
+                briefErrors = [:]
+                isBriefOpen = true
+            case .explain: explainSelection()
+            case .setDayHome: setDay(selectedDay, kind: .home)
+            case .setDayOffice: setDay(selectedDay, kind: .office)
+            case .setDayOff: setDay(selectedDay, kind: .off)
+            case .clearDayKind: clearDayOverride(on: selectedDay)
             case .core: break
             }
         }
@@ -110,6 +122,14 @@ extension AppModel {
             isHelpOpen = false
         } else if eventDetailID != nil {
             eventDetailID = nil
+        } else if explanation != nil {
+            explanation = nil
+        } else if projectEditor != nil {
+            projectEditor = nil
+        } else if isProjectsOpen {
+            isProjectsOpen = false
+        } else if isBriefOpen {
+            isBriefOpen = false
         } else if recurringTaskToDelete != nil {
             recurringTaskToDelete = nil
         } else if eventToDelete != nil {
@@ -130,10 +150,17 @@ extension AppModel {
     }
 
     /// Return / `e` / double-click: tasks open the editor sheet, events their detail popover, and
-    /// an event whose popover is already open its editor sheet.
+    /// an event whose popover is already open its editor sheet. Project time opens Projects and
+    /// the gym its routine, which is where each is changed.
     func editSelection() {
         if case .gap(let id)? = selection, let gap = gridLayout.gap(id: id) {
             openFitPicker(gap)
+        } else if let block = selectedPlanBlock {
+            if block.isCommitment {
+                openSettings(.routine)
+            } else {
+                isProjectsOpen = true
+            }
         } else if let task = selectedTask {
             editorTask = task
         } else if let event = selectedEvent {

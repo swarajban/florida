@@ -59,8 +59,8 @@ final class AppModel {
     private(set) var briefs: [Brief] = []
     /// The briefs the server is writing right now.
     var briefsInFlight: Set<BriefKind> = []
-    /// Why the last brief request failed; the brief panel shows it in place.
-    var briefError: String?
+    /// Why the last request for each kind of brief failed; the brief panel shows it on that kind's tab.
+    var briefErrors: [BriefKind: String] = [:]
     /// Today's events and task blocks for the menu bar, observed for the current day.
     var todayAgenda: DayAgenda?
     /// The current minute; the menu bar title and agenda recompute from it.
@@ -125,7 +125,7 @@ final class AppModel {
     var projectEditor: Project?
     /// The brief and weekly review panel (`g b`).
     var isBriefOpen = false
-    /// The answer to "Why here?" for one task, while its popover is open.
+    /// The answer to "Why here?" for one task, while its sheet is open.
     var explanation: PlacementExplanation?
     /// The Settings tab to show, and a counter `RootView` watches to open the Settings window.
     var settingsTab: SettingsTab = .server
@@ -253,6 +253,8 @@ final class AppModel {
             days: visibleDays, events: events, placements: placements,
             // A month cell has no room for work that is not on the plan.
             suggestions: viewMode == .month ? [] : visibleDays.flatMap { optionalPicks(on: $0).flatMap(\.picks) },
+            // The gym is a fixed part of a day; held project time is detail a month cell can skip.
+            planBlocks: viewMode == .month ? planBlocks.filter(\.isCommitment) : planBlocks, projectsById: projectsById,
             tasksById: tasksById,
             categoriesById: categoriesById, calendarsById: calendarsById, schedules: activeSchedules,
             options: layoutOptions, lineLimit: viewMode == .month ? MonthGridView.maxLinesPerCell : nil,

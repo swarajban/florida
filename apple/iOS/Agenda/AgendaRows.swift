@@ -47,6 +47,9 @@ struct EventRow: View {
 /// With `showsProgress`, the block in progress fills left to right in its category color and
 /// says how long is left.
 struct BlockRow: View {
+    /// Where the title starts: the time column, the bar, and the spacing on both sides of it.
+    static let titleInset: CGFloat = TimeColumn.width + 12 + 3 + 12
+
     let block: ScheduledBlock
     let category: TaskCategory?
     let now: Date

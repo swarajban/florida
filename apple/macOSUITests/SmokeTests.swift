@@ -43,6 +43,51 @@ final class SmokeTests: XCTestCase {
         }
     }
 
+    /// Projects, the brief and the task editor's plan pickers, each opened by its keys.
+    @MainActor
+    func testPlanScreensInBothAppearances() throws {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-demoData", "YES", "-uiAppearance", appearance]
+            app.launch()
+            defer { app.terminate() }
+            let window = app.windows.firstMatch
+            XCTAssertTrue(window.waitForExistence(timeout: 15))
+            XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 10))
+            XCTAssertTrue(app.buttons["open-projects"].exists)
+            XCTAssertTrue(app.buttons["open-brief"].exists)
+
+            // The hour three projects share is after lunch: day view, scrolled to the afternoon.
+            app.typeKey("d", modifierFlags: [])
+            XCTAssertEqual((app.radioButtons["Day"].value as? NSNumber)?.intValue, 1)
+            window.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.7)).scroll(byDeltaX: 0, deltaY: -260)
+            capture(window, "lanes-\(appearance)")
+
+            app.typeKey("g", modifierFlags: [])
+            app.typeKey("p", modifierFlags: [])
+            // A project with no tasks: only the Projects sheet can show it.
+            XCTAssertTrue(app.staticTexts["Home network rebuild"].waitForExistence(timeout: 5))
+            capture(window, "projects-\(appearance)")
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(app.staticTexts["Home network rebuild"].waitForNonExistence(timeout: 5))
+
+            app.typeKey("g", modifierFlags: [])
+            app.typeKey("b", modifierFlags: [])
+            let headline = app.staticTexts["Keys first, then a three-project hour after lunch"]
+            XCTAssertTrue(headline.waitForExistence(timeout: 5))
+            capture(window, "brief-\(appearance)")
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(headline.waitForNonExistence(timeout: 5))
+
+            app.typeKey("n", modifierFlags: .shift)
+            XCTAssertTrue(app.popUpButtons["task-project"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.popUpButtons["task-attention"].exists)
+            capture(window, "task-editor-\(appearance)")
+            app.typeKey(.escape, modifierFlags: [])
+        }
+    }
+
     @MainActor
     private func capture(_ window: XCUIElement, _ name: String) {
         let attachment = XCTAttachment(screenshot: window.screenshot())

@@ -67,7 +67,7 @@ struct MonthCellView: View {
                 line(item: block.item, day: day, text: block.title, tint: block.tint, filled: true)
             }
             ForEach(timed.prefix(max(0, MonthGridView.maxLinesPerCell - allDay.count))) { block in
-                line(item: block.item, day: day, text: "\(DateText.time(block.start)) \(block.title)", tint: block.tint, filled: !block.isTask)
+                line(item: block.item, day: day, text: "\(DateText.time(block.start)) \(block.title)", tint: block.tint, filled: block.isEvent)
             }
             if overflow > 0 {
                 Text("+\(overflow) more")
@@ -90,6 +90,8 @@ struct MonthCellView: View {
         .onTapGesture {
             model.focus = .calendar
             model.selectDay(day)
+            // The status bar's note was about the line this click deselects.
+            model.statusMessage = nil
             model.select(nil)
         }
     }

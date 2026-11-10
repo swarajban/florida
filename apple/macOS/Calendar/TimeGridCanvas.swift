@@ -4,7 +4,9 @@ import SwiftUI
 /// Draws one `GridLayout` into a `Canvas`: off-hours shading, hour lines and labels, day
 /// separators, the day tints, free gaps, every block (sliding from its old slot while
 /// `transition` runs, the current one filling as it goes; a suggestion dotted, barely filled,
-/// with a moon), the focus ring and the "now" line.
+/// with a moon; the gym solid and neutral; project time in long dashes), the focus ring and the
+/// "now" line. A block that shares its hour with other parallel work is marked, and says what
+/// runs beside it when it is tall enough.
 /// Pure drawing from precomputed frames and labels; `now` is the model's minute clock.
 struct TimeGridCanvas: View {
     let layout: GridLayout
@@ -124,6 +126,13 @@ struct TimeGridCanvas: View {
         case .suggestion:
             context.fill(shape, with: .color(block.tint.opacity(0.03)))
             context.stroke(shape, with: .color(block.tint.opacity(0.6)), style: StrokeStyle(lineWidth: 1, dash: [1, 3]))
+        case .commitment:
+            context.fill(shape, with: .color(block.tint.opacity(0.07 * alpha)))
+            context.stroke(shape, with: .color(block.tint.opacity(0.45 * alpha)), lineWidth: 1)
+        case .projectTime:
+            context.fill(shape, with: .color(block.tint.opacity(0.04 * alpha)))
+            context.stroke(
+                shape, with: .color(block.tint.opacity(0.6 * alpha)), style: StrokeStyle(lineWidth: 1, dash: [7, 3]))
         }
 
         var inner = context
@@ -134,7 +143,7 @@ struct TimeGridCanvas: View {
         }
         let padding: CGFloat = 4
         var titleRect = rect.insetBy(dx: padding, dy: 2)
-        if let glyph = block.isPinned ? "pin.fill" : (block.isSuggestion ? "moon.stars" : nil) {
+        if let glyph = Self.glyph(for: block) {
             let pinSize: CGFloat = 10
             inner.draw(
                 Text(Image(systemName: glyph)).font(.system(size: 9)).foregroundStyle(textColor),
@@ -147,12 +156,35 @@ struct TimeGridCanvas: View {
             inner.draw(
                 Text(DateText.timeRange(block.start, block.end)).font(.system(size: 10)).foregroundStyle(textColor.opacity(0.85)),
                 in: CGRect(x: titleRect.minX, y: titleRect.minY + 14, width: titleRect.width, height: 13))
+            // From an hour up: shorter, and the line would sit under "23 min left".
+            if rect.height >= 56, let note = Self.note(for: block) {
+                inner.draw(
+                    Text(note).font(.system(size: 10)).foregroundStyle(textColor.opacity(0.7)),
+                    in: CGRect(x: rect.minX + padding, y: titleRect.minY + 27, width: rect.width - padding * 2, height: 13))
+            }
         } else {
             inner.draw(title, in: CGRect(x: titleRect.minX, y: rect.minY + 1, width: titleRect.width, height: max(rect.height - 2, 8)))
         }
         if isCurrent {
             drawTimeLeft(of: block, in: &inner, rect: rect, color: textColor)
         }
+    }
+
+    /// The corner mark: pinned, suggested, the gym, project time, or sharing its hour.
+    private static func glyph(for block: GridLayout.Block) -> String? {
+        switch block.kind {
+        case .task(pinned: true): "pin.fill"
+        case .suggestion: "moon.stars"
+        case .commitment: PlanText.commitmentSymbol
+        case .projectTime: PlanText.projectSymbol
+        case .event, .task: block.companions.isEmpty ? nil : PlanText.parallelSymbol
+        }
+    }
+
+    /// The third line of a tall block: what runs beside it, or that it is time held for a project.
+    private static func note(for block: GridLayout.Block) -> String? {
+        if let alongside = block.alongside { return alongside }
+        return block.kind == .projectTime ? PlanText.projectTime : nil
     }
 
     private func drawSelectionRing(in context: inout GraphicsContext, geometry: GridGeometry) {

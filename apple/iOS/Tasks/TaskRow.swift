@@ -1,7 +1,7 @@
 import FloridaKit
 import SwiftUI
 
-/// One open task in the Tasks list: title, duration, due day, and when the scheduler put it. Only
+/// One open task in the Tasks list: title, duration, due day, context, and when the scheduler put it. Only
 /// an ASAP or high priority is printed. Late and overdue tasks read red; an unscheduled or partly
 /// placed task says why and how much is left out.
 struct TaskRow: View {
@@ -31,6 +31,9 @@ struct TaskRow: View {
                             "\(task.deadlineType == .hard ? "Due" : "By") \(Formatting.due(dueAt, now: now, calendar: calendar))",
                             systemImage: task.deadlineType == .hard ? "calendar.badge.clock" : "calendar")
                     }
+                    Text("·")
+                    Label(task.context.displayName, systemImage: task.context.symbolName)
+                        .accessibilityLabel("\(task.context.displayName) context")
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
