@@ -119,7 +119,8 @@ struct TaskPaneView: View {
             tint: tint,
             isSelected: model.selection == item, isFocused: model.focus == .tasks,
             isUntriaged: group.isInbox, suggestion: suggestion,
-            calendar: model.calendar
+            calendar: model.calendar,
+            onComplete: { model.complete(task) }
         ) {
             if let suggestion { model.move(task, to: suggestion) }
         }

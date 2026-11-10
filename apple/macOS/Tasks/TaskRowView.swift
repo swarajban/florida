@@ -1,7 +1,7 @@
 import FloridaKit
 import SwiftUI
 
-/// One task: title, then priority (only ASAP or High is printed), duration, due day, scheduled
+/// One task: a circle that marks it done (the mouse's Space), the title, then priority (only ASAP or High is printed), duration, due day, scheduled
 /// time and pin state, and a red or orange line when it is overdue, late (with its ETA) or could
 /// not be (fully) placed.
 /// Inbox rows have a dashed edge and may offer the AI's category.
@@ -16,10 +16,24 @@ struct TaskRowView: View {
     /// The AI's suggested category, if any; clicking it (or ⇥ on the selected row) accepts it.
     let suggestion: TaskCategory?
     let calendar: Calendar
+    let onComplete: () -> Void
     let onAcceptSuggestion: () -> Void
+    @State private var isOverDone = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
+            Button(action: onComplete) {
+                Image(systemName: isOverDone ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 15))
+                    .foregroundStyle(isOverDone ? tint : Color.secondary)
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { isOverDone = $0 }
+            .help("Mark done (Space)")
+            .accessibilityLabel("Mark done")
+            .accessibilityIdentifier("task-done-\(task.id)")
             VStack(alignment: .leading, spacing: 3) {
                 Text(task.title)
                     .lineLimit(2)
