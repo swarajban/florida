@@ -6,9 +6,12 @@ import SwiftUI
 /// server's AI, which fills the form for confirmation. Save writes locally and closes; nothing
 /// waits on the server. An open task has Mark done on top, which saves any edits and completes it.
 ///
-/// Due is checked for a new task; its soft/hard choice applies only with a date. Due and Not
-/// before are whole days; "Add a time" shows a clock for the rare task that needs one (see
-/// `TaskDay` for what a day without a time stores). A pinned start always has a time.
+/// The two dates come right after the title, Start above Due: finishing a task and moving its
+/// dates are what the sheet is opened for. Due is checked for a new task; its soft/hard choice
+/// applies only with a date. Both are whole days; "Add a time" shows a clock for the rare task
+/// that needs one (see `TaskDay` for what a day without a time stores). A start moved to or past
+/// the due date takes the due date with it, to the day after (`keepDueAfterStart`). A pinned
+/// start always has a time.
 struct TaskEditorSheet: View {
     @Environment(AppModel.self) private var model
     @State private var draft: TaskItem
@@ -68,11 +71,9 @@ struct TaskEditorSheet: View {
                         .focused($isTitleFocused)
                     TextField("Notes", text: notes, axis: .vertical)
                         .lineLimit(3...8)
-                    Picker("Category", selection: $draft.categoryId) {
-                        ForEach(model.orderedCategories) { category in
-                            Text(category.name).tag(category.id)
-                        }
-                    }
+                }
+                Section("Dates") {
+                    OptionalDateRow(title: "Start", isOn: $hasStart, date: $startAt, hasTime: startHasTime)
                     OptionalDateRow(title: "Due", isOn: $hasDue, date: $dueAt, hasTime: dueHasTime)
                     Picker("Deadline", selection: deadline) {
                         ForEach([DeadlineType.soft, .hard], id: \.self) { type in
@@ -80,6 +81,13 @@ struct TaskEditorSheet: View {
                         }
                     }
                     .disabled(!hasDue)
+                }
+                Section {
+                    Picker("Category", selection: $draft.categoryId) {
+                        ForEach(model.orderedCategories) { category in
+                            Text(category.name).tag(category.id)
+                        }
+                    }
                     LabeledContent("Duration") {
                         HStack {
                             TextField("Minutes", value: $draft.durationMinutes, format: .number)
@@ -125,7 +133,6 @@ struct TaskEditorSheet: View {
                     }
                     .help("Work that can run in parallel shares an hour with up to two other such tasks.")
                     .accessibilityIdentifier("task-attention")
-                    OptionalDateRow(title: "Not before", isOn: $hasStart, date: $startAt, hasTime: startHasTime)
                     OptionalDateRow(title: "Pinned start", isOn: $hasPinnedStart, date: $pinnedStart)
                 }
                 TaskRecurrenceSection(
@@ -154,6 +161,17 @@ struct TaskEditorSheet: View {
         .onAppear {
             isTitleFocused = !isNew || model.editorAIText == nil
         }
+        .onChange(of: startAt) { keepDueAfterStart() }
+        .onChange(of: hasStart) { keepDueAfterStart() }
+        .onChange(of: hasDue) { keepDueAfterStart() }
+    }
+
+    /// A start that reaches or passes the due date leaves no time for the task, so the due date
+    /// moves to the day after the start, in the row right below. Run when the start changes and
+    /// when either date is switched on; a due date typed in earlier than the start is left alone.
+    private func keepDueAfterStart() {
+        guard hasStart, hasDue else { return }
+        dueAt = TaskDay.due(dueAt, notBefore: startAt, calendar: model.calendar)
     }
 
     private var notes: Binding<String> {

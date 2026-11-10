@@ -42,4 +42,19 @@ public enum TaskDay {
     public static func notBeforeHasTime(_ startAt: Date, calendar: Calendar) -> Bool {
         startAt != calendar.startOfDay(for: startAt)
     }
+
+    /// The due date to keep once the task may not start before `startAt`. A due date still after
+    /// the start stands. One the start has reached or passed leaves no time to do the task, so it
+    /// moves to the day after the start, at the clock time it already had: a whole-day deadline
+    /// stays whole-day, and "by 3 PM" stays 3 PM.
+    public static func due(_ dueAt: Date, notBefore startAt: Date, calendar: Calendar) -> Date {
+        guard startAt >= dueAt else { return dueAt }
+        let startDay = calendar.startOfDay(for: startAt)
+        let nextDay = calendar.date(byAdding: .day, value: 1, to: startDay) ?? startDay.addingTimeInterval(86_400)
+        // Set, not added: on a day the clocks change, 17 hours after midnight is not 17:00.
+        let clock = calendar.dateComponents([.hour, .minute, .second], from: dueAt)
+        return calendar.date(
+            bySettingHour: clock.hour ?? dueHour, minute: clock.minute ?? 0, second: clock.second ?? 0, of: nextDay)
+            ?? due(on: nextDay, calendar: calendar)
+    }
 }

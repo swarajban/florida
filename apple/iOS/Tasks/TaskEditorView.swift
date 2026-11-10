@@ -6,11 +6,14 @@ import SwiftUI
 /// from the + button or an AI parse) the same form adds the task, and an AI parse's rationale
 /// shows on top for review.
 ///
-/// Due date leads the scheduling fields and is on for a new task; its soft/hard choice only shows
-/// with a date. Due and Not before are whole days; "Add a time" shows a clock for the rare task
-/// that needs one (see `TaskDay` for what a day without a time stores).
+/// The two dates come right after the title, Start above Due, one row each (`TaskDateRow`):
+/// finishing a task and moving its dates are what the sheet is opened for. Both are whole days
+/// unless a time is added from the row's menu (see `TaskDay` for what a day without a time
+/// stores). Due is on for a new task; its soft/hard choice only shows with a date. A start moved
+/// to or past the due date takes the due date with it, to the day after (`setStart`).
 ///
-/// Project, attention and "Why here?" follow the scheduling fields (`TaskPlanSection`).
+/// Category, the scheduling fields, then project, attention and "Why here?" (`TaskPlanSection`)
+/// follow; the pin, repeating and Delete come last.
 struct TaskEditorView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -100,6 +103,18 @@ struct TaskEditorView: View {
                     }
                 }
 
+                Section("Dates") {
+                    TaskDateRow(title: "Start", identifier: "task-start", isOn: hasStart, date: startAt, hasTime: hasStartTime)
+                    TaskDateRow(title: "Due", identifier: "task-due", isOn: hasDue, date: dueAt, hasTime: hasDueTime)
+                    if hasDue.wrappedValue {
+                        Picker("Deadline", selection: $draft.deadlineType) {
+                            ForEach([DeadlineType.soft, .hard], id: \.self) { type in
+                                Text(type.displayName).tag(type)
+                            }
+                        }
+                    }
+                }
+
                 Section("Category") {
                     Picker("Category", selection: $draft.categoryId) {
                         ForEach(model.categories) { category in
@@ -112,22 +127,10 @@ struct TaskEditorView: View {
                             .tag(category.id)
                         }
                     }
+                    .accessibilityIdentifier("task-category")
                 }
 
                 Section("Scheduling") {
-                    Toggle("Due date", isOn: hasDue)
-                    if hasDue.wrappedValue {
-                        DatePicker("Due", selection: dueAt, displayedComponents: .date)
-                        Toggle("Add a time", isOn: hasDueTime)
-                        if hasDueTime.wrappedValue {
-                            DatePicker("Due time", selection: dueAt, displayedComponents: .hourAndMinute)
-                        }
-                        Picker("Deadline", selection: $draft.deadlineType) {
-                            ForEach([DeadlineType.soft, .hard], id: \.self) { type in
-                                Text(type.displayName).tag(type)
-                            }
-                        }
-                    }
                     Stepper(value: $draft.durationMinutes, in: 15...(24 * 60), step: 15) {
                         LabeledContent("Duration", value: Formatting.duration(minutes: draft.durationMinutes))
                     }
@@ -146,14 +149,6 @@ struct TaskEditorView: View {
                 TaskPlanSection(task: $draft, original: original, isNew: isNew, explanation: $explanation)
 
                 Section {
-                    Toggle("Earliest start", isOn: hasStart)
-                    if draft.startAt != nil {
-                        DatePicker("Not before", selection: startAt, displayedComponents: .date)
-                        Toggle("Add a time", isOn: hasStartTime)
-                        if hasStartTime.wrappedValue {
-                            DatePicker("Not before time", selection: startAt, displayedComponents: .hourAndMinute)
-                        }
-                    }
                     Toggle("Pin to a time", isOn: hasPin)
                     if draft.pinnedStart != nil {
                         DatePicker("Pinned start", selection: pinnedStart, displayedComponents: [.date, .hourAndMinute])
@@ -227,7 +222,9 @@ struct TaskEditorView: View {
             set: { on in
                 if on {
                     draft.deadlineType = .soft
-                    draft.dueAt = draft.dueAt ?? defaultDueDate
+                    let dueAt = draft.dueAt ?? defaultDueDate
+                    // The default day may be before a start already set.
+                    draft.dueAt = draft.startAt.map { TaskDay.due(dueAt, notBefore: $0, calendar: model.calendar) } ?? dueAt
                 } else {
                     draft.deadlineType = .none
                     draft.dueAt = nil
@@ -236,7 +233,7 @@ struct TaskEditorView: View {
             })
     }
 
-    /// Both Due pickers. Without a time, a new day keeps the whole-day clock the date already had
+    /// The Due picker. Without a time, a new day keeps the whole-day clock the date already had
     /// (the date picker carries it over) and anything else becomes the 17:00 default.
     private var dueAt: Binding<Date> {
         Binding(
@@ -260,22 +257,23 @@ struct TaskEditorView: View {
             })
     }
 
+    /// On while the task has a start date ("not before"). Switching it on starts today.
     private var hasStart: Binding<Bool> {
         Binding(
             get: { draft.startAt != nil },
             set: { on in
-                draft.startAt = on ? (draft.startAt ?? TaskDay.notBefore(on: Date(), calendar: model.calendar)) : nil
+                setStart(on ? (draft.startAt ?? TaskDay.notBefore(on: Date(), calendar: model.calendar)) : nil)
                 if !on {
                     startTimeChoice = nil
                 }
             })
     }
 
-    /// Both Not before pickers; without a time the date is the start of its day.
+    /// The Start picker; without a time the date is the start of its day.
     private var startAt: Binding<Date> {
         Binding(
             get: { draft.startAt ?? Date() },
-            set: { draft.startAt = hasStartTime.wrappedValue ? $0 : TaskDay.notBefore(on: $0, calendar: model.calendar) })
+            set: { setStart(hasStartTime.wrappedValue ? $0 : TaskDay.notBefore(on: $0, calendar: model.calendar)) })
     }
 
     private var hasStartTime: Binding<Bool> {
@@ -284,9 +282,18 @@ struct TaskEditorView: View {
             set: { on in
                 startTimeChoice = on
                 if !on, let startAt = draft.startAt {
-                    draft.startAt = TaskDay.notBefore(on: startAt, calendar: model.calendar)
+                    setStart(TaskDay.notBefore(on: startAt, calendar: model.calendar))
                 }
             })
+    }
+
+    /// Every change to the start date goes through here: a start that reaches or passes the due
+    /// date moves the due date to the day after it, in the row right below.
+    private func setStart(_ start: Date?) {
+        draft.startAt = start
+        if let start, let dueAt = draft.dueAt {
+            draft.dueAt = TaskDay.due(dueAt, notBefore: start, calendar: model.calendar)
+        }
     }
 
     private var hasPin: Binding<Bool> {
