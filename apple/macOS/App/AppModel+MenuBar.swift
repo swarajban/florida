@@ -13,17 +13,20 @@ struct AgendaEntry: Identifiable, Hashable {
     let isTask: Bool
 }
 
-// The menu bar extra replaces a separate date / next-meeting app, so its title always shows the
-// full date with the year, then the next meeting and how long until it. It reads today's agenda
-// from the local store and `clockNow`, which ticks on each minute; nothing waits on the network.
+// The menu bar extra replaces a separate date / next-meeting app, so its title leads with the
+// next meeting and how long until it, and always ends with the full date, with the year, and the
+// time. It reads today's agenda from the local store and `clockNow`, which ticks on each minute;
+// nothing waits on the network.
 
 extension AppModel {
-    /// "Mon Nov 9, 2026 · Standup in 12m", or just the date when nothing else is on today.
+    /// "Standup in 12m · Mon Nov 9, 2026 2:03 PM", or just the date and time when no meeting is
+    /// left today.
     var menuBarTitle: String {
         let now = clockNow
         let date = "\(now.formatted(.dateTime.weekday(.abbreviated))) \(now.formatted(.dateTime.month(.abbreviated).day())), \(now.formatted(.dateTime.year()))"
-        guard let next = nextMeeting(after: now) else { return date }
-        return "\(date) · \(Self.shortTitle(next.title)) \(Self.untilText(next.start, now: now))"
+        let dateAndTime = "\(date) \(DateText.time(now))"
+        guard let next = nextMeeting(after: now) else { return dateAndTime }
+        return "\(Self.shortTitle(next.title)) \(Self.untilText(next.start, now: now)) · \(dateAndTime)"
     }
 
     /// The next timed meeting today that has not started, else the one in progress.

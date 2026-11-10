@@ -1,7 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// The menu bar item: the mark, then "Mon Nov 9, 2026 · Standup in 12m". Always shows the date.
+/// The menu bar item: the mark, then "Standup in 12m · Mon Nov 9, 2026 2:03 PM". Always shows the
+/// date and time.
 struct MenuBarLabel: View {
     @Environment(AppModel.self) private var model
 
