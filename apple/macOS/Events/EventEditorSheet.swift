@@ -44,6 +44,7 @@ struct EventEditorSheet: View {
                         }
                     }
                     .disabled(!isNew)
+                    .accessibilityIdentifier("event-calendar")
                 }
                 Section {
                     Toggle("All-day", isOn: allDay)

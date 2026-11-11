@@ -160,14 +160,16 @@ enum DemoData {
                 suggestion("demo-pick-funds-2", "demo-task-funds", at(1, 20), at(1, 20, 45)),
             ],
             accounts: [
-                GoogleAccount(id: "demo-work", email: "swaraj@work.example", label: "work", updatedAt: now),
-                GoogleAccount(id: "demo-personal", email: "swaraj@personal.example", label: "personal", updatedAt: now),
+                GoogleAccount(id: "demo-work", email: "demo@sempre-health.com", label: "work", updatedAt: now),
+                GoogleAccount(id: "demo-personal", email: "demo@personal.example", label: "personal", updatedAt: now),
             ],
             calendars: [
-                CalendarInfo(id: work, accountId: "demo-work", googleId: "g-work", summary: "Work", color: "#3B82F6", accessRole: "owner", selected: true, updatedAt: now),
+                CalendarInfo(id: work, accountId: "demo-work", googleId: "demo@sempre-health.com", summary: "demo@sempre-health.com", color: "#3B82F6", accessRole: "owner", selected: true, updatedAt: now),
                 CalendarInfo(id: ooo, accountId: "demo-work", googleId: "g-ooo", summary: "Team OOO", color: "#F59E0B", accessRole: "reader", selected: true, updatedAt: now),
-                CalendarInfo(id: personal, accountId: "demo-personal", googleId: "g-personal", summary: "Personal", color: "#10B981", accessRole: "owner", selected: true, updatedAt: now),
+                CalendarInfo(id: personal, accountId: "demo-personal", googleId: "demo@personal.example", summary: "demo@personal.example", color: "#10B981", accessRole: "owner", selected: true, updatedAt: now),
                 CalendarInfo(id: birthdays, accountId: "demo-personal", googleId: "g-birthdays", summary: "Birthdays", color: "#EC4899", accessRole: "reader", selected: false, updatedAt: now),
+                CalendarInfo(id: "demo-family", accountId: "demo-personal", googleId: "g-family", summary: "A&S Family Calendar", accessRole: "writer", selected: true, updatedAt: now),
+                CalendarInfo(id: "demo-colleague", accountId: "demo-work", googleId: "teammate@sempre-health.com", summary: "teammate@sempre-health.com", accessRole: "writer", selected: true, updatedAt: now),
             ],
             unscheduled: [
                 UnscheduledTask(taskId: "demo-task-vpn", reason: "no_fit_in_horizon", unplacedMinutes: 30, computedAt: now),

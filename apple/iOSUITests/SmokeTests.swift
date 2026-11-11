@@ -55,23 +55,94 @@ final class SmokeTests: XCTestCase {
             waitForText("Infra offsite", in: app)
             capture(app, "three-day-start-\(appearance)")
             let heading = app.buttons["Go to day"]
-            let right = app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.55))
+            let right = app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.55))
             let left = app.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.55))
-            // Both directions, including a swipe begun on a timed block rather than the gutter.
-            for (offset, forward) in [(1, true), (2, true), (1, false), (0, false)] {
-                if forward {
-                    right.press(forDuration: 0.05, thenDragTo: left)
-                } else {
-                    left.press(forDuration: 0.05, thenDragTo: right)
-                }
+            let postmortem = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Draft incident postmortem")).firstMatch
+            XCTAssertTrue(postmortem.isHittable)
+            let beforeVerticalScroll = postmortem.frame.minY
+            let gutter = app.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.7))
+            gutter.press(forDuration: 0.05, thenDragTo: gutter.withOffset(CGVector(dx: 0, dy: -80)),
+                         withVelocity: .slow, thenHoldForDuration: 0.3)
+            XCTAssertLessThan(postmortem.frame.minY, beforeVerticalScroll - 50)
+            let originalY = postmortem.frame.minY
+            let oneColumn = app.windows.firstMatch.frame.width * 0.3
+            right.press(forDuration: 0.05, thenDragTo: right.withOffset(CGVector(dx: -oneColumn, dy: 0)),
+                        withVelocity: .slow, thenHoldForDuration: 0.3)
+            // Yesterday's block is behind the fixed gutter, not an invisible tap target there.
+            app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 25, dy: originalY + 10)).tap()
+            XCTAssertFalse(app.buttons["Cancel"].exists)
+            left.press(forDuration: 0.05, thenDragTo: left.withOffset(CGVector(dx: oneColumn, dy: 0)),
+                       withVelocity: .slow, thenHoldForDuration: 0.3)
+            right.tap()
+            XCTAssertTrue(app.navigationBars["New Event"].waitForExistence(timeout: 5))
+            let thirdDay = calendar.date(byAdding: .day, value: 2, to: today)!
+            XCTAssertTrue(app.datePickers["event-start"].buttons[
+                thirdDay.formatted(.dateTime.month(.abbreviated).day().year())].exists)
+            app.buttons["Cancel"].tap()
+            // A held slow drag crosses two columns without momentum. The old swipe-end handler
+            // always moved just one day. Travel far enough both ways to replenish the runway.
+            for (offset, forward) in [
+                (2, true), (4, true), (6, true), (4, false), (2, false), (0, false),
+                (-2, false), (-4, false), (-6, false), (-4, true), (-2, true), (0, true),
+            ] {
+                (forward ? right : left).press(
+                    forDuration: 0.05, thenDragTo: forward ? left : right,
+                    withVelocity: .slow, thenHoldForDuration: 0.3)
                 let date = calendar.date(byAdding: .day, value: offset, to: today)!
                 let expected = date.formatted(.dateTime.weekday(.wide).month(.wide).day().year())
                 XCTAssertTrue(heading.waitForExistence(timeout: 5))
-                XCTAssertEqual(heading.value as? String, expected, "A swipe must move one day, not three")
+                XCTAssertEqual(heading.value as? String, expected, "The calendar must follow the distance dragged")
             }
+            XCTAssertEqual(postmortem.frame.minY, originalY, accuracy: 2, "Horizontal movement must retain the hour position")
+            postmortem.tap()
+            XCTAssertTrue(app.buttons["Mark done"].waitForExistence(timeout: 5))
+            app.buttons["Cancel"].tap()
+            let oldTime = postmortem.value as? String
+            let blockCenter = postmortem.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            blockCenter.press(forDuration: 0.5, thenDragTo: blockCenter.withOffset(CGVector(dx: 0, dy: 30)),
+                              withVelocity: .slow, thenHoldForDuration: 0.3)
+            XCTAssertNotEqual(postmortem.value as? String, oldTime, "Holding still must move the task rather than scroll")
+            XCTAssertEqual(postmortem.frame.minY, originalY + 30, accuracy: 15, "The task should move by half an hour")
+            // Native inertia can carry a flick farther than the same slow drag.
+            right.press(forDuration: 0.05, thenDragTo: left, withVelocity: .fast, thenHoldForDuration: 0)
+            let fartherDays = (3...7).map { offset in
+                calendar.date(byAdding: .day, value: offset, to: today)!
+                    .formatted(.dateTime.weekday(.wide).month(.wide).day().year())
+            }
+            XCTAssertTrue(fartherDays.contains(heading.value as? String ?? ""), "A flick must coast across multiple days")
+            capture(app, "three-day-coasted-\(appearance)")
+            let coastedDay = heading.value as? String
+            app.tabBars.buttons["Tasks"].tap()
+            app.tabBars.buttons["Agenda"].tap()
+            XCTAssertEqual(heading.value as? String, coastedDay)
+            app.buttons["Today"].tap()
+            XCTAssertEqual(heading.value as? String, today.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
+            XCTAssertTrue(postmortem.isHittable)
             // Three column labels replace the seven-day strip, rather than sitting below it.
             XCTAssertFalse(app.buttons[today.formatted(.dateTime.weekday(.wide).month(.wide).day())].exists)
             capture(app, "three-day-return-\(appearance)")
+            // Choosing a date outside the preloaded range, and Today afterwards, replace it.
+            heading.tap()
+            XCTAssertTrue(app.buttons["Next Month"].waitForExistence(timeout: 5))
+            app.buttons["Next Month"].tap()
+            let nextMonth = calendar.date(byAdding: .month, value: 1, to: today)!
+            let distantDay = calendar.date(bySetting: .day, value: 15, of: nextMonth)!
+            let distantChoice = app.buttons.matching(NSPredicate(format: "label CONTAINS %@",
+                distantDay.formatted(.dateTime.weekday(.wide).month(.wide).day()))).firstMatch
+            XCTAssertTrue(distantChoice.waitForExistence(timeout: 5))
+            distantChoice.tap()
+            XCTAssertEqual(heading.value as? String, distantDay.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
+            app.buttons["Today"].tap()
+            XCTAssertTrue(postmortem.isHittable)
+            // The single-day control still pages by one day, then re-enters the carousel there.
+            app.segmentedControls["agenda-mode"].buttons["Day"].tap()
+            right.press(forDuration: 0.05, thenDragTo: left, withVelocity: .slow, thenHoldForDuration: 0.3)
+            let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+            XCTAssertEqual(heading.value as? String, tomorrow.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
+            app.segmentedControls["agenda-mode"].buttons["3 Days"].tap()
+            XCTAssertTrue(app.buttons["Architecture sync"].exists)
+            app.buttons["Today"].tap()
+            XCTAssertTrue(postmortem.isHittable)
             app.terminate()
         }
     }
@@ -95,9 +166,21 @@ final class SmokeTests: XCTestCase {
             title.tap()
             title.typeText("Weekly planning\n")
             XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+            let calendarPicker = app.buttons["event-calendar"]
+            XCTAssertTrue(calendarPicker.label.contains("demo@sempre-health.com"), calendarPicker.debugDescription)
+            calendarPicker.tap()
+            let choices = ["demo@sempre-health.com", "demo@personal.example", "A&S Family Calendar", "teammate@sempre-health.com"]
+                .map { app.buttons[$0] }
+            XCTAssertTrue(choices.allSatisfy(\.exists))
+            let tops = choices.map(\.frame.minY)
+            XCTAssertEqual(tops, tops.sorted())
+            capture(app, "calendar-order-\(appearance)")
+            choices[0].tap()
+            XCTAssertTrue(app.buttons["A&S Family Calendar"].waitForNonExistence(timeout: 5))
             let repeatPicker = app.buttons["event-repeat"]
             XCTAssertTrue(repeatPicker.waitForExistence(timeout: 5))
             repeatPicker.tap()
+            XCTAssertTrue(app.buttons["Weekly"].waitForExistence(timeout: 5))
             app.buttons["Weekly"].tap()
             XCTAssertTrue(app.buttons["Monthly"].waitForNonExistence(timeout: 5))
             waitForText("Every 1 week", in: app)

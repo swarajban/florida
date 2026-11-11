@@ -4,16 +4,24 @@ import Testing
 
 @Suite struct JSONCodingTests {
     @Test func newEventCalendarPreferenceOverridesAlphabeticalAndVisibilityOrder() {
-        func calendar(_ id: String, _ name: String, selected: Bool = true) -> CalendarInfo {
-            CalendarInfo(id: id, accountId: "a", googleId: id, summary: name, accessRole: "owner", selected: selected, updatedAt: .distantPast)
+        let accounts = [
+            GoogleAccount(id: "work", email: "me@sempre-health.com", label: "work", updatedAt: .distantPast),
+            GoogleAccount(id: "personal", email: "me@gmail.com", label: "personal", updatedAt: .distantPast),
+        ]
+        func calendar(_ id: String, _ name: String, googleId: String? = nil, selected: Bool = true) -> CalendarInfo {
+            CalendarInfo(id: id, accountId: "work", googleId: googleId ?? id, summary: name, accessRole: "owner", selected: selected, updatedAt: .distantPast)
         }
         let calendars = [
             calendar("other", "AAA"), calendar("family", "A&S Family Calendar"),
-            calendar("personal", "PERSONAL"), calendar("sempre", " sempre ", selected: false),
+            calendar("colleague", "coworker@sempre-health.com", googleId: "coworker@sempre-health.com"),
+            calendar("personal", "me@gmail.com", googleId: "me@gmail.com"),
+            calendar("sempre", "Renamed work calendar", googleId: "ME@sempre-health.com", selected: false),
         ]
-        #expect(calendars.sorted(by: CalendarInfo.isPreferredForNewEvents).map(\.id) == ["sempre", "personal", "family", "other"])
-        #expect(calendars.filter { $0.id != "sempre" }.sorted(by: CalendarInfo.isPreferredForNewEvents).first?.id == "personal")
-        #expect(calendars.prefix(2).sorted(by: CalendarInfo.isPreferredForNewEvents).first?.id == "family")
+        let preferred = { CalendarInfo.isPreferredForNewEvents($0, $1, accounts: accounts) }
+        #expect(calendars.sorted(by: preferred).map(\.id) == ["sempre", "personal", "family", "other", "colleague"])
+        #expect(calendars.filter { $0.id != "sempre" }.sorted(by: preferred).first?.id == "personal")
+        #expect(calendars.prefix(2).sorted(by: preferred).first?.id == "family")
+        #expect([calendar("p", "PERSONAL"), calendar("s", " sempre ")].sorted(by: preferred).map(\.id) == ["s", "p"])
     }
 
     @Test func parsesServerInstantsWithAndWithoutFraction() throws {

@@ -3,17 +3,24 @@ import Foundation
 extension CalendarInfo {
     /// New-event choices: Sempre, Personal, A&S Family Calendar, then the other calendars.
     /// Visibility only breaks ties: hiding Sempre's events must not change the default.
-    public static func isPreferredForNewEvents(_ lhs: CalendarInfo, _ rhs: CalendarInfo) -> Bool {
-        (lhs.eventRank, lhs.selected ? 0 : 1, lhs.summary.lowercased(), lhs.id)
-            < (rhs.eventRank, rhs.selected ? 0 : 1, rhs.summary.lowercased(), rhs.id)
+    public static func isPreferredForNewEvents(_ lhs: CalendarInfo, _ rhs: CalendarInfo, accounts: [GoogleAccount]) -> Bool {
+        (lhs.eventRank(accounts: accounts), lhs.selected ? 0 : 1, lhs.summary.lowercased(), lhs.id)
+            < (rhs.eventRank(accounts: accounts), rhs.selected ? 0 : 1, rhs.summary.lowercased(), rhs.id)
     }
 
-    private var eventRank: Int {
+    private func eventRank(accounts: [GoogleAccount]) -> Int {
+        // Google's primary calendar ID is the account email even if its display name changes.
+        // Match a connected identity, not every shared calendar at the same company.
+        if let account = accounts.first(where: { $0.email.caseInsensitiveCompare(googleId) == .orderedSame }) {
+            let domain = account.email.lowercased().split(separator: "@").last
+            if domain == "sempre-health.com" || domain == "semprehealth.com" { return 0 }
+            if account.label.lowercased() == "personal" || domain == "gmail.com" { return 1 }
+        }
         switch summary.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-        case "sempre": 0
-        case "personal": 1
-        case "a&s family calendar": 2
-        default: 3
+        case "sempre": return 0
+        case "personal": return 1
+        case "a&s family calendar": return 2
+        default: return 3
         }
     }
 }

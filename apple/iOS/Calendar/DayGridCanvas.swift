@@ -10,6 +10,7 @@ struct DayGridCanvas: View {
     let hourLabels: [HourLabel]
     let now: Date
     let calendar: Calendar
+    let pinnedGutterX: CGFloat
 
     var body: some View {
         Canvas(rendersAsynchronously: false) { context, size in
@@ -17,6 +18,15 @@ struct DayGridCanvas: View {
             drawHourLines(in: &context, width: size.width)
             drawDaySeparators(in: &context)
             drawNowLine(in: &context)
+            // The canvas scrolls horizontally with the days; redraw the gutter at the viewport
+            // edge so its background, labels and hit region remain fixed.
+            context.fill(Path(CGRect(x: pinnedGutterX, y: 0, width: geometry.gutterWidth, height: size.height)), with: .color(FloridaStyle.paper))
+            for label in hourLabels where label.minute > 0 {
+                let point = CGPoint(x: pinnedGutterX + geometry.gutterWidth - 6, y: CGFloat(geometry.grid.y(forMinute: label.minute)))
+                context.draw(
+                    Text(label.label).font(.caption2.monospacedDigit()).foregroundStyle(.secondary),
+                    at: point, anchor: .trailing)
+            }
         }
         .frame(width: geometry.width, height: geometry.dayHeight)
     }
@@ -42,11 +52,6 @@ struct DayGridCanvas: View {
             let halfY = CGFloat(geometry.grid.y(forMinute: label.minute + 30))
             halves.move(to: CGPoint(x: gutter, y: halfY))
             halves.addLine(to: CGPoint(x: width, y: halfY))
-            if label.minute > 0 {
-                context.draw(
-                    Text(label.label).font(.caption2.monospacedDigit()).foregroundStyle(.secondary),
-                    at: CGPoint(x: gutter - 6, y: y), anchor: .trailing)
-            }
         }
         context.stroke(hours, with: .color(lineColor), lineWidth: 1)
         context.stroke(halves, with: .color(lineColor.opacity(0.4)), style: StrokeStyle(lineWidth: 1, dash: [2, 3]))

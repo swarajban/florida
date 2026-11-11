@@ -44,6 +44,16 @@ final class SmokeTests: XCTestCase {
             let title = app.sheets.textFields.firstMatch
             XCTAssertTrue(title.waitForExistence(timeout: 5))
             title.typeText("Weekly planning")
+            let calendar = app.popUpButtons["event-calendar"]
+            XCTAssertEqual(calendar.value as? String, "demo@sempre-health.com")
+            calendar.click()
+            let choices = ["demo@sempre-health.com", "demo@personal.example", "A&S Family Calendar", "teammate@sempre-health.com"]
+                .map { app.menuItems[$0] }
+            XCTAssertTrue(choices.allSatisfy(\.exists))
+            let tops = choices.map(\.frame.minY)
+            XCTAssertEqual(tops, tops.sorted())
+            capture(app.windows.firstMatch, "calendar-order-\(appearance)")
+            choices[0].click()
             let startTime = app.popUpButtons["time-Starts"]
             XCTAssertTrue(startTime.exists)
             startTime.click()

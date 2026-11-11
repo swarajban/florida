@@ -54,6 +54,7 @@ struct EventEditorView: View {
                         }
                     }
                     .disabled(!isNew)
+                    .accessibilityIdentifier("event-calendar")
                 } footer: {
                     if isNew, model.writableCalendars.isEmpty {
                         Text("No calendar you can add events to. Connect a Google account in Settings.")

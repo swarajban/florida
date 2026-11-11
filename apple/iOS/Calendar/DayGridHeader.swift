@@ -9,7 +9,7 @@ struct DayGridHeader: View {
     let today: Date
     let gutterWidth: CGFloat
     let columnWidth: CGFloat
-    let direction: CGFloat
+    let pinnedGutterX: CGFloat
     let calendar: Calendar
 
     var body: some View {
@@ -38,9 +38,6 @@ struct DayGridHeader: View {
                     .frame(width: columnWidth)
                     .padding(.vertical, 4)
                     .offset(x: CGFloat(days.firstIndex(of: day) ?? 0) * columnWidth)
-                    .transition(.asymmetric(
-                        insertion: .offset(x: direction * columnWidth),
-                        removal: .offset(x: -direction * columnWidth)))
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(day.formatted(.dateTime.weekday(.wide).month(.wide).day()))
                     .accessibilityValue(isToday ? "Today" : "")
@@ -49,6 +46,7 @@ struct DayGridHeader: View {
             .frame(width: columnWidth * CGFloat(days.count), alignment: .leading)
             .clipped()
         }
+        .mask(Rectangle().padding(.leading, max(0, pinnedGutterX + gutterWidth)))
     }
 }
 
@@ -58,25 +56,31 @@ struct DayGridAllDayStrip: View {
     let layout: DayGridLayout
     let geometry: DayGridGeometry
     let now: Date
+    let pinnedGutterX: CGFloat
     let onSelect: (CalendarEvent) -> Void
 
     @ScaledMetric(relativeTo: .caption) private var rowHeight: CGFloat = 22
 
     var body: some View {
         ZStack(alignment: .topLeading) {
+            ForEach(layout.allDayBlocks) { block in
+                let frame = frame(for: block)
+                if frame.width > 0 {
+                    AllDayBar(block: block, isPast: block.localEnd <= now)
+                        .frame(width: frame.width, height: frame.height)
+                        .offset(x: frame.minX, y: frame.minY)
+                        .onTapGesture {
+                            onSelect(block.event)
+                        }
+                }
+            }
             Text("all-day")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-                .frame(width: geometry.gutterWidth - 8, height: rowHeight, alignment: .trailing)
-            ForEach(layout.allDayBlocks) { block in
-                let frame = frame(for: block)
-                AllDayBar(block: block, isPast: block.localEnd <= now)
-                    .frame(width: frame.width, height: frame.height)
-                    .offset(x: frame.minX, y: frame.minY)
-                    .onTapGesture {
-                        onSelect(block.event)
-                    }
-            }
+                .padding(.trailing, 8)
+                .frame(width: geometry.gutterWidth, height: CGFloat(layout.allDayRowCount) * rowHeight + 2, alignment: .topTrailing)
+                .background(FloridaStyle.paper)
+                .offset(x: pinnedGutterX)
         }
         .frame(width: geometry.width, height: CGFloat(layout.allDayRowCount) * rowHeight + 2, alignment: .topLeading)
     }
@@ -84,9 +88,9 @@ struct DayGridAllDayStrip: View {
     /// Where the bar sits in the strip; plain `let`s so the type checker does not have to fold
     /// the chain inside the `ForEach`.
     private func frame(for block: DayGridLayout.AllDayBlock) -> CGRect {
-        let spannedDays = CGFloat(block.endDayIndex - block.startDayIndex + 1)
-        let width: CGFloat = max(spannedDays * geometry.columnWidth - 4, 4)
-        let x: CGFloat = geometry.x(forDay: block.startDayIndex) + 2
+        // A spanning event keeps its title visible when its starting day scrolls off screen.
+        let x = max(geometry.x(forDay: block.startDayIndex), pinnedGutterX + geometry.gutterWidth) + 2
+        let width = max(0, geometry.x(forDay: block.endDayIndex + 1) - x - 2)
         let y: CGFloat = CGFloat(block.row) * rowHeight + 2
         return CGRect(x: x, y: y, width: width, height: rowHeight - 4)
     }
