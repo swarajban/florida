@@ -3,6 +3,41 @@ import XCTest
 /// Wait for real content before capturing; a fixed launch delay can silently save a blank screen.
 final class SmokeTests: XCTestCase {
     @MainActor
+    func testTaskShortcutAndRecurringEvent() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = launch(appearance: appearance)
+            waitForText("Infra offsite", in: app)
+            app.open(URL(string: "florida://tasks/new")!)
+            XCTAssertTrue(app.navigationBars["New Task"].waitForExistence(timeout: 10))
+            XCTAssertTrue(app.buttons["Add"].exists)
+            capture(app, "widget-add-task-\(appearance)")
+            app.buttons["Cancel"].tap()
+            app.open(URL(string: "florida://agenda")!)
+            app.buttons["agenda-add"].tap()
+            app.buttons["New Event"].tap()
+            let title = app.textFields["Title"]
+            XCTAssertTrue(title.waitForExistence(timeout: 5))
+            title.tap()
+            title.typeText("Weekly planning\n")
+            XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+            let repeatPicker = app.buttons["event-repeat"]
+            XCTAssertTrue(repeatPicker.waitForExistence(timeout: 5))
+            repeatPicker.tap()
+            app.buttons["Weekly"].tap()
+            XCTAssertTrue(app.buttons["Monthly"].waitForNonExistence(timeout: 5))
+            waitForText("Every 1 week", in: app)
+            app.buttons["event-repeat-interval-Increment"].tap()
+            waitForText("Every 2 weeks", in: app)
+            capture(app, "event-recurring-\(appearance)")
+            app.navigationBars["New Event"].buttons["Add"].tap()
+            XCTAssertTrue(app.navigationBars["New Event"].waitForNonExistence(timeout: 5))
+            waitForText("Weekly planning", in: app)
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testScreensInBothAppearances() {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {

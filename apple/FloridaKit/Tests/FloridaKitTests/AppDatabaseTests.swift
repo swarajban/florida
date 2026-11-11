@@ -536,14 +536,15 @@ import Testing
 
     // MARK: 5. Event writes
 
-    @Test func saveEventQueuesOnePutAndShowsTheRowAtOnce() throws {
+    @Test(arguments: [false, true]) func saveEventQueuesOnePutAndShowsTheRowAtOnce(repeating: Bool) throws {
         let db = try AppDatabase.inMemory()
         try db.apply(SyncResponse(cursor: "c", calendars: [Fixtures.calendar()]))
         // A new event has no Google id until the server's copy arrives.
         var event = Fixtures.event(id: "e1", start: "2026-11-09T10:00:00Z", end: "2026-11-09T11:00:00Z", responseStatus: nil)
         event.googleId = ""
         event.location = "Room 4"
-        try db.saveEvent(event, now: Fixtures.instant("2026-11-08T10:00:00Z"))
+        let recurrence = repeating ? EventRecurrence(frequency: .weekly, interval: 2, timeZone: "America/Los_Angeles", count: 12) : nil
+        try db.saveEvent(event, recurrence: recurrence, now: Fixtures.instant("2026-11-08T10:00:00Z"))
         event.summary = "renamed"
         try db.saveEvent(event, now: Fixtures.instant("2026-11-08T10:01:00Z"))
 
@@ -552,7 +553,7 @@ import Testing
         let body = try JSONCoding.decoder.decode(EventWrite.self, from: try #require(pending.first?.body))
         #expect(body == EventWrite(
             calendarId: "cal", summary: "renamed", location: "Room 4", startAt: Fixtures.instant("2026-11-09T10:00:00Z"),
-            endAt: Fixtures.instant("2026-11-09T11:00:00Z"), allDay: false))
+            endAt: Fixtures.instant("2026-11-09T11:00:00Z"), allDay: false, recurrence: recurrence))
 
         let stored = try #require(try db.event(id: "e1"))
         #expect(stored.summary == "renamed")

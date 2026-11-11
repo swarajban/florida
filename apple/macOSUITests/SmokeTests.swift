@@ -4,6 +4,40 @@ import XCTest
 /// Kept screenshots are exported from the result bundle by CI for light/dark visual review.
 final class SmokeTests: XCTestCase {
     @MainActor
+    func testRecurringEventCreation() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-demoData", "YES", "-uiAppearance", appearance]
+            app.launch()
+            XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 15))
+            app.typeKey("c", modifierFlags: .shift)
+            let title = app.sheets.textFields.firstMatch
+            XCTAssertTrue(title.waitForExistence(timeout: 5))
+            title.typeText("Weekly planning")
+            let repeatPicker = app.popUpButtons["event-repeat"]
+            XCTAssertTrue(repeatPicker.exists)
+            app.buttons["Cancel"].hover()
+            title.hover()
+            repeatPicker.hover()
+            repeatPicker.click()
+            app.menuItems["Weekly"].click()
+            XCTAssertTrue(app.staticTexts["Every 1 week"].waitForExistence(timeout: 5))
+            app.switches["event-repeat-limit"].click()
+            XCTAssertTrue(app.staticTexts["Ends after 10 occurrences"].exists)
+            XCTAssertEqual((app.switches["event-repeat-limit"].value as? NSNumber)?.boolValue, true)
+            app.buttons["Add Event"].hover()
+            capture(app.windows.firstMatch, "event-recurring-\(appearance)")
+            app.buttons["Add Event"].click()
+            XCTAssertTrue(repeatPicker.waitForNonExistence(timeout: 5))
+            app.typeKey("e", modifierFlags: .shift)
+            let saved = app.textFields.matching(NSPredicate(format: "value == %@", "Weekly planning")).firstMatch
+            XCTAssertTrue(saved.waitForExistence(timeout: 5))
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testCalendarAndQuickAddInBothAppearances() throws {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {

@@ -1254,6 +1254,25 @@ public struct ScheduleWrite: Codable, Hashable, Sendable {
     }
 }
 
+/// Creation-only recurrence for Google events. Instances remain ordinary CalendarEvent rows.
+public struct EventRecurrence: Codable, Hashable, Sendable {
+    public enum Frequency: String, Codable, CaseIterable, Sendable {
+        case daily, weekly, monthly, yearly
+    }
+
+    public var frequency: Frequency
+    public var interval: Int
+    public var timeZone: String
+    public var count: Int?
+
+    public init(frequency: Frequency, interval: Int = 1, timeZone: String, count: Int? = nil) {
+        self.frequency = frequency
+        self.interval = interval
+        self.timeZone = timeZone
+        self.count = count
+    }
+}
+
 /// Body of `PUT /api/events/:id`. Creating an event is a `PUT` of a client-made id; the server
 /// writes it to Google and fills in `googleId`. Nil `location` and `description` are omitted from
 /// the JSON, like `TaskWrite`'s optionals.
@@ -1267,10 +1286,11 @@ public struct EventWrite: Codable, Hashable, Sendable {
     public var allDay: Bool
     /// The user's own response: "accepted", "declined", "tentative" or "needsAction".
     public var responseStatus: String?
+    public var recurrence: EventRecurrence?
 
     public init(
         calendarId: String, summary: String, location: String? = nil, description: String? = nil,
-        startAt: Date, endAt: Date, allDay: Bool, responseStatus: String? = nil
+        startAt: Date, endAt: Date, allDay: Bool, responseStatus: String? = nil, recurrence: EventRecurrence? = nil
     ) {
         self.calendarId = calendarId
         self.summary = summary
@@ -1280,6 +1300,7 @@ public struct EventWrite: Codable, Hashable, Sendable {
         self.endAt = endAt
         self.allDay = allDay
         self.responseStatus = responseStatus
+        self.recurrence = recurrence
     }
 
     /// The body for an existing row, or nil for a row without `startAt` or `endAt` (Google omits

@@ -428,12 +428,20 @@ extension AppDatabase {
     /// server's copy replaces the row; it shows up in `events(in:)` as soon as its calendar is selected.
     /// Throws `WriteError.eventWithoutTimes` for a row missing `startAt` or `endAt`, which the
     /// server would refuse; nothing is stored or queued.
-    public func saveEvent(_ event: CalendarEvent, now: Date = Date()) throws {
+    public func saveEvent(_ event: CalendarEvent, recurrence: EventRecurrence? = nil, now: Date = Date()) throws {
         var event = event
         event.updatedAt = now
-        guard let write = EventWrite(event) else { throw WriteError.eventWithoutTimes(id: event.id) }
-        let body = try JSONCoding.encoder.encode(write)
+        guard let initial = EventWrite(event) else { throw WriteError.eventWithoutTimes(id: event.id) }
         try writer.write { db in
+            var write = initial
+            write.recurrence = recurrence
+            // An offline rename/reschedule must not erase the queued series creation.
+            if write.recurrence == nil, event.googleId.isEmpty,
+               let pending = try PendingWrite.filter(Column("entity") == "event" && Column("entityId") == event.id).fetchOne(db),
+               pending.op == .put, let body = pending.body {
+                write.recurrence = try JSONCoding.decoder.decode(EventWrite.self, from: body).recurrence
+            }
+            let body = try JSONCoding.encoder.encode(write)
             try event.save(db)
             try Self.enqueue(db, entity: .event, id: event.id, op: .put, body: body, now: now)
         }

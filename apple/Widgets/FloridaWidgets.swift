@@ -11,9 +11,3 @@ struct FloridaWidgets: WidgetBundle {
         TasksWidget()
     }
 }
-
-/// Deep links the widgets open the app with; `RootView` maps them to tabs.
-enum WidgetLinks {
-    static let agenda = URL(string: "florida://agenda")
-    static let tasks = URL(string: "florida://tasks")
-}

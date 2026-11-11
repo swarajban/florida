@@ -32,7 +32,7 @@ schemes:
       config: Debug
     test:
       config: Debug
-      targets: [Florida-iOSUITests]
+      targets: [FloridaWidgetsTests, Florida-iOSUITests]
       preferredScreenCaptureFormat: screenRecording
       deleteScreenshotsWhenEachTestSucceeds: false
     archive:
@@ -59,6 +59,7 @@ targets:
       - iOS
       - Design/FloridaStyle.swift
       - Design/TaskRecurrenceSection.swift
+      - Design/EventRecurrenceSection.swift
       - Design/TaskContext+Display.swift
       - Design/Plan+Display.swift
       - Design/Assets.xcassets
@@ -81,6 +82,9 @@ targets:
         # Only HTTPS; skips the export-compliance questions on every TestFlight build.
         ITSAppUsesNonExemptEncryption: false
         UILaunchScreen: {}
+        CFBundleURLTypes:
+          - CFBundleURLName: com.swarajban.florida
+            CFBundleURLSchemes: [florida]
         UIBackgroundModes: [remote-notification]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
     entitlements:
@@ -120,6 +124,7 @@ targets:
       - macOS
       - Design/FloridaStyle.swift
       - Design/TaskRecurrenceSection.swift
+      - Design/EventRecurrenceSection.swift
       - Design/TaskContext+Display.swift
       - Design/Plan+Display.swift
       - Design/Assets.xcassets
@@ -148,6 +153,21 @@ targets:
         com.apple.security.app-sandbox: true
         com.apple.security.network.client: true
         com.apple.security.application-groups: [group.com.swarajban.florida]
+
+  FloridaWidgetsTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - WidgetsTests
+      - path: Widgets
+        excludes: [FloridaWidgets.swift, Info.plist, FloridaWidgets.entitlements]
+    dependencies:
+      - package: FloridaKit
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.swarajban.florida.widgettests
+        TARGETED_DEVICE_FAMILY: "1"
 
   Florida-iOSUITests:
     type: bundle.ui-testing

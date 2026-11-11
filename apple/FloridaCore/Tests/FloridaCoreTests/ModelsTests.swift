@@ -259,6 +259,22 @@ import Testing
         #expect(try JSONCoding.decoder.decode(EventWrite.self, from: data) == write)
     }
 
+    @Test func eventRecurrenceUsesTheCreationWireContract() throws {
+        let data = Data("""
+            {"calendarId":"cal","summary":"Planning","startAt":"2026-11-09T17:00:00Z","endAt":"2026-11-09T18:00:00Z",
+             "allDay":false,"recurrence":{"frequency":"weekly","interval":2,"timeZone":"America/Los_Angeles","count":12}}
+            """.utf8)
+        let write = try JSONCoding.decoder.decode(EventWrite.self, from: data)
+        #expect(write.recurrence == EventRecurrence(frequency: .weekly, interval: 2, timeZone: "America/Los_Angeles", count: 12))
+        let encoded = try JSONCoding.encoder.encode(write)
+        let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        let rule = try #require(object["recurrence"] as? [String: Any])
+        #expect(rule["frequency"] as? String == "weekly")
+        #expect(rule["interval"] as? Int == 2)
+        #expect(rule["count"] as? Int == 12)
+        #expect(rule["timeZone"] as? String == "America/Los_Angeles")
+    }
+
     @Test func eventWriteOfARowCarriesItsEditableFieldsOnly() throws {
         let start = try #require(JSONCoding.parseInstant("2026-11-10T00:00:00Z"))
         let end = start.addingTimeInterval(86_400)

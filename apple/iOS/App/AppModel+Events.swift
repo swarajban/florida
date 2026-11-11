@@ -40,9 +40,10 @@ extension AppModel {
             updatedAt: Date())
     }
 
-    func save(event: CalendarEvent) {
-        guard requireEditable(event) else { return }
-        write { try $0.saveEvent(event) }
+    @discardableResult
+    func save(event: CalendarEvent, recurrence: EventRecurrence? = nil) -> Bool {
+        guard requireEditable(event) else { return false }
+        return write { try $0.saveEvent(event, recurrence: recurrence) }
     }
 
     /// Moves the event to `start`–`end` (stored instants: UTC midnights for an all-day event) and

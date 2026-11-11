@@ -1,6 +1,13 @@
 import FloridaKit
 import SwiftUI
 
+/// Deep links handled by the iOS root view.
+enum WidgetLinks {
+    static let agenda = URL(string: "florida://agenda")
+    static let tasks = URL(string: "florida://tasks")
+    static let newTask = URL(string: "florida://tasks/new")!
+}
+
 // Small display helpers for the widget views. The widget target does not share sources with the
 // app, so the few it needs are repeated here.
 

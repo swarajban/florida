@@ -125,10 +125,10 @@ extension AppModel {
     /// Upserts the event locally and syncs in the background. Returns false, with a status
     /// message, when its calendar is read-only or the store refused.
     @discardableResult
-    func save(event: CalendarEvent) -> Bool {
+    func save(event: CalendarEvent, recurrence: EventRecurrence? = nil) -> Bool {
         guard requireEditable(event), let database else { return false }
         do {
-            try database.saveEvent(event)
+            try database.saveEvent(event, recurrence: recurrence)
         } catch {
             statusMessage = "Could not save: \(error.localizedDescription)"
             return false

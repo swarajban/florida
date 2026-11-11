@@ -12,6 +12,7 @@ struct EventEditorView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var draft: CalendarEvent
+    @State private var recurrence: EventRecurrence?
     /// The clock and length of the timed event from before All-day was switched on, so switching
     /// it off again brings them back on whatever day is chosen by then.
     @State private var timedShape: (hour: Int, minute: Int, duration: TimeInterval)?
@@ -36,6 +37,8 @@ struct EventEditorView: View {
                 Section {
                     TextField("Title", text: title)
                         .focused($titleFocused)
+                        .submitLabel(.done)
+                        .onSubmit { titleFocused = false }
                 }
 
                 Section {
@@ -70,12 +73,23 @@ struct EventEditorView: View {
                     }
                 }
 
+                if isNew {
+                    EventRecurrenceSection(recurrence: $recurrence, timeZone: calendar.timeZone.identifier)
+                } else if draft.recurringEventId != nil {
+                    Section {
+                        Text("Part of a repeating event. Changes here apply to this occurrence only. Edit the series in Google Calendar.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 Section {
                     TextField("Location", text: location)
                     TextField("Notes", text: notes, axis: .vertical)
                         .lineLimit(3...8)
                 }
             }
+            .scrollDismissesKeyboard(.immediately)
             .navigationTitle(isNew ? "New Event" : "Edit Event")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -252,7 +266,7 @@ struct EventEditorView: View {
         event.allDay = draft.allDay
         event.startAt = draft.startAt
         event.endAt = draft.endAt
-        model.save(event: event)
+        guard model.save(event: event, recurrence: isNew ? recurrence : nil) else { return }
         dismiss()
     }
 

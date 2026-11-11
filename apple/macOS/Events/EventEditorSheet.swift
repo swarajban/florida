@@ -12,6 +12,7 @@ import SwiftUI
 struct EventEditorSheet: View {
     @Environment(AppModel.self) private var model
     @State private var draft: CalendarEvent
+    @State private var recurrence: EventRecurrence?
     /// The clock and length of the timed event from before All-day was switched on, so switching
     /// it off again brings them back on whatever day is chosen by then.
     @State private var timedShape: (hour: Int, minute: Int, duration: TimeInterval)?
@@ -52,6 +53,15 @@ struct EventEditorSheet: View {
                     if !endsAfterStart {
                         Label("The end must be after the start.", systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.red)
+                    }
+                }
+                if isNew {
+                    EventRecurrenceSection(recurrence: $recurrence, timeZone: calendar.timeZone.identifier)
+                } else if draft.recurringEventId != nil {
+                    Section {
+                        Text("Part of a repeating event. Changes here apply to this occurrence only. Edit the series in Google Calendar.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 Section {
@@ -239,7 +249,7 @@ struct EventEditorSheet: View {
         event.allDay = draft.allDay
         event.startAt = draft.startAt
         event.endAt = draft.endAt
-        guard model.save(event: event) else { return }
+        guard model.save(event: event, recurrence: isNew ? recurrence : nil) else { return }
         model.eventEditor = nil
         if isNew {
             model.selectDay(shownStart)

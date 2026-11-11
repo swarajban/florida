@@ -140,16 +140,25 @@ Attention. A task row shows its context. The app syncs on launch, when
 it returns to the foreground, and every two minutes while active; after each
 sync it reloads the widget timelines.
 
+Both event editors offer daily, weekly, monthly and yearly repeats when creating an
+event, with an interval and an optional occurrence count. The rule uses the app's
+calendar time zone so timed repeats keep their wall-clock time through DST. Save
+is local and immediate; Google expands the series on sync. Later edits and deletes
+affect one occurrence only; use Google Calendar to change the whole series.
+
 ### Widgets (`FloridaWidgets`)
 
 Three widgets, all reading the shared store directly and deep-linking into the
-app (`florida://agenda`, `florida://tasks`):
+app (`florida://agenda`, `florida://tasks`, `florida://tasks/new`):
 
-- **Up Next** (small, medium, lock-screen rectangular): the next timed events
-  and task blocks; its timeline has an entry at every start and end in the
-  next six hours.
-- **Today** (medium, large): what is left today, all-day first; refreshes
-  hourly.
+- **Today's Agenda** (small, medium, lock-screen rectangular; replaces Up Next
+  in place): compact rows for today's remaining events and scheduled tasks,
+  all-day first, with today's date always in the Home Screen header. The lock
+  screen shows the next timed item today.
+- **Today** (medium, large): the same agenda with more room. Both agenda widgets
+  update at start/end boundaries, clear yesterday at midnight, and request a
+  store refresh every 30 minutes. Medium/large layouts have a **+** shortcut to
+  a blank task editor; the small widget opens Agenda because it has one tap target.
 - **Tasks** (small, medium): open tasks in scheduler order with the open count
   and each task's category color; late tasks in red.
 
