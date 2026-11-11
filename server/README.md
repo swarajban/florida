@@ -189,6 +189,23 @@ curl -s -X POST "$PUBLIC_URL/api/google/resync" -H "authorization: Bearer $API_T
 Dates cross the wire as ISO 8601 strings. Events keep `updatedAt` as the server's write time so
 sync cursors never miss a change.
 
+### Recurring calendar events
+
+When creating an event, `PUT /api/events/:id` also accepts optional `recurrence`:
+`{ frequency: "daily" | "weekly" | "monthly" | "yearly", interval: 1…99,
+timeZone: "America/Los_Angeles", count?: 1…999 }`. Omit `count` for no end date.
+The id must be a UUID. The server creates an idempotent Google RRULE series,
+sends the named zone for timed events (so wall-clock times survive DST), and
+stores expanded occurrences through a year ahead. All-day repeats use Google's
+date-only fields. Google skips nonexistent dates for monthly/yearly repeats.
+
+The first occurrence keeps the client id; later ones get their own row ids.
+The series master is never an agenda row. Normal Google sync maintains the
+occurrences after creation. Edits and deletes target only one occurrence;
+changing the series rule is not supported. A retry of the initial create can
+still carry `recurrence`, but it does not change the rule or create another series.
+Deploy this server support before shipping clients that send `recurrence`.
+
 ### Recurring tasks
 
 `PUT/PATCH /api/tasks/:id` and MCP `create_task` / `update_task` accept `recurrence`:

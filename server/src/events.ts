@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { and, eq, ne } from 'drizzle-orm'
 import { z } from 'zod'
 import type { Db } from './db/client.js'
@@ -6,7 +7,7 @@ import type { CalendarRow, EventRow } from './db/schema.js'
 import { GoogleApiError, mapEvent } from './google/client.js'
 import type { GoogleEvent, GoogleEventTimeWrite, GoogleEventWrite } from './google/client.js'
 import type { CalendarSyncService } from './google/sync.js'
-import { badRequest, forbidden, isoInstant, notFound } from './validation.js'
+import { badRequest, forbidden, isoInstant, notFound, timeZone } from './validation.js'
 
 export const responseStatus = z.enum(['accepted', 'declined', 'tentative', 'needsAction'])
 
@@ -25,6 +26,13 @@ export const eventBody = z
     allDay: z.boolean(),
     /** The user's own RSVP. `null` leaves it alone; it is ignored when creating. */
     responseStatus: responseStatus.nullish(),
+    /** Creation only. Google owns the series; stored rows are individual instances. */
+    recurrence: z.object({
+      frequency: z.enum(['daily', 'weekly', 'monthly', 'yearly']),
+      interval: z.number().int().min(1).max(99),
+      timeZone,
+      count: z.number().int().min(1).max(999).nullish(),
+    }).nullish(),
   })
   .refine((b) => new Date(b.endAt) > new Date(b.startAt), { message: 'endAt must be after startAt', path: ['endAt'] })
   .refine((b) => !b.allDay || (isUtcMidnight(b.startAt) && isUtcMidnight(b.endAt)), {
@@ -54,12 +62,20 @@ export async function upsertEvent(
   const [current] = await db.select().from(events).where(eq(events.id, id)).limit(1)
   if (current === undefined) return createEvent(db, sync, id, body, now)
   if (current.deletedAt !== null) throw notFound(`event ${id}`)
+  // A queued create can be edited while its first push is in flight. Once it exists, keep the
+  // recurrence creation-only and apply ordinary field changes to its first occurrence.
+  if (body.recurrence != null && current.recurringEventId !== googleEventId(id)) {
+    throw badRequest('repeat can only be set when creating a new event')
+  }
   return updateEvent(db, sync, current, body, now)
 }
 
 async function createEvent(db: Db, sync: CalendarSyncService, id: string, body: EventBody, now: Date): Promise<EventRow> {
   const calendar = await writableCalendar(db, body.calendarId)
   const googleId = googleEventId(id)
+  const repeat = body.recurrence
+  if (repeat != null && googleId === undefined) throw badRequest('recurring events require a UUID id')
+  const zone = repeat != null && !body.allDay ? { timeZone: repeat.timeZone } : {}
   let created: GoogleEvent
   try {
     created = await sync.createEvent(calendar, {
@@ -67,8 +83,11 @@ async function createEvent(db: Db, sync: CalendarSyncService, id: string, body: 
       summary: body.summary,
       ...(body.location == null ? {} : { location: body.location }),
       ...(body.description == null ? {} : { description: body.description }),
-      start: googleTime(new Date(body.startAt), body.allDay),
-      end: googleTime(new Date(body.endAt), body.allDay),
+      start: { ...googleTime(new Date(body.startAt), body.allDay), ...zone },
+      end: { ...googleTime(new Date(body.endAt), body.allDay), ...zone },
+      ...(repeat == null ? {} : {
+        recurrence: [`RRULE:FREQ=${repeat.frequency.toUpperCase()};INTERVAL=${repeat.interval}${repeat.count == null ? '' : `;COUNT=${repeat.count}`}`],
+      }),
     })
   } catch (err) {
     // 409 under our own id: an earlier attempt reached Google but its reply (or our row) was lost.
@@ -76,19 +95,33 @@ async function createEvent(db: Db, sync: CalendarSyncService, id: string, body: 
     if (googleId === undefined || !(err instanceof GoogleApiError && err.status === 409)) throw err
     created = await sync.getEvent(calendar, googleId)
   }
-  const row = mapEvent(calendar.id, created, now)
+  // Never store a series master as an occurrence: that would duplicate the first event and
+  // make editing/deleting it affect the entire series. Fetch Google's expansion before storing.
+  const instances = repeat == null ? [created] : await sync.eventInstances(
+    calendar, created.id, body.startAt,
+    new Date(Math.max(now.getTime(), new Date(body.startAt).getTime()) + 365 * 86_400_000).toISOString(),
+  )
+  // The instances endpoint does not promise an order, including across page boundaries.
+  const occurrences = instances.map((instance) => mapEvent(calendar.id, instance, now))
+    .sort((a, b) => (a.startAt?.getTime() ?? Infinity) - (b.startAt?.getTime() ?? Infinity))
+  const row = occurrences[0]
+  if (row === undefined) throw new Error('Google returned no occurrences for the new event')
   return db.transaction(async (tx) => {
     // A sync that ran between Google's reply and this write already holds the event under a random
     // id. The client's id wins, so its optimistic row and the server's row are the same record.
     await tx
       .delete(events)
-      .where(and(eq(events.calendarId, calendar.id), eq(events.googleId, created.id), ne(events.id, id)))
+      .where(and(eq(events.calendarId, calendar.id), eq(events.googleId, row.googleId), ne(events.id, id)))
     const [stored] = await tx
       .insert(events)
       .values({ id, ...row })
       .onConflictDoUpdate({ target: events.id, set: row })
       .returning()
     if (stored === undefined) throw new Error(`insert of event ${id} returned no row`)
+    for (const occurrence of occurrences.slice(1)) {
+      await tx.insert(events).values({ id: randomUUID(), ...occurrence })
+        .onConflictDoUpdate({ target: [events.calendarId, events.googleId], set: occurrence })
+    }
     return stored
   })
 }

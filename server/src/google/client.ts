@@ -105,6 +105,7 @@ export interface GoogleEvent {
   organizer?: { email?: string; displayName?: string; self?: boolean }
   eventType?: string
   recurringEventId?: string
+  recurrence?: string[]
   iCalUID?: string
 }
 
@@ -116,6 +117,7 @@ export interface GoogleEvent {
 export interface GoogleEventTimeWrite {
   date?: string | null
   dateTime?: string | null
+  timeZone?: string
 }
 
 /** The fields of an event the apps write. On a patch, absent fields keep their value. */
@@ -130,6 +132,7 @@ export interface GoogleEventWrite {
   description?: string | null
   start?: GoogleEventTimeWrite
   end?: GoogleEventTimeWrite
+  recurrence?: string[]
   /** Replaced wholesale by Google, so an RSVP re-sends every attendee. */
   attendees?: GoogleEventAttendee[]
 }
@@ -309,6 +312,24 @@ export function insertEvent(accessToken: string, calendarId: string, event: Goog
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(event),
   })
+}
+
+/** Google's expanded instances, including every page. Never return the series master. */
+export async function eventInstances(
+  accessToken: string, calendarId: string, eventId: string, timeMin: string, timeMax: string,
+): Promise<GoogleEvent[]> {
+  const query = new URLSearchParams({ timeMin, timeMax, maxResults: '2500', showDeleted: 'false' })
+  const instances: GoogleEvent[] = []
+  let next: string | undefined
+  do {
+    if (next !== undefined) query.set('pageToken', next)
+    const page = await apiFetch<{ items?: GoogleEvent[]; nextPageToken?: string }>(
+      accessToken, `${eventsUrl(calendarId, eventId)}/instances?${query.toString()}`,
+    )
+    instances.push(...page.items ?? [])
+    next = page.nextPageToken
+  } while (next !== undefined)
+  return instances
 }
 
 /** Patches an event (only the given fields change) and returns Google's updated copy. */

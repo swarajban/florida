@@ -41,6 +41,7 @@ export class FakeSync implements CalendarSyncService {
   eventWrites: FakeEventWrite[] = []
   /** When set, the next event write rejects with it, as a failing Google call would, and clears it. */
   nextWriteError: Error | undefined
+  instances: GoogleEvent[] = []
   /** Ids are assigned as `g-<n>` from this counter. */
   nextGoogleId = 1
   async connectAccount(label: string): Promise<GoogleAccountRow> {
@@ -92,6 +93,11 @@ export class FakeSync implements CalendarSyncService {
     this.eventWrites.push({ method: 'patch', calendarId: calendar.googleId, googleId, body: patch })
     return structuredClone(updated)
   }
+  async eventInstances(): Promise<GoogleEvent[]> {
+    this.failIfArmed()
+    for (const instance of this.instances) this.googleEvents.set(instance.id, structuredClone(instance))
+    return structuredClone(this.instances)
+  }
   async deleteEvent(calendar: CalendarRow, googleId: string): Promise<void> {
     this.failIfArmed()
     this.googleEvents.delete(googleId)
@@ -125,7 +131,7 @@ function applyWrite(current: GoogleEvent, write: GoogleEventWrite): GoogleEvent 
     const value = write[key]
     if (value === undefined) continue
     const merged: GoogleEventDateTime = { ...(next[key] ?? {}) }
-    for (const part of ['date', 'dateTime'] as const) {
+    for (const part of ['date', 'dateTime', 'timeZone'] as const) {
       const v = value[part]
       if (v === undefined) continue
       if (v === null) delete merged[part]
@@ -134,5 +140,6 @@ function applyWrite(current: GoogleEvent, write: GoogleEventWrite): GoogleEvent 
     next[key] = merged
   }
   if (write.attendees !== undefined) next.attendees = write.attendees
+  if (write.recurrence !== undefined) next.recurrence = write.recurrence
   return next
 }

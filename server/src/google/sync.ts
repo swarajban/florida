@@ -9,6 +9,7 @@ import {
   GoogleApiError,
   GoogleGoneError,
   deleteEvent as deleteGoogleEvent,
+  eventInstances as googleEventInstances,
   getEvent as getGoogleEvent,
   insertEvent,
   listCalendars,
@@ -42,6 +43,8 @@ export interface CalendarSyncService {
   getEvent(calendar: CalendarRow, googleId: string): Promise<GoogleEvent>
   /** Creates an event in the calendar; Google assigns the id. Returns Google's copy. */
   createEvent(calendar: CalendarRow, event: GoogleEventWrite): Promise<GoogleEvent>
+  /** Expanded occurrences of a series in the given window. */
+  eventInstances(calendar: CalendarRow, googleId: string, timeMin: string, timeMax: string): Promise<GoogleEvent[]>
   /** Changes only the given fields of an event. Returns Google's updated copy. */
   updateEvent(calendar: CalendarRow, googleId: string, patch: GoogleEventWrite): Promise<GoogleEvent>
   /** Deletes an event. Resolves once it is gone, including when Google had already removed it. */
@@ -278,6 +281,10 @@ export class GoogleSync implements CalendarSyncService {
 
   async createEvent(calendar: CalendarRow, event: GoogleEventWrite): Promise<GoogleEvent> {
     return insertEvent(await this.tokenFor(calendar), calendar.googleId, event)
+  }
+
+  async eventInstances(calendar: CalendarRow, googleId: string, timeMin: string, timeMax: string): Promise<GoogleEvent[]> {
+    return googleEventInstances(await this.tokenFor(calendar), calendar.googleId, googleId, timeMin, timeMax)
   }
 
   async updateEvent(calendar: CalendarRow, googleId: string, patch: GoogleEventWrite): Promise<GoogleEvent> {

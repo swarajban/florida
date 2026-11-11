@@ -1273,6 +1273,76 @@ describe('calendar event writes', () => {
     expect((await api('/api/events/ev-1', { method: 'DELETE' })).status).toBe(403)
     expect(((await (await api('/api/events/ev-1')).json()) as { deletedAt: string | null }).deletedAt).toBeNull()
   })
+
+  it.each([false, true])('creates a retry-safe Google series, stores only occurrences, and edits one (allDay=%s)', async (allDay) => {
+    const id = allDay ? 'a0000000-0000-4000-8000-000000000002' : 'a0000000-0000-4000-8000-000000000001'
+    const master = id.replaceAll('-', '')
+    const body: EventBody = {
+      ...write, summary: 'Fortnightly planning', allDay,
+      startAt: allDay ? '2026-10-25T00:00:00.000Z' : '2026-10-25T16:00:00.000Z',
+      endAt: allDay ? '2026-10-26T00:00:00.000Z' : '2026-10-25T17:00:00.000Z',
+      recurrence: { frequency: 'weekly', interval: 2, timeZone: 'America/Los_Angeles', count: 2 },
+    }
+    fake.instances = []
+    // Google accepted the master but expansion failed: retry must recover it, not insert again.
+    expect((await api(`/api/events/${id}`, { method: 'PUT', json: body })).status).toBe(500)
+    expect((await api(`/api/events/${id}`)).status).toBe(404)
+    expect(fake.googleEvents.get(master)).toMatchObject({
+      recurrence: ['RRULE:FREQ=WEEKLY;INTERVAL=2;COUNT=2'],
+      start: allDay ? { date: '2026-10-25' } : { dateTime: body.startAt, timeZone: 'America/Los_Angeles' },
+      end: allDay ? { date: '2026-10-26' } : { dateTime: body.endAt, timeZone: 'America/Los_Angeles' },
+    })
+    // Google expands at the same local hour across DST, not the same UTC hour. Its endpoint
+    // does not promise ordering: the earliest occurrence must still keep the client's id.
+    fake.instances = [
+      { ...fake.googleEvents.get(master), id: `${master}_second`, recurringEventId: master,
+        start: allDay ? { date: '2026-11-08' } : { dateTime: '2026-11-08T17:00:00.000Z' },
+        end: allDay ? { date: '2026-11-09' } : { dateTime: '2026-11-08T18:00:00.000Z' } },
+      { ...fake.googleEvents.get(master), id: `${master}_first`, recurringEventId: master,
+        start: allDay ? { date: '2026-10-25' } : { dateTime: body.startAt },
+        end: allDay ? { date: '2026-10-26' } : { dateTime: body.endAt } },
+    ]
+    const response = await api(`/api/events/${id}`, { method: 'PUT', json: body })
+    expect(response.status).toBe(200)
+    const created = (await response.json()) as { event: { id: string; googleId: string; recurringEventId: string } }
+    expect(created.event).toMatchObject({ id, googleId: `${master}_first`, recurringEventId: master })
+    const beforeRetry = fake.eventWrites.length
+    expect((await api(`/api/events/${id}`, { method: 'PUT', json: body })).status).toBe(200)
+    expect(fake.eventWrites).toHaveLength(beforeRetry)
+    const rows = await db.select().from(events).where(eq(events.recurringEventId, master))
+    expect(rows).toHaveLength(2)
+    expect(rows.map((row) => row.startAt?.toISOString()).sort()).toEqual([
+      body.startAt, allDay ? '2026-11-08T00:00:00.000Z' : '2026-11-08T17:00:00.000Z',
+    ])
+    expect(await db.select().from(events).where(eq(events.googleId, master))).toEqual([])
+    const synced = (await (await api('/api/sync')).json()) as { events: { recurringEventId: string }[] }
+    expect(synced.events.filter((event) => event.recurringEventId === master)).toHaveLength(2)
+
+    // An edit queued while the first create was in flight still carries recurrence. Apply its
+    // changed fields without creating another series or silently dropping the edit.
+    expect((await api(`/api/events/${id}`, { method: 'PUT', json: { ...body, summary: 'Edited while sending' } })).status).toBe(200)
+    expect(fake.googleEvents.get(`${master}_first`)?.summary).toBe('Edited while sending')
+    const { recurrence: _, ...edit } = body
+    expect((await api(`/api/events/${id}`, { method: 'PUT', json: { ...edit, summary: 'Just this occurrence' } })).status).toBe(200)
+    expect(fake.googleEvents.get(`${master}_first`)?.summary).toBe('Just this occurrence')
+    expect(fake.googleEvents.get(master)?.summary).toBe(body.summary)
+    expect(fake.googleEvents.get(`${master}_second`)?.summary).toBe(body.summary)
+    expect((await api(`/api/events/${id}`, { method: 'DELETE' })).status).toBe(200)
+    expect(fake.googleEvents.has(master)).toBe(true)
+    expect(fake.googleEvents.has(`${master}_second`)).toBe(true)
+    fake.instances = []
+  })
+
+  it('rejects invalid recurrence before creating anything on Google', async () => {
+    const recurrence = { frequency: 'weekly', interval: 1, timeZone: 'America/Los_Angeles' }
+    const before = fake.eventWrites.length
+    for (const invalid of [{ interval: 0 }, { interval: 100 }, { timeZone: 'Mars/Olympus' }, { frequency: 'hourly' }, { count: 0 }]) {
+      expect((await api('/api/events/a0000000-0000-4000-8000-000000000003', {
+        method: 'PUT', json: { ...write, recurrence: { ...recurrence, ...invalid } },
+      })).status).toBe(400)
+    }
+    expect(fake.eventWrites).toHaveLength(before)
+  })
 })
 
 describe('projects', () => {

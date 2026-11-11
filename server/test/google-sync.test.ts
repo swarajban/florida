@@ -175,6 +175,22 @@ describe('GoogleSync event writes', () => {
     expect(calls[0]!.init.headers).toMatchObject({ authorization: 'Bearer live-token' })
   })
 
+  it('loads every page of recurring instances with the calendar token and bounded dates', async () => {
+    const calls = stubFetch(
+      Response.json({ items: [{ id: 'first', recurringEventId: 'series' }], nextPageToken: 'page-2' }),
+      Response.json({ items: [{ id: 'second', recurringEventId: 'series' }] }),
+    )
+    expect(await sync.eventInstances(calendar, 'series', '2026-11-01T00:00:00Z', '2027-11-01T00:00:00Z'))
+      .toEqual([{ id: 'first', recurringEventId: 'series' }, { id: 'second', recurringEventId: 'series' }])
+    expect(calls).toHaveLength(2)
+    const url = new URL(calls[1]!.url)
+    expect(url.pathname).toBe('/calendar/v3/calendars/me%40example.com/events/series/instances')
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({
+      timeMin: '2026-11-01T00:00:00Z', timeMax: '2027-11-01T00:00:00Z', pageToken: 'page-2', showDeleted: 'false',
+    })
+    expect(calls[1]!.init.headers).toMatchObject({ authorization: 'Bearer live-token' })
+  })
+
   it('treats 404 and 410 from events.delete as already deleted and rethrows anything else', async () => {
     stubFetch(new Response(JSON.stringify({ error: { message: 'Not Found' } }), { status: 404 }))
     await expect(sync.deleteEvent(calendar, 'g-missing')).resolves.toBeUndefined()

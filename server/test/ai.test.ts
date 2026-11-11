@@ -262,6 +262,7 @@ describe('POST /api/ai/parse-task', () => {
     ensureAllWatches: () => Promise.resolve(),
     getEvent: () => Promise.reject(new Error('unused')),
     createEvent: () => Promise.reject(new Error('unused')),
+    eventInstances: () => Promise.reject(new Error('unused')),
     updateEvent: () => Promise.reject(new Error('unused')),
     deleteEvent: () => Promise.reject(new Error('unused')),
   }
@@ -747,6 +748,7 @@ describe('POST /api/ai/suggest-category', () => {
     ensureAllWatches: () => Promise.resolve(),
     getEvent: () => Promise.reject(new Error('unused')),
     createEvent: () => Promise.reject(new Error('unused')),
+    eventInstances: () => Promise.reject(new Error('unused')),
     updateEvent: () => Promise.reject(new Error('unused')),
     deleteEvent: () => Promise.reject(new Error('unused')),
   }
