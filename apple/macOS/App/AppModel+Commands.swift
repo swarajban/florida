@@ -7,7 +7,7 @@ extension AppModel {
     /// overwritten by the stale draft when the sheet saves.
     var isSheetOpen: Bool {
         editorTask != nil || isGoToDateOpen || isNewCategoryOpen || doneForNow != nil || recurringTaskToDelete != nil
-            || eventEditor != nil || eventToDelete != nil
+            || eventEditor != nil || eventToDelete != nil || eventMove != nil
             || isProjectsOpen || projectEditor != nil || isBriefOpen || explanation != nil
     }
 

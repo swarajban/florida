@@ -131,12 +131,9 @@ struct ProjectsSheet: View {
             openTaskCount: model.openTasks(in: project).count, isSelected: project.id == selectedID
         )
         .id(project.id)
-        .onTapGesture(count: 2) {
+        .onClick { isDouble in
             select(project)
-            edit(project)
-        }
-        .onTapGesture {
-            select(project)
+            if isDouble { edit(project) }
         }
     }
 

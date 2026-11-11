@@ -45,12 +45,13 @@ struct DayHeaderView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 6)
                 .contentShape(Rectangle())
-                .onTapGesture(count: 2) {
-                    model.goTo(day: day)
-                    model.setViewMode(.day)
-                }
-                .onTapGesture {
-                    model.selectDay(day)
+                .onClick { isDouble in
+                    if isDouble {
+                        model.goTo(day: day)
+                        model.setViewMode(.day)
+                    } else {
+                        model.selectDay(day)
+                    }
                 }
                 .contextMenu {
                     ForEach(DayKind.allCases, id: \.self) { choice in

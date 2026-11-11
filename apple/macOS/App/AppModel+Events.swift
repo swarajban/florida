@@ -4,13 +4,27 @@ import Foundation
 // Google events, local-first like tasks: an RSVP, an edit, a new event or a delete lands in the
 // store at once (the live query redraws the calendar) and a background sync pushes it. Writes are
 // refused here, with a status message, for calendars the user cannot write to; nothing waits on
-// Google. No undo: `UndoEntry` knows only task fields, so a delete asks first instead.
+// Google. Of these only a move by drag can be undone (`z`); a delete asks first instead.
 
 /// What the event editor sheet is open on: a stored event, or the draft of a new one.
 struct EventEditorRequest: Identifiable, Equatable {
     var id: String { event.id }
     let event: CalendarEvent
     let isNew: Bool
+}
+
+/// A dragged event dropped on a new time, waiting for an answer: it repeats (this one or all of
+/// them?), or it has guests, who get an email.
+struct EventMoveRequest: Identifiable, Equatable {
+    var id: String { event.id }
+    let event: CalendarEvent
+    let start: Date
+    /// The event repeats and was dropped on its own day, so the series can take the new time of
+    /// day. A drop on another day can only move this one: every instance keeps its day.
+    let canMoveSeries: Bool
+
+    var repeats: Bool { event.recurringEventId != nil }
+    var hasGuests: Bool { event.attendees?.contains(where: { !$0.isSelf }) == true }
 }
 
 extension AppModel {
@@ -134,6 +148,140 @@ extension AppModel {
         }
         scheduleSync()
         return true
+    }
+
+    // MARK: - Drag
+
+    /// The start of a drag on `block` in the time grid. Nil, with a word in the status bar, for
+    /// what a drag cannot move: tasks (the scheduler places them), the gym, an event on a
+    /// read-only calendar, and the part of an event that crosses midnight.
+    func beginDrag(on block: GridLayout.Block?) -> GridDrag? {
+        guard let block else { return nil }
+        guard case .event(let id) = block.item, let event = events.first(where: { $0.id == id }) else {
+            if block.isTask {
+                statusMessage = "The scheduler places tasks · p pins one to its slot"
+            }
+            return nil
+        }
+        guard requireEditable(event) else { return nil }
+        // Such an event has a block in two day columns, each showing only its part of it.
+        guard let start = event.startAt, let end = event.endAt,
+              end <= start || calendar.isDate(start, inSameDayAs: end.addingTimeInterval(-1))
+        else {
+            statusMessage = "This event crosses midnight · ⇧E edits its times"
+            return nil
+        }
+        eventDetailID = nil
+        select(block.item, in: .calendar)
+        return GridDrag(block: block, event: event)
+    }
+
+    /// The end of a drag. Back in its own slot the event is left alone. A repeating event asks
+    /// whether this one moves or all of them. With guests it asks too: a slip of the hand should
+    /// not send everyone a new time.
+    func drop(_ drag: GridDrag) {
+        guard drag.hasMoved else {
+            gridDrag = nil
+            return
+        }
+        let stored = storedVersion(of: drag.event)
+        guard stored.startAt == drag.event.startAt, stored.endAt == drag.event.endAt, stored.deletedAt == nil else {
+            gridDrag = nil
+            statusMessage = "That event changed while it was dragged"
+            return
+        }
+        var dropped = drag
+        dropped.isDropped = true
+        gridDrag = dropped
+        let sameDay = stored.startAt.map { calendar.isDate($0, inSameDayAs: drag.start) } ?? false
+        let request = EventMoveRequest(
+            event: stored, start: drag.start, canMoveSeries: stored.recurringEventId != nil && sameDay)
+        if request.repeats || request.hasGuests {
+            eventMove = request
+        } else {
+            move(event: stored, toStart: drag.start)
+        }
+    }
+
+    /// The move dialog's title.
+    func moveQuestion(_ request: EventMoveRequest) -> String {
+        request.canMoveSeries ? "Move this event or all of them?" : "Move this event?"
+    }
+
+    /// The move dialog's text: where the event goes, what each answer moves, and who hears of it.
+    func moveMessage(_ request: EventMoveRequest) -> String {
+        let title = Self.quoted(Self.title(of: request.event))
+        let when = DateText.dayAndTime(request.start, calendar: calendar)
+        var text: String
+        if request.canMoveSeries {
+            text = "\(title) repeats. This Event moves only this one to \(when). "
+                + "All Events moves every one to \(DateText.time(request.start)) on its own day."
+        } else if request.repeats {
+            text = "\(title) repeats. Only this one moves to \(when); drop it on its own day to move them all."
+        } else {
+            text = "\(title) moves to \(when)."
+        }
+        if request.hasGuests {
+            text += " Google emails its guests the new time."
+        }
+        return text
+    }
+
+    /// The answer was no, or the question was dismissed: the block goes back. Does nothing once
+    /// the answer was yes, which clears the request first.
+    func cancelEventMove() {
+        guard eventMove != nil else { return }
+        eventMove = nil
+        gridDrag = nil
+    }
+
+    /// Moves a timed event to `start`, keeping its length; `z` puts it back.
+    func move(event: CalendarEvent, toStart start: Date) {
+        guard let oldStart = event.startAt, let oldEnd = event.endAt, oldEnd >= oldStart else {
+            gridDrag = nil
+            return
+        }
+        var moved = event
+        let end = start.addingTimeInterval(oldEnd.timeIntervalSince(oldStart))
+        moved.startAt = start
+        moved.endAt = end
+        guard save(event: moved) else {
+            gridDrag = nil
+            return
+        }
+        pushUndo(UndoEntry(
+            label: "Moved \(Self.quoted(Self.title(of: event)))",
+            restores: [.moveEvent(
+                eventId: event.id, from: DateInterval(start: oldStart, end: oldEnd), to: DateInterval(start: start, end: end))],
+            at: Date()))
+        showGhost("Moved to \(DateText.dayAndTime(start, calendar: calendar)) · z to undo", for: .seconds(3))
+    }
+
+    /// Moves every instance of a repeating event to the time of day `event` was dropped on, each
+    /// on its own day; `z` moves them back. The store shifts the instances it holds at once, and
+    /// the server moves the series on Google from the one queued write.
+    func moveSeries(of event: CalendarEvent, toStart start: Date) {
+        guard requireEditable(event), let database, let oldStart = event.startAt, let oldEnd = event.endAt,
+              oldEnd >= oldStart
+        else {
+            gridDrag = nil
+            return
+        }
+        let end = start.addingTimeInterval(oldEnd.timeIntervalSince(oldStart))
+        do {
+            try database.moveEventSeries(instanceId: event.id, start: start, end: end)
+        } catch {
+            gridDrag = nil
+            statusMessage = "Could not save: \(error.localizedDescription)"
+            return
+        }
+        scheduleSync()
+        pushUndo(UndoEntry(
+            label: "Moved every \(Self.quoted(Self.title(of: event)))",
+            restores: [.moveEventSeries(
+                eventId: event.id, from: DateInterval(start: oldStart, end: oldEnd), to: DateInterval(start: start, end: end))],
+            at: Date()))
+        showGhost("Moved all to \(DateText.time(start)) · z to undo", for: .seconds(3))
     }
 
     /// status is "accepted", "tentative" or "declined". The own entry in the guest list follows,

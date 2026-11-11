@@ -85,11 +85,12 @@ struct MonthCellView: View {
             Divider()
         }
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            model.goTo(day: day)
-            model.setViewMode(.day)
-        }
-        .onTapGesture {
+        .onClick { isDouble in
+            if isDouble {
+                model.goTo(day: day)
+                model.setViewMode(.day)
+                return
+            }
             model.focus = .calendar
             model.selectDay(day)
             // The status bar's note was about the line this click deselects.
@@ -125,15 +126,12 @@ struct MonthCellView: View {
         .padding(.vertical, 1)
         .background(isSelected ? FloridaStyle.ink.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 3))
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            model.select(item, in: .calendar)
-            model.editSelection()
-        }
-        .onTapGesture {
+        .onClick { isDouble in
             if model.jumpLabel(for: item) != nil {
                 model.selectJumped(item)
             } else {
                 model.select(item, in: .calendar)
+                if isDouble { model.editSelection() }
             }
         }
         .eventDetailPopover(model, eventId: detailId)

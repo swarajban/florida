@@ -29,6 +29,7 @@ struct MacKeymap: Sendable {
     static let overriddenSequences: Set<KeySequence> = [[KeyChord("m")]]
 
     static let macBindings: [(String, MacCommand)] = [
+        ("z", .undo),
         ("u", .undo),
         ("m", .move),
         ("shift+m", .core(.viewMonth)),
@@ -37,7 +38,7 @@ struct MacKeymap: Sendable {
         ("n", .doNow),
         ("shift+space", .doneForNow),
         (".", .repeatLast),
-        ("z z", .centerOnNow),
+        ("g n", .centerOnNow),
         ("g g", .jumpToFirst),
         ("shift+g", .jumpToLast),
         ("shift+e", .editEvent),
@@ -71,7 +72,7 @@ struct MacKeymap: Sendable {
         bindings.filter { $0.command == command }.map(\.sequence)
     }
 
-    /// "u", "⌘K, /" — every shortcut for `command`, in keymap order.
+    /// "z, u", "⌘K, /" — every shortcut for `command`, in keymap order.
     func shortcut(for command: MacCommand) -> String {
         bindings(for: command).map(Self.display).joined(separator: ", ")
     }
@@ -101,10 +102,16 @@ struct MacKeymap: Sendable {
     }
 
     /// How a sequence reads in the help, the palette and the status bar: plain letters stay
-    /// lowercase as typed ("g d", "u"), shifted letters are capitals ("G", "H"), and chords with
+    /// lowercase as typed ("g d", "z"), shifted letters are capitals ("G", "H"), and chords with
     /// other modifiers use the glyph form ("⌘K").
     static func display(_ sequence: KeySequence) -> String {
         sequence.map(display).joined(separator: " ")
+    }
+
+    /// A sequence as a keycap shows it: "V", "R Y", "⇧E". Capitals read better at that size, so
+    /// Shift is spelled out.
+    static func keycap(_ sequence: KeySequence) -> String {
+        sequence.map(\.description).joined(separator: " ")
     }
 
     static func display(_ chord: KeyChord) -> String {

@@ -17,6 +17,8 @@ struct TimeGridCanvas: View {
     let jumpLabels: [ItemID: String]
     /// The stretch of the grid that was on screen when the labels went up; nil when the mode is off.
     let jumpViewport: JumpViewport?
+    /// The event being dragged: its block is drawn where it would land, on top of the others.
+    let drag: GridDrag?
     let selectedDay: Date
     let now: Date
     /// The animation frame's time, which drives `transition`.
@@ -37,10 +39,21 @@ struct TimeGridCanvas: View {
             drawHourLines(in: &context, geometry: geometry)
             drawDaySeparators(in: &context, geometry: geometry)
             drawGaps(in: &context, geometry: geometry)
+            var dragged: GridLayout.Block?
             for blocks in layout.blocksByDay {
                 for block in blocks {
-                    draw(block, in: &context, geometry: geometry)
+                    if let drag, drag.applies(to: block) {
+                        dragged = block
+                    } else {
+                        draw(block, in: &context, geometry: geometry)
+                    }
                 }
+            }
+            if let dragged {
+                // Last and on an opaque ground: it passes over the blocks it is dragged across.
+                let ground = Path(roundedRect: animatedRect(for: dragged, geometry: geometry), cornerRadius: 5)
+                context.fill(ground, with: .color(FloridaStyle.paper))
+                draw(dragged, in: &context, geometry: geometry)
             }
             drawSelectionRing(in: &context, geometry: geometry)
             drawNowLine(in: &context, geometry: geometry)
@@ -166,7 +179,10 @@ struct TimeGridCanvas: View {
                 at: CGPoint(x: rect.maxX - padding - pinSize / 2, y: rect.minY + 2 + pinSize / 2))
             titleRect.size.width -= pinSize + 2
         }
-        let title = Text(block.title).font(.system(size: 11, weight: .medium))
+        // A dragged block says where it would land, in place of its title when it has one line.
+        let dragTimes = drag.flatMap { $0.applies(to: block) ? DateText.timeRange($0.start, $0.end) : nil }
+        let title = Text(rect.height < 34 ? dragTimes ?? block.title : block.title)
+            .font(.system(size: 11, weight: .medium))
             .strikethrough(block.kind == .completed).foregroundStyle(textColor)
         var titleLine = titleRect
         if let badge = jumpBadge(for: block, in: rect), badge.frame.minY < titleLine.minY + 14 {
@@ -182,7 +198,7 @@ struct TimeGridCanvas: View {
                 inner.draw(title, in: CGRect(x: titleLine.minX, y: titleLine.minY, width: titleLine.width, height: 14))
             }
             inner.draw(
-                Text(DateText.timeRange(block.start, block.end)).font(.system(size: 10)).foregroundStyle(textColor.opacity(0.85)),
+                Text(dragTimes ?? DateText.timeRange(block.start, block.end)).font(.system(size: 10)).foregroundStyle(textColor.opacity(0.85)),
                 in: CGRect(x: titleRect.minX, y: titleRect.minY + 14, width: titleRect.width, height: 13))
             // From an hour up: shorter, and the line would sit under "23 min left".
             if rect.height >= 56, let note = Self.note(for: block) {

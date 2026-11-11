@@ -43,13 +43,14 @@ enum DemoData {
         }
         func event(
             _ id: String, _ calendarId: String, _ summary: String, _ start: Date, _ end: Date,
-            allDay: Bool = false, location: String? = nil, meet: String? = nil
+            allDay: Bool = false, location: String? = nil, meet: String? = nil, series: String? = nil
         ) -> CalendarEvent {
             var event = CalendarEvent(
                 id: id, calendarId: calendarId, googleId: "g-\(id)", summary: summary, location: location,
                 startAt: start, endAt: end, allDay: allDay, responseStatus: "accepted",
                 htmlLink: "https://calendar.google.com/calendar/event?eid=\(id)", updatedAt: now)
             event.conferenceUrl = meet
+            event.recurringEventId = series
             return event
         }
         /// All-day events are stored as UTC midnights, as the server does.
@@ -127,7 +128,8 @@ enum DemoData {
                 task("demo-task-offsite", inbox, "Prepare offsite slides", minutes: 240, priority: .medium, due: at(1, 9), hard: true),
             ],
             events: [
-                event("demo-event-standup", work, "Standup", at(0, 9), at(0, 9, 30), meet: "https://meet.google.com/stu-ndup-xyz"),
+                event("demo-event-standup", work, "Standup", at(0, 9), at(0, 9, 30), meet: "https://meet.google.com/stu-ndup-xyz",
+                      series: "demo-series-standup"),
                 DemoData.designReview(event("demo-event-design", work, "Design review: scheduler v2", at(0, 11, 30), at(0, 12, 30),
                                             location: "Room 4 / Meet", meet: "https://meet.google.com/abc-defg-hij")),
                 event("demo-event-lunch", personal, "Lunch with Priya", at(0, 12, 30), at(0, 13, 30), location: "Souvla"),

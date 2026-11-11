@@ -42,8 +42,7 @@ struct CommandPaletteView: View {
                     draft: model.palette.draft, category: model.paletteCategory,
                     unknownHint: model.paletteUnknownHint, calendar: model.calendar)
             case .command:
-                PaletteResultList(count: model.palette.commands.count, selectedIndex: model.palette.selectedIndex) { index in
-                    let command = model.palette.commands[index]
+                PaletteResultList(items: model.palette.commands, selectedIndex: model.palette.selectedIndex) { command in
                     HStack {
                         Text(command.label)
                         Spacer()
@@ -53,8 +52,7 @@ struct CommandPaletteView: View {
                     }
                 }
             case .search:
-                PaletteResultList(count: model.palette.searchResults.count, selectedIndex: model.palette.selectedIndex) { index in
-                    let result = model.palette.searchResults[index]
+                PaletteResultList(items: model.palette.searchResults, selectedIndex: model.palette.selectedIndex) { result in
                     HStack {
                         Image(systemName: result.id.isTask ? "checkmark.circle" : "calendar")
                             .foregroundStyle(.secondary)
@@ -67,8 +65,7 @@ struct CommandPaletteView: View {
                     }
                 }
             case .fit:
-                PaletteResultList(count: model.palette.taskResults.count, selectedIndex: model.palette.selectedIndex) { index in
-                    let task = model.palette.taskResults[index]
+                PaletteResultList(items: model.palette.taskResults, selectedIndex: model.palette.selectedIndex) { task in
                     HStack {
                         Circle()
                             .fill(model.categoriesById[task.categoryId]?.tint ?? .defaultCategory)
@@ -81,8 +78,7 @@ struct CommandPaletteView: View {
                     }
                 }
             case .move(let taskId):
-                PaletteResultList(count: model.palette.categoryResults.count, selectedIndex: model.palette.selectedIndex) { index in
-                    let category = model.palette.categoryResults[index]
+                PaletteResultList(items: model.palette.categoryResults, selectedIndex: model.palette.selectedIndex) { category in
                     HStack {
                         Circle()
                             .fill(category.tint)
@@ -145,15 +141,18 @@ struct CommandPaletteView: View {
     }
 }
 
-/// A scrolling list of `count` rows with one highlighted; clicking a row selects and submits it.
-struct PaletteResultList<Row: View>: View {
+/// A scrolling list of rows with one highlighted; clicking a row selects and submits it.
+///
+/// Each row is handed its item, not an index to look up: a row can be drawn once more after the
+/// palette has closed and emptied its results, and an index into them would then be out of range.
+struct PaletteResultList<Item, Row: View>: View {
     @Environment(AppModel.self) private var model
-    let count: Int
+    let items: [Item]
     let selectedIndex: Int
-    @ViewBuilder let row: (Int) -> Row
+    @ViewBuilder let row: (Item) -> Row
 
     var body: some View {
-        if count == 0 {
+        if items.isEmpty {
             Text("No matches")
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity)
@@ -162,8 +161,8 @@ struct PaletteResultList<Row: View>: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(0..<count, id: \.self) { index in
-                            row(index)
+                        ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                            row(item)
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 6)
                                 .background(index == selectedIndex ? FloridaStyle.ink.opacity(0.08) : .clear)

@@ -1,10 +1,11 @@
 import FloridaKit
 
 // Jump mode: `f` puts a short label on every task and event on screen, in the calendar and in the
-// task pane, and typing a label selects its item. The usual keys then act on it: Space, `e`, `s`
-// or `p` on a task; ⇧E, `r y`, `v` or `o` on an event. The labels are FloridaCore's `JumpLabels`;
-// the views draw `jumpLabel(for:)`, so a two-key label shrinks to its second key once the first
-// is typed.
+// task pane, and typing a label opens its item: a task in its editor, an event in its detail
+// popover. Both show the key of each of their controls, so `f`, a label and one more key finishes
+// a task, moves its due date, joins a call or answers an invitation. The labels are FloridaCore's
+// `JumpLabels`; the views draw `jumpLabel(for:)`, so a two-key label shrinks to its second key
+// once the first is typed.
 //
 // "On screen" is taken when `f` is pressed: what the time grid and the task pane are scrolled past
 // gets no label, which keeps the single keys for what can be seen. A scroll that a key started
@@ -34,7 +35,7 @@ extension AppModel {
         eventDetailID = nil
         jumpGridViewport = viewport
         jump = labels
-        statusMessage = "Type a label to select · Esc cancels"
+        statusMessage = "Type a label to open · Esc cancels"
     }
 
     /// The stretch of the time grid on screen, or the stretch an animated scroll is on its way
@@ -71,7 +72,7 @@ extension AppModel {
     }
 
     /// One key while the labels are up; returns true when jump mode consumed it. A label's last
-    /// key selects its item and leaves the mode; the first key of a two-key label narrows the
+    /// key opens its item and leaves the mode; the first key of a two-key label narrows the
     /// labels. Anything else leaves the mode without running: a mistyped label must not delete
     /// or complete whatever was selected before. ⌘ shortcuts leave the mode and still run.
     func handleJumpKey(_ chord: KeyChord) -> Bool {
@@ -96,8 +97,10 @@ extension AppModel {
         return true
     }
 
-    /// Selects a labelled item in its pane. Events also open their details, so choosing a label
-    /// has a visible result and immediately exposes RSVP, editing and meeting actions.
+    /// Selects a labelled item in the focused pane when it is shown there, else in the other one,
+    /// and opens it. Typing a label and clicking one both end here. The gym and project time are
+    /// only selected: Return on them leaves the calendar for Settings or the projects, which a
+    /// label should not do.
     func selectJumped(_ item: ItemID) {
         let onCalendar = gridLayout.day(of: item) != nil
         let inPane = isTasksPaneVisible && orderedTaskItems.contains(item)
@@ -108,8 +111,8 @@ extension AppModel {
         }
         let staysInPane = inPane && (focus == .tasks || !onCalendar)
         select(item, in: staysInPane ? .tasks : .calendar)
-        if case .event(let id) = item {
-            eventDetailID = id
+        if selectedTask != nil || selectedEvent != nil {
+            editSelection()
         }
     }
 }

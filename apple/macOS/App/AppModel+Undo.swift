@@ -1,11 +1,12 @@
 import FloridaKit
 import Foundation
 
-/// One undoable task write: the fields it changed, with what they held before. `u` puts those
-/// back only while the row still holds what the write set; when the task is gone or something
-/// else (an edit, a sync) changed those fields since, undo writes nothing. Fields the write did
-/// not touch are never written. The server's `PUT /api/tasks/:id` is an upsert that clears
-/// `deletedAt` and takes `completedAt` from the body, so a restore is just another save.
+/// One undoable write. For a task: the fields it changed, with what they held before. `z` puts
+/// those back only while the row still holds what the write set; when the task is gone or
+/// something else (an edit, a sync) changed those fields since, undo writes nothing. Fields the
+/// write did not touch are never written. The server's `PUT /api/tasks/:id` is an upsert that
+/// clears `deletedAt` and takes `completedAt` from the body, so a restore is just another save.
+/// For an event, only a move by drag: its old times go back while it still has the new ones.
 struct UndoEntry {
     /// One field a write changed.
     struct FieldChange {
@@ -20,10 +21,16 @@ struct UndoEntry {
         case revert(taskId: String, changes: [FieldChange])
         /// The write created the task.
         case delete(taskId: String)
+        /// A drag moved the event from one time to another.
+        case moveEvent(eventId: String, from: DateInterval, to: DateInterval)
+        /// A drag moved this instance of a repeating event, and the rest of its series with it.
+        case moveEventSeries(eventId: String, from: DateInterval, to: DateInterval)
 
-        var taskId: String {
+        /// The task the write was on; nil for an event.
+        var taskId: String? {
             switch self {
             case .revert(let id, _), .delete(let id): id
+            case .moveEvent, .moveEventSeries: nil
             }
         }
     }
@@ -96,7 +103,7 @@ extension AppModel {
     static let undoLimit = 50
 
     /// Runs `write` on task `taskId` as one undoable step: the row is read before and after, and
-    /// the fields that differ are what `u` puts back; a task that did not exist before is undone
+    /// the fields that differ are what `z` puts back; a task that did not exist before is undone
     /// by deleting it. Rethrows what `write` throws, recording nothing.
     func recordingUndo(_ label: String, taskId: String, _ write: () throws -> Void) throws {
         guard let database else { return }
@@ -108,13 +115,18 @@ extension AppModel {
         } else {
             restore = .delete(taskId: taskId)
         }
-        undoStack.append(UndoEntry(label: label, restores: [restore], at: Date()))
+        pushUndo(UndoEntry(label: label, restores: [restore], at: Date()))
+    }
+
+    /// Remembers a write for `z`, dropping the oldest past `undoLimit`.
+    func pushUndo(_ entry: UndoEntry) {
+        undoStack.append(entry)
         if undoStack.count > Self.undoLimit {
             undoStack.removeFirst(undoStack.count - Self.undoLimit)
         }
     }
 
-    /// `u`: puts back the fields of the last write if its rows still hold what it set; otherwise
+    /// `z`: puts back the fields of the last write if its rows still hold what it set; otherwise
     /// ("Already changed") nothing is written. The entry is spent either way.
     func undo() {
         guard let entry = undoStack.popLast() else {
@@ -125,6 +137,17 @@ extension AppModel {
         do {
             var reverted: [TaskItem] = []
             var created: [String] = []
+            var movedBack: [CalendarEvent] = []
+            var seriesBack: [(eventId: String, back: DateInterval)] = []
+            /// The event if it is still where the move left it. The store keeps milliseconds: the
+            /// same instant is within a second.
+            func event(_ id: String, stillAt to: DateInterval) throws -> CalendarEvent? {
+                guard let event = try database.event(id: id), event.deletedAt == nil,
+                      let start = event.startAt, let end = event.endAt,
+                      abs(start.timeIntervalSince(to.start)) < 1, abs(end.timeIntervalSince(to.end)) < 1
+                else { return nil }
+                return event
+            }
             for restore in entry.restores {
                 switch restore {
                 case .revert(let taskId, let changes):
@@ -146,6 +169,20 @@ extension AppModel {
                         return
                     }
                     created.append(taskId)
+                case .moveEvent(let eventId, let from, let to):
+                    guard var event = try event(eventId, stillAt: to) else {
+                        showGhost("Already changed")
+                        return
+                    }
+                    event.startAt = from.start
+                    event.endAt = from.end
+                    movedBack.append(event)
+                case .moveEventSeries(let eventId, let from, let to):
+                    guard try event(eventId, stillAt: to) != nil else {
+                        showGhost("Already changed")
+                        return
+                    }
+                    seriesBack.append((eventId, from))
                 }
             }
             for task in reverted {
@@ -154,8 +191,16 @@ extension AppModel {
             for taskId in created {
                 try database.deleteTask(id: taskId)
             }
+            for event in movedBack {
+                try database.saveEvent(event)
+            }
+            for series in seriesBack {
+                try database.moveEventSeries(instanceId: series.eventId, start: series.back.start, end: series.back.end)
+            }
             if let task = reverted.first, task.isOpen {
                 selection = .task(task.id)
+            } else if let eventId = movedBack.first?.id ?? seriesBack.first?.eventId {
+                selection = .event(eventId)
             }
         } catch {
             statusMessage = "Could not undo: \(error.localizedDescription)"

@@ -83,7 +83,7 @@ extension AppModel {
         lastAction = .doneForNow(minutes: minutes)
         let worked = DateText.duration(minutes: minutes)
         if save(task, undoLabel: "Logged \(worked) on \(Self.quoted(task.title))") {
-            showGhost(finished ? "Done · u to undo" : "Logged \(worked) · \(DateText.duration(minutes: task.remainingMinutes)) left")
+            showGhost(finished ? "Done · z to undo" : "Logged \(worked) · \(DateText.duration(minutes: task.remainingMinutes)) left")
         }
     }
 

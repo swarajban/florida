@@ -107,12 +107,9 @@ struct TaskPaneView: View {
             Divider()
             TaskActionsMenu(task: pick.task)
         }
-        .onTapGesture(count: 2) {
+        .onClick { isDouble in
             model.select(item, in: .tasks)
-            model.editSelection()
-        }
-        .onTapGesture {
-            model.select(item, in: .tasks)
+            if isDouble { model.editSelection() }
         }
     }
 
@@ -137,12 +134,9 @@ struct TaskPaneView: View {
         .contextMenu {
             TaskActionsMenu(task: task)
         }
-        .onTapGesture(count: 2) {
+        .onClick { isDouble in
             model.select(item, in: .tasks)
-            model.editSelection()
-        }
-        .onTapGesture {
-            model.select(item, in: .tasks)
+            if isDouble { model.editSelection() }
         }
     }
 }

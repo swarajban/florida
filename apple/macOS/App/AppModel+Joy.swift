@@ -25,7 +25,7 @@ extension AppModel {
         return (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
     }
 
-    /// `zz`: centers the grid on the current time, going to today first when it is not visible.
+    /// `g n`: centers the grid on the current time, going to today first when it is not visible.
     func centerOnNow() {
         guard viewMode != .month, visibleRange.contains(Date()) else {
             goToToday()
@@ -62,14 +62,14 @@ extension AppModel {
             }
         }
         let undo = recentUndo
-        let actedOn = Set(undo?.restores.map(\.taskId) ?? [])
+        let actedOn = Set(undo?.restores.compactMap(\.taskId) ?? [])
         let moved = Set(changed.keys.map { String($0.prefix { $0 != "#" }) }).subtracting(actedOn)
         guard !moved.isEmpty else { return }
         let text = "Moved \(moved.count) task\(moved.count == 1 ? "" : "s")"
-        // `u` undoes the cause only when the reshuffle followed one of our own writes just now;
+        // `z` undoes the cause only when the reshuffle followed one of our own writes just now;
         // a later one came from elsewhere (an event moved, the server re-planned).
         let followsOurWrite = undo.map { Date().timeIntervalSince($0.at) < 5 } ?? false
-        showGhost(followsOurWrite ? "\(text) · u to undo" : text, for: .seconds(2))
+        showGhost(followsOurWrite ? "\(text) · z to undo" : text, for: .seconds(2))
     }
 
     /// "Review doc · 23m": the task block (else timed meeting) happening now and what is left of it.
@@ -140,7 +140,7 @@ extension AppModel {
     }
 
     /// Takes a suggestion: pins the task where it was suggested, which moves it onto the plan and
-    /// out of the suggestions at once (`u` undoes it).
+    /// out of the suggestions at once (`z` undoes it).
     func take(_ pick: OptionalPicks.Pick) {
         guard let task = tasksById[pick.task.id] else { return }
         fill(start: pick.placement.startAt, with: task)

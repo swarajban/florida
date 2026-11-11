@@ -4,11 +4,16 @@ import SwiftUI
 /// Day / 3-day / week: headers, the all-day strip, and a scrolling `Canvas` time grid that opens
 /// at 07:00 and scrolls to keep the selected block on screen. Clicks select; a double-click on a
 /// block edits it (tasks) or opens its details (events); a double-click on empty grid starts a
-/// quick add pinned to that slot.
+/// quick add pinned to that slot. Dragging an event moves it, in quarter hours and across days,
+/// keeping its length (`GridDrag`).
 struct CalendarGridView: View {
     @Environment(AppModel.self) private var model
     @AppStorage(JoyPreference.currentProgress.key) private var showsProgress = true
     @State private var position = ScrollPosition(idType: Int.self, y: CalendarGridView.initialY)
+    /// The drag under way began on something that cannot be dragged; the rest of it is ignored.
+    @State private var ignoresDrag = false
+    /// What the last click in the grid selected, until the selection change it caused is handled.
+    @State private var clickedItem: ItemID?
 
     static let grid = TimeGrid(hourHeight: 60, slotMinutes: 15)
     static let gutterWidth: CGFloat = 56
@@ -27,17 +32,19 @@ struct CalendarGridView: View {
                         TimeGridCanvas(
                             layout: model.gridLayout, selection: model.selection,
                             jumpLabels: model.jump?.remaining ?? [:],
-                            jumpViewport: model.jump == nil ? nil : model.jumpGridViewport, selectedDay: model.selectedDay,
+                            jumpViewport: model.jump == nil ? nil : model.jumpGridViewport, drag: model.gridDrag,
+                            selectedDay: model.selectedDay,
                             now: model.clockNow, frameDate: timeline.date, transition: model.layoutTransition,
                             showsProgress: showsProgress, calendar: model.calendar, hourLabels: model.hourLabels,
                             grid: Self.grid, gutterWidth: Self.gutterWidth)
                     }
-                    .onTapGesture(count: 2) { point in
-                        handleTap(at: point, width: geometry.size.width, isDouble: true)
+                    .onClickAt { point, isDouble in
+                        handleTap(at: point, width: geometry.size.width, isDouble: isDouble)
                     }
-                    .onTapGesture { point in
-                        handleTap(at: point, width: geometry.size.width, isDouble: false)
-                    }
+                    .gesture(
+                        DragGesture(minimumDistance: 4)
+                            .onChanged { dragChanged($0, width: geometry.size.width) }
+                            .onEnded { _ in dragEnded() })
                     .eventDetailPopover(
                         model, eventId: detailBlock == nil ? nil : model.eventDetailID,
                         anchor: .rect(.rect(detailBlock.map { gridGeometry(width: geometry.size.width).rect(for: $0) } ?? .zero)))
@@ -62,7 +69,11 @@ struct CalendarGridView: View {
                 if phase != .animating { model.gridScrollTarget = nil }
             }
             .onChange(of: model.selection) { _, selection in
-                revealSelection(selection)
+                // What a click selected is under the pointer already. Scrolling to it would put
+                // something else there before the second click of a double-click lands.
+                let clicked = clickedItem
+                clickedItem = nil
+                if selection != clicked { revealSelection(selection) }
             }
             .onChange(of: model.gridScrollRequest) { _, request in
                 if let request {
@@ -128,6 +139,7 @@ struct CalendarGridView: View {
                 model.selectJumped(block.item)
                 return
             }
+            clickedItem = block.item
             model.select(block.item, in: .calendar)
             if isDouble {
                 model.editSelection()
@@ -135,6 +147,7 @@ struct CalendarGridView: View {
             return
         }
         if !isDouble, let gap = geometry.gap(at: point, in: layout) {
+            clickedItem = gap.item
             model.select(gap.item, in: .calendar)
             return
         }
@@ -148,6 +161,39 @@ struct CalendarGridView: View {
             let minute = Self.grid.snappedMinute(forY: point.y)
             model.openQuickAdd(prefill: Self.quickAddPrefix(day: day, minute: minute, calendar: model.calendar))
         }
+    }
+
+    /// A drag in the grid: begins on the block under the point where the button went down, then
+    /// follows the pointer by slots and day columns. The model is told only when the slot
+    /// changes, so the canvas redraws a few times per drag, not once per pointer event.
+    private func dragChanged(_ value: DragGesture.Value, width: CGFloat) {
+        guard !ignoresDrag else { return }
+        let layout = model.gridLayout
+        let geometry = gridGeometry(width: width)
+        var drag: GridDrag
+        if let current = model.gridDrag, !current.isDropped {
+            drag = current
+        } else if let begun = model.beginDrag(on: geometry.block(at: value.startLocation, in: layout)) {
+            drag = begun
+            model.gridDrag = begun
+        } else {
+            ignoresDrag = true
+            return
+        }
+        let minute = BlockDrag(startMinute: drag.block.startMinute, durationMinutes: drag.durationMinutes)
+            .startMinute(movedBy: value.translation.height, grid: Self.grid)
+        // Past either side of the grid the block stays in the nearest day.
+        let dayIndex = geometry.dayIndex(atX: value.location.x)
+            ?? (value.location.x < Self.gutterWidth ? 0 : layout.days.count - 1)
+        guard minute != drag.startMinute || dayIndex != drag.dayIndex else { return }
+        drag.move(toDay: dayIndex, minute: minute, days: layout.days, calendar: model.calendar)
+        model.gridDrag = drag
+    }
+
+    private func dragEnded() {
+        defer { ignoresDrag = false }
+        guard let drag = model.gridDrag, !drag.isDropped else { return }
+        model.drop(drag)
     }
 
     /// "11/20/2026 at 2:00pm " — the forms `QuickAddParser` reads as a pinned start.

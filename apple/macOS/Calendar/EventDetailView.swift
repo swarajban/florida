@@ -7,7 +7,8 @@ import SwiftUI
 ///
 /// On a calendar the user can write to it also answers an invitation (Yes / Maybe / No) and
 /// offers Edit and Delete; on a read-only calendar it only shows the response. The keymap's event
-/// keys (`e`, `r y` / `r m` / `r n`, `x`) work while it is open, through its own key monitor.
+/// keys (`v`, `r y` / `r m` / `r n`, ⇧E, `x`, `o`) work while it is open, through its own key
+/// monitor, and each control shows its key.
 struct EventDetailView: View {
     @Environment(AppModel.self) private var model
     let event: CalendarEvent
@@ -16,7 +17,10 @@ struct EventDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             header
             if let url = event.joinURL {
-                JoinButton(url: url, start: event.startAt)
+                HStack(spacing: 8) {
+                    JoinButton(url: url, start: event.startAt)
+                    Self.keycap(for: .joinMeeting)
+                }
             }
             if let location = event.location?.trimmingCharacters(in: .whitespacesAndNewlines), !location.isEmpty {
                 Label {
@@ -48,20 +52,25 @@ struct EventDetailView: View {
             if model.canEdit(event) {
                 Divider()
                 HStack {
-                    Button("Edit…") {
+                    Button {
                         model.openEventEditor(event)
+                    } label: {
+                        Self.keyLabel("Edit…", for: .editEvent)
                     }
                     .help(Self.hint(for: .editEvent))
                     Spacer()
-                    Button("Delete…", role: .destructive) {
+                    Button(role: .destructive) {
                         model.confirmDelete(event)
+                    } label: {
+                        Self.keyLabel("Delete…", for: .core(.delete))
                     }
                     .help(Self.hint(for: .core(.delete)))
                 }
             }
         }
         .padding(16)
-        .frame(width: 360, alignment: .leading)
+        // Wide enough for Yes / Maybe / No with their keys beside "Going?".
+        .frame(width: 400, alignment: .leading)
         .background(KeyEventMonitorView(model: model, isEventPopover: true))
     }
 
@@ -82,10 +91,26 @@ struct EventDetailView: View {
             get: { event.responseStatus == status },
             set: { _ in model.respond(to: event, status: status) })
         return Toggle(isOn: isCurrent) {
-            Label(title, systemImage: EventAttendeeList.symbol(for: status))
+            HStack(spacing: 5) {
+                Label(title, systemImage: EventAttendeeList.symbol(for: status))
+                Self.keycap(for: command)
+            }
+            .fixedSize()
         }
         .toggleStyle(.button)
         .help(Self.hint(for: command))
+    }
+
+    /// The keys bound to `command`, as a keycap: "V", "R Y".
+    private static func keycap(for command: MacCommand) -> Keycap {
+        Keycap(MacKeymap.default.bindings(for: command).first.map(MacKeymap.keycap) ?? "")
+    }
+
+    private static func keyLabel(_ title: String, for command: MacCommand) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+            keycap(for: command)
+        }
     }
 
     /// "RSVP: Yes (r y)" — a button's tooltip: the command it runs and the keys bound to it.
@@ -103,8 +128,10 @@ struct EventDetailView: View {
                     .textSelection(.enabled)
                 Spacer()
                 Menu {
-                    Button("Open in Google Calendar") { model.openInGoogle(event) }
-                        .disabled(event.htmlLink == nil)
+                    Button("Open in Google Calendar (\(MacKeymap.default.shortcut(for: .core(.openInGoogle))))") {
+                        model.openInGoogle(event)
+                    }
+                    .disabled(event.htmlLink == nil)
                     Button("Copy Link") { model.copyLink(of: event) }
                 } label: {
                     Image(systemName: "ellipsis.circle")

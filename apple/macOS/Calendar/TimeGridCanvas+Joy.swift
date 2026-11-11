@@ -40,8 +40,13 @@ extension TimeGridCanvas {
         }
     }
 
-    /// The block's frame at `frameDate`: eased from its old slot while `transition` runs.
+    /// The block's frame at `frameDate`: eased from its old slot while `transition` runs. The
+    /// block being dragged is where the drag has it, the full width of its day.
     func animatedRect(for block: GridLayout.Block, geometry: GridGeometry) -> CGRect {
+        if let drag, drag.applies(to: block) {
+            return geometry.rect(
+                dayIndex: drag.dayIndex, column: 0, columnCount: 1, startMinute: drag.startMinute, endMinute: drag.endMinute)
+        }
         let target = geometry.rect(for: block)
         guard let transition, block.isTask, let slot = transition.from[block.slotKey] else { return target }
         let elapsed = frameDate.timeIntervalSince(transition.startedAt) / LayoutTransition.duration

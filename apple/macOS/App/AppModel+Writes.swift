@@ -3,12 +3,12 @@ import Foundation
 
 // Every write goes to the local store first; the live queries update the views, and a background
 // sync pushes the change. Nothing here awaits anything. Each task write runs through
-// `recordingUndo`, so `u` can put back the fields it changed.
+// `recordingUndo`, so `z` can put back the fields it changed.
 
 extension AppModel {
     static let defaultDurationMinutes = 30
 
-    /// Upserts a task locally, remembers the fields it changes for `u`, and syncs in the
+    /// Upserts a task locally, remembers the fields it changes for `z`, and syncs in the
     /// background. `undoLabel` is past tense ("Edited “X”"); returns false when the store refused.
     @discardableResult
     func save(_ task: TaskItem, undoLabel: String? = nil) -> Bool {
@@ -25,7 +25,7 @@ extension AppModel {
         return true
     }
 
-    /// `x`: deletes a task at once (`u` brings it back). An event, selected or open in its detail
+    /// `x`: deletes a task at once (`z` brings it back). An event, selected or open in its detail
     /// popover, asks first: nothing undoes an event delete.
     func deleteSelection() {
         if let event = commandEvent {
@@ -56,7 +56,7 @@ extension AppModel {
             return
         }
         selection = next
-        showGhost("Deleted \(Self.quoted(task.title)) · u to undo", for: .seconds(3))
+        showGhost("Deleted \(Self.quoted(task.title)) · z to undo", for: .seconds(3))
         scheduleSync()
     }
 
@@ -92,7 +92,7 @@ extension AppModel {
         if selection == item {
             selection = next
         }
-        showGhost("Done · u to undo")
+        showGhost("Done · z to undo")
         scheduleSync()
     }
 

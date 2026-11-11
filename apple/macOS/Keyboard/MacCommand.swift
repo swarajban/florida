@@ -5,7 +5,7 @@ import FloridaKit
 /// the iOS app uses it too), so Mac-only commands are cases here instead.
 enum MacCommand: Hashable, Sendable {
     case core(AppCommand)
-    /// `u`: re-saves the task versions the last write replaced.
+    /// `z` (or `u`): puts back what the last write changed, on a task or a dragged event.
     case undo
     /// `m`: Move to… — the category picker for the selected task.
     case move
@@ -20,7 +20,7 @@ enum MacCommand: Hashable, Sendable {
     case doneForNow
     /// `.`: the last action again, on the current selection.
     case repeatLast
-    /// `zz`: center the grid on the current time.
+    /// `g n`: center the grid on the current time.
     case centerOnNow
     /// `gg` / `G`: the first or last item of the focused pane.
     case jumpToFirst, jumpToLast
@@ -38,7 +38,7 @@ enum MacCommand: Hashable, Sendable {
     case explain
     /// Makes the highlighted day a home, office or off day, or puts it back on the routine.
     case setDayHome, setDayOffice, setDayOff, clearDayKind
-    /// `f`: jump mode, which labels every item on screen; typing a label selects its item.
+    /// `f`: jump mode, which labels every item on screen; typing a label opens its item.
     case jump
     /// `v`: opens the video call of the selected event, or the one whose detail popover is open.
     case joinMeeting
@@ -93,7 +93,7 @@ enum MacCommand: Hashable, Sendable {
     var actsOnOpenEvent: Bool {
         switch self {
         case .core(.edit), .core(.delete), .core(.openInGoogle), .core(.copyLink), .core(.cancel),
-             .editEvent, .respondYes, .respondMaybe, .respondNo, .joinMeeting:
+             .editEvent, .respondYes, .respondMaybe, .respondNo, .joinMeeting, .undo:
             true
         default:
             false

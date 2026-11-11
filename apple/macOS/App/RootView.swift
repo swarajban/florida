@@ -89,6 +89,28 @@ struct RootView: View {
         } message: { event in
             Text("\(AppModel.quoted(AppModel.title(of: event))) is deleted from Google Calendar too. This cannot be undone.")
         }
+        .confirmationDialog(
+            model.eventMove.map(model.moveQuestion) ?? "Move this event?",
+            isPresented: Binding(
+                get: { model.eventMove != nil },
+                set: { if !$0 { model.cancelEventMove() } }),
+            titleVisibility: .visible, presenting: model.eventMove
+        ) { request in
+            Button(request.repeats ? "This Event" : "Move Event") {
+                model.eventMove = nil
+                model.move(event: request.event, toStart: request.start)
+            }
+            .keyboardShortcut(.defaultAction)
+            if request.canMoveSeries {
+                Button("All Events") {
+                    model.eventMove = nil
+                    model.moveSeries(of: request.event, toStart: request.start)
+                }
+            }
+            Button("Cancel", role: .cancel) { model.cancelEventMove() }
+        } message: { request in
+            Text(model.moveMessage(request))
+        }
         .onChange(of: model.settingsRequest) {
             openSettings()
         }

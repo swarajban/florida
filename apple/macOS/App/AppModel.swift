@@ -101,6 +101,10 @@ final class AppModel {
     var eventEditor: EventEditorRequest?
     /// The event whose delete is waiting for confirmation: nothing undoes an event delete.
     var eventToDelete: CalendarEvent?
+    /// The event being dragged in the time grid, or just dropped and not yet in the layout.
+    var gridDrag: GridDrag?
+    /// A dropped event with guests, waiting for a yes: Google emails them the new time.
+    var eventMove: EventMoveRequest?
     var isGoToDateOpen = false
     /// Display form of a multi-key sequence in progress, e.g. "g …".
     var pendingKeys = ""
@@ -121,7 +125,7 @@ final class AppModel {
     @ObservationIgnored var paneItemsOnScreen: Set<ItemID> = []
     var statusMessage: String?
     var ghost: Ghost?
-    /// Task writes `u` can revert, oldest first.
+    /// Writes `z` can revert, oldest first.
     var undoStack: [UndoEntry] = []
     /// Set for a moment after a scheduler run moved visible task blocks, so they slide.
     var layoutTransition: LayoutTransition?
@@ -274,6 +278,11 @@ final class AppModel {
             categoriesById: categoriesById, calendarsById: calendarsById, schedules: activeSchedules,
             options: layoutOptions, lineLimit: viewMode == .month ? MonthGridView.maxLinesPerCell : nil,
             now: Date(), calendar: calendar)
+        // A dropped event has arrived in its new slot: the drag's stand-in is no longer needed.
+        if let drag = gridDrag, drag.isDropped, eventMove == nil,
+           !gridLayout.blocksByDay.joined().contains(where: drag.applies) {
+            gridDrag = nil
+        }
     }
 
     /// Joins the gym's occurrences and project time with their names, then lays the grid out again.

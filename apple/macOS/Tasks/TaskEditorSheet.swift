@@ -12,6 +12,10 @@ import SwiftUI
 /// that needs one (see `TaskDay` for what a day without a time stores). A start moved to or past
 /// the due date takes the due date with it, to the day after (`keepDueAfterStart`). A pinned
 /// start always has a time.
+///
+/// Every control shows its key (`TaskEditorKey`). An open task comes up with the keyboard in no
+/// field, so the keys act at once: Space marks it done, `d` goes to the due date, `p` steps the
+/// priority. A new task comes up in its title; Escape leaves a field, and then the keys act.
 struct TaskEditorSheet: View {
     @Environment(AppModel.self) private var model
     @State private var draft: TaskItem
@@ -27,7 +31,13 @@ struct TaskEditorSheet: View {
     private let original: TaskItem
     /// Not in the store yet: titled "New task", shows the AI section, and saves as "Added".
     let isNew: Bool
-    @FocusState private var isTitleFocused: Bool
+    @FocusState private var focus: TextFocus?
+    @State private var keyboard = TaskEditorKeyboard()
+
+    /// The text fields a key can put the keyboard in.
+    private enum TextFocus {
+        case title, notes, duration
+    }
 
     init(task: TaskItem, isNew: Bool) {
         let calendar = Calendar.autoupdatingCurrent
@@ -55,6 +65,7 @@ struct TaskEditorSheet: View {
                     Label("Mark done", systemImage: "checkmark.circle.fill")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
+                        .overlay(alignment: .trailing) { Keycap(TaskEditorKey.markDone.keycap) }
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
@@ -67,50 +78,70 @@ struct TaskEditorSheet: View {
                     AIParseSection(apply: apply)
                 }
                 Section(isNew ? "New task" : "Task") {
-                    TextField("Title", text: $draft.title)
-                        .focused($isTitleFocused)
-                    TextField("Notes", text: notes, axis: .vertical)
-                        .lineLimit(3...8)
+                    TextField(text: $draft.title) {
+                        keyLabel("Title", .title)
+                    }
+                    .focused($focus, equals: .title)
+                    TextField(text: notes, axis: .vertical) {
+                        keyLabel("Notes", .notes)
+                    }
+                    .focused($focus, equals: .notes)
+                    .lineLimit(3...8)
                 }
                 Section("Dates") {
-                    OptionalDateRow(title: "Start", isOn: $hasStart, date: $startAt, hasTime: startHasTime)
-                    OptionalDateRow(title: "Due", isOn: $hasDue, date: $dueAt, hasTime: dueHasTime)
-                    Picker("Deadline", selection: deadline) {
+                    OptionalDateRow(
+                        title: "Start", key: TaskEditorKey.start.keycap, isOn: $hasStart, date: $startAt,
+                        hasTime: startHasTime)
+                    OptionalDateRow(
+                        title: "Due", key: TaskEditorKey.due.keycap, isOn: $hasDue, date: $dueAt, hasTime: dueHasTime)
+                    Picker(selection: deadline) {
                         ForEach([DeadlineType.soft, .hard], id: \.self) { type in
                             Text(type.displayName).tag(type)
                         }
+                    } label: {
+                        keyLabel("Deadline", .deadline)
                     }
                     .disabled(!hasDue)
                 }
                 Section {
-                    Picker("Category", selection: $draft.categoryId) {
+                    Picker(selection: $draft.categoryId) {
                         ForEach(model.orderedCategories) { category in
                             Text(category.name).tag(category.id)
                         }
+                    } label: {
+                        keyLabel("Category", .category)
                     }
-                    LabeledContent("Duration") {
+                    LabeledContent {
                         HStack {
                             TextField("Minutes", value: $draft.durationMinutes, format: .number)
                                 .labelsHidden()
                                 .frame(width: 60)
                                 .multilineTextAlignment(.trailing)
+                                .focused($focus, equals: .duration)
                             Stepper("Minutes", value: $draft.durationMinutes, in: 5...960, step: 5)
                                 .labelsHidden()
                             Text(DateText.duration(minutes: draft.durationMinutes))
                                 .foregroundStyle(.secondary)
                         }
+                    } label: {
+                        keyLabel("Duration", .duration)
                     }
-                    Picker("Priority", selection: $draft.priority) {
+                    Picker(selection: $draft.priority) {
                         ForEach(Priority.allCases, id: \.self) { priority in
                             Text(priority.displayName).tag(priority)
                         }
+                    } label: {
+                        keyLabel("Priority", .priority)
                     }
-                    Picker("Context", selection: $draft.context) {
+                    .accessibilityIdentifier("task-priority")
+                    Picker(selection: $draft.context) {
                         ForEach(TaskContext.allCases, id: \.self) { context in
                             Text(context.displayName).tag(context)
                         }
+                    } label: {
+                        keyLabel("Context", .context)
                     }
-                    Picker("Project", selection: $draft.projectId) {
+                    Picker(selection: $draft.projectId) {
                         Text("None").tag(String?.none)
                         if let id = draft.projectId, model.project(id: id)?.deletedAt != nil || model.project(id: id) == nil {
                             // Keeps the picker from going blank while a delete is still syncing.
@@ -123,17 +154,23 @@ struct TaskEditorSheet: View {
                                 }
                             }
                         }
+                    } label: {
+                        keyLabel("Project", .project)
                     }
                     .accessibilityIdentifier("task-project")
-                    Picker("Attention", selection: $draft.attention) {
+                    Picker(selection: $draft.attention) {
                         Text(defaultAttentionLabel).tag(TaskAttention?.none)
                         ForEach(TaskAttention.allCases, id: \.self) { attention in
                             Text(attention.displayName).tag(TaskAttention?.some(attention))
                         }
+                    } label: {
+                        keyLabel("Attention", .attention)
                     }
                     .help("Work that can run in parallel shares an hour with up to two other such tasks.")
                     .accessibilityIdentifier("task-attention")
-                    OptionalDateRow(title: "Pinned start", isOn: $hasPinnedStart, date: $pinnedStart)
+                    OptionalDateRow(
+                        title: "Pinned start", key: TaskEditorKey.pinnedStart.keycap, isOn: $hasPinnedStart,
+                        date: $pinnedStart)
                 }
                 TaskRecurrenceSection(
                     recurrence: $draft.recurrence,
@@ -143,13 +180,23 @@ struct TaskEditorSheet: View {
             .formStyle(.grouped)
             Divider()
             HStack {
-                Button("Cancel") {
+                Button {
                     model.editorTask = nil
+                } label: {
+                    KeyLabel("Cancel", key: "esc")
                 }
                 .keyboardShortcut(.cancelAction)
                 Spacer()
-                Button(isNew ? "Add Task" : "Save") {
+                Text("Key again for the next choice · ⇧ steps back or clears a date · esc leaves a field")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                Spacer()
+                Button {
                     save()
+                } label: {
+                    KeyLabel(isNew ? "Add Task" : "Save", key: "↩")
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
@@ -158,12 +205,70 @@ struct TaskEditorSheet: View {
             .padding()
         }
         .frame(width: 560, height: 720)
+        .background(TaskEditorKeyMonitor(keyboard: keyboard, startsUnfocused: !isNew, onPress: handle))
         .onAppear {
-            isTitleFocused = !isNew || model.editorAIText == nil
+            // A new task is typed first. An open one is acted on, so no field has the keyboard.
+            if isNew, model.editorAIText == nil {
+                focus = .title
+            }
         }
         .onChange(of: startAt) { keepDueAfterStart() }
         .onChange(of: hasStart) { keepDueAfterStart() }
         .onChange(of: hasDue) { keepDueAfterStart() }
+    }
+
+    private func keyLabel(_ title: String, _ key: TaskEditorKey) -> KeyLabel {
+        KeyLabel(title, key: key.keycap)
+    }
+
+    /// One of the editor's keys. A text key puts the keyboard in its field. A date key switches
+    /// the date on and puts the keyboard in it, where the arrows change it; with Shift it switches
+    /// the date off. A choice key steps to the next choice, or with Shift to the one before.
+    private func handle(_ press: TaskEditorKey.Press) {
+        let backward = press.isShifted
+        switch press.key {
+        case .markDone:
+            if !isNew, original.isOpen {
+                markDone()
+            }
+        case .title:
+            focus = .title
+        case .notes:
+            focus = .notes
+        case .duration:
+            focus = .duration
+        case .start:
+            setDate($hasStart, on: !backward, field: 0)
+        case .due:
+            setDate($hasDue, on: !backward, field: 1)
+        case .pinnedStart:
+            setDate($hasPinnedStart, on: !backward, field: 2)
+        case .deadline:
+            guard hasDue else { return }
+            deadline.wrappedValue = TaskEditorKey.step(deadline.wrappedValue, in: [.soft, .hard], backward: backward)
+        case .category:
+            draft.categoryId = TaskEditorKey.step(
+                draft.categoryId, in: model.orderedCategories.map(\.id), backward: backward)
+        case .priority:
+            draft.priority = TaskEditorKey.step(draft.priority, in: Array(Priority.allCases), backward: backward)
+        case .context:
+            draft.context = TaskEditorKey.step(draft.context, in: Array(TaskContext.allCases), backward: backward)
+        case .project:
+            let projects = model.projectSections.flatMap(\.projects).map { String?.some($0.id) }
+            draft.projectId = TaskEditorKey.step(draft.projectId, in: [nil] + projects, backward: backward)
+        case .attention:
+            let choices = [nil] + TaskAttention.allCases.map { TaskAttention?.some($0) }
+            draft.attention = TaskEditorKey.step(draft.attention, in: choices, backward: backward)
+        }
+    }
+
+    private func setDate(_ isOn: Binding<Bool>, on: Bool, field: Int) {
+        isOn.wrappedValue = on
+        if on {
+            keyboard.focusDateField(at: field)
+        } else {
+            keyboard.dropFocus()
+        }
     }
 
     /// A start that reaches or passes the due date leaves no time for the task, so the due date
@@ -251,7 +356,7 @@ struct TaskEditorSheet: View {
         startTimeChoice = nil
         hasPinnedStart = parsed.pinnedStart != nil
         pinnedStart = parsed.pinnedStart ?? pinnedStart
-        isTitleFocused = true
+        focus = .title
     }
 
     /// True when a field differs from the task the sheet opened on.
@@ -284,7 +389,7 @@ struct TaskEditorSheet: View {
     }
 
     /// Mark done: saves any edits as Save would (an emptied title keeps the old one), closes, and
-    /// completes through the model's Space path, so the sound, the bloom and `u` are the same.
+    /// completes through the model's Space path, so the sound, the bloom and `z` are the same.
     private func markDone() {
         var task = original
         if hasEdits {
@@ -313,17 +418,26 @@ struct TaskEditorSheet: View {
 }
 
 /// A checkbox that enables a date picker. With `hasTime` the row asks for a day only, and its
-/// "Add a time" box shows the clock; without it the row always has a time.
+/// "Add a time" box shows the clock; without it the row always has a time. `key` is the keycap
+/// shown after the title, where the sheet has a key for the row.
 struct OptionalDateRow: View {
     let title: String
+    var key: String?
     @Binding var isOn: Bool
     @Binding var date: Date
     var hasTime: Binding<Bool>?
 
     var body: some View {
         HStack {
-            Toggle(title, isOn: $isOn)
-                .toggleStyle(.checkbox)
+            Toggle(isOn: $isOn) {
+                HStack(spacing: 6) {
+                    Text(title)
+                    if let key {
+                        Keycap(key)
+                    }
+                }
+            }
+            .toggleStyle(.checkbox)
             Spacer()
             if let hasTime {
                 Toggle("Add a time", isOn: hasTime)

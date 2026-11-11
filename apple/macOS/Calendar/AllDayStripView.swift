@@ -34,15 +34,12 @@ struct AllDayStripView: View {
                             isSelected: model.selection == block.item,
                             isPast: block.localEnd <= model.clockNow,
                             jumpLabel: model.jumpLabel(for: block.item))
-                            .onTapGesture(count: 2) {
-                                model.select(block.item, in: .calendar)
-                                model.editSelection()
-                            }
-                            .onTapGesture {
+                            .onClick { isDouble in
                                 if model.jumpLabel(for: block.item) != nil {
                                     model.selectJumped(block.item)
                                 } else {
                                     model.select(block.item, in: .calendar)
+                                    if isDouble { model.editSelection() }
                                 }
                             }
                     }
