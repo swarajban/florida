@@ -166,20 +166,128 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(app.popUpButtons["task-project"].waitForExistence(timeout: 5))
             XCTAssertTrue(app.popUpButtons["task-attention"].exists)
             capture(window, "task-editor-\(appearance)")
+            // A new task opens in its title: the first Escape leaves the field, the second cancels.
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(app.popUpButtons["task-project"].exists)
             app.typeKey(.escape, modifierFlags: [])
             XCTAssertTrue(app.popUpButtons["task-project"].waitForNonExistence(timeout: 5))
 
             // An open task: Mark done on top, then both dates. This one was due yesterday, so
-            // a start of today moves its due date to tomorrow.
-            app.staticTexts["Renew VPN certificate"].firstMatch.doubleClick()
-            XCTAssertTrue(app.buttons["Mark done"].waitForExistence(timeout: 5))
+            // a start of today moves its due date to tomorrow. One click only selects the row;
+            // the second opens it.
+            let row = app.staticTexts["Renew VPN certificate"].firstMatch
+            let priority = app.popUpButtons["task-priority"]
+            row.click()
+            XCTAssertFalse(priority.waitForExistence(timeout: 1.5), "one click should select, not open")
+            row.doubleClick()
+            XCTAssertTrue(priority.waitForExistence(timeout: 5))
             app.checkBoxes["Start"].click()
             capture(window, "task-editor-open-\(appearance)")
             app.typeKey(.escape, modifierFlags: [])
         }
     }
 
-    /// Jump mode: `f` labels every item, a label selects its item, and Escape takes the labels
+    /// The keys on an opened item. `f` and a label open a task with the keyboard in no field, so
+    /// each control's key acts: `p` steps the priority, `s` switches the start date on and ⇧S off,
+    /// Space marks the task done, and `z` on the calendar brings it back. An event's popover
+    /// shows its keys the same way.
+    @MainActor
+    func testKeysOnAnOpenedItemInBothAppearances() throws {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-demoData", "YES", "-uiAppearance", appearance]
+            app.launch()
+            defer { app.terminate() }
+            let window = app.windows.firstMatch
+            XCTAssertTrue(window.waitForExistence(timeout: 15))
+            XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 10))
+
+            try typeJumpLabel(of: "demo-task-vpn", in: app)
+            let priority = app.popUpButtons["task-priority"]
+            XCTAssertTrue(priority.waitForExistence(timeout: 5), "the label should open the task")
+            capture(window, "task-keys-\(appearance)")
+
+            let before = try XCTUnwrap(priority.value as? String)
+            app.typeKey("p", modifierFlags: [])
+            wait(for: [expectation(for: NSPredicate(format: "value != %@", before), evaluatedWith: priority)], timeout: 5)
+            let stepped = try XCTUnwrap(priority.value as? String)
+            app.typeKey("p", modifierFlags: .shift)
+            wait(for: [expectation(for: NSPredicate(format: "value == %@", before), evaluatedWith: priority)], timeout: 5)
+            XCTAssertNotEqual(stepped, before)
+
+            let start = app.checkBoxes["Start"]
+            XCTAssertEqual((start.value as? NSNumber)?.intValue, 0)
+            app.typeKey("s", modifierFlags: [])
+            wait(for: [expectation(for: NSPredicate(format: "value == 1"), evaluatedWith: start)], timeout: 5)
+            app.typeKey("s", modifierFlags: .shift)
+            wait(for: [expectation(for: NSPredicate(format: "value == 0"), evaluatedWith: start)], timeout: 5)
+
+            // Space finishes the task: the editor closes and its row leaves the pane.
+            let done = app.buttons["task-done-demo-task-vpn"]
+            app.typeKey(.space, modifierFlags: [])
+            XCTAssertTrue(priority.waitForNonExistence(timeout: 5))
+            XCTAssertTrue(done.waitForNonExistence(timeout: 5))
+            app.typeKey("z", modifierFlags: [])
+            XCTAssertTrue(done.waitForExistence(timeout: 5), "z should undo Mark done")
+
+            // The grid is a canvas, so search finds the event; Return then opens its popover.
+            app.typeKey("/", modifierFlags: [])
+            let input = app.textFields.firstMatch
+            XCTAssertTrue(input.waitForExistence(timeout: 5))
+            input.typeText("Standup")
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(input.waitForNonExistence(timeout: 5))
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(app.buttons["Edit…"].waitForExistence(timeout: 5))
+            capture(window, "event-keys-\(appearance)")
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(app.buttons["Edit…"].waitForNonExistence(timeout: 5))
+        }
+    }
+
+    /// Dragging an event that repeats. Dropped on its own day it asks whether this one moves or
+    /// all of them; All Events moves it and `z` moves it back. Dropped on another day only this
+    /// one can move, and Cancel puts the block back.
+    @MainActor
+    func testDraggingARepeatingEventAsksWhichToMove() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-demoData", "YES", "-uiAppearance", "light"]
+        app.launch()
+        defer { app.terminate() }
+        let window = app.windows.firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 10))
+
+        // The demo's time grid shows an hour in 60 points: 90 points down is an hour and a half.
+        let home = standupPopoverFrame(in: app)
+        let windowFrame = window.frame
+        let block = window.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: home.minX - windowFrame.minX - 40, dy: home.midY - windowFrame.minY))
+        block.press(forDuration: 0.3, thenDragTo: block.withOffset(CGVector(dx: 0, dy: 90)), withVelocity: .slow, thenHoldForDuration: 0.3)
+        let thisEvent = app.buttons["This Event"]
+        let allEvents = app.buttons["All Events"]
+        XCTAssertTrue(allEvents.waitForExistence(timeout: 5), "a repeating event dropped on its own day should ask which to move")
+        XCTAssertTrue(thisEvent.exists)
+        capture(window, "move-repeating-event")
+        allEvents.click()
+        XCTAssertTrue(allEvents.waitForNonExistence(timeout: 5))
+        XCTAssertEqual(standupPopoverFrame(in: app).midY, home.midY + 90, accuracy: 8, "All Events should move the event")
+
+        app.typeKey("z", modifierFlags: [])
+        XCTAssertEqual(standupPopoverFrame(in: app).midY, home.midY, accuracy: 2, "z should move it back")
+
+        block.press(forDuration: 0.3, thenDragTo: block.withOffset(CGVector(dx: 220, dy: 60)), withVelocity: .slow, thenHoldForDuration: 0.3)
+        XCTAssertTrue(thisEvent.waitForExistence(timeout: 5), "dropped on another day it should still ask")
+        XCTAssertFalse(allEvents.exists, "a drop on another day can only move this one")
+        capture(window, "move-repeating-event-other-day")
+        app.sheets.buttons["Cancel"].click()
+        XCTAssertTrue(thisEvent.waitForNonExistence(timeout: 5))
+        XCTAssertEqual(standupPopoverFrame(in: app).midY, home.midY, accuracy: 2, "Cancel should leave it where it was")
+    }
+
+    /// Jump mode: `f` labels every item, a label opens its item, and Escape takes the labels
     /// down. The grid is a canvas the test cannot read, so labels come from the task pane's rows:
     /// one task that is also on the grid, one that is only in the pane.
     @MainActor
@@ -261,12 +369,42 @@ final class SmokeTests: XCTestCase {
         }
     }
 
-    /// `f`, then the label on the task's row in the pane: Return edits the selection, so the
-    /// editor's title says which task the label chose. `whileLabelled` runs with the labels up.
+    /// `f`, then the label on the task's row in the pane, which opens the task: the editor's
+    /// title says which task the label chose. `whileLabelled` runs with the labels up.
     @MainActor
     private func jump(
         to id: String, titled title: String, in app: XCUIApplication, whileLabelled: () -> Void = {}
     ) throws {
+        try typeJumpLabel(of: id, in: app, whileLabelled: whileLabelled)
+        let editorTitle = app.textFields.matching(NSPredicate(format: "value == %@", title)).firstMatch
+        XCTAssertTrue(editorTitle.waitForExistence(timeout: 5), "the label should open \(title)")
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(editorTitle.waitForNonExistence(timeout: 5))
+    }
+
+    /// The frame of the Standup's detail popover, which points at the event's block from the
+    /// block's right. The grid is a canvas the test cannot read, so this is how it finds the
+    /// block: search selects the event, Return opens the popover, Escape closes it.
+    @MainActor
+    private func standupPopoverFrame(in app: XCUIApplication) -> CGRect {
+        app.typeKey("/", modifierFlags: [])
+        let input = app.textFields.firstMatch
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        input.typeText("Standup")
+        app.typeKey(.return, modifierFlags: [])
+        XCTAssertTrue(input.waitForNonExistence(timeout: 5))
+        app.typeKey(.return, modifierFlags: [])
+        let edit = app.buttons["Edit…"]
+        XCTAssertTrue(edit.waitForExistence(timeout: 5))
+        let frame = app.popovers.firstMatch.frame
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(edit.waitForNonExistence(timeout: 5))
+        return frame
+    }
+
+    /// Presses `f`, then types the label on the task's row in the pane.
+    @MainActor
+    private func typeJumpLabel(of id: String, in app: XCUIApplication, whileLabelled: () -> Void = {}) throws {
         app.typeKey("f", modifierFlags: [])
         let label = app.staticTexts["task-jump-\(id)"]
         XCTAssertTrue(label.waitForExistence(timeout: 5))
@@ -277,12 +415,6 @@ final class SmokeTests: XCTestCase {
             app.typeKey(String(key), modifierFlags: [])
         }
         XCTAssertTrue(label.waitForNonExistence(timeout: 5))
-
-        app.typeKey(.return, modifierFlags: [])
-        let editorTitle = app.textFields.matching(NSPredicate(format: "value == %@", title)).firstMatch
-        XCTAssertTrue(editorTitle.waitForExistence(timeout: 5), "\(keys) should select \(title)")
-        app.typeKey(.escape, modifierFlags: [])
-        XCTAssertTrue(editorTitle.waitForNonExistence(timeout: 5))
     }
 
     @MainActor

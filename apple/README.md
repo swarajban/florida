@@ -71,10 +71,11 @@ ones:
 | `h` / `l`, `⇧H` / `⇧L`, `t`, `g d` | previous/next day, previous/next week, today, go to date |
 | `d` `3` `w` `⇧M` | day, 3-day, week, month view |
 | `j` / `k` | move the selection through the focused panel |
-| `f` | jump: label every task and event on screen, then type a label to select it |
+| `f` | jump: label every task and event on screen, then type a label to open it |
 | `⌘T`, `g t` / `g c` | toggle the task pane, focus tasks / calendar |
 | `⌘K`, `/` or `⌘F` | command palette (quick add; type `>` for commands), search |
 | `c`, `e` or `↩`, `x`, `space` | new task, edit, delete, complete |
+| `z` or `u`, `g n` | undo the last change, scroll to now |
 | `p` / `⇧P`, `s`, `⌘1`–`⌘4` | pin / unpin to its slot (on an evening suggestion: do it tonight), snooze to tomorrow, priority ASAP…low |
 | `⇧E`, `r y` / `r m` / `r n`, `v` | edit the selected event, RSVP yes / maybe / no, join its video call |
 | `g p`, `g b`, `y` | projects, today's brief and the weekly review, "Why here?" for the selected task |
@@ -84,6 +85,20 @@ Quick add parses natural language locally (`QuickAddParser`): "infosec review
 2h by fri high #work" sets duration, due date, priority, and category; the
 palette shows the parsed chips before you press return. Double-clicking an
 empty slot opens quick add prefilled with that time as a pinned start.
+
+An opened task or event shows the key for each control beside it. The task
+editor opens with no field focused, so its keys (`TaskEditorKey` in
+FloridaCore) act at once: `space` marks the task done, `s` and `d` go to Start
+and Due, `p` steps the priority and `⇧P` steps back, and `esc` leaves a field.
+A new task opens in its title instead. One click selects a block and a
+double-click opens it. Drag a timed event to move it: it snaps to 15 minutes,
+keeps its length, and can cross day columns; an event with guests asks first,
+because Google emails them. An event that repeats asks whether this one moves
+or all of them. All Events is offered only for a drop on the event's own day:
+the series takes the new time of day and every instance keeps its day
+(`moveEventSeries` in FloridaKit shifts the stored instances at once and queues
+one write with `scope: "series"`, which the server needs to move the series on
+Google). Tasks do not drag, because the scheduler places them.
 
 The scheduler's suggestions for an optional routine block (the evening) sit
 on top of the task pane and as dotted blocks in the grid. They are not on the
