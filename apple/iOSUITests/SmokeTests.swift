@@ -57,6 +57,11 @@ final class SmokeTests: XCTestCase {
             let heading = app.buttons["Go to day"]
             let right = app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.55))
             let left = app.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.55))
+            let todayHeader = element(today.formatted(.dateTime.weekday(.wide).month(.wide).day()), in: app)
+            let nextDay = calendar.date(byAdding: .day, value: 1, to: today)!
+            let nextHeader = element(nextDay.formatted(.dateTime.weekday(.wide).month(.wide).day()), in: app)
+            let oneColumn = nextHeader.frame.midX - todayHeader.frame.midX
+            XCTAssertGreaterThan(oneColumn, 0)
             let postmortem = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Draft incident postmortem")).firstMatch
             XCTAssertTrue(postmortem.isHittable)
             let beforeVerticalScroll = postmortem.frame.minY
@@ -65,29 +70,30 @@ final class SmokeTests: XCTestCase {
                          withVelocity: .slow, thenHoldForDuration: 0.3)
             XCTAssertLessThan(postmortem.frame.minY, beforeVerticalScroll - 50)
             let originalY = postmortem.frame.minY
-            let oneColumn = app.windows.firstMatch.frame.width * 0.3
             right.press(forDuration: 0.05, thenDragTo: right.withOffset(CGVector(dx: -oneColumn, dy: 0)),
-                        withVelocity: .slow, thenHoldForDuration: 0.3)
+                        withVelocity: XCUIGestureVelocity(rawValue: 80), thenHoldForDuration: 1)
             // Yesterday's block is behind the fixed gutter, not an invisible tap target there.
             app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 25, dy: originalY + 10)).tap()
             XCTAssertFalse(app.buttons["Cancel"].exists)
             left.press(forDuration: 0.05, thenDragTo: left.withOffset(CGVector(dx: oneColumn, dy: 0)),
-                       withVelocity: .slow, thenHoldForDuration: 0.3)
+                       withVelocity: XCUIGestureVelocity(rawValue: 80), thenHoldForDuration: 1)
             right.tap()
             XCTAssertTrue(app.navigationBars["New Event"].waitForExistence(timeout: 5))
             let thirdDay = calendar.date(byAdding: .day, value: 2, to: today)!
             XCTAssertTrue(app.datePickers["event-start"].buttons[
                 thirdDay.formatted(.dateTime.month(.abbreviated).day().year())].exists)
             app.buttons["Cancel"].tap()
-            // A held slow drag crosses two columns without momentum. The old swipe-end handler
-            // always moved just one day. Travel far enough both ways to replenish the runway.
+            // Drag exactly two measured columns, then stop before releasing. XCTest's .slow
+            // is still 250 pt/s and can coast another day on newer iOS runtimes. Test inertia
+            // separately below; this checks distance tracking and replenishing the runway.
             for (offset, forward) in [
                 (2, true), (4, true), (6, true), (4, false), (2, false), (0, false),
                 (-2, false), (-4, false), (-6, false), (-4, true), (-2, true), (0, true),
             ] {
-                (forward ? right : left).press(
-                    forDuration: 0.05, thenDragTo: forward ? left : right,
-                    withVelocity: .slow, thenHoldForDuration: 0.3)
+                let from = forward ? right : left
+                let to = from.withOffset(CGVector(dx: (forward ? -2 : 2) * oneColumn, dy: 0))
+                from.press(forDuration: 0.05, thenDragTo: to,
+                           withVelocity: XCUIGestureVelocity(rawValue: 80), thenHoldForDuration: 1)
                 let date = calendar.date(byAdding: .day, value: offset, to: today)!
                 let expected = date.formatted(.dateTime.weekday(.wide).month(.wide).day().year())
                 XCTAssertTrue(heading.waitForExistence(timeout: 5))
