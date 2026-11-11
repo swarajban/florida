@@ -11,7 +11,7 @@ step() { printf '\n==> %s (%s)\n' "$1" "$(date +%T)"; }
 
 step "System packages for the Swift toolchain"
 missing=()
-for pkg in libedit-dev libpython3-dev zip libsqlite3-dev libcurl4-openssl-dev libxml2-dev; do
+for pkg in binutils-gold pkg-config libedit-dev libpython3-dev zip libsqlite3-dev libcurl4-openssl-dev libxml2-dev; do
   dpkg -s "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
 done
 if [ "${#missing[@]}" -gt 0 ]; then
