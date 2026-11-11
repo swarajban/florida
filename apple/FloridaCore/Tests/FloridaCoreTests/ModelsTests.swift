@@ -278,6 +278,15 @@ import Testing
         #expect(object["allDay"] as? Bool == false)
         #expect(object["responseStatus"] as? String == "tentative")
         #expect(try JSONCoding.decoder.decode(EventWrite.self, from: data) == write)
+
+        // A move of the whole series says so; the server reads "series".
+        var series = write
+        series.scope = .series
+        let seriesData = try JSONCoding.encoder.encode(series)
+        let seriesObject = try #require(JSONSerialization.jsonObject(with: seriesData) as? [String: Any])
+        #expect(seriesObject["scope"] as? String == "series")
+        #expect(seriesObject.count == object.count + 1)
+        #expect(try JSONCoding.decoder.decode(EventWrite.self, from: seriesData) == series)
     }
 
     @Test func eventRecurrenceUsesTheCreationWireContract() throws {

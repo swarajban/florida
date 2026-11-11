@@ -440,15 +440,59 @@ extension AppDatabase {
         try writer.write { db in
             var write = initial
             write.recurrence = recurrence
-            // An offline rename/reschedule must not erase the queued series creation.
-            if write.recurrence == nil, event.googleId.isEmpty,
-               let pending = try PendingWrite.filter(Column("entity") == "event" && Column("entityId") == event.id).fetchOne(db),
+            if let pending = try PendingWrite.filter(Column("entity") == "event" && Column("entityId") == event.id).fetchOne(db),
                pending.op == .put, let body = pending.body {
-                write.recurrence = try JSONCoding.decoder.decode(EventWrite.self, from: body).recurrence
+                let queued = try JSONCoding.decoder.decode(EventWrite.self, from: body)
+                // An offline rename/reschedule must not erase the queued series creation.
+                if write.recurrence == nil, event.googleId.isEmpty {
+                    write.recurrence = queued.recurrence
+                }
+                // Nor may an RSVP or a rename erase a queued move of the whole series: the other
+                // instances have moved here already, and only this write tells the server.
+                if queued.scope == .series, queued.startAt == write.startAt, queued.endAt == write.endAt {
+                    write.scope = .series
+                }
             }
             let body = try JSONCoding.encoder.encode(write)
             try event.save(db)
             try Self.enqueue(db, entity: .event, id: event.id, op: .put, body: body, now: now)
+        }
+    }
+
+    /// Moves a repeating event as a whole. The instance `instanceId` goes to `start`…`end`; every
+    /// other live timed row of its series on the same calendar shifts by as much and takes the
+    /// same length, so each keeps its day. Queues one `put`, for the instance, with
+    /// `scope: series`: the server moves the series on Google from it, and its rows replace these
+    /// on the next sync. An event that does not repeat moves alone.
+    /// Throws `WriteError.eventWithoutTimes` when there is no such row or it has no times.
+    public func moveEventSeries(instanceId: String, start: Date, end: Date, now: Date = Date()) throws {
+        try writer.write { db in
+            guard var instance = try CalendarEvent.fetchOne(db, id: instanceId), let oldStart = instance.startAt,
+                  instance.endAt != nil
+            else { throw WriteError.eventWithoutTimes(id: instanceId) }
+            let shift = start.timeIntervalSince(oldStart)
+            let length = end.timeIntervalSince(start)
+            if let series = instance.recurringEventId {
+                let others = try CalendarEvent
+                    .filter(Column("calendarId") == instance.calendarId && Column("recurringEventId") == series)
+                    .filter(Column("id") != instanceId && Column("deletedAt") == nil && Column("allDay") == false)
+                    .fetchAll(db)
+                for var other in others {
+                    guard let otherStart = other.startAt else { continue }
+                    let moved = otherStart.addingTimeInterval(shift)
+                    other.startAt = moved
+                    other.endAt = moved.addingTimeInterval(length)
+                    other.updatedAt = now
+                    try other.save(db)
+                }
+            }
+            instance.startAt = start
+            instance.endAt = end
+            instance.updatedAt = now
+            guard var write = EventWrite(instance) else { throw WriteError.eventWithoutTimes(id: instanceId) }
+            write.scope = .series
+            try instance.save(db)
+            try Self.enqueue(db, entity: .event, id: instanceId, op: .put, body: try JSONCoding.encoder.encode(write), now: now)
         }
     }
 

@@ -600,6 +600,73 @@ import Testing
         #expect(try db.pendingWrites().isEmpty, "nothing is queued for the server to refuse")
     }
 
+    @Test func moveEventSeriesShiftsEveryLiveInstanceAndQueuesOneSeriesPut() throws {
+        let db = try AppDatabase.inMemory()
+        func instance(_ id: String, calendarId: String = "cal", series: String? = "weekly", start: String, end: String) -> CalendarEvent {
+            var event = Fixtures.event(id: id, calendarId: calendarId, start: start, end: end)
+            event.recurringEventId = series
+            return event
+        }
+        try db.apply(SyncResponse(
+            cursor: "c",
+            events: [
+                instance("w1", start: "2026-11-09T17:00:00Z", end: "2026-11-09T17:30:00Z"),
+                instance("w2", start: "2026-11-16T17:00:00Z", end: "2026-11-16T17:30:00Z"),
+                // Moved on its own earlier: it shifts by as much as the rest.
+                instance("w3", start: "2026-11-23T19:00:00Z", end: "2026-11-23T20:00:00Z"),
+                instance("gone", start: "2026-11-30T17:00:00Z", end: "2026-11-30T17:30:00Z"),
+                instance("other-series", series: "daily", start: "2026-11-16T17:00:00Z", end: "2026-11-16T17:30:00Z"),
+                instance("other-calendar", calendarId: "cal2", start: "2026-11-16T17:00:00Z", end: "2026-11-16T17:30:00Z"),
+                instance("single", series: nil, start: "2026-11-16T17:00:00Z", end: "2026-11-16T17:30:00Z"),
+            ],
+            calendars: [Fixtures.calendar(), Fixtures.calendar(id: "cal2")]))
+        // Deleted here and not yet pushed: its tombstone stays where it was.
+        try db.deleteEvent(id: "gone", now: Fixtures.t0)
+        let now = Fixtures.instant("2026-11-08T10:00:00Z")
+
+        // w2 is dragged 90 minutes later and made 45 minutes long.
+        try db.moveEventSeries(
+            instanceId: "w2", start: Fixtures.instant("2026-11-16T18:30:00Z"), end: Fixtures.instant("2026-11-16T19:15:00Z"), now: now)
+
+        func times(_ id: String) throws -> [Date?] {
+            let event = try #require(try db.event(id: id))
+            return [event.startAt, event.endAt]
+        }
+        #expect(try times("w1") == [Fixtures.instant("2026-11-09T18:30:00Z"), Fixtures.instant("2026-11-09T19:15:00Z")])
+        #expect(try times("w2") == [Fixtures.instant("2026-11-16T18:30:00Z"), Fixtures.instant("2026-11-16T19:15:00Z")])
+        #expect(try times("w3") == [Fixtures.instant("2026-11-23T20:30:00Z"), Fixtures.instant("2026-11-23T21:15:00Z")])
+        for untouched in ["other-series", "other-calendar", "single"] {
+            #expect(try times(untouched) == [Fixtures.instant("2026-11-16T17:00:00Z"), Fixtures.instant("2026-11-16T17:30:00Z")])
+        }
+        #expect(try times("gone") == [Fixtures.instant("2026-11-30T17:00:00Z"), Fixtures.instant("2026-11-30T17:30:00Z")])
+
+        // One write, for the dragged instance; the server moves the rest from it.
+        let pending = try db.pendingWrites()
+        #expect(pending.map { "\($0.entity.rawValue):\($0.entityId):\($0.op.rawValue)" }.sorted() == ["event:gone:delete", "event:w2:put"])
+        let body = try JSONCoding.decoder.decode(EventWrite.self, from: try #require(pending.first { $0.entityId == "w2" }?.body))
+        #expect(body.scope == .series)
+        #expect(body.startAt == Fixtures.instant("2026-11-16T18:30:00Z"))
+        #expect(body.endAt == Fixtures.instant("2026-11-16T19:15:00Z"))
+
+        // An RSVP on the dragged instance before the push still tells the server to move the series.
+        var answered = try #require(try db.event(id: "w2"))
+        answered.responseStatus = "accepted"
+        try db.saveEvent(answered, now: now)
+        let resent = try JSONCoding.decoder.decode(
+            EventWrite.self, from: try #require(try db.pendingWrites().first { $0.entityId == "w2" }?.body))
+        #expect(resent.scope == .series)
+        #expect(resent.responseStatus == "accepted")
+
+        // An event that does not repeat moves alone, and a missing one is refused.
+        try db.moveEventSeries(
+            instanceId: "single", start: Fixtures.instant("2026-11-16T15:00:00Z"), end: Fixtures.instant("2026-11-16T15:30:00Z"), now: now)
+        #expect(try times("single") == [Fixtures.instant("2026-11-16T15:00:00Z"), Fixtures.instant("2026-11-16T15:30:00Z")])
+        #expect(try times("other-series") == [Fixtures.instant("2026-11-16T17:00:00Z"), Fixtures.instant("2026-11-16T17:30:00Z")])
+        #expect(throws: AppDatabase.WriteError.eventWithoutTimes(id: "nope")) {
+            try db.moveEventSeries(instanceId: "nope", start: now, end: now.addingTimeInterval(60), now: now)
+        }
+    }
+
     @Test func deleteEventHidesTheRowAtOnceAndLeavesOneDeleteRow() throws {
         let db = try AppDatabase.inMemory()
         try db.apply(SyncResponse(

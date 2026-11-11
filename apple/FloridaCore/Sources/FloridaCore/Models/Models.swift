@@ -1277,6 +1277,15 @@ public struct EventRecurrence: Codable, Hashable, Sendable {
 /// writes it to Google and fills in `googleId`. Nil `location` and `description` are omitted from
 /// the JSON, like `TaskWrite`'s optionals.
 public struct EventWrite: Codable, Hashable, Sendable {
+    /// What a new time on one instance of a repeating event moves.
+    public enum Scope: String, Codable, Hashable, Sendable {
+        /// The instance alone.
+        case instance
+        /// Every instance: the series takes the time of day and length of this body, and each
+        /// instance keeps its day.
+        case series
+    }
+
     public var calendarId: String
     public var summary: String
     public var location: String?
@@ -1287,10 +1296,13 @@ public struct EventWrite: Codable, Hashable, Sendable {
     /// The user's own response: "accepted", "declined", "tentative" or "needsAction".
     public var responseStatus: String?
     public var recurrence: EventRecurrence?
+    /// Nil, which the JSON omits, moves the instance alone.
+    public var scope: Scope?
 
     public init(
         calendarId: String, summary: String, location: String? = nil, description: String? = nil,
-        startAt: Date, endAt: Date, allDay: Bool, responseStatus: String? = nil, recurrence: EventRecurrence? = nil
+        startAt: Date, endAt: Date, allDay: Bool, responseStatus: String? = nil,
+        recurrence: EventRecurrence? = nil, scope: Scope? = nil
     ) {
         self.calendarId = calendarId
         self.summary = summary
@@ -1301,6 +1313,7 @@ public struct EventWrite: Codable, Hashable, Sendable {
         self.allDay = allDay
         self.responseStatus = responseStatus
         self.recurrence = recurrence
+        self.scope = scope
     }
 
     /// The body for an existing row, or nil for a row without `startAt` or `endAt` (Google omits
