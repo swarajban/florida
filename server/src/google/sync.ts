@@ -25,8 +25,8 @@ import type { GoogleCalendarListEntry, GoogleEvent, GoogleEventWrite, ListEvents
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
 const DAY = 24 * HOUR
-const FULL_SYNC_PAST_DAYS = 30
-const FULL_SYNC_FUTURE_DAYS = 365
+export const FULL_SYNC_PAST_DAYS = 30
+export const FULL_SYNC_FUTURE_DAYS = 365
 /** Refresh the access token when it expires within this long. */
 const TOKEN_SLACK = 60_000
 /** Renew a webhook channel when it expires within this long. */

@@ -105,6 +105,8 @@ export interface GoogleEvent {
   organizer?: { email?: string; displayName?: string; self?: boolean }
   eventType?: string
   recurringEventId?: string
+  /** On an instance of a recurring event: where the series puts it, even after it was moved on its own. */
+  originalStartTime?: GoogleEventDateTime
   recurrence?: string[]
   iCalUID?: string
 }
@@ -117,6 +119,7 @@ export interface GoogleEvent {
 export interface GoogleEventTimeWrite {
   date?: string | null
   dateTime?: string | null
+  /** The IANA zone a recurring event repeats in. Only a write to a series sends it. */
   timeZone?: string
 }
 

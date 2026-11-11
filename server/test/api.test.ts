@@ -1,5 +1,5 @@
 import { setTimeout as sleep } from 'node:timers/promises'
-import { dateFromDayNumber, dayNumber, isoDate, localDate, localParts, weekdayOf } from '@florida/scheduler'
+import { dateFromDayNumber, dayNumber, isoDate, localDate, localParts, weekdayOf, zonedToUtc } from '@florida/scheduler'
 import type { Hono } from 'hono'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { eq, inArray } from 'drizzle-orm'
@@ -1237,6 +1237,250 @@ describe('calendar event writes', () => {
     expect(synced.events.map((e) => e.id).sort()).toEqual(ids)
   })
 
+  describe("scope: 'series'", () => {
+    const MIN = 60_000
+    const DAY = 86_400_000
+    // A zone with daylight time: a time of day there is not a fixed offset from UTC.
+    const zone = 'America/New_York'
+    const today = dayNumber(localDate(start.getTime(), zone))
+    /** `minutes` after midnight in `zone`, on the day `days` after the one `start` is in. */
+    const at = (days: number, minutes: number) => zonedToUtc(dateFromDayNumber(today + days), minutes, zone)
+    const iso = (ms: number) => new Date(ms).toISOString()
+    // The series began on a day whose UTC offset differs from today's, so the master and the
+    // instances have the same time of day at different UTC times.
+    const winter = { year: 2025, month: 1, day: 15 }
+    const summer = { year: 2025, month: 7, day: 15 }
+    const firstDay = (at(0, 600) - zonedToUtc(winter, 600, zone)) % DAY === 0 ? summer : winter
+    /** A daily event from 10:00 to 10:30 in `zone`, as Google holds its master. */
+    const master = (id: string): GoogleEvent => ({
+      id,
+      status: 'confirmed',
+      summary: 'Standup',
+      start: { dateTime: iso(zonedToUtc(firstDay, 600, zone)), timeZone: zone },
+      end: { dateTime: iso(zonedToUtc(firstDay, 630, zone)), timeZone: zone },
+      recurrence: ['RRULE:FREQ=DAILY'],
+    })
+    /** The instance on day `days`, starting `minutes` after midnight; the series put it at `original`. */
+    const instance = (series: string, id: string, days: number, minutes = 600, length = 30, original = minutes): GoogleEvent => ({
+      id,
+      status: 'confirmed',
+      summary: 'Standup',
+      start: { dateTime: iso(at(days, minutes)), timeZone: zone },
+      end: { dateTime: iso(at(days, minutes) + length * MIN), timeZone: zone },
+      recurringEventId: series,
+      originalStartTime: { dateTime: iso(at(days, original)), timeZone: zone },
+    })
+    /** Puts a series on Google and stores its instances under the given row ids. */
+    const hold = async (series: string, held: Record<string, GoogleEvent>) => {
+      fake.googleEvents.set(series, master(series))
+      for (const e of Object.values(held)) fake.googleEvents.set(e.id, e)
+      await db.insert(events).values(Object.entries(held).map(([id, e]) => ({ id, ...mapEvent('cal-rw', e) })))
+    }
+    /** The body that drops an instance at `minutes` after midnight on day `days`, for the whole series. */
+    const moveTo = (days: number, minutes: number, length = 30) => ({
+      ...write,
+      summary: 'Standup',
+      location: null,
+      startAt: iso(at(days, minutes)),
+      endAt: iso(at(days, minutes) + length * MIN),
+      scope: 'series' as const,
+    })
+    const masterPatch = (series: string, minutes: number, length = 30) => ({
+      method: 'patch',
+      calendarId: 'ev@example.com',
+      googleId: series,
+      body: {
+        start: { dateTime: iso(zonedToUtc(firstDay, minutes, zone)), timeZone: zone },
+        end: { dateTime: iso(zonedToUtc(firstDay, minutes, zone) + length * MIN), timeZone: zone },
+      },
+    })
+    const rows = async (ids: string[]) => {
+      const found = await db.select().from(events).where(inArray(events.id, ids))
+      return new Map(found.map((e) => [e.id, e]))
+    }
+    /** Google id and start of every live row of a series, by Google id. */
+    const liveRows = async (series: string) => {
+      const found = await db.select().from(events).where(eq(events.recurringEventId, series))
+      return found.filter((e) => e.deletedAt === null).map((e) => [e.googleId, e.startAt?.toISOString()]).sort()
+    }
+    const syncCursor = async () => ((await (await api('/api/sync')).json()) as { cursor: string }).cursor
+    /** Id and start of the events `/api/sync` hands out after `cursor`, by id. */
+    const sentSince = async (cursor: string) => {
+      const synced = (await (await api(`/api/sync?since=${encodeURIComponent(cursor)}`)).json()) as { events: { id: string; startAt: string }[] }
+      return synced.events.map((e) => [e.id, e.startAt]).sort()
+    }
+
+    // These instances fill the days around `start`; later tests read those days' free time.
+    afterAll(async () => {
+      await db.delete(events).where(inArray(events.recurringEventId, ['g-daily', 'g-other', 'g-weekly', 'g-fixed', 'g-moved']))
+      await db.delete(events).where(eq(events.id, 'ev-single'))
+    })
+
+    it('moves the whole series to the new time of day, once, and keeps the id the client wrote to', async () => {
+      await hold('g-daily', {
+        'ev-s0': instance('g-daily', 'g-daily_a0', -1),
+        'ev-s1': instance('g-daily', 'g-daily_a1', 0),
+        'ev-s2': instance('g-daily', 'g-daily_a2', 1),
+        'ev-s3': instance('g-daily', 'g-daily_a3', 2),
+      })
+      await hold('g-other', { 'ev-other': instance('g-other', 'g-other_a1', 1) })
+      // Google after the move: an instance is named after its original start, so every id is new.
+      // The day before `start` is no longer listed, and a day we never held is.
+      fake.instancesAfterPatch.set('g-daily', [0, 1, 2, 3].map((days) => instance('g-daily', `g-daily_b${days + 1}`, days, 690, 45)))
+      fake.eventWrites = []
+      const moved = moveTo(1, 690, 45)
+
+      // Google takes the move, then listing its instances fails: nothing is stored yet.
+      const cursor = await syncCursor()
+      const listing = fake.eventInstances.bind(fake)
+      const list = vi.spyOn(fake, 'eventInstances').mockImplementationOnce(listing).mockRejectedValueOnce(new GoogleApiError(503, 'unavailable'))
+      const failed = await api('/api/events/ev-s2', { method: 'PUT', json: moved })
+      expect(failed.status).toBe(502)
+      expect(fake.eventWrites).toEqual([masterPatch('g-daily', 690, 45)])
+      // The apps moved every instance already; the stored times go back out to them.
+      expect(await sentSince(cursor)).toEqual(['ev-s0', 'ev-s1', 'ev-s2', 'ev-s3'].map((id, i) => [id, iso(at(i - 1, 600))]))
+
+      // The retry finds the series already there and patches nothing more.
+      const res = await api('/api/events/ev-s2', { method: 'PUT', json: moved })
+      list.mockRestore()
+      expect(res.status).toBe(200)
+      expect(fake.eventWrites).toEqual([masterPatch('g-daily', 690, 45)])
+      const body = (await res.json()) as { event: Record<string, unknown> }
+      expect(body.event).toMatchObject({
+        id: 'ev-s2',
+        googleId: 'g-daily_b2',
+        recurringEventId: 'g-daily',
+        startAt: moved.startAt,
+        endAt: moved.endAt,
+        deletedAt: null,
+      })
+
+      const stored = await rows(['ev-s0', 'ev-s1', 'ev-s3', 'ev-other'])
+      expect(stored.get('ev-s0')?.deletedAt).not.toBeNull()
+      expect(stored.get('ev-s1')?.deletedAt).not.toBeNull()
+      expect(stored.get('ev-s3')?.deletedAt).not.toBeNull()
+      expect(stored.get('ev-other')).toMatchObject({ deletedAt: null, startAt: new Date(at(1, 600)) })
+      expect(await liveRows('g-daily')).toEqual([0, 1, 2, 3].map((days) => [`g-daily_b${days + 1}`, iso(at(days, 690))]))
+    })
+
+    it('moves the series back through another instance, whose old id a dead row still holds', async () => {
+      // Back at 10:00 Google names the instances as it did before the first move, and `ev-s3`,
+      // dead since then, still holds the id the dragged row now takes.
+      const [dragged] = await db.select().from(events).where(eq(events.googleId, 'g-daily_b3'))
+      if (dragged === undefined) throw new Error('no row holds g-daily_b3')
+      fake.instancesAfterPatch.set('g-daily', [0, 1, 2, 3].map((days) => instance('g-daily', `g-daily_a${days + 1}`, days)))
+      fake.eventWrites = []
+
+      const res = await api(`/api/events/${dragged.id}`, { method: 'PUT', json: moveTo(2, 600) })
+      expect(res.status).toBe(200)
+      expect(fake.eventWrites).toEqual([masterPatch('g-daily', 600)])
+      expect(((await res.json()) as { event: Record<string, unknown> }).event).toMatchObject({
+        id: dragged.id,
+        googleId: 'g-daily_a3',
+        startAt: iso(at(2, 600)),
+        endAt: iso(at(2, 630)),
+        deletedAt: null,
+      })
+      expect(await liveRows('g-daily')).toEqual([0, 1, 2, 3].map((days) => [`g-daily_a${days + 1}`, iso(at(days, 600))]))
+      // The dead row stays dead under the id Google dropped; the instance `ev-s1` held is back.
+      const stored = await rows(['ev-s1', 'ev-s2', 'ev-s3'])
+      expect(stored.get('ev-s3')?.googleId).toBe('g-daily_b3')
+      expect(stored.get('ev-s3')?.deletedAt).not.toBeNull()
+      expect(stored.get('ev-s2')?.deletedAt).not.toBeNull()
+      expect(stored.get('ev-s1')).toMatchObject({ googleId: 'g-daily_a1', deletedAt: null })
+    })
+
+    it('updates the rows in place when Google keeps the instance ids, and moves one event that does not repeat', async () => {
+      // `ev-w0` is older than a full sync reaches back; it is still listed, so it is not dropped.
+      await hold('g-weekly', {
+        'ev-w0': instance('g-weekly', 'g-weekly_a0', -42),
+        'ev-w1': instance('g-weekly', 'g-weekly_a1', 0),
+        'ev-w2': instance('g-weekly', 'g-weekly_a2', 7),
+      })
+      fake.instancesAfterPatch.set('g-weekly', [-42, 0, 7].map((days, i) => instance('g-weekly', `g-weekly_a${i}`, days, 540)))
+      expect((await api('/api/events/ev-w1', { method: 'PUT', json: moveTo(0, 540) })).status).toBe(200)
+      const stored = await rows(['ev-w0', 'ev-w1', 'ev-w2'])
+      expect(stored.get('ev-w0')).toMatchObject({ googleId: 'g-weekly_a0', deletedAt: null, startAt: new Date(at(-42, 540)) })
+      expect(stored.get('ev-w1')).toMatchObject({ googleId: 'g-weekly_a1', deletedAt: null, startAt: new Date(at(0, 540)) })
+      expect(stored.get('ev-w2')).toMatchObject({ googleId: 'g-weekly_a2', deletedAt: null, startAt: new Date(at(7, 540)) })
+
+      const single = instance('g-none', 'g-single', 0)
+      delete single.recurringEventId
+      delete single.originalStartTime
+      fake.googleEvents.set('g-single', single)
+      await db.insert(events).values({ id: 'ev-single', ...mapEvent('cal-rw', single) })
+      fake.eventWrites = []
+      const earlier = moveTo(0, 540)
+      expect((await api('/api/events/ev-single', { method: 'PUT', json: earlier })).status).toBe(200)
+      expect(fake.eventWrites).toEqual([
+        {
+          method: 'patch',
+          calendarId: 'ev@example.com',
+          googleId: 'g-single',
+          body: { start: { dateTime: earlier.startAt }, end: { dateTime: earlier.endAt } },
+        },
+      ])
+    })
+
+    it('refuses a move it cannot make for every instance, sends Google nothing, and hands the stored times back', async () => {
+      await hold('g-fixed', { 'ev-f1': instance('g-fixed', 'g-fixed_a1', 1), 'ev-f2': instance('g-fixed', 'g-fixed_a2', 2) })
+      const unmoved = [['ev-f1', iso(at(1, 600))], ['ev-f2', iso(at(2, 600))]]
+      const allDay = {
+        ...moveTo(1, 600),
+        allDay: true,
+        startAt: `${isoDate(dateFromDayNumber(today + 1))}T00:00:00.000Z`,
+        endAt: `${isoDate(dateFromDayNumber(today + 2))}T00:00:00.000Z`,
+      }
+      fake.eventWrites = []
+      for (const [body, status] of [
+        // Half past midnight is the next day in the series' zone: the master keeps its date, so
+        // every instance would land a day before the drop.
+        [moveTo(2, 30), 400],
+        [allDay, 400],
+      ] as const) {
+        const cursor = await syncCursor()
+        expect((await api('/api/events/ev-f1', { method: 'PUT', json: body })).status).toBe(status)
+        expect(await sentSince(cursor)).toEqual(unmoved)
+      }
+      // Google refusing the patch of the master is passed on like any other refusal.
+      const cursor = await syncCursor()
+      fake.nextWriteError = new GoogleApiError(403, JSON.stringify({ error: { message: 'Forbidden' } }))
+      expect((await api('/api/events/ev-f1', { method: 'PUT', json: moveTo(1, 660) })).status).toBe(403)
+      expect(await sentSince(cursor)).toEqual(unmoved)
+      expect(fake.eventWrites).toEqual([])
+
+      // A series Google no longer has: the row the client wrote to is dropped.
+      fake.googleEvents.delete('g-fixed')
+      expect((await api('/api/events/ev-f1', { method: 'PUT', json: moveTo(1, 660) })).status).toBe(404)
+      expect(((await (await api('/api/events/ev-f1')).json()) as { deletedAt: string | null }).deletedAt).not.toBeNull()
+      expect(fake.eventWrites).toEqual([])
+    })
+
+    it('refuses a series in which this event or an upcoming one was moved on its own', async () => {
+      // `ev-m0` is in the past and has a time of its own; `ev-m2` is upcoming and has one too.
+      await hold('g-moved', {
+        'ev-m0': instance('g-moved', 'g-moved_a0', -5, 720, 30, 600),
+        'ev-m1': instance('g-moved', 'g-moved_a1', 1),
+        'ev-m2': instance('g-moved', 'g-moved_a2', 2, 720, 30, 600),
+      })
+      fake.eventWrites = []
+      const cursor = await syncCursor()
+      expect((await api('/api/events/ev-m1', { method: 'PUT', json: moveTo(1, 660) })).status).toBe(400)
+      expect(fake.eventWrites).toEqual([])
+      expect(await sentSince(cursor)).toEqual([['ev-m0', iso(at(-5, 720))], ['ev-m1', iso(at(1, 600))], ['ev-m2', iso(at(2, 720))]])
+
+      // A length of its own counts as well.
+      fake.googleEvents.set('g-moved_a2', instance('g-moved', 'g-moved_a2', 2, 600, 60))
+      expect((await api('/api/events/ev-m1', { method: 'PUT', json: moveTo(1, 660) })).status).toBe(400)
+      expect(fake.eventWrites).toEqual([])
+
+      // With only the past one left, the series moves.
+      fake.googleEvents.set('g-moved_a2', instance('g-moved', 'g-moved_a2', 2))
+      expect((await api('/api/events/ev-m1', { method: 'PUT', json: moveTo(1, 660) })).status).toBe(200)
+      expect(fake.eventWrites).toEqual([masterPatch('g-moved', 660)])
+    })
+  })
+
   it('DELETE removes the event on Google, tombstones the row and reschedules', async () => {
     const cursor = ((await (await api('/api/sync')).json()) as { cursor: string }).cursor
     fake.eventWrites = []
@@ -1283,7 +1527,6 @@ describe('calendar event writes', () => {
       endAt: allDay ? '2026-10-26T00:00:00.000Z' : '2026-10-25T17:00:00.000Z',
       recurrence: { frequency: 'weekly', interval: 2, timeZone: 'America/Los_Angeles', count: 2 },
     }
-    fake.instances = []
     // Google accepted the master but expansion failed: retry must recover it, not insert again.
     expect((await api(`/api/events/${id}`, { method: 'PUT', json: body })).status).toBe(500)
     expect((await api(`/api/events/${id}`)).status).toBe(404)
@@ -1294,14 +1537,14 @@ describe('calendar event writes', () => {
     })
     // Google expands at the same local hour across DST, not the same UTC hour. Its endpoint
     // does not promise ordering: the earliest occurrence must still keep the client's id.
-    fake.instances = [
+    for (const instance of [
       { ...fake.googleEvents.get(master), id: `${master}_second`, recurringEventId: master,
         start: allDay ? { date: '2026-11-08' } : { dateTime: '2026-11-08T17:00:00.000Z' },
         end: allDay ? { date: '2026-11-09' } : { dateTime: '2026-11-08T18:00:00.000Z' } },
       { ...fake.googleEvents.get(master), id: `${master}_first`, recurringEventId: master,
         start: allDay ? { date: '2026-10-25' } : { dateTime: body.startAt },
         end: allDay ? { date: '2026-10-26' } : { dateTime: body.endAt } },
-    ]
+    ]) fake.googleEvents.set(instance.id, instance)
     const response = await api(`/api/events/${id}`, { method: 'PUT', json: body })
     expect(response.status).toBe(200)
     const created = (await response.json()) as { event: { id: string; googleId: string; recurringEventId: string } }
@@ -1330,7 +1573,6 @@ describe('calendar event writes', () => {
     expect((await api(`/api/events/${id}`, { method: 'DELETE' })).status).toBe(200)
     expect(fake.googleEvents.has(master)).toBe(true)
     expect(fake.googleEvents.has(`${master}_second`)).toBe(true)
-    fake.instances = []
   })
 
   it('rejects invalid recurrence before creating anything on Google', async () => {
@@ -1497,17 +1739,25 @@ describe('day overrides', () => {
     freeMinutes: { computer: number; errand: number; home: number; office: number }
   }
 
-  /** The first Saturday or Sunday after today (Pacific): a day the routine plans nothing on. */
-  function nextWeekendDay(): string {
+  /**
+   * The first Saturday or Sunday after today (Pacific) with no event on it: a day the routine plans
+   * nothing on. The event tests above leave events three days out, which is a Saturday on Wednesdays.
+   */
+  async function nextWeekendDay(): Promise<string> {
+    const busy = new Set(
+      (await db.select().from(events))
+        .filter((e) => e.deletedAt === null && e.startAt !== null)
+        .map((e) => isoDate(localDate(e.startAt!.getTime(), 'America/Los_Angeles'))),
+    )
     const today = dayNumber(localDate(Date.now(), 'America/Los_Angeles'))
     for (let day = today + 1; ; day++) {
       const date = dateFromDayNumber(day)
-      if (weekdayOf(date) === 0 || weekdayOf(date) === 6) return isoDate(date)
+      if ((weekdayOf(date) === 0 || weekdayOf(date) === 6) && !busy.has(isoDate(date))) return isoDate(date)
     }
   }
 
   it('PUT sets what a date is and the plan follows; DELETE puts the date back on its weekday', async () => {
-    const date = nextWeekendDay()
+    const date = await nextWeekendDay()
     expect((await api('/api/day-overrides/next-tuesday', { method: 'PUT', json: { kind: 'off' } })).status).toBe(400)
     expect((await api('/api/day-overrides/2026-02-30', { method: 'PUT', json: { kind: 'off' } })).status).toBe(400)
     expect((await api(`/api/day-overrides/${date}`, { method: 'PUT', json: { kind: 'vacation' } })).status).toBe(400)

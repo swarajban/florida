@@ -35,13 +35,20 @@ export class FakeSync implements CalendarSyncService {
   /** When set, `syncAccount` waits on it, so a test can observe what happens while a first sync is still running. */
   syncAccountGate: Promise<void> | undefined
   syncAllCalls = 0
-  /** Google's copy of every event created through or seeded into this fake, by Google id. */
+  /**
+   * Google's copy of every event created through or seeded into this fake, by Google id. One with
+   * a `recurringEventId` is an instance of that series, and `eventInstances` lists it.
+   */
   googleEvents = new Map<string, GoogleEvent>()
+  /**
+   * By recurring event id: the instances Google holds once that event is next patched, in place
+   * of the ones it holds now. A series whose time changes comes back under new instance ids.
+   */
+  instancesAfterPatch = new Map<string, GoogleEvent[]>()
   /** Every event write in order, as the Google client would send it. */
   eventWrites: FakeEventWrite[] = []
   /** When set, the next event write rejects with it, as a failing Google call would, and clears it. */
   nextWriteError: Error | undefined
-  instances: GoogleEvent[] = []
   /** Ids are assigned as `g-<n>` from this counter. */
   nextGoogleId = 1
   async connectAccount(label: string): Promise<GoogleAccountRow> {
@@ -90,13 +97,20 @@ export class FakeSync implements CalendarSyncService {
     this.failIfArmed()
     const updated = applyWrite(this.googleEvent(googleId), patch)
     this.googleEvents.set(googleId, updated)
+    const instances = this.instancesAfterPatch.get(googleId)
+    if (instances !== undefined) {
+      this.instancesAfterPatch.delete(googleId)
+      for (const [id, event] of this.googleEvents) if (event.recurringEventId === googleId) this.googleEvents.delete(id)
+      for (const instance of instances) this.googleEvents.set(instance.id, structuredClone(instance))
+    }
     this.eventWrites.push({ method: 'patch', calendarId: calendar.googleId, googleId, body: patch })
     return structuredClone(updated)
   }
-  async eventInstances(): Promise<GoogleEvent[]> {
-    this.failIfArmed()
-    for (const instance of this.instances) this.googleEvents.set(instance.id, structuredClone(instance))
-    return structuredClone(this.instances)
+  /** The instances of a recurring event that overlap [timeMin, timeMax), in the order they were seeded. */
+  async eventInstances(_calendar: CalendarRow, googleId: string, timeMin: string, timeMax: string): Promise<GoogleEvent[]> {
+    this.googleEvent(googleId)
+    const overlaps = (e: GoogleEvent) => instant(e.end) > Date.parse(timeMin) && instant(e.start) < Date.parse(timeMax)
+    return structuredClone([...this.googleEvents.values()].filter((e) => e.recurringEventId === googleId && overlaps(e)))
   }
   async deleteEvent(calendar: CalendarRow, googleId: string): Promise<void> {
     this.failIfArmed()
@@ -115,6 +129,11 @@ export class FakeSync implements CalendarSyncService {
     this.nextWriteError = undefined
     throw err
   }
+}
+
+/** The instant a Google time names; an all-day `date` is read as UTC midnight. */
+function instant(time: GoogleEventDateTime | undefined): number {
+  return Date.parse(time?.dateTime ?? time?.date ?? '')
 }
 
 /** Google's patch semantics: given fields replace, `null` clears, `start`/`end` merge key by key, arrays are replaced. */

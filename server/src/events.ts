@@ -1,15 +1,19 @@
 import { randomUUID } from 'node:crypto'
-import { and, eq, ne } from 'drizzle-orm'
+import { dayNumber, localDate, localParts, zonedToUtc } from '@florida/scheduler'
+import { and, eq, inArray, isNull, ne } from 'drizzle-orm'
 import { z } from 'zod'
 import type { Db } from './db/client.js'
 import { calendars, events } from './db/schema.js'
 import type { CalendarRow, EventRow } from './db/schema.js'
 import { GoogleApiError, mapEvent } from './google/client.js'
 import type { GoogleEvent, GoogleEventTimeWrite, GoogleEventWrite } from './google/client.js'
+import { FULL_SYNC_FUTURE_DAYS, FULL_SYNC_PAST_DAYS } from './google/sync.js'
 import type { CalendarSyncService } from './google/sync.js'
 import { badRequest, forbidden, isoInstant, notFound, timeZone } from './validation.js'
 
 export const responseStatus = z.enum(['accepted', 'declined', 'tentative', 'needsAction'])
+
+const DAY = 86_400_000
 
 /**
  * Full event body as accepted by `PUT /api/events/:id`. All-day events carry UTC midnight instants:
@@ -33,6 +37,12 @@ export const eventBody = z
       timeZone,
       count: z.number().int().min(1).max(999).nullish(),
     }).nullish(),
+    /**
+     * `'series'` on an instance of a recurring event gives the whole series the time of day and
+     * the length of `startAt`/`endAt`; every instance keeps its day. Absent, or on an event that
+     * does not repeat, only this event changes.
+     */
+    scope: z.enum(['instance', 'series']).nullish(),
   })
   .refine((b) => new Date(b.endAt) > new Date(b.startAt), { message: 'endAt must be after startAt', path: ['endAt'] })
   .refine((b) => !b.allDay || (isUtcMidnight(b.startAt) && isUtcMidnight(b.endAt)), {
@@ -50,7 +60,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * live row is patched on Google with only the fields that changed. A tombstone is 404: the event is
  * gone on Google, and the client learns that from `GET /api/events/:id`. When Google turns out to
  * have deleted the event since the last sync, the row is tombstoned and returned as such, so the
- * caller can reschedule before answering 404.
+ * caller can reschedule before answering 404. With `scope: 'series'` the other rows of the series
+ * change too (`moveSeries`).
  */
 export async function upsertEvent(
   db: Db,
@@ -133,9 +144,44 @@ async function updateEvent(
   body: EventBody,
   now: Date,
 ): Promise<EventRow> {
-  if (body.calendarId !== current.calendarId) throw badRequest('moving an event to another calendar is not supported')
-  const calendar = await writableCalendar(db, current.calendarId)
+  const seriesId = body.scope === 'series' ? current.recurringEventId : null
+  let moved = false
+  try {
+    if (body.calendarId !== current.calendarId) throw badRequest('moving an event to another calendar is not supported')
+    const calendar = await writableCalendar(db, current.calendarId)
+    // The times of a series move go to the series; this instance is patched for what else changed.
+    const stored = await updateInstance(db, sync, calendar, current, body, now, seriesId === null)
+    if (seriesId === null || stored.deletedAt !== null) return stored
+    const result = await moveSeries(db, sync, calendar, stored, seriesId, body, now)
+    moved = result.deletedAt === null
+    return result
+  } finally {
+    // The apps move every instance of a series before they push. When the move did not go through,
+    // whatever the reason, the rows are stamped so the next `/api/sync` hands them the stored times.
+    if (seriesId !== null && !moved) {
+      await db.update(events).set({ updatedAt: now }).where(liveSeries(current.calendarId, seriesId))
+    }
+  }
+}
+
+/**
+ * Patches one event on Google with what changed and stores Google's copy. Without `withTimes` a
+ * changed start or end is left out. When Google no longer has the event, the row is tombstoned.
+ */
+async function updateInstance(
+  db: Db,
+  sync: CalendarSyncService,
+  calendar: CalendarRow,
+  current: EventRow,
+  body: EventBody,
+  now: Date,
+  withTimes: boolean,
+): Promise<EventRow> {
   const patch = changedFields(current, body)
+  if (!withTimes) {
+    delete patch.start
+    delete patch.end
+  }
   const rsvp = body.responseStatus ?? null
   let updated: GoogleEvent | undefined
   try {
@@ -159,13 +205,158 @@ async function updateEvent(
     return tombstoneEvent(db, current.id, now)
   }
   if (updated === undefined) return current
-  const [stored] = await db
+  const [row] = await db
     .update(events)
     .set(mapEvent(calendar.id, updated, now))
     .where(eq(events.id, current.id))
     .returning()
-  if (stored === undefined) throw notFound(`event ${current.id}`)
-  return stored
+  if (row === undefined) throw notFound(`event ${current.id}`)
+  return row
+}
+
+/**
+ * Moves a recurring event as a whole: its master takes the time of day of `body.startAt`, read in
+ * the zone the series repeats in, and the length of the body, and keeps its date. The target is
+ * absolute, so a retry after a lost reply patches nothing. The rows of the series are then replaced
+ * by Google's instances (`storeSeries`). A series Google no longer has tombstones the row.
+ *
+ * Two moves are refused before Google is touched:
+ * - To another day, in the series' zone, than the instance is on. The master keeps its date, so
+ *   every instance would land a day from where it was dropped.
+ * - Of a series in which this instance or an upcoming one was moved on its own. Google is reported
+ *   to drop such instances when the master's time changes, and it mails the guests. That report is
+ *   not verified; until it is, the series is left to Google Calendar.
+ */
+async function moveSeries(
+  db: Db,
+  sync: CalendarSyncService,
+  calendar: CalendarRow,
+  current: EventRow,
+  seriesId: string,
+  body: EventBody,
+  now: Date,
+): Promise<EventRow> {
+  if (body.allDay) throw badRequest('an all-day series cannot be moved as a whole')
+  try {
+    const master = await sync.getEvent(calendar, seriesId)
+    const zone = master.start?.timeZone
+    if (master.start?.dateTime === undefined || master.end?.dateTime === undefined || zone === undefined) {
+      throw badRequest('only a timed recurring event can be moved as a whole')
+    }
+    const from = new Date(master.start.dateTime).getTime()
+    const length = new Date(master.end.dateTime).getTime() - from
+    const target = new Date(body.startAt).getTime()
+    const targetLength = new Date(body.endAt).getTime() - target
+    if (current.startAt === null || dayNumber(localDate(target, zone)) !== dayNumber(localDate(current.startAt.getTime(), zone))) {
+      throw badRequest(`a recurring event can only be moved as a whole within its day in ${zone}`)
+    }
+    const time = localParts(target, zone)
+    const start = zonedToUtc(localDate(from, zone), time.hour * 60 + time.minute + time.second / 60, zone)
+    if (start !== from || targetLength !== length) {
+      const { instances } = await readSeries(db, sync, calendar, seriesId, now)
+      const upcoming = (e: GoogleEvent) => e.start?.dateTime !== undefined && new Date(e.start.dateTime) >= now
+      if (instances.some((e) => (e.id === current.googleId || upcoming(e)) && movedAlone(e, length))) {
+        throw badRequest('this series has an event that was moved on its own; move the series in Google Calendar')
+      }
+      await sync.updateEvent(calendar, seriesId, {
+        start: { dateTime: new Date(start).toISOString(), timeZone: zone },
+        end: { dateTime: new Date(start + targetLength).toISOString(), timeZone: master.end.timeZone ?? zone },
+      })
+    }
+    return await storeSeries(db, sync, calendar, current, seriesId, target, now)
+  } catch (err) {
+    if (!isGone(err)) throw err
+    return tombstoneEvent(db, current.id, now)
+  }
+}
+
+/**
+ * Whether an instance of a timed series was given a start or a length of its own: Google reports
+ * where the series put it as `originalStartTime`, and `seriesLength` is the master's.
+ */
+function movedAlone(instance: GoogleEvent, seriesLength: number): boolean {
+  if (instance.start?.dateTime === undefined || instance.end?.dateTime === undefined) return false
+  const start = new Date(instance.start.dateTime).getTime()
+  const original = instance.originalStartTime?.dateTime
+  if (original !== undefined && new Date(original).getTime() !== start) return true
+  return new Date(instance.end.dateTime).getTime() - start !== seriesLength
+}
+
+/**
+ * The live rows of one recurring event and Google's instances of it. The instances are listed over
+ * the usual sync window, widened to every row we hold: a row outside it would otherwise look gone.
+ */
+async function readSeries(db: Db, sync: CalendarSyncService, calendar: CalendarRow, seriesId: string, now: Date) {
+  const live = await db
+    .select({ id: events.id, googleId: events.googleId, startAt: events.startAt, endAt: events.endAt })
+    .from(events)
+    .where(liveSeries(calendar.id, seriesId))
+  const starts = live.flatMap((e) => (e.startAt === null ? [] : [e.startAt.getTime()]))
+  const ends = live.flatMap((e) => (e.endAt === null ? [] : [e.endAt.getTime()]))
+  const instances = await sync.eventInstances(
+    calendar,
+    seriesId,
+    new Date(Math.min(now.getTime() - FULL_SYNC_PAST_DAYS * DAY, ...starts) - DAY).toISOString(),
+    new Date(Math.max(now.getTime() + FULL_SYNC_FUTURE_DAYS * DAY, ...ends) + DAY).toISOString(),
+  )
+  return { live, instances }
+}
+
+/**
+ * Makes the rows of one recurring event match Google's instances: each instance is upserted and a
+ * live row Google no longer lists is tombstoned. Google names an instance after its original start
+ * time, so a series whose time changed can come back under new ids. The row the client wrote to
+ * then takes the instance that starts at `target`: its id is the one the client holds.
+ */
+async function storeSeries(
+  db: Db,
+  sync: CalendarSyncService,
+  calendar: CalendarRow,
+  current: EventRow,
+  seriesId: string,
+  target: number,
+  now: Date,
+): Promise<EventRow> {
+  const { live, instances } = await readSeries(db, sync, calendar, seriesId, now)
+  const held = new Set(live.map((e) => e.googleId))
+  const listed = new Set(instances.map((e) => e.id))
+  const renamed = listed.has(current.googleId)
+    ? undefined
+    : instances.find((e) => !held.has(e.id) && e.start?.dateTime !== undefined && new Date(e.start.dateTime).getTime() === target)
+  return db.transaction(async (tx) => {
+    for (const instance of instances) {
+      const row = mapEvent(calendar.id, instance, now)
+      if (instance !== renamed) {
+        await tx
+          .insert(events)
+          .values({ id: randomUUID(), ...row })
+          .onConflictDoUpdate({ target: [events.calendarId, events.googleId], set: row })
+        continue
+      }
+      // Another row can hold the instance's id: a tombstone from before the series left this time
+      // and came back, or a row a sync wrote meanwhile. The two rows trade ids and the other one
+      // stays dead. Deleting it would leave its event on a device that has not synced since.
+      const [other] = await tx
+        .update(events)
+        .set({ googleId: `${current.googleId}:${current.id}`, deletedAt: now, updatedAt: now })
+        .where(and(eq(events.calendarId, calendar.id), eq(events.googleId, instance.id), ne(events.id, current.id)))
+        .returning({ id: events.id })
+      await tx.update(events).set(row).where(eq(events.id, current.id))
+      if (other !== undefined) await tx.update(events).set({ googleId: current.googleId }).where(eq(events.id, other.id))
+    }
+    const stale = live.filter((e) => !listed.has(e.googleId) && !(renamed !== undefined && e.id === current.id)).map((e) => e.id)
+    if (stale.length > 0) {
+      await tx.update(events).set({ deletedAt: now, updatedAt: now }).where(inArray(events.id, stale))
+    }
+    const [stored] = await tx.select().from(events).where(eq(events.id, current.id)).limit(1)
+    if (stored === undefined) throw notFound(`event ${current.id}`)
+    return stored
+  })
+}
+
+/** The live rows of one recurring event in a calendar. */
+function liveSeries(calendarId: string, seriesId: string) {
+  return and(eq(events.calendarId, calendarId), eq(events.recurringEventId, seriesId), isNull(events.deletedAt))
 }
 
 /**
