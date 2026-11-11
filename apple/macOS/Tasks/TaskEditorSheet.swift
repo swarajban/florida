@@ -331,9 +331,7 @@ struct OptionalDateRow: View {
                     .foregroundStyle(.secondary)
                     .disabled(!isOn)
             }
-            DatePicker(
-                title, selection: $date,
-                displayedComponents: hasTime?.wrappedValue ?? true ? [.date, .hourAndMinute] : .date)
+            QuarterHourDatePicker(title: title, date: $date, showsTime: hasTime?.wrappedValue ?? true)
                 .labelsHidden()
                 .disabled(!isOn)
         }

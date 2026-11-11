@@ -79,7 +79,7 @@ extension AppModel {
             DateText.duration(minutes: max(1, Int((end.timeIntervalSince(now) / 60).rounded(.up))))
         }
         if let placement = placements.first(where: { $0.startAt <= now && now < $0.endAt }),
-           let task = tasksById[placement.taskId] {
+           let task = tasksById[placement.taskId], task.isOpen {
             return "\(Self.shortTitle(task.title)) · \(left(placement.endAt))"
         }
         if let event = todayAgenda?.events.first(where: { event in

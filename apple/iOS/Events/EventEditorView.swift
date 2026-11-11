@@ -64,8 +64,10 @@ struct EventEditorView: View {
                     Toggle("All-day", isOn: allDay)
                     DatePicker("Starts", selection: start, displayedComponents: dateComponents)
                         .datePickerStyle(.compact)
+                        .accessibilityIdentifier("event-start")
                     DatePicker("Ends", selection: end, displayedComponents: dateComponents)
                         .datePickerStyle(.compact)
+                        .accessibilityIdentifier("event-end")
                 } footer: {
                     if !endsAfterStart {
                         Label("The end must be after the start.", systemImage: "exclamationmark.triangle.fill")

@@ -8,36 +8,46 @@ struct DayGridHeader: View {
     let days: [Date]
     let today: Date
     let gutterWidth: CGFloat
+    let columnWidth: CGFloat
+    let direction: CGFloat
     let calendar: Calendar
 
     var body: some View {
         HStack(spacing: 0) {
             Color.clear
                 .frame(width: gutterWidth, height: 0)
-            ForEach(days, id: \.self) { day in
-                let isToday = calendar.isDate(day, inSameDayAs: today)
-                VStack(spacing: 2) {
-                    Text(day.formatted(.dateTime.weekday(.abbreviated)))
-                        .font(.caption2)
-                        .foregroundStyle(isToday ? FloridaStyle.ink : Color.secondary)
-                    Text("\(calendar.component(.day, from: day))")
-                        .font(.body.weight(isToday ? .bold : .regular))
-                        .foregroundStyle(isToday ? FloridaStyle.paper : FloridaStyle.ink)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
-                        .frame(width: 30, height: 30)
-                        .background {
-                            if isToday {
-                                Circle().fill(FloridaStyle.ink)
+            ZStack(alignment: .leading) {
+                ForEach(days, id: \.self) { day in
+                    let isToday = calendar.isDate(day, inSameDayAs: today)
+                    VStack(spacing: 2) {
+                        Text(day.formatted(.dateTime.weekday(.abbreviated)))
+                            .font(.caption2)
+                            .foregroundStyle(isToday ? FloridaStyle.ink : Color.secondary)
+                        Text("\(calendar.component(.day, from: day))")
+                            .font(.body.weight(isToday ? .bold : .regular))
+                            .foregroundStyle(isToday ? FloridaStyle.paper : FloridaStyle.ink)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.5)
+                            .frame(width: 30, height: 30)
+                            .background {
+                                if isToday {
+                                    Circle().fill(FloridaStyle.ink)
+                                }
                             }
-                        }
+                    }
+                    .frame(width: columnWidth)
+                    .padding(.vertical, 4)
+                    .offset(x: CGFloat(days.firstIndex(of: day) ?? 0) * columnWidth)
+                    .transition(.asymmetric(
+                        insertion: .offset(x: direction * columnWidth),
+                        removal: .offset(x: -direction * columnWidth)))
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(day.formatted(.dateTime.weekday(.wide).month(.wide).day()))
+                    .accessibilityValue(isToday ? "Today" : "")
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 4)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(day.formatted(.dateTime.weekday(.wide).month(.wide).day()))
-                .accessibilityValue(isToday ? "Today" : "")
             }
+            .frame(width: columnWidth * CGFloat(days.count), alignment: .leading)
+            .clipped()
         }
     }
 }

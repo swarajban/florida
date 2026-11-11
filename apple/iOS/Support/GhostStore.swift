@@ -11,6 +11,15 @@ struct GhostBlock: Codable, Hashable, Identifiable {
     var categoryId: String
     var start: Date
     var end: Date
+    /// Present for a completion stamp. Its tiny layout interval is not time spent working.
+    var completedAt: Date? = nil
+
+    static func completion(_ task: TaskItem) -> GhostBlock? {
+        guard let at = task.completedAt, task.deletedAt == nil else { return nil }
+        return GhostBlock(
+            id: "completed-\(task.id)", taskId: task.id, title: task.title, categoryId: task.categoryId,
+            start: at, end: at.addingTimeInterval(0.001), completedAt: at)
+    }
 }
 
 /// Today's ghosts in the app's own defaults (they are a display nicety, not synced data). Ghosts

@@ -39,7 +39,11 @@ struct AllDayStripView: View {
                                 model.editSelection()
                             }
                             .onTapGesture {
-                                model.select(block.item, in: .calendar)
+                                if model.jumpLabel(for: block.item) != nil {
+                                    model.selectJumped(block.item)
+                                } else {
+                                    model.select(block.item, in: .calendar)
+                                }
                             }
                     }
                 }
@@ -87,6 +91,8 @@ private struct AllDayBar: View {
         HStack(spacing: 4) {
             if let jumpLabel {
                 JumpBadge(label: jumpLabel)
+                    .accessibilityIdentifier("event-jump-\(block.id)")
+                    .accessibilityValue(jumpLabel.uppercased())
             }
             Text(block.title)
                 .font(.caption)

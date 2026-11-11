@@ -4,6 +4,35 @@ import XCTest
 /// Kept screenshots are exported from the result bundle by CI for light/dark visual review.
 final class SmokeTests: XCTestCase {
     @MainActor
+    func testCompletionStamp() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-demoData", "YES", "-uiAppearance", appearance]
+            app.launch()
+            let row = app.staticTexts["Renew VPN certificate"].firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 15))
+            row.doubleClick()
+            XCTAssertTrue(app.sheets.buttons["Mark done"].waitForExistence(timeout: 5))
+            app.sheets.buttons["Mark done"].click()
+            XCTAssertTrue(row.waitForNonExistence(timeout: 5))
+            app.typeKey("z", modifierFlags: [])
+            app.typeKey("z", modifierFlags: [])
+            let stamp = app.staticTexts["Completed: Renew VPN certificate"]
+            XCTAssertTrue(stamp.waitForExistence(timeout: 5))
+            XCTAssertTrue((stamp.value as? String)?.hasPrefix("Done at ") == true)
+            capture(app.windows.firstMatch, "completed-at-now-mac-\(appearance)")
+            app.typeKey("m", modifierFlags: .shift)
+            capture(app.windows.firstMatch, "completed-month-mac-\(appearance)")
+            app.typeKey("d", modifierFlags: [])
+            app.typeKey("u", modifierFlags: [])
+            XCTAssertTrue(row.waitForExistence(timeout: 5))
+            XCTAssertTrue(stamp.waitForNonExistence(timeout: 5))
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testRecurringEventCreation() {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {
@@ -15,6 +44,15 @@ final class SmokeTests: XCTestCase {
             let title = app.sheets.textFields.firstMatch
             XCTAssertTrue(title.waitForExistence(timeout: 5))
             title.typeText("Weekly planning")
+            let startTime = app.popUpButtons["time-Starts"]
+            XCTAssertTrue(startTime.exists)
+            startTime.click()
+            let at = Calendar.current.date(bySettingHour: 10, minute: 15, second: 0, of: Date())!
+            let timeLabel = at.formatted(.dateTime.hour().minute())
+            XCTAssertFalse(app.menuItems[at.addingTimeInterval(60).formatted(.dateTime.hour().minute())].exists)
+            XCTAssertTrue(app.menuItems[at.addingTimeInterval(900).formatted(.dateTime.hour().minute())].exists)
+            app.menuItems[timeLabel].click()
+            XCTAssertEqual(startTime.value as? String, timeLabel)
             let repeatPicker = app.popUpButtons["event-repeat"]
             XCTAssertTrue(repeatPicker.exists)
             app.buttons["Cancel"].hover()
@@ -157,6 +195,26 @@ final class SmokeTests: XCTestCase {
 
             app.typeKey(.escape, modifierFlags: [])
             XCTAssertTrue(nearTop.waitForNonExistence(timeout: 5))
+
+            // Choosing an event label opens its details, by keyboard or by clicking the badge.
+            for click in [false, true] {
+                app.typeKey("f", modifierFlags: [])
+                let eventLabel = app.staticTexts["event-jump-demo-event-offsite"]
+                XCTAssertTrue(eventLabel.waitForExistence(timeout: 5))
+                if click {
+                    app.buttons["Today"].hover()
+                    eventLabel.hover()
+                    eventLabel.click()
+                } else {
+                    let keys = try XCTUnwrap(eventLabel.value as? String).lowercased()
+                    for key in keys { app.typeKey(String(key), modifierFlags: []) }
+                }
+                XCTAssertTrue(app.buttons["Edit…"].waitForExistence(timeout: 5))
+                XCTAssertTrue(app.staticTexts["Half Moon Bay"].exists)
+                capture(window, "jump-event-\(click ? "click" : "key")-\(appearance)")
+                app.typeKey(.escape, modifierFlags: [])
+                XCTAssertTrue(app.buttons["Edit…"].waitForNonExistence(timeout: 5))
+            }
 
             // A task on the calendar and in the pane, then one in the pane only.
             try jump(to: "demo-task-pr", titled: "Review auth service PR", in: app)

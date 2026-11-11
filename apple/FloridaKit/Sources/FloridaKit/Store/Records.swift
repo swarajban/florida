@@ -154,11 +154,17 @@ public struct DayAgenda: Hashable, Sendable {
     public var placements: [ScheduledBlock]
     /// The day's commitments (the gym) and time held for active projects, by start.
     public var planBlocks: [PlanBlock]
+    /// Completed on this local day, regardless of where (or whether) they were scheduled.
+    public var completedTasks: [TaskItem]
 
-    public init(day: Date, events: [CalendarEvent], placements: [ScheduledBlock], planBlocks: [PlanBlock] = []) {
+    public init(
+        day: Date, events: [CalendarEvent], placements: [ScheduledBlock],
+        planBlocks: [PlanBlock] = [], completedTasks: [TaskItem] = []
+    ) {
         self.day = day
         self.events = events
         self.placements = placements
         self.planBlocks = planBlocks
+        self.completedTasks = completedTasks
     }
 }

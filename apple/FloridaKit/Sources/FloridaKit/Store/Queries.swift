@@ -217,7 +217,8 @@ extension AppDatabase {
         let tasks = try TaskItem.filter(ids: Set(placements.map(\.taskId))).fetchAll(db)
         let tasksById = Dictionary(uniqueKeysWithValues: tasks.map { ($0.id, $0) })
         return placements.compactMap { placement in
-            tasksById[placement.taskId].map { ScheduledBlock(placement: placement, task: $0) }
+            guard let task = tasksById[placement.taskId], task.isOpen else { return nil }
+            return ScheduledBlock(placement: placement, task: task)
         }
     }
 
@@ -227,7 +228,11 @@ extension AppDatabase {
             day: range.lowerBound,
             events: try events(db, in: range, calendar: calendar),
             placements: try scheduledBlocks(db, in: range),
-            planBlocks: try planBlocks(db, in: range))
+            planBlocks: try planBlocks(db, in: range),
+            completedTasks: try TaskItem
+                .filter(Column("deletedAt") == nil && Column("completedAt") >= range.lowerBound && Column("completedAt") < range.upperBound)
+                .order(Column("completedAt"), Column("id"))
+                .fetchAll(db))
     }
 
     /// The commitments and project time overlapping `range`, by start. Reads all four tables

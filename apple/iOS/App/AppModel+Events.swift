@@ -19,10 +19,9 @@ extension AppModel {
         event.responseStatus != nil && canEdit(event)
     }
 
-    /// Calendars the user may create events in, selected ones first.
+    /// Writable calendars in the preferred new-event order; the first is the default.
     var writableCalendars: [CalendarInfo] {
-        let writable = calendars.filter(Self.isWritable)
-        return writable.filter(\.selected) + writable.filter { !$0.selected }
+        calendars.filter(Self.isWritable).sorted(by: CalendarInfo.isPreferredForNewEvents)
     }
 
     /// A blank 30-minute event starting at `start` (rounded to the next 15 minutes) on the first

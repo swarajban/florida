@@ -217,7 +217,9 @@ final class AppModel {
     }
 
     func task(id: String) -> TaskItem? {
-        openTasks.first { $0.id == id } ?? agenda?.placements.first { $0.task.id == id }?.task
+        if let open = openTasks.first(where: { $0.id == id }) { return open }
+        guard let stored = try? database?.task(id: id), stored.deletedAt == nil else { return nil }
+        return stored
     }
 }
 

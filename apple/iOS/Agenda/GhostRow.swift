@@ -8,7 +8,7 @@ struct GhostRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            TimeColumn(start: ghost.start, end: ghost.end)
+            TimeColumn(start: ghost.start, end: ghost.completedAt == nil ? ghost.end : nil)
             RoundedRectangle(cornerRadius: 2)
                 .fill(Color.category(category).opacity(0.5))
                 .frame(width: 3)
@@ -26,5 +26,6 @@ struct GhostRow: View {
         .opacity(0.6)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Done: \(ghost.title)")
+        .accessibilityValue(ghost.completedAt.map { "Done at \(Formatting.time($0))" } ?? "")
     }
 }

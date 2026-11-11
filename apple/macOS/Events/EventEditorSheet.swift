@@ -47,8 +47,8 @@ struct EventEditorSheet: View {
                 }
                 Section {
                     Toggle("All-day", isOn: allDay)
-                    DatePicker("Starts", selection: start, displayedComponents: dateComponents)
-                    DatePicker("Ends", selection: end, displayedComponents: dateComponents)
+                    QuarterHourDatePicker(title: "Starts", date: start, showsTime: !draft.allDay)
+                    QuarterHourDatePicker(title: "Ends", date: end, showsTime: !draft.allDay)
                 } footer: {
                     if !endsAfterStart {
                         Label("The end must be after the start.", systemImage: "exclamationmark.triangle.fill")
@@ -135,10 +135,6 @@ struct EventEditorSheet: View {
 
     private var calendar: Calendar {
         model.calendar
-    }
-
-    private var dateComponents: DatePickerComponents {
-        draft.allDay ? [.date] : [.date, .hourAndMinute]
     }
 
     /// Both filled in `init`, so the fallbacks are never used.

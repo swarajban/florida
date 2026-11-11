@@ -118,6 +118,8 @@ extension AppModel {
         guard let block = blocks.first(where: { !$0.companions.isEmpty }) ?? blocks.first else { return nil }
         let alongside = block.companions.isEmpty ? nil : PlanText.alongside(block.companions)
         switch block.kind {
+        case .completed:
+            return "Completed at \(DateText.time(block.start))"
         case .commitment:
             return "\(block.title), from your routine · Return: edit the routine"
         case .projectTime:

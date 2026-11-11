@@ -45,6 +45,17 @@ extension AppDatabase {
         }
     }
 
+    /// Live tasks including completions, for calendar history as well as the open-task pane.
+    public func observeTasks() -> AsyncValueObservation<[TaskItem]> {
+        observe { db in
+            try TaskItem.fetchAll(db, sql: """
+                SELECT * FROM task
+                WHERE deletedAt IS NULL
+                ORDER BY \(Self.priorityRankSQL), dueAt IS NULL, dueAt, createdAt
+                """)
+        }
+    }
+
     /// Every placement, by start. The table only ever holds the scheduler's horizon, so the
     /// task list can derive each task's scheduled time from it without a date filter.
     public func observePlacements() -> AsyncValueObservation<[Placement]> {

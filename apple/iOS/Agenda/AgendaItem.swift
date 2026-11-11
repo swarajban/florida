@@ -74,7 +74,10 @@ enum AgendaItem: Identifiable, Hashable {
         let events = agenda.events.filter { !$0.allDay }.map(AgendaItem.event)
         let blocks = agenda.placements.map(AgendaItem.block)
         let plan = agenda.planBlocks.map(AgendaItem.plan)
-        var items = (events + blocks + plan + ghosts.map(AgendaItem.ghost)).sorted { lhs, rhs in
+        let completions = agenda.completedTasks.compactMap(GhostBlock.completion)
+        let completedIDs = Set(agenda.completedTasks.map(\.id))
+        let visibleGhosts = ghosts.filter { !completedIDs.contains($0.taskId) } + completions
+        var items = (events + blocks + plan + visibleGhosts.map(AgendaItem.ghost)).sorted { lhs, rhs in
             if lhs.start != rhs.start { return lhs.start < rhs.start }
             if lhs.end != rhs.end { return lhs.end < rhs.end }
             return (lhs.lane ?? -1) < (rhs.lane ?? -1)

@@ -20,7 +20,6 @@ extension AppModel {
         completed.completedMinutes = previous.durationMinutes
         guard write({ try $0.completeTask(id: task.id, at: now) }) else { return }
         completionCount += 1
-        let ghosts = recordGhosts(for: previous)
         if let index {
             blooming[task.id] = BloomingTask(task: previous, index: index)
             Task { [weak self] in
@@ -32,7 +31,7 @@ extension AppModel {
         }
         showToast(Toast(
             message: "Completed “\(task.title)”", systemImage: "checkmark.circle.fill", style: .success,
-            undo: TaskUndo(from: previous, to: completed), ghostIds: ghosts))
+            undo: TaskUndo(from: previous, to: completed)))
     }
 
     /// Credits `minutes` of work without finishing: the rest stays open and the scheduler places

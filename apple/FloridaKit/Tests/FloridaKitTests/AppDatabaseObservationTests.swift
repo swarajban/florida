@@ -6,17 +6,23 @@ import Testing
     @Test func openTasksObservationYieldsNowAndAfterWrites() async throws {
         let db = try AppDatabase.inMemory()
         var iterator = db.observeOpenTasks().makeAsyncIterator()
+        var history = db.observeTasks().makeAsyncIterator()
 
         let initial = try await iterator.next()
         #expect(initial == [])
+        #expect(try await history.next() == [])
 
         try db.saveTask(Fixtures.task(id: "t1"), now: Fixtures.t0)
         let afterInsert = try await iterator.next()
         #expect(afterInsert?.map(\.id) == ["t1"])
+        #expect(try await history.next()?.map(\.id) == ["t1"])
 
         try db.completeTask(id: "t1", at: Fixtures.instant("2026-11-08T12:00:00Z"))
         let afterComplete = try await iterator.next()
         #expect(afterComplete == [])
+        #expect(try await history.next()?.first?.completedAt == Fixtures.instant("2026-11-08T12:00:00Z"))
+        try db.deleteTask(id: "t1", now: Fixtures.instant("2026-11-08T12:01:00Z"))
+        #expect(try await history.next() == [])
     }
 
     @Test func eventsObservationIsScopedToTheRangeAndSelectedCalendars() async throws {

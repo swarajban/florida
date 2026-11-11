@@ -67,7 +67,9 @@ struct MonthCellView: View {
                 line(item: block.item, day: day, text: block.title, tint: block.tint, filled: true)
             }
             ForEach(timed.prefix(max(0, MonthGridView.maxLinesPerCell - allDay.count))) { block in
-                line(item: block.item, day: day, text: "\(DateText.time(block.start)) \(block.title)", tint: block.tint, filled: block.isEvent)
+                line(
+                    item: block.item, day: day, text: "\(DateText.time(block.start)) \(block.title)",
+                    tint: block.tint, filled: block.isEvent, completed: block.kind == .completed)
             }
             if overflow > 0 {
                 Text("+\(overflow) more")
@@ -96,7 +98,7 @@ struct MonthCellView: View {
         }
     }
 
-    private func line(item: ItemID, day: Date, text: String, tint: Color, filled: Bool) -> some View {
+    private func line(item: ItemID, day: Date, text: String, tint: Color, filled: Bool, completed: Bool = false) -> some View {
         let isSelected = model.selection == item
         // An event spanning several cells shows its detail from the first one.
         let detailId: String? = if case .event(let id) = item, layout.day(of: item) == day { id } else { nil }
@@ -104,6 +106,10 @@ struct MonthCellView: View {
             if let label = model.jumpLabel(for: item) {
                 // Jump mode: the label takes the dot's place.
                 JumpBadge(label: label)
+            } else if completed {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 8))
+                    .foregroundStyle(tint)
             } else {
                 Circle()
                     .fill(filled ? tint : .clear)
@@ -112,6 +118,7 @@ struct MonthCellView: View {
             }
             Text(text)
                 .font(.caption2)
+                .strikethrough(completed)
                 .lineLimit(1)
         }
         .padding(.horizontal, 3)
@@ -123,7 +130,11 @@ struct MonthCellView: View {
             model.editSelection()
         }
         .onTapGesture {
-            model.select(item, in: .calendar)
+            if model.jumpLabel(for: item) != nil {
+                model.selectJumped(item)
+            } else {
+                model.select(item, in: .calendar)
+            }
         }
         .eventDetailPopover(model, eventId: detailId)
     }

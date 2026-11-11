@@ -3,6 +3,80 @@ import XCTest
 /// Wait for real content before capturing; a fixed launch delay can silently save a blank screen.
 final class SmokeTests: XCTestCase {
     @MainActor
+    func testCompletionStampAndQuarterHourPicker() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = launch(appearance: appearance, mode: "day")
+            waitForText("Infra offsite", in: app)
+            app.tabBars.buttons["Tasks"].tap()
+            let task = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Renew VPN certificate")).firstMatch
+            XCTAssertTrue(task.waitForExistence(timeout: 10))
+            task.tap()
+            app.buttons["Mark done"].tap()
+            app.tabBars.buttons["Agenda"].tap()
+            let stamp = app.buttons["Renew VPN certificate, done"]
+            XCTAssertTrue(stamp.waitForExistence(timeout: 10))
+            XCTAssertTrue(stamp.isHittable, "an unscheduled task is stamped at now, in the visible grid")
+            XCTAssertTrue((stamp.value as? String)?.hasPrefix("Done at ") == true)
+            capture(app, "completed-at-now-\(appearance)")
+            stamp.tap()
+            app.buttons["Reopen"].tap()
+            XCTAssertTrue(stamp.waitForNonExistence(timeout: 5))
+
+            app.buttons["agenda-add"].tap()
+            app.buttons["New Event"].tap()
+            let title = app.textFields["Title"]
+            XCTAssertTrue(title.waitForExistence(timeout: 5))
+            title.typeText("Time picker check\n")
+            XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+            let dateButtons = app.datePickers["event-start"].buttons
+            dateButtons.element(boundBy: dateButtons.count - 1).tap()
+            XCTAssertTrue(app.pickerWheels.firstMatch.waitForExistence(timeout: 5))
+            let minute = app.pickerWheels.element(boundBy: 1)
+            minute.adjust(toPickerWheelValue: "15")
+            XCTAssertEqual(minute.value as? String, "15 minutes")
+            // Move one row without momentum: a one-minute wheel would select 16, not 30.
+            let middle = minute.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            middle.press(forDuration: 0.05, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: -34)),
+                         withVelocity: .slow, thenHoldForDuration: 0.3)
+            XCTAssertEqual(minute.value as? String, "30 minutes")
+            capture(app, "quarter-hour-picker-\(appearance)")
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testThreeDayNavigation() {
+        continueAfterFailure = false
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        for appearance in ["light", "dark"] {
+            let app = launch(appearance: appearance, mode: "threeDays")
+            waitForText("Infra offsite", in: app)
+            capture(app, "three-day-start-\(appearance)")
+            let heading = app.buttons["Go to day"]
+            let right = app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.55))
+            let left = app.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.55))
+            // Both directions, including a swipe begun on a timed block rather than the gutter.
+            for (offset, forward) in [(1, true), (2, true), (1, false), (0, false)] {
+                if forward {
+                    right.press(forDuration: 0.05, thenDragTo: left)
+                } else {
+                    left.press(forDuration: 0.05, thenDragTo: right)
+                }
+                let date = calendar.date(byAdding: .day, value: offset, to: today)!
+                let expected = date.formatted(.dateTime.weekday(.wide).month(.wide).day().year())
+                XCTAssertTrue(heading.waitForExistence(timeout: 5))
+                XCTAssertEqual(heading.value as? String, expected, "A swipe must move one day, not three")
+            }
+            // Three column labels replace the seven-day strip, rather than sitting below it.
+            XCTAssertFalse(app.buttons[today.formatted(.dateTime.weekday(.wide).month(.wide).day())].exists)
+            capture(app, "three-day-return-\(appearance)")
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testTaskShortcutAndRecurringEvent() {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {

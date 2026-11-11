@@ -96,8 +96,9 @@ extension AppModel {
         return true
     }
 
-    /// Selects a labelled item in the focused pane when it is shown there, else in the other one.
-    private func selectJumped(_ item: ItemID) {
+    /// Selects a labelled item in its pane. Events also open their details, so choosing a label
+    /// has a visible result and immediately exposes RSVP, editing and meeting actions.
+    func selectJumped(_ item: ItemID) {
         let onCalendar = gridLayout.day(of: item) != nil
         let inPane = isTasksPaneVisible && orderedTaskItems.contains(item)
         guard onCalendar || inPane else {
@@ -107,5 +108,8 @@ extension AppModel {
         }
         let staysInPane = inPane && (focus == .tasks || !onCalendar)
         select(item, in: staysInPane ? .tasks : .calendar)
+        if case .event(let id) = item {
+            eventDetailID = id
+        }
     }
 }

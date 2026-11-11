@@ -3,6 +3,19 @@ import Testing
 @testable import FloridaCore
 
 @Suite struct JSONCodingTests {
+    @Test func newEventCalendarPreferenceOverridesAlphabeticalAndVisibilityOrder() {
+        func calendar(_ id: String, _ name: String, selected: Bool = true) -> CalendarInfo {
+            CalendarInfo(id: id, accountId: "a", googleId: id, summary: name, accessRole: "owner", selected: selected, updatedAt: .distantPast)
+        }
+        let calendars = [
+            calendar("other", "AAA"), calendar("family", "A&S Family Calendar"),
+            calendar("personal", "PERSONAL"), calendar("sempre", " sempre ", selected: false),
+        ]
+        #expect(calendars.sorted(by: CalendarInfo.isPreferredForNewEvents).map(\.id) == ["sempre", "personal", "family", "other"])
+        #expect(calendars.filter { $0.id != "sempre" }.sorted(by: CalendarInfo.isPreferredForNewEvents).first?.id == "personal")
+        #expect(calendars.prefix(2).sorted(by: CalendarInfo.isPreferredForNewEvents).first?.id == "family")
+    }
+
     @Test func parsesServerInstantsWithAndWithoutFraction() throws {
         let withFraction = try #require(JSONCoding.parseInstant("2026-11-08T17:00:00.250Z"))
         let whole = try #require(JSONCoding.parseInstant("2026-11-08T17:00:00Z"))

@@ -295,8 +295,8 @@ final class AppModel {
                 model.rebuildLayout()
                 model.refreshSuggestions()
             },
-            observe(database.observeOpenTasks()) { model, tasks in
-                model.openTasks = tasks
+            observe(database.observeTasks()) { model, tasks in
+                model.openTasks = tasks.filter(\.isOpen)
                 model.tasksById = Dictionary(tasks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
                 model.rebuildLayout()
                 model.refreshSuggestions()

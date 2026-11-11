@@ -47,6 +47,12 @@ struct TimeGridCanvas: View {
             drawJumpLabels(in: &context, geometry: geometry)
         }
         .frame(height: grid.dayHeight)
+        .accessibilityChildren {
+            ForEach(layout.blocksByDay.flatMap { $0 }.filter { $0.kind == .completed }) { block in
+                Text("Completed: \(block.title)")
+                    .accessibilityValue("Done at \(DateText.time(block.start))")
+            }
+        }
     }
 
     // MARK: Chrome
@@ -125,6 +131,9 @@ struct TimeGridCanvas: View {
                 let accountEdge = CGRect(x: rect.minX, y: rect.minY + 3, width: 2, height: max(0, rect.height - 6))
                 context.fill(Path(roundedRect: accountEdge, cornerRadius: 1), with: .color(rim.opacity(alpha)))
             }
+        case .completed:
+            context.fill(shape, with: .color(block.tint.opacity(0.05)))
+            context.stroke(shape, with: .color(block.tint.opacity(0.3)), lineWidth: 1)
         case .task(let pinned):
             context.fill(shape, with: .color(block.tint.opacity(0.04 * alpha)))
             context.stroke(
@@ -144,7 +153,7 @@ struct TimeGridCanvas: View {
 
         var inner = context
         inner.clip(to: shape)
-        let isCurrent = showsProgress && !block.isSuggestion && block.start <= now && now < block.end
+        let isCurrent = showsProgress && !block.isSuggestion && block.kind != .completed && block.start <= now && now < block.end
         if isCurrent {
             drawProgressFill(of: block, in: &inner, rect: rect)
         }
@@ -157,7 +166,8 @@ struct TimeGridCanvas: View {
                 at: CGPoint(x: rect.maxX - padding - pinSize / 2, y: rect.minY + 2 + pinSize / 2))
             titleRect.size.width -= pinSize + 2
         }
-        let title = Text(block.title).font(.system(size: 11, weight: .medium)).foregroundStyle(textColor)
+        let title = Text(block.title).font(.system(size: 11, weight: .medium))
+            .strikethrough(block.kind == .completed).foregroundStyle(textColor)
         var titleLine = titleRect
         if let badge = jumpBadge(for: block, in: rect), badge.frame.minY < titleLine.minY + 14 {
             // The label sits on the block's corner (`drawJumpLabels`), so the title starts after it.
@@ -191,6 +201,7 @@ struct TimeGridCanvas: View {
     /// The corner mark: pinned, suggested, the gym, project time, or sharing its hour.
     private static func glyph(for block: GridLayout.Block) -> String? {
         switch block.kind {
+        case .completed: "checkmark.circle.fill"
         case .task(pinned: true): "pin.fill"
         case .suggestion: "moon.stars"
         case .commitment: PlanText.commitmentSymbol

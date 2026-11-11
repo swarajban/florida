@@ -26,10 +26,9 @@ extension AppModel {
         event.responseStatus != nil && canEdit(event)
     }
 
-    /// Calendars the user may create events in, selected ones first.
+    /// Writable calendars in the preferred new-event order; the first is the default.
     var writableCalendars: [CalendarInfo] {
-        let writable = calendars.filter(Self.isWritable)
-        return writable.filter(\.selected) + writable.filter { !$0.selected }
+        calendars.filter(Self.isWritable).sorted(by: CalendarInfo.isPreferredForNewEvents)
     }
 
     /// The event the event keys act on: the one whose detail popover is open, else the selected one.

@@ -20,7 +20,7 @@ struct DayGridLayout: Equatable {
 
     /// A timed block in one day column.
     struct Block: Identifiable, Hashable {
-        /// Day index and source id: a block crossing midnight is drawn in two columns.
+        /// Date and source id: stable when paging, distinct on either side of midnight.
         let id: String
         let item: Item
         let dayIndex: Int
@@ -202,8 +202,12 @@ struct DayGridLayout: Equatable {
             lanes[plan.id] = plan.lane
         }
 
-        // A ghost whose placement is still live (same id) is drawn once, as the placement.
-        for ghost in ghosts {
+        // Completions come from synced task timestamps, not the task's former scheduled slot.
+        let completed = agendas.flatMap(\.completedTasks)
+        let completedIDs = Set(completed.map(\.id))
+        let visibleGhosts = ghosts.filter { !completedIDs.contains($0.taskId) } + completed.compactMap(GhostBlock.completion)
+        // A partial-work ghost whose placement is still live is drawn once, as the placement.
+        for ghost in visibleGhosts {
             let id = "ghost-\(ghost.id)"
             guard ghost.end > range.lowerBound, ghost.start < range.upperBound, sources[ghost.id] == nil else { continue }
             sources[id] = Source(
@@ -241,11 +245,17 @@ struct DayGridLayout: Equatable {
             let frames = DayLayout.layout(items, day: day, calendar: calendar, minimumMinutes: minimumMinutes)
             for frame in LaneColumns.ordered(frames, lanes: lanes) {
                 guard let source = sources[frame.id] else { continue }
+                let timeText: String
+                if case .ghost(let ghost) = source.item, let at = ghost.completedAt {
+                    timeText = "Done at \(Formatting.time(at))"
+                } else {
+                    timeText = Formatting.timeRange(source.start, source.end)
+                }
                 layout.blocks.append(Block(
-                    id: "\(index)-\(frame.id)", item: source.item, dayIndex: index, column: frame.column,
+                    id: "\(day.timeIntervalSinceReferenceDate)-\(frame.id)", item: source.item, dayIndex: index, column: frame.column,
                     columnCount: frame.columnCount, startMinute: frame.startMinute, endMinute: frame.endMinute,
                     start: source.start, end: source.end, title: source.title,
-                    timeText: Formatting.timeRange(source.start, source.end), tint: source.tint, rim: source.rim,
+                    timeText: timeText, tint: source.tint, rim: source.rim,
                     isPinned: source.isPinned, isDone: source.isDone))
             }
         }

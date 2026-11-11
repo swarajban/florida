@@ -40,15 +40,17 @@ struct AgendaView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 dayHeading
-                ZStack {
-                    WeekStrip(
-                        selectedDay: model.selectedDay,
-                        today: model.today,
-                        calendar: model.calendar,
-                        onSelect: { model.select(day: $0) },
-                        onShiftWeek: { model.shiftDay(by: 7 * $0) })
-                    .id(DateNavigation.startOfWeek(for: shownDay ?? model.selectedDay, calendar: model.calendar))
-                    .transition(slide)
+                if mode != .threeDays {
+                    ZStack {
+                        WeekStrip(
+                            selectedDay: model.selectedDay,
+                            today: model.today,
+                            calendar: model.calendar,
+                            onSelect: { model.select(day: $0) },
+                            onShiftWeek: { model.shiftDay(by: 7 * $0) })
+                        .id(DateNavigation.startOfWeek(for: shownDay ?? model.selectedDay, calendar: model.calendar))
+                        .transition(slide)
+                    }
                 }
                 Divider()
                 content
@@ -208,11 +210,14 @@ struct AgendaView: View {
                 showsDayPicker = true
             } label: {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(model.selectedDay.formatted(.dateTime.weekday(.wide)))
-                        .font(.title.weight(.medium))
-                        .foregroundStyle(FloridaStyle.ink)
+                    if mode != .threeDays {
+                        Text(model.selectedDay.formatted(.dateTime.weekday(.wide)))
+                            .font(.title.weight(.medium))
+                            .foregroundStyle(FloridaStyle.ink)
+                    }
                     HStack(spacing: 4) {
-                        Text(model.selectedDay.formatted(.dateTime.month(.wide).day().year()))
+                        Text(model.selectedDay.formatted(mode == .threeDays
+                            ? .dateTime.month(.wide).year() : .dateTime.month(.wide).day().year()))
                             .font(.subheadline)
                         Image(systemName: "chevron.down")
                             .font(.caption2.weight(.bold))

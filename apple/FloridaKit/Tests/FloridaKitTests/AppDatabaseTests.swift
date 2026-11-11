@@ -494,6 +494,30 @@ import Testing
         #expect(try db.openTasks().isEmpty)
     }
 
+    @Test func completionStampsFollowTheActualLocalDayAndSurviveRescheduling() throws {
+        let db = try AppDatabase.inMemory()
+        let at = Fixtures.instant("2026-11-09T07:57:00Z") // Nov 8, 11:57 PM in Los Angeles
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: at)!
+        let oldSlot = Placement(id: "p", taskId: "later", startAt: tomorrow, endAt: tomorrow.addingTimeInterval(3600), pinned: false, computedAt: at)
+        try db.apply(SyncResponse(cursor: "c", tasks: [Fixtures.task(id: "later"), Fixtures.task(id: "unscheduled")], placements: [oldSlot]))
+        try db.completeTask(id: "later", at: at)
+        try db.completeTask(id: "unscheduled", at: at.addingTimeInterval(60))
+        let agenda = try db.agenda(for: at, calendar: calendar)
+        #expect(agenda.completedTasks.map(\.id) == ["later", "unscheduled"])
+        #expect(agenda.completedTasks.first?.completedAt == at)
+        #expect(agenda.placements.isEmpty)
+        #expect(try db.agenda(for: tomorrow, calendar: calendar).placements.isEmpty, "the stale future slot disappears immediately")
+        #expect(try db.agenda(for: tomorrow, calendar: calendar).completedTasks.isEmpty)
+
+        try db.apply(SyncResponse(cursor: "c2", placements: []))
+        #expect(try db.agenda(for: at, calendar: calendar).completedTasks.map(\.id) == ["later", "unscheduled"])
+        try db.reopenTask(id: "later", now: at.addingTimeInterval(90))
+        try db.deleteTask(id: "unscheduled", now: at.addingTimeInterval(100))
+        #expect(try db.agenda(for: at, calendar: calendar).completedTasks.isEmpty)
+    }
+
     @Test func completeAndReopenGoThroughSaveTask() throws {
         let db = try AppDatabase.inMemory()
         try db.apply(SyncResponse(cursor: "c", tasks: [Fixtures.task(id: "t1")]))

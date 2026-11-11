@@ -124,6 +124,10 @@ struct CalendarGridView: View {
         let geometry = gridGeometry(width: width)
         guard let dayIndex = geometry.dayIndex(atX: point.x) else { return }
         if let block = geometry.block(at: point, in: layout) {
+            if model.jumpLabel(for: block.item) != nil {
+                model.selectJumped(block.item)
+                return
+            }
             model.select(block.item, in: .calendar)
             if isDouble {
                 model.editSelection()

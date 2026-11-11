@@ -35,8 +35,8 @@ struct DayGridView: View {
     @State private var position = ScrollPosition(idType: Int.self, y: DayGridView.initialY)
     /// Height of the scrolling part; 0 until the first layout pass of the current day's grid.
     @State private var visibleHeight: CGFloat = 0
-    /// Where the grid is scrolled to, carried from one day's grid to the next (the day change
-    /// recreates the scroll view); nil until the user or `scrollToStart` has scrolled once.
+    /// Carried across single-day pages; the three-day carousel keeps its scroll view alive.
+    /// Nil until the user or `scrollToStart` has scrolled once.
     @State private var scrollY: CGFloat?
     /// The first day on screen; trails `model.selectedDay` by the slide, like `AgendaView`.
     @State private var shownDay: Date?
@@ -69,12 +69,21 @@ struct DayGridView: View {
         GeometryReader { proxy in
             let geometry = DayGridGeometry(
                 width: proxy.size.width, gutterWidth: Self.gutterWidth, dayCount: dayCount, grid: grid)
-            ZStack {
-                gridContent(geometry: geometry, days: days)
-                    .id(shownDay ?? model.selectedDay)
-                    .transition(slide(offset: dayCount > 1 ? geometry.columnWidth : 24))
+            Group {
+                if dayCount > 1 {
+                    // Keep the two shared days' views alive as they move one column. Replacing
+                    // the whole scroll view made every swipe look like a three-day page flip.
+                    gridContent(geometry: geometry, days: days)
+                } else {
+                    ZStack {
+                        gridContent(geometry: geometry, days: days)
+                            .id(shownDay ?? model.selectedDay)
+                            .transition(slide(offset: 24))
+                    }
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
         }
         .background(FloridaStyle.paper)
         .onAppear {
@@ -86,9 +95,8 @@ struct DayGridView: View {
         .onChange(of: model.selectedDay) { old, new in
             slideDirection = new > old ? 1 : -1
             model.setGridRange(start: new, dayCount: dayCount)
-            // The incoming grid is a new scroll view; its first layout pass restores `scrollY`,
-            // so paging while looking at 4 PM stays at 4 PM, as the Mac grid and Apple Calendar do.
-            visibleHeight = 0
+            // Only single-day paging replaces the scroll view and must restore `scrollY`.
+            if dayCount == 1 { visibleHeight = 0 }
             withAnimation(.snappy(duration: 0.2)) {
                 shownDay = new
             }
@@ -133,7 +141,9 @@ struct DayGridView: View {
                 // One day is already named by the heading and week strip above; only the columns
                 // of a three-day grid need labelling.
                 if dayCount > 1 {
-                    DayGridHeader(days: days, today: model.today, gutterWidth: Self.gutterWidth, calendar: model.calendar)
+                    DayGridHeader(
+                        days: days, today: model.today, gutterWidth: Self.gutterWidth,
+                        columnWidth: geometry.columnWidth, direction: slideDirection, calendar: model.calendar)
                     Divider()
                 }
                 if layout.allDayRowCount > 0 {
@@ -173,35 +183,41 @@ struct DayGridView: View {
                 .onTapGesture(coordinateSpace: .local) { point in
                     create(at: point, geometry: geometry, days: days)
                 }
-            ForEach(layout.blocks) { block in
-                let rect = geometry.rect(for: block)
-                DayGridBlockView(
-                    block: block, timeText: block.timeText, showsTime: rect.height >= geometry.timeTextHeight,
-                    isPast: block.end <= now, showsSymbol: rect.width >= Self.planSymbolWidth,
-                    showsThirdLine: rect.height >= geometry.timeTextHeight * 2)
-                    .frame(width: rect.width, height: rect.height)
-                    .offset(x: rect.minX, y: rect.minY)
-                    .opacity(drag?.block.id == block.id ? 0.3 : 1)
-                    // The hold is attached first so it outranks the tap: a quick tap opens the
-                    // block (the hold fails when the finger lifts early), a completed hold does
-                    // not also open it on release. A plan block gets no hold at all.
-                    .modifier(HoldToMove(
-                        isEnabled: !block.isPlan,
-                        gesture: BlockMoveGesture(
-                            onLift: { lift(block, geometry: geometry) },
-                            onMove: { follow($0, geometry: geometry, days: days) },
-                            onDrop: { translation in
-                                follow(translation, geometry: geometry, days: days)
-                                drop()
-                            },
-                            onCancel: { cancelDrag() })))
-                    .onTapGesture {
-                        open(block)
-                    }
-                    .modifier(SuggestionDialog(
-                        block: block, taking: $takingSuggestion, now: now, calendar: model.calendar,
-                        onTake: { model.take($0) }, onEdit: { onEditTask($0.task) }))
+            ZStack(alignment: .topLeading) {
+                ForEach(layout.blocks) { block in
+                    let rect = geometry.rect(for: block)
+                    DayGridBlockView(
+                        block: block, timeText: block.timeText, showsTime: rect.height >= geometry.timeTextHeight,
+                        isPast: block.end <= now, showsSymbol: rect.width >= Self.planSymbolWidth,
+                        showsThirdLine: rect.height >= geometry.timeTextHeight * 2)
+                        .frame(width: rect.width, height: rect.height)
+                        .offset(x: rect.minX, y: rect.minY)
+                        .transition(.asymmetric(
+                            insertion: .offset(x: geometry.columnWidth * slideDirection),
+                            removal: .offset(x: -geometry.columnWidth * slideDirection)))
+                        .opacity(drag?.block.id == block.id ? 0.3 : 1)
+                        // A quick tap opens; only a still hold lifts the block. Finished tasks
+                        // and plan blocks get no hold, so their touches can always scroll.
+                        .modifier(HoldToMove(
+                            isEnabled: block.canMove,
+                            gesture: BlockMoveGesture(
+                                onLift: { lift(block, geometry: geometry) },
+                                onMove: { follow($0, geometry: geometry, days: days) },
+                                onDrop: { translation in
+                                    follow(translation, geometry: geometry, days: days)
+                                    drop()
+                                },
+                                onCancel: { cancelDrag() })))
+                        .onTapGesture {
+                            open(block)
+                        }
+                        .modifier(SuggestionDialog(
+                            block: block, taking: $takingSuggestion, now: now, calendar: model.calendar,
+                            onTake: { model.take($0) }, onEdit: { onEditTask($0.task) }))
+                }
             }
+            .frame(width: geometry.width, height: geometry.dayHeight, alignment: .topLeading)
+            .mask(Rectangle().padding(.leading, geometry.gutterWidth))
             if let drag {
                 let rect = drag.rect(in: geometry)
                 DayGridBlockView(
@@ -271,10 +287,7 @@ struct DayGridView: View {
 
     // MARK: - Day change
 
-    /// New content enters from the side the day moved towards and fades in; the old grid leaves
-    /// the other way. One day moves 24 points. Three days move a whole column: the two days the
-    /// new page shares with the old one stay exactly where they were and only the new column
-    /// slides in, so paging reads as a carousel rather than a page flip.
+    /// Single-day pages slide and fade; three-day mode instead moves its persistent blocks.
     private func slide(offset: CGFloat) -> AnyTransition {
         .asymmetric(
             insertion: .offset(x: offset * slideDirection).combined(with: .opacity),

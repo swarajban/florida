@@ -45,7 +45,11 @@ struct DayGridBlockView: View {
         let textColor = FloridaStyle.ink.opacity(alpha)
         VStack(alignment: .leading, spacing: 1) {
             HStack(alignment: .top, spacing: 2) {
-                if showsSymbol, let planSymbol {
+                if block.isDone {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 10))
+                        .padding(.top, 2)
+                } else if showsSymbol, let planSymbol {
                     Image(systemName: planSymbol)
                         .font(.system(size: 10))
                         .padding(.top, 2)

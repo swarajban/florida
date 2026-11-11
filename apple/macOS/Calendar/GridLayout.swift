@@ -9,6 +9,8 @@ struct GridLayout {
         enum Kind: Hashable {
             case event
             case task(pinned: Bool)
+            /// A timestamp, not scheduled work: the instant the task was marked done.
+            case completed
             /// What the scheduler suggests for an optional routine block; not on the plan.
             case suggestion
             /// A commitment the routine placed (the gym): held time that is not a task.
@@ -171,7 +173,7 @@ struct GridLayout {
             let number = blockNumbers[placement.taskId, default: 0]
             blockNumbers[placement.taskId] = number + 1
             guard placement.endAt > firstDay, placement.startAt < rangeEnd,
-                  let task = tasksById[placement.taskId]
+                  let task = tasksById[placement.taskId], task.isOpen
             else { continue }
             sources[placement.id] = Source(
                 item: .task(task.id), kind: .task(pinned: placement.pinned), start: placement.startAt,
@@ -180,6 +182,17 @@ struct GridLayout {
                 rim: nil)
             timed.append(LayoutItem(id: placement.id, start: placement.startAt, end: placement.endAt))
             lanes[placement.id] = placement.lane
+        }
+        for task in tasksById.values {
+            guard let at = task.completedAt, task.deletedAt == nil, (firstDay..<rangeEnd).contains(at) else { continue }
+            let id = "completed-\(task.id)"
+            // Layout gives this instant a minimum tap target; it is not a duration of work.
+            let end = at.addingTimeInterval(0.001)
+            sources[id] = Source(
+                item: .task(task.id), kind: .completed, start: at, end: end,
+                title: task.title, tint: categoriesById[task.categoryId]?.tint ?? .defaultCategory,
+                slotKey: id, rim: nil)
+            timed.append(LayoutItem(id: id, start: at, end: end))
         }
         for block in planBlocks {
             guard block.endAt > firstDay, block.startAt < rangeEnd else { continue }
@@ -256,7 +269,9 @@ struct GridLayout {
         layout.gapsByDay = days.enumerated().map { index, day in
             guard needsHours, options.freeGaps else { return [] }
             let ahead = upcoming(layout.workingByDay[index], on: day, now: now, calendar: calendar)
-            return gaps(dayIndex: index, day: day, working: ahead, blocks: layout.blocksByDay[index], calendar: calendar)
+            return gaps(
+                dayIndex: index, day: day, working: ahead,
+                blocks: layout.blocksByDay[index].filter { $0.kind != .completed }, calendar: calendar)
         }
 
         var seen: Set<ItemID> = []
