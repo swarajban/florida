@@ -1740,20 +1740,21 @@ describe('day overrides', () => {
   }
 
   /**
-   * The first Saturday or Sunday after today (Pacific) with no event on it: a day the routine plans
-   * nothing on. The event tests above leave events three days out, which is a Saturday on Wednesdays.
+   * A future Saturday or Sunday in the seven-day capacity window with no timed event on it.
+   * All-day events do not block scheduling; their UTC midnight can fall on the prior Pacific date.
    */
   async function nextWeekendDay(): Promise<string> {
     const busy = new Set(
       (await db.select().from(events))
-        .filter((e) => e.deletedAt === null && e.startAt !== null)
+        .filter((e) => e.deletedAt === null && !e.allDay && e.startAt !== null)
         .map((e) => isoDate(localDate(e.startAt!.getTime(), 'America/Los_Angeles'))),
     )
     const today = dayNumber(localDate(Date.now(), 'America/Los_Angeles'))
-    for (let day = today + 1; ; day++) {
+    for (let day = today + 1; day < today + 7; day++) {
       const date = dateFromDayNumber(day)
       if ((weekdayOf(date) === 0 || weekdayOf(date) === 6) && !busy.has(isoDate(date))) return isoDate(date)
     }
+    throw new Error('No event-free weekend date in the seven-day capacity window')
   }
 
   it('PUT sets what a date is and the plan follows; DELETE puts the date back on its weekday', async () => {
