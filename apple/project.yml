@@ -60,6 +60,7 @@ targets:
       - Design/FloridaStyle.swift
       - Design/TaskRecurrenceSection.swift
       - Design/EventRecurrenceSection.swift
+      - Design/EventQuickAddComposer.swift
       - Design/TaskContext+Display.swift
       - Design/Plan+Display.swift
       - Design/Assets.xcassets
@@ -125,6 +126,7 @@ targets:
       - Design/FloridaStyle.swift
       - Design/TaskRecurrenceSection.swift
       - Design/EventRecurrenceSection.swift
+      - Design/EventQuickAddComposer.swift
       - Design/TaskContext+Display.swift
       - Design/Plan+Display.swift
       - Design/Assets.xcassets

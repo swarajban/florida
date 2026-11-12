@@ -12,6 +12,7 @@ struct EventEditorRequest: Identifiable, Equatable {
     var id: String { event.id }
     let event: CalendarEvent
     let isNew: Bool
+    var showsComposer = false
 }
 
 /// A dragged event dropped on a new time, waiting for an answer: it repeats (this one or all of
@@ -56,7 +57,7 @@ extension AppModel {
 
     // MARK: - Commands
 
-    /// ⇧C / `>New event`: the editor on a blank 30-minute event. Without `start` it begins at the
+    /// ⇧C / `>New event`: the composer on a blank 30-minute event. Without `start` it begins at the
     /// next quarter hour when the highlighted day is today, else at 9:00 on that day.
     func openNewEventEditor(start: Date? = nil) {
         guard !writableCalendars.isEmpty else {
@@ -67,7 +68,7 @@ extension AppModel {
             ? Date()
             : calendar.date(bySettingHour: 9, minute: 0, second: 0, of: selectedDay) ?? selectedDay
         eventDetailID = nil
-        eventEditor = EventEditorRequest(event: newEventTemplate(start: start ?? fallback), isNew: true)
+        eventEditor = EventEditorRequest(event: newEventTemplate(start: start ?? fallback), isNew: true, showsComposer: true)
     }
 
     /// ⇧E: the editor sheet for the selected event, or the one whose detail popover is open.

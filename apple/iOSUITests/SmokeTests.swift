@@ -141,6 +141,8 @@ final class SmokeTests: XCTestCase {
 
             app.buttons["agenda-add"].tap()
             app.buttons["New Event"].tap()
+            XCTAssertTrue(app.textFields["event-quick-add-input"].waitForExistence(timeout: 5))
+            app.buttons["event-quick-add-details"].tap()
             let title = app.textFields["Title"]
             XCTAssertTrue(title.waitForExistence(timeout: 5))
             title.typeText("Time picker check\n")
@@ -194,6 +196,8 @@ final class SmokeTests: XCTestCase {
             left.press(forDuration: 0.05, thenDragTo: left.withOffset(CGVector(dx: oneColumn, dy: 0)),
                        withVelocity: XCUIGestureVelocity(rawValue: 80), thenHoldForDuration: 1)
             right.tap()
+            XCTAssertTrue(app.textFields["event-quick-add-input"].waitForExistence(timeout: 5))
+            app.buttons["event-quick-add-details"].tap()
             XCTAssertTrue(app.navigationBars["New Event"].waitForExistence(timeout: 5))
             let thirdDay = calendar.date(byAdding: .day, value: 2, to: today)!
             XCTAssertTrue(app.datePickers["event-start"].buttons[
@@ -283,6 +287,8 @@ final class SmokeTests: XCTestCase {
             app.open(URL(string: "florida://agenda")!)
             app.buttons["agenda-add"].tap()
             app.buttons["New Event"].tap()
+            XCTAssertTrue(app.textFields["event-quick-add-input"].waitForExistence(timeout: 5))
+            app.buttons["event-quick-add-details"].tap()
             let title = app.textFields["Title"]
             XCTAssertTrue(title.waitForExistence(timeout: 5))
             title.tap()

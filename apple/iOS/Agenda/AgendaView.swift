@@ -92,7 +92,7 @@ struct AgendaView: View {
                 EventDetailView(event: event)
             }
             .sheet(item: $newEvent) { event in
-                EventEditorView(event: event, isNew: true)
+                EventCaptureSheet(event: event)
             }
             .taskActionSheets(doneForNow: $doneForNowTask)
             .onChange(of: model.selectedDay) { old, new in

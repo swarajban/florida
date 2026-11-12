@@ -14,6 +14,7 @@ struct CalendarGridView: View {
     @State private var ignoresDrag = false
     /// What the last click in the grid selected, until the selection change it caused is handled.
     @State private var clickedItem: ItemID?
+    @State private var eventStart: Date?
 
     static let grid = TimeGrid(hourHeight: 60, slotMinutes: 15)
     static let gutterWidth: CGFloat = 56
@@ -40,6 +41,24 @@ struct CalendarGridView: View {
                     }
                     .onClickAt { point, isDouble in
                         handleTap(at: point, width: geometry.size.width, isDouble: isDouble)
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("Calendar time grid")
+                    .accessibilityIdentifier("calendar-time-grid")
+                    .onContinuousHover { phase in
+                        if case .active(let point) = phase {
+                            let start = newEventStart(at: point, width: geometry.size.width)
+                            if eventStart != start {
+                                eventStart = start
+                            }
+                        }
+                    }
+                    .contextMenu {
+                        if let eventStart {
+                            Button("New Event…") {
+                                model.openNewEventEditor(start: eventStart)
+                            }
+                        }
                     }
                     .gesture(
                         DragGesture(minimumDistance: 4)
@@ -96,6 +115,13 @@ struct CalendarGridView: View {
         GridGeometry(
             size: CGSize(width: width, height: Self.grid.dayHeight), gutterWidth: Self.gutterWidth,
             dayCount: model.gridLayout.days.count, grid: Self.grid)
+    }
+
+    private func newEventStart(at point: CGPoint, width: CGFloat) -> Date? {
+        guard let dayIndex = gridGeometry(width: width).dayIndex(atX: point.x) else { return nil }
+        let day = model.gridLayout.days[dayIndex]
+        let minute = Self.grid.snappedMinute(forY: point.y)
+        return model.calendar.date(bySettingHour: minute / 60, minute: minute % 60, second: 0, of: day)
     }
 
     /// Scrolls just enough to bring the selected block or gap on the highlighted day on screen;

@@ -19,7 +19,7 @@ struct EventEditorView: View {
     @FocusState private var titleFocused: Bool
     private let isNew: Bool
 
-    init(event: CalendarEvent, isNew: Bool) {
+    init(event: CalendarEvent, isNew: Bool, recurrence: EventRecurrence? = nil) {
         self.isNew = isNew
         var event = event
         // Rows without times never reach the agenda, but the shape allows them; give the pickers something.
@@ -29,6 +29,7 @@ struct EventEditorView: View {
             event.endAt = event.endAt ?? start.addingTimeInterval(30 * 60)
         }
         _draft = State(initialValue: event)
+        _recurrence = State(initialValue: recurrence)
     }
 
     var body: some View {
@@ -55,6 +56,13 @@ struct EventEditorView: View {
                     }
                     .disabled(!isNew)
                     .accessibilityIdentifier("event-calendar")
+                    if let info = model.calendarInfo(id: draft.calendarId),
+                       let account = model.accounts.first(where: { $0.id == info.accountId }) {
+                        Text(account.email)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("event-account")
+                    }
                 } footer: {
                     if isNew, model.writableCalendars.isEmpty {
                         Text("No calendar you can add events to. Connect a Google account in Settings.")
@@ -113,6 +121,8 @@ struct EventEditorView: View {
             }
         }
         .presentationDetents([.large])
+        .environment(\.calendar, model.calendar)
+        .environment(\.timeZone, model.calendar.timeZone)
     }
 
     // MARK: - Bindings over optional fields
