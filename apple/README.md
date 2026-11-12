@@ -24,6 +24,64 @@ regenerate. In Xcode, pick the **Florida-iOS** or **Florida-macOS** scheme and
 run. The **FloridaWidgets** extension is embedded in the iOS app and is built
 with it.
 
+## Local Mac verification
+
+On a connected Mac (including alnilam's `/Users/swaraj/florida`), use an isolated
+worktree for your branch, not another agent's checkout. Install XcodeGen with
+`brew install xcodegen`, select Xcode with `xcode-select`, and install an iPhone
+simulator runtime in Xcode. From the repository root:
+
+```sh
+bash apple/scripts/check.sh generate
+bash apple/scripts/check.sh build
+bash apple/scripts/check.sh ios
+bash apple/scripts/check.sh macos
+
+# A single test (the same options work for either suite):
+bash apple/scripts/check.sh ios -only-testing:Florida-iOSUITests/SmokeTests/testUnifiedTaskCapture
+bash apple/scripts/check.sh macos -only-testing:Florida-macOSUITests/SmokeTests/testRecurringEventCreation
+```
+
+`build` generates the project with an empty development team and runs
+`xcodebuild build-for-testing` for **both** schemes. This compiles the iOS app,
+embedded widgets, Mac app and test runners without distribution credentials.
+The Mac products are ad-hoc signed so the UI runner can launch. `ios` and `macos`
+regenerate and use `xcodebuild test`, incrementally reusing `apple/build/ios`
+and `apple/build/macos`. They run serially within each suite; the tests already
+cover light and dark appearances. `ios` chooses a Pro iPhone on the newest
+installed iOS runtime; set `UDID` to use a particular available simulator.
+
+To reproduce CI's reuse of compiled products, run `build`, then
+`TEST_WITHOUT_BUILDING=1 bash apple/scripts/check.sh ios` (or `macos`). Each run
+writes a fresh result bundle under `apple/build/results/`. Export screenshots
+with `xcrun xcresulttool export attachments --path <result.xcresult> --output-path <screenshots>`.
+Local runs do not retry by default; `RETRY_FAILED_TESTS=1` enables one retry of
+failed tests without changing assertions. A passing retry is not a flake fix.
+
+### Pull request and release checks
+
+`ci.yml` keeps TypeScript and both Linux Swift package suites on every PR. Apple
+jobs run only if the PR changes `apple/**` or one of the three CI/release
+workflows. One Xcode job
+builds both schemes for testing, caches SwiftPM downloads and derived data by
+toolchain/architecture, and uploads the compiled products. Three independent
+jobs run `test-without-building`: the full Mac suite, iPhone capture/plan tests, and
+all remaining iPhone tests plus widget tests. The capture shard explicitly
+selects three long tests; the other shard excludes only those three, so new tests
+automatically join the gate. Each shard is serial to avoid desktop/simulator
+interaction races; failure in one does not cancel the others.
+
+Superseded PR runs are cancelled, and branch pushes no longer duplicate the
+iPhone PR suite. Failed PR UI tests get at most one native XCTest retry; the
+first failure stays in the raw log and xcresult, with a warning and job summary
+when a failed test is logged. Results and logs are artifacts for seven days.
+
+Main's release workflows remain separate: `ios.yml` runs the complete iPhone
+and widget suite before upload; `macos.yml` runs the full Mac suite before its
+upload. Release runs are not cancelled by later pushes, do not use PR test
+artifacts, and retain `run_number * 10 + run_attempt` build numbering. A change
+under `apple/`, even a README or script, still triggers both releases on main.
+
 ## Layout
 
 | Path | What it is |

@@ -1,15 +1,11 @@
 name: iOS
 
-# build:      compiles the iOS app and its widgets for the simulator on every change under
-#             apple/ (no signing), then screenshots each tab with demo data.
+# build:      runs the full simulator suite before an iOS release. PR checks live in ci.yml.
 # testflight: archives, signs and uploads to TestFlight on pushes to main and on manual runs.
 #             Needs the App Store Connect secrets described in apple/README.md.
 on:
   push:
-    paths:
-      - "apple/**"
-      - ".github/workflows/ios.yml"
-  pull_request:
+    branches: [main]
     paths:
       - "apple/**"
       - ".github/workflows/ios.yml"

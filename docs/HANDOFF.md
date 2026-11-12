@@ -321,9 +321,9 @@ Status unknown, not checked: de-duplicating an event shared into both Google acc
 
 - TypeScript, from the root: `pnpm build && pnpm typecheck && pnpm test`.
 - Swift packages, inside `apple/FloridaCore` or `apple/FloridaKit` in an orb: `. ~/.local/share/swiftly/env.sh && swift build --build-tests && swift test`.
-- The app targets (SwiftUI, AppKit, WidgetKit) only compile with Xcode: a Mac satellite, or CI after a push. A Linux build does not catch Darwin-only name clashes.
+- The app targets (SwiftUI, AppKit, WidgetKit) only compile with Xcode. On a connected Mac, use `bash apple/scripts/check.sh build`, then `ios` and `macos` for the UI suites before pushing. Single-test commands are in `apple/README.md`. PR CI is a backstop; a Linux build does not catch Darwin-only name clashes. If no Mac is connected, report local app verification as unavailable.
 
-**Mac satellite, as used in the build thread**
+**Historical Mac satellite, as used in the build thread**
 
 - Image `macos-26`, synced path `apple`. The repo lands at `/Users/runner/workspace/repo`. `xcodegen` is installed; `rg` is not.
 - After adding or removing a source file, run `xcodegen generate` in `apple`.
@@ -334,8 +334,8 @@ Status unknown, not checked: de-duplicating an event shared into both Google acc
 
 **CI and shipping**
 
-- `ci.yml` runs on every push to `main` and on pull requests: scheduler and server, the Swift packages on Linux, and an Xcode build of the apps.
-- `ios.yml` runs on changes under `apple/`; on `main` it also uploads to TestFlight.
+- `ci.yml` runs on every push to `main` and on pull requests: scheduler and server plus the Swift packages on Linux. Apple-changing PRs also build both app schemes once, run Darwin package tests, and reuse test products in separate Mac and sharded iPhone UI jobs. See `apple/README.md` for caching, bounded failed-test retries and artifacts.
+- `ios.yml` runs on changes under `apple/` on `main` (not branch pushes or PRs): the full iPhone and widget suite, then TestFlight. Manual releases remain available.
 - `macos.yml` runs on pushes to `main` that change `apple/`: the Mac UI smoke test, then a TestFlight upload.
 - A push to `main` that touches `apple/` starts two test-gated releases. Allow for runner capacity, the full UI suites and Apple processing; the previous 20-minute estimate is no longer reliable. Apple allows about 20 uploads per app per day.
 - There is no deploy workflow. The server is deployed by hand with `fly deploy` from the repo root; the release command runs the migrations and then the seed. `.agents/setup` installs `flyctl` and `neonctl`, which read `FLY_API_TOKEN` and `NEON_API_KEY` from the Amp project's secrets.
