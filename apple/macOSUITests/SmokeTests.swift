@@ -575,6 +575,31 @@ final class SmokeTests: XCTestCase {
                 waitForValue(selectedText, of: button)
                 XCTAssertTrue(editorTitle.exists, "choosing a date must not save the editor")
             }
+            for (key, identifier, hour) in [("i", "task-pinned-start", 15), ("d", "task-due", 16)] {
+                let button = app.buttons[identifier]
+                let before = try XCTUnwrap(button.value as? String)
+                app.typeKey(key, modifierFlags: [])
+                let search = app.textFields["\(identifier)-search"]
+                XCTAssertTrue(search.waitForExistence(timeout: 5))
+                let time = app.textFields["\(identifier)-time"]
+                XCTAssertTrue(time.waitForExistence(timeout: 5))
+                time.click()
+                app.typeKey("a", modifierFlags: .command)
+                app.typeText("not a time")
+                waitForValue("not a time", of: time)
+                app.buttons["\(identifier)-quick-tomorrow"].click()
+                XCTAssertTrue(search.exists, "a quick date must reject an invalid edited clock")
+                XCTAssertEqual(button.value as? String, before)
+                time.click()
+                app.typeKey("a", modifierFlags: .command)
+                app.typeText("\(hour - 12)pm")
+                waitForValue("\(hour - 12)pm", of: time)
+                app.buttons["\(identifier)-quick-tomorrow"].click()
+                XCTAssertTrue(search.waitForNonExistence(timeout: 5))
+                let expected = calendar.date(bySettingHour: hour, minute: 0, second: 0, of: tomorrow)!
+                waitForValue(expected.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()), of: button)
+                XCTAssertTrue(editorTitle.exists)
+            }
             app.typeKey(.escape, modifierFlags: [])
             XCTAssertTrue(editorTitle.waitForNonExistence(timeout: 5))
         }

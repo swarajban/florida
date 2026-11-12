@@ -308,7 +308,9 @@ private struct MacDateSelector: View {
 
     private func quick(_ choice: DateEntryQuickChoice) {
         if let date = DateEntry.quickDate(choice, now: now, calendar: calendar) {
-            choose(.date(date, hasTime: false))
+            let result = timed ? withClock(on: date) : .date(date, hasTime: false)
+            guard result != .invalid else { return }
+            choose(result)
         } else if allowsClear { choose(.clear) }
     }
 
