@@ -31,6 +31,9 @@ jobs:
               - '.github/workflows/ios.yml'
               - '.github/workflows/macos.yml'
               - '.github/workflows/apple-checks.yml'
+              - '.github/workflows/ios-upload.yml'
+              - '.github/workflows/macos-upload.yml'
+              - '.github/workflows/apple-release-policy.yml'
 
   typescript:
     name: Scheduler + server

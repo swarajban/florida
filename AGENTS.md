@@ -10,6 +10,7 @@ Single-user personal calendar + auto-scheduled tasks (Motion replacement). Speed
   - `apple/FloridaCore/` — dependency-free models (wire-compatible with the server JSON), quick-add parser, keyboard engine, calendar layout math. Pure logic, no I/O.
   - `apple/FloridaKit/` — GRDB/SQLite store, sync client, token store; re-exports FloridaCore. Depends on GRDB 7.
   - Both packages build and test on Linux (`swift build --build-tests && swift test` inside each; Swift 6.4 via swiftly). App targets need Xcode: on a connected Mac, run `bash apple/scripts/check.sh build` before pushing and targeted UI tests while editing. PR CI compiles both apps, widgets and test bundles on every Apple-changing push, but does not run UI tests. Once the head is otherwise ready, request the complete UI gate with `gh workflow run ios.yml --ref <PR-branch> -f ui_only=true`; require its checks to pass on the current head before merge. See `apple/README.md` for full/local/single-test commands. PR CI is the backstop, not the compile loop; report when no Mac is available.
+  - On main, full Mac/iPhone UI suites still run, but **the TestFlight UI gate is off for now by Swaraj's choice**. Archive/sign/upload jobs do not depend on UI results; UI failures remain failed checks and are summarized after one failed-test retry. The single switch is `APPLE_UI_GATE` in `.github/workflows/apple-release-policy.yml`; set it to `'true'` to gate both uploads again. Never cancel an upload.
 
 ## Commands
 

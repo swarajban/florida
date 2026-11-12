@@ -1,6 +1,6 @@
 name: iOS
 
-# build:      runs the full simulator suite before an iOS release. PR compilation is ci.yml.
+# build:      runs the full simulator suite on main, independently of uploads by default.
 # ui:         explicit ui_only dispatch runs both PR UI suites without release credentials.
 # testflight: archives, signs and uploads to TestFlight on pushes to main and on manual runs.
 #             Needs the App Store Connect secrets described in apple/README.md.
@@ -10,6 +10,8 @@ on:
     paths:
       - "apple/**"
       - ".github/workflows/ios.yml"
+      - ".github/workflows/ios-upload.yml"
+      - ".github/workflows/apple-release-policy.yml"
   workflow_dispatch:
     inputs:
       ui_only:
@@ -18,16 +20,14 @@ on:
         default: false
 
 concurrency:
-  group: ${{ inputs.ui_only && 'apple-ui' || 'ios' }}-${{ github.ref }}
-  # UI requests cannot displace releases. Superseded UI/branch runs are cancelled;
-  # main releases queue instead because they may be mid-upload to TestFlight.
-  cancel-in-progress: ${{ inputs.ui_only || github.ref != 'refs/heads/main' }}
-
-env:
-  # Also set in apple/project.yml (the widget extension is $BUNDLE_ID.widgets).
-  BUNDLE_ID: com.swarajban.florida
+  group: ${{ inputs.ui_only && format('apple-ui-{0}', github.ref) || format('ios-run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ inputs.ui_only }}
 
 jobs:
+  policy:
+    if: inputs.ui_only != true
+    uses: ./.github/workflows/apple-release-policy.yml
+
   ui:
     name: On-demand Apple UI
     if: github.event_name == 'workflow_dispatch' && inputs.ui_only
@@ -36,7 +36,7 @@ jobs:
       run_ui: true
 
   build:
-    name: Build (simulator)
+    name: iPhone UI suite
     if: inputs.ui_only != true
     runs-on: macos-26
     # Cold simulator boot plus the full light/dark capture suite can exceed 30 minutes.
@@ -139,187 +139,14 @@ jobs:
 
   testflight:
     name: Upload to TestFlight
-    needs: build
-    if: inputs.ui_only != true && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
-    runs-on: macos-26
-    timeout-minutes: 45
-    env:
-      ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-      ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-      ASC_KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
-      # Not secret (it is in every signed app). The default is the team virtus ships under.
-      TEAM_ID: ${{ secrets.APPLE_TEAM_ID || '8G7N7547R6' }}
-    steps:
-      - uses: actions/checkout@v5
+    needs: policy
+    if: needs.policy.outputs.ui_gate != 'true' && (inputs.ui_only != true && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')))
+    uses: ./.github/workflows/ios-upload.yml
+    secrets: inherit
 
-      - name: Check secrets
-        run: |
-          missing=""
-          for v in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8 TEAM_ID; do
-            [ -z "${!v}" ] && missing="$missing $v"
-          done
-          if [ -n "$missing" ]; then
-            echo "::error::Missing secrets:$missing — see apple/README.md"
-            exit 1
-          fi
-
-      - name: Install App Store Connect API key
-        run: |
-          KEY_PATH="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
-          # Accept the .p8 either pasted as-is or base64-encoded.
-          if printf '%s' "$ASC_KEY_P8" | grep -q "BEGIN PRIVATE KEY"; then
-            printf '%s\n' "$ASC_KEY_P8" > "$KEY_PATH"
-          else
-            printf '%s' "$ASC_KEY_P8" | base64 --decode > "$KEY_PATH"
-          fi
-          echo "KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
-
-      - name: Generate Xcode project
-        working-directory: apple
-        env:
-          DEVELOPMENT_TEAM: ${{ env.TEAM_ID }}
-        run: |
-          brew install xcodegen
-          xcodegen generate
-
-      - name: Verify App Store Connect API key
-        run: |
-          python3 -m pip install --quiet --break-system-packages pyjwt cryptography 2>/dev/null || python3 -m pip install --quiet pyjwt cryptography
-          python3 - <<'PY'
-          import json, os, sys, time, urllib.request, urllib.error
-          import jwt
-          key_id, issuer = os.environ["ASC_KEY_ID"].strip(), os.environ["ASC_ISSUER_ID"].strip()
-          pem = open(os.environ["KEY_PATH"]).read()
-          print(f"Key ID length {len(key_id)} (expect 10), issuer length {len(issuer)} (expect 36, a UUID)")
-          print(f"p8 has BEGIN line: {'BEGIN PRIVATE KEY' in pem}, END line: {'END PRIVATE KEY' in pem}, {len(pem)} chars")
-          try:
-              token = jwt.encode({"iss": issuer, "iat": int(time.time()), "exp": int(time.time()) + 600, "aud": "appstoreconnect-v1"},
-                                 pem, algorithm="ES256", headers={"kid": key_id, "typ": "JWT"})
-          except Exception as e:
-              print(f"::error::Could not load the .p8 private key: {e}"); sys.exit(1)
-          bundle = os.environ["BUNDLE_ID"]
-          req = urllib.request.Request(f"https://api.appstoreconnect.apple.com/v1/apps?filter[bundleId]={bundle}",
-                                       headers={"Authorization": f"Bearer {token}"})
-          try:
-              data = json.load(urllib.request.urlopen(req))
-          except urllib.error.HTTPError as e:
-              print(f"::error::App Store Connect rejected the key: HTTP {e.code} {e.read().decode()[:500]}"); sys.exit(1)
-          apps = data.get("data", [])
-          if not apps:
-              print(f"::error::Key works, but no App Store Connect app uses bundle ID {bundle}. Create it under Apps > New App."); sys.exit(1)
-          print(f"Key OK. Found app '{apps[0]['attributes']['name']}' for {bundle}.")
-          PY
-
-      - name: Archive
-        working-directory: apple
-        run: |
-          set -o pipefail
-          # Archive unsigned: the export step signs with Apple's cloud-managed distribution
-          # certificate, so no development profile (which would need a registered device) or
-          # local certificate is ever created. The next step seals the entitlements in, which
-          # an unsigned archive would otherwise lose. The bundle ids stay as project.yml sets
-          # them: the app and the widget extension need different ones, so no command-line
-          # override. Monotonic build number; run_attempt keeps re-runs unique.
-          BUILD_NUMBER=$(( GITHUB_RUN_NUMBER * 10 + GITHUB_RUN_ATTEMPT ))
-          echo "Build number: $BUILD_NUMBER"
-          xcodebuild archive \
-            -project Florida.xcodeproj \
-            -scheme Florida-iOS \
-            -configuration Release \
-            -destination 'generic/platform=iOS' \
-            -archivePath "$RUNNER_TEMP/Florida.xcarchive" \
-            DEVELOPMENT_TEAM="$TEAM_ID" \
-            CODE_SIGNING_ALLOWED=NO \
-            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
-            | tee archive.log | xcbeautify --renderer github-actions
-
-      - name: Seal entitlements into the archive
-        working-directory: apple
-        run: |
-          # -exportArchive keeps only the entitlements it finds in an existing code signature.
-          # A bundle left unsigned by the archive is re-signed with the profile's defaults and
-          # silently loses App Groups, so the widgets find no shared container and the app
-          # falls back to a private store. An ad-hoc signature with the xcodegen-written
-          # entitlements is enough: the export step re-signs everything with the real
-          # certificate. Nested code first, then the app.
-          APP="$RUNNER_TEMP/Florida.xcarchive/Products/Applications/Florida.app"
-          APPEX="$APP/PlugIns/FloridaWidgets.appex"
-          APP_GROUP="group.$BUNDLE_ID"   # also in project.yml and FloridaKit.swift
-          for bundle in "$APP" "$APPEX"; do
-            if [ ! -d "$bundle" ]; then
-              echo "::error::Expected $bundle in the archive"
-              find "$RUNNER_TEMP/Florida.xcarchive/Products" -maxdepth 4 -type d \( -name '*.app' -o -name '*.appex' -o -name '*.framework' \)
-              exit 1
-            fi
-          done
-          for nested in "$APP"/Frameworks/*; do
-            [ -e "$nested" ] || continue
-            codesign --force --sign - "$nested"
-          done
-          codesign --force --sign - --entitlements Widgets/FloridaWidgets.entitlements "$APPEX"
-          codesign --force --sign - --entitlements iOS/Florida.entitlements "$APP"
-          for bundle in "$APPEX" "$APP"; do
-            echo "== $(basename "$bundle") entitlements"
-            entitlements=$(codesign -d --entitlements - "$bundle" 2>&1)
-            echo "$entitlements"
-            if ! grep -q "$APP_GROUP" <<<"$entitlements"; then
-              echo "::error::$(basename "$bundle") is missing the $APP_GROUP entitlement"
-              exit 1
-            fi
-          done
-
-      - name: Export and upload to TestFlight
-        working-directory: apple
-        run: |
-          set -o pipefail
-          plutil -insert teamID -string "$TEAM_ID" ExportOptions.plist
-          xcodebuild -exportArchive \
-            -archivePath "$RUNNER_TEMP/Florida.xcarchive" \
-            -exportOptionsPlist ExportOptions.plist \
-            -exportPath "$RUNNER_TEMP/export" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$KEY_PATH" \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
-            2>&1 | tee export.log
-
-      - name: Check what the export signed
-        working-directory: apple
-        run: |
-          # DistributionSummary.plist records the entitlements the export signed each bundle
-          # with. The build is already on TestFlight here; failing marks it as one to skip.
-          SUMMARY="$RUNNER_TEMP/export/DistributionSummary.plist"
-          if [ ! -f "$SUMMARY" ]; then
-            echo "::warning::No DistributionSummary.plist at $SUMMARY; could not confirm the uploaded entitlements"
-            ls -la "$RUNNER_TEMP/export" || true
-            exit 0
-          fi
-          python3 - "$SUMMARY" "group.$BUNDLE_ID" <<'PY'
-          import plistlib, sys
-          summary = plistlib.load(open(sys.argv[1], "rb"))
-          group = sys.argv[2]
-          missing = []
-          for ipa, items in summary.items():
-              for item in items if isinstance(items, list) else []:
-                  name = item.get("name", "?")
-                  entitlements = item.get("entitlements", {})
-                  print(f"{ipa} / {name}: {sorted(entitlements)}")
-                  if name.endswith((".app", ".appex")) and group not in entitlements.get("com.apple.security.application-groups", []):
-                      missing.append(name)
-          if missing:
-              print(f"::error::Uploaded without the {group} App Group: {', '.join(missing)}")
-              sys.exit(1)
-          print(f"Every app and extension carries {group}.")
-          PY
-
-      - name: Upload logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: xcode-logs
-          path: apple/*.log
-          if-no-files-found: ignore
-
-      - name: Clean up key
-        if: always()
-        run: rm -f "$KEY_PATH"
+  gated-testflight:
+    name: Upload to TestFlight (UI gate enabled)
+    needs: [policy, build]
+    if: needs.policy.outputs.ui_gate == 'true' && (inputs.ui_only != true && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')))
+    uses: ./.github/workflows/ios-upload.yml
+    secrets: inherit

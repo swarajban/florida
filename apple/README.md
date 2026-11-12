@@ -99,12 +99,24 @@ only, without weakening assertions. First failures remain in the raw log and
 xcresult and are listed in the run summary even if the retry passes. Results
 and logs are artifacts for seven days; a passing retry is not a flake fix.
 
-Main's release workflows remain separate: `ios.yml` runs the complete iPhone
-and widget suite before upload; `macos.yml` runs the full Mac suite before its
-upload. Ordinary manual iOS dispatches still release (`ui_only` defaults to
-false). Release runs are not cancelled by later pushes, do not use PR test
-artifacts, and retain `run_number * 10 + run_attempt` build numbering. A change
-under `apple/`, even a README or script, still triggers both releases on main.
+Main's release workflows remain separate. After an Apple-changing merge,
+`ios.yml` runs the complete iPhone/widget suite and `macos.yml` runs the full
+Mac suite, **without gating TestFlight for now, by Swaraj's choice**. Independent
+archive/sign/upload jobs compile the apps and can upload before UI tests finish
+or even when they fail. A persistent UI failure is still a failed check and is
+listed in that job's run summary; it is not hidden with `continue-on-error`.
+
+The single checked-in switch is `APPLE_UI_GATE: 'false'` in
+`.github/workflows/apple-release-policy.yml`. Change that value to `'true'` to
+make both upload paths depend on successful full UI suites again. With it off,
+uploads depend only on the small Linux policy job, never on a UI job. Release
+serialization applies only to the upload job, so an earlier run's slow UI suite
+cannot hold up the next upload. Active uploads are never cancelled by later runs.
+
+Ordinary manual iOS dispatches still release (`ui_only` defaults to false).
+Uploads do not use PR test artifacts and retain
+`run_number * 10 + run_attempt` build numbering. A change under `apple/`, even a
+README or script, still triggers both releases on main.
 
 ## Layout
 

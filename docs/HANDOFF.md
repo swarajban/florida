@@ -335,9 +335,9 @@ Status unknown, not checked: de-duplicating an event shared into both Google acc
 **CI and shipping**
 
 - `ci.yml` runs on every push to `main` and on pull requests: scheduler and server plus the Swift packages on Linux. Apple-changing PRs also compile both apps, widgets and UI bundles once, with no UI execution. An explicit `ui_only` dispatch of `ios.yml` runs the cached build plus Darwin package tests and reuses its products in separate Mac and sharded iPhone UI jobs. See `apple/README.md` for requesting the pre-merge gate, retries and artifacts.
-- `ios.yml` runs on changes under `apple/` on `main` (not branch pushes or PRs): the full iPhone and widget suite, then TestFlight. Manual releases remain available.
-- `macos.yml` runs on pushes to `main` that change `apple/`: the Mac UI smoke test, then a TestFlight upload.
-- A push to `main` that touches `apple/` starts two test-gated releases. Allow for runner capacity, the full UI suites and Apple processing; the previous 20-minute estimate is no longer reliable. Apple allows about 20 uploads per app per day.
+- `ios.yml` runs on changes under `apple/` on `main` (not branch pushes or PRs): the full iPhone/widget suite plus an independent TestFlight upload. Manual releases remain available.
+- `macos.yml` runs on pushes to `main` that change `apple/`: the full Mac UI suite plus an independent TestFlight upload.
+- Swaraj chose **non-blocking UI on main for now**: the full suites still run, retry failed tests once and report persistent failures as failed checks and in summaries, but uploads never wait for them. The single `APPLE_UI_GATE` value in `.github/workflows/apple-release-policy.yml` is `'false'`; set it to `'true'` to restore both gates. Upload jobs serialize without cancellation; UI jobs do not hold the upload lock. Allow for runner capacity and Apple processing. Apple allows about 20 uploads per app per day.
 - There is no deploy workflow. The server is deployed by hand with `fly deploy` from the repo root; the release command runs the migrations and then the seed. `.agents/setup` installs `flyctl` and `neonctl`, which read `FLY_API_TOKEN` and `NEON_API_KEY` from the Amp project's secrets.
 - Deploy the server before shipping an app build that needs a new route or field.
 
