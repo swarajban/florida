@@ -8,6 +8,9 @@ ignores `apple/*.xcodeproj`), so regenerate it after cloning or after editing
 
 ## Generate and open
 
+Use a Mac with Xcode for the local app build and UI-test loop before opening a
+pull request; Linux package tests cannot catch Darwin-only compile errors.
+
 ```sh
 brew install xcodegen
 cd apple
@@ -20,6 +23,100 @@ project is generated, so re-run `xcodegen generate` with it set whenever you
 regenerate. In Xcode, pick the **Florida-iOS** or **Florida-macOS** scheme and
 run. The **FloridaWidgets** extension is embedded in the iOS app and is built
 with it.
+
+## Local Mac verification
+
+On a connected Mac (including alnilam's `/Users/swaraj/florida`), use an isolated
+worktree for your branch, not another agent's checkout. Install XcodeGen with
+`brew install xcodegen`, select Xcode with `xcode-select`, and install an iPhone
+simulator runtime in Xcode. From the repository root:
+
+```sh
+bash apple/scripts/check.sh generate
+bash apple/scripts/check.sh build
+bash apple/scripts/check.sh ios
+bash apple/scripts/check.sh macos
+
+# A single test (the same options work for either suite):
+bash apple/scripts/check.sh ios -only-testing:Florida-iOSUITests/SmokeTests/testUnifiedTaskCapture
+bash apple/scripts/check.sh macos -only-testing:Florida-macOSUITests/SmokeTests/testRecurringEventCreation
+```
+
+`build` generates the project with an empty development team and runs
+`xcodebuild build-for-testing` for **both** schemes. This compiles the iOS app,
+embedded widgets, Mac app and test runners without distribution credentials.
+The Mac products are ad-hoc signed so the UI runner can launch. `ios` and `macos`
+regenerate and use `xcodebuild test`, incrementally reusing `apple/build/ios`
+and `apple/build/macos`. They run serially within each suite; the tests already
+cover light and dark appearances. `ios` chooses a Pro iPhone on the newest
+installed iOS runtime; set `UDID` to use a particular available simulator.
+
+To reproduce CI's reuse of compiled products, run `build`, then
+`TEST_WITHOUT_BUILDING=1 bash apple/scripts/check.sh ios` (or `macos`). Each run
+writes a fresh result bundle under `apple/build/results/`. Export screenshots
+with `xcrun xcresulttool export attachments --path <result.xcresult> --output-path <screenshots>`.
+Local runs do not retry by default; `RETRY_FAILED_TESTS=1` enables one retry of
+failed tests without changing assertions. A passing retry is not a flake fix.
+
+### Pull request and release checks
+
+On **every PR push**, `ci.yml` runs TypeScript and both Linux Swift package
+suites. If the PR changes `apple/**` or an Apple CI/release workflow, one
+compile-only Xcode job builds both apps, the widgets and UI test bundles. It
+caches SwiftPM and derived data by toolchain/architecture, but runs no UI tests.
+Superseded PR runs are cancelled. Branch pushes do not start a duplicate iPhone
+workflow, and unrelated PRs use no macOS runners.
+
+**Once before merge**, when the head is otherwise ready, request both UI suites:
+
+```sh
+gh workflow run ios.yml --ref <PR-branch> -f ui_only=true
+gh run list --workflow ios.yml --branch <PR-branch> --event workflow_dispatch
+```
+
+This explicit dispatch uses the existing iOS workflow's `ui_only` mode: it never
+starts a release or reads release secrets. It runs against the branch head, so
+its **On-demand Apple UI** checks appear on that commit in the PR. Unlike a
+sticky label, it does not rerun on each subsequent push. Confirm the run's
+`headSha` matches the PR's current `headRefOid` (`gh run view <run-id> --json headSha`
+and `gh pr view <PR> --json headRefOid`) and require all UI checks to pass before
+merge. A later push invalidates that result: cancel any stale run with
+`gh run cancel <run-id>` and request a new run when ready. A new UI request on
+the same branch automatically cancels a superseded request. UI-only requests
+have a separate concurrency group, so they cannot cancel or replace a queued
+release, even if dispatched on main.
+
+The on-demand run uses the same cached build recipe as the compile gate, builds both
+schemes once and runs Darwin package tests, then uploads the compiled products.
+Three independent jobs use `test-without-building`: the full Mac suite, iPhone
+capture/plan tests, and all remaining iPhone tests plus widget tests. The capture
+shard selects three long tests; the other excludes only those three, so new
+tests automatically join the gate. Each shard is serial to avoid desktop and
+simulator interaction races; failure in one does not cancel the others.
+
+PR and release UI tests get at most one native XCTest retry of failed tests
+only, without weakening assertions. First failures remain in the raw log and
+xcresult and are listed in the run summary even if the retry passes. Results
+and logs are artifacts for seven days; a passing retry is not a flake fix.
+
+Main's release workflows remain separate. After an Apple-changing merge,
+`ios.yml` runs the complete iPhone/widget suite and `macos.yml` runs the full
+Mac suite, **without gating TestFlight for now, by Swaraj's choice**. Independent
+archive/sign/upload jobs compile the apps and can upload before UI tests finish
+or even when they fail. A persistent UI failure is still a failed check and is
+listed in that job's run summary; it is not hidden with `continue-on-error`.
+
+The single checked-in switch is `APPLE_UI_GATE: 'false'` in
+`.github/workflows/apple-release-policy.yml`. Change that value to `'true'` to
+make both upload paths depend on successful full UI suites again. With it off,
+uploads depend only on the small Linux policy job, never on a UI job. Release
+serialization applies only to the upload job, so an earlier run's slow UI suite
+cannot hold up the next upload. Active uploads are never cancelled by later runs.
+
+Ordinary manual iOS dispatches still release (`ui_only` defaults to false).
+Uploads do not use PR test artifacts and retain
+`run_number * 10 + run_attempt` build numbering. A change under `apple/`, even a
+README or script, still triggers both releases on main.
 
 ## Layout
 

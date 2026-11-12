@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prepares an Amp orb for this repository: pnpm workspace deps, scheduler build,
+# Prepares a Linux agent machine for this repository: pnpm workspace deps, scheduler build,
 # and a Linux Swift toolchain so FloridaKit (apple/FloridaKit) can be built and
 # tested here. SwiftUI/AppKit/UIKit targets still need a Mac.
 set -euo pipefail
@@ -43,7 +43,7 @@ for profile in "$HOME/.bash_profile" "$HOME/.profile"; do
 done
 
 step "Deploy CLIs: flyctl and neonctl"
-# Both authenticate from the environment: FLY_API_TOKEN and NEON_API_KEY are Amp project secrets.
+# Both authenticate from the environment: FLY_API_TOKEN and NEON_API_KEY.
 if [ ! -x "$HOME/.fly/bin/fly" ]; then
   curl -fsSL https://fly.io/install.sh | sh
 else

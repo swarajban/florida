@@ -1,0 +1,20 @@
+name: Apple release policy
+
+on:
+  workflow_call:
+    outputs:
+      ui_gate:
+        value: ${{ jobs.policy.outputs.ui_gate }}
+
+jobs:
+  policy:
+    name: UI release gate
+    runs-on: ubuntu-latest
+    env:
+      # Swaraj chose non-blocking UI for now; set this one value true to gate both uploads.
+      APPLE_UI_GATE: 'false'
+    outputs:
+      ui_gate: ${{ steps.gate.outputs.ui_gate }}
+    steps:
+      - id: gate
+        run: echo "ui_gate=$APPLE_UI_GATE" >> "$GITHUB_OUTPUT"

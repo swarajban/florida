@@ -5,11 +5,36 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+  pull-requests: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Apple paths
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      apple: ${{ steps.paths.outputs.apple }}
+    steps:
+      - uses: dorny/paths-filter@v3
+        id: paths
+        with:
+          filters: |
+            apple:
+              - 'apple/**'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/ios.yml'
+              - '.github/workflows/macos.yml'
+              - '.github/workflows/apple-checks.yml'
+              - '.github/workflows/ios-upload.yml'
+              - '.github/workflows/macos-upload.yml'
+              - '.github/workflows/apple-release-policy.yml'
+
   typescript:
     name: Scheduler + server
     runs-on: ubuntu-latest
@@ -43,57 +68,8 @@ jobs:
 
   apple:
     name: Apple apps (Xcode)
-    runs-on: macos-26
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v5
-      - run: brew install xcodegen
-      - run: xcodebuild -version
-      - run: xcodegen generate
-        working-directory: apple
-        env:
-          DEVELOPMENT_TEAM: ""
-      # The iOS app and widgets are built (and shipped) by ios.yml.
-      - name: Build Florida-macOS
-        run: |
-          set -o pipefail
-          xcodebuild build \
-            -project Florida.xcodeproj \
-            -scheme Florida-macOS \
-            -destination 'platform=macOS' \
-            -derivedDataPath DerivedData \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-            | xcbeautify --renderer github-actions
-        working-directory: apple
-      - name: macOS UI smoke test and screenshots
-        working-directory: apple
-        run: |
-          set -o pipefail
-          xcodebuild test \
-            -project Florida.xcodeproj \
-            -scheme Florida-macOS \
-            -destination 'platform=macOS' \
-            -derivedDataPath DerivedData \
-            -resultBundlePath mac-ui.xcresult \
-            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM="" \
-            | xcbeautify --renderer github-actions
-      - name: Export macOS screenshots
-        if: always()
-        working-directory: apple
-        run: |
-          if [ -d mac-ui.xcresult ]; then
-            xcrun xcresulttool export attachments --path mac-ui.xcresult --output-path mac-screenshots
-          fi
-      - name: Upload macOS screenshots
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: mac-screenshots
-          path: apple/mac-screenshots/
-          if-no-files-found: ignore
-      - name: FloridaCore tests (macOS)
-        run: swift test
-        working-directory: apple/FloridaCore
-      - name: FloridaKit tests (macOS)
-        run: swift test
-        working-directory: apple/FloridaKit
+    needs: changes
+    if: needs.changes.outputs.apple == 'true'
+    uses: ./.github/workflows/apple-checks.yml
+    with:
+      run_ui: false
