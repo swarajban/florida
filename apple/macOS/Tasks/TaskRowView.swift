@@ -110,10 +110,10 @@ struct TaskRowView: View {
         .padding(.vertical, Self.verticalPadding)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? FloridaStyle.ink.opacity(isFocused ? 0.08 : 0.04) : .clear))
+                .fill(isSelected ? FloridaStyle.ink.opacity(isFocused ? 0.16 : 0.09) : .clear))
         .overlay(
             RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(FloridaStyle.ink, lineWidth: isSelected && isFocused ? 1.5 : 0))
+                .strokeBorder(FloridaStyle.ink.opacity(isFocused ? 1 : 0.5), lineWidth: isSelected ? 2 : 0))
         .overlay(alignment: .leading) {
             if isUntriaged {
                 RoundedRectangle(cornerRadius: 1)
@@ -129,6 +129,10 @@ struct TaskRowView: View {
         }
         .padding(.horizontal, 6)
         .contentShape(Rectangle())
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("task-row-\(task.id)")
+        .accessibilityValue(isSelected ? "Selected" : "Not selected")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private var scheduleColor: Color {

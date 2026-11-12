@@ -8,6 +8,18 @@ struct EventRecurrenceSection: View {
 
     var body: some View {
         Section {
+            #if os(macOS)
+            MacChoiceField(
+                "Repeat", selection: frequency,
+                options: [
+                    MacChoice("none", "Does not repeat"),
+                    MacChoice("daily", "Daily"),
+                    MacChoice("weekly", "Weekly"),
+                    MacChoice("monthly", "Monthly"),
+                    MacChoice("yearly", "Yearly"),
+                ],
+                identifier: "event-repeat")
+            #else
             Picker("Repeat", selection: frequency) {
                 Text("Does not repeat").tag("none")
                 Text("Daily").tag("daily")
@@ -17,6 +29,7 @@ struct EventRecurrenceSection: View {
             }
             .accessibilityIdentifier("event-repeat")
             .menuActionDismissBehavior(.enabled)
+            #endif
             if let rule = recurrence {
                 Stepper(value: Binding(
                     get: { recurrence?.interval ?? 1 },

@@ -20,12 +20,12 @@ struct NewCategorySheet: View {
                     .onSubmit(create)
             }
             VStack(alignment: .leading, spacing: 4) {
-                Picker("Area", selection: $area) {
-                    Text("Not set").tag(CategoryArea?.none)
-                    ForEach(CategoryArea.allCases, id: \.self) { area in
-                        Text(area.displayName).tag(CategoryArea?.some(area))
-                    }
-                }
+                MacChoiceField(
+                    "Area", selection: $area,
+                    options: [MacChoice(CategoryArea?.none, "Not set")] + CategoryArea.allCases.map {
+                        MacChoice(CategoryArea?.some($0), $0.displayName)
+                    },
+                    identifier: "new-category-area")
                 Text(CategoryArea.footnote)
                     .font(.caption)
                     .foregroundStyle(.secondary)

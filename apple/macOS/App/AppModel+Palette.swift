@@ -37,7 +37,7 @@ extension AppModel {
         case .search:
             palette.searchResults = searchItems(palette.query)
         case .move:
-            palette.categoryResults = FuzzyMatch.filter(orderedCategories, query: palette.query, label: \.name)
+            palette.categoryResults = FuzzyMatch.filter(orderedCategories, query: palette.query, label: \.name).inListOrder()
         case .fit(_, let minutes):
             palette.taskResults = FuzzyMatch.filter(tasksThatFit(minutes: minutes), query: palette.query, label: \.title)
         case .eventResources(let eventId):

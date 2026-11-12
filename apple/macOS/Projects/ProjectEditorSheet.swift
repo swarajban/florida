@@ -38,19 +38,20 @@ struct ProjectEditorSheet: View {
                     TextField("Name", text: $draft.name)
                         .focused($isNameFocused)
                         .accessibilityIdentifier("project-editor-name")
-                    Picker("Status", selection: $draft.status) {
-                        ForEach(ProjectStatus.listOrder, id: \.self) { status in
-                            Label(status.label, systemImage: status.symbolName).tag(status)
-                        }
-                    }
-                    .accessibilityIdentifier("project-editor-status")
-                    Picker("Category", selection: categoryChoice) {
-                        Text("None").tag(String?.none)
-                        ForEach(model.orderedCategories) { category in
-                            Text(category.name).tag(String?.some(category.id))
-                        }
-                    }
-                    .accessibilityIdentifier("project-editor-category")
+                    MacChoiceField(
+                        "Status", selection: $draft.status,
+                        options: ProjectStatus.listOrder.map { MacChoice($0, $0.label) },
+                        identifier: "project-editor-status")
+                    MacChoiceField(
+                        "Category", selection: categoryChoice,
+                        options: [MacChoice(String?.none, "None")] + model.orderedCategories.map {
+                            MacChoice(String?.some($0.id), $0.name)
+                        },
+                        identifier: "project-editor-category",
+                        create: { name in
+                            guard let category = model.createCategory(name: name) else { return nil }
+                            return category.id
+                        })
                     TextField("Next step", text: nextStep)
                         .accessibilityIdentifier("project-editor-next-step")
                     TextField("Notes", text: notes, axis: .vertical)
@@ -67,13 +68,12 @@ struct ProjectEditorSheet: View {
                     Text(PlanText.parallelFootnote)
                 }
                 Section {
-                    Picker("Weekly time", selection: weeklyMinutes) {
-                        Text("None").tag(Int?.none)
-                        ForEach(weeklyChoices, id: \.self) { minutes in
-                            Text(ProjectsText.weekly(minutes)).tag(Int?.some(minutes))
-                        }
-                    }
-                    .accessibilityIdentifier("project-editor-weekly")
+                    MacChoiceField(
+                        "Weekly time", selection: weeklyMinutes,
+                        options: [MacChoice(Int?.none, "None")] + weeklyChoices.map {
+                            MacChoice(Int?.some($0), ProjectsText.weekly($0))
+                        },
+                        identifier: "project-editor-weekly")
                 } footer: {
                     Text(PlanText.weeklyFootnote)
                 }

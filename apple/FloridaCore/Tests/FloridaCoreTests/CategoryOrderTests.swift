@@ -49,4 +49,32 @@ import Testing
         #expect(first.inListOrder().map(\.id) == ["a", "b"])
         #expect(first.reversed().inListOrder().map(\.id) == ["a", "b"])
     }
+
+    @Test func filteredSubsetUsesAreaOrder() {
+        let categories = [
+            Self.category("none", "work archive", nil, sortOrder: -10),
+            Self.category("personal", "Work", .personal, sortOrder: -20),
+            Self.category("work", "Team work", .work, sortOrder: 50),
+            Self.category("inbox", "Inbox", .personal, sortOrder: 100),
+        ]
+        let matches = categories.filter { $0.name.lowercased().contains("work") }
+        #expect(matches.inListOrder().map(\.id) == ["work", "personal", "none"])
+        #expect(categories.inListOrder().first?.isInbox == true)
+    }
+
+    @Test func renamingAndAssigningAreasRecomputesTheOrder() {
+        var categories = [
+            Self.category("inbox", "Inbox", nil),
+            Self.category("engineering", "Engineering", .work),
+            Self.category("deals", "Deals", .work),
+            Self.category("personal", "Finances & accounts", .personal),
+            Self.category("legacy-z", "Zoo", nil),
+            Self.category("legacy-a", "admin", nil),
+        ]
+        #expect(categories.inListOrder().map(\.id) == ["inbox", "deals", "engineering", "personal", "legacy-a", "legacy-z"])
+        categories[4].area = .work
+        categories[4].name = "accounting"
+        categories[2].area = .personal
+        #expect(categories.inListOrder().map(\.id) == ["inbox", "legacy-z", "engineering", "deals", "personal", "legacy-a"])
+    }
 }

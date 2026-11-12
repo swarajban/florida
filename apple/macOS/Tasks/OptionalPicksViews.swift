@@ -59,10 +59,10 @@ struct OptionalPickRowView: View {
         .padding(.vertical, 9)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? FloridaStyle.ink.opacity(isFocused ? 0.08 : 0.04) : .clear))
+                .fill(isSelected ? FloridaStyle.ink.opacity(isFocused ? 0.16 : 0.09) : .clear))
         .overlay(
             RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(FloridaStyle.ink, lineWidth: isSelected && isFocused ? 1.5 : 0))
+                .strokeBorder(FloridaStyle.ink.opacity(isFocused ? 1 : 0.5), lineWidth: isSelected ? 2 : 0))
         .overlay(alignment: .leading) {
             RoundedRectangle(cornerRadius: 1)
                 .stroke(category?.tint ?? .defaultCategory, style: StrokeStyle(lineWidth: 1, dash: [1, 3]))

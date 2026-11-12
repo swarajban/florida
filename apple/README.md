@@ -89,10 +89,34 @@ empty slot opens quick add prefilled with that time as a pinned start.
 
 An opened task or event shows the key for each control beside it. The task
 editor opens with no field focused, so its keys (`TaskEditorKey` in
-FloridaCore) act at once: `space` marks the task done, `s` and `d` go to Start
-and Due, `p` steps the priority and `⇧P` steps back, and `esc` leaves a field.
-A new task opens in its title instead. One click selects a block and a
-double-click opens it. Drag a timed event to move it: it snaps to 15 minutes,
+FloridaCore) act at once: `space` marks the task done; `s`, `d` and `i` open
+Start, Due and Pinned start. `c` opens Category, `j` Project, `o` Context,
+`p` Priority, `a` Attention and `h` the soft/hard Deadline choice. Clicking a
+value opens the same anchored selector. Its search field is focused immediately;
+typing ranks case-insensitive prefixes before substring and fuzzy matches.
+Use arrows or `⌃N`/`⌃P`, then Return to choose. The current value starts
+highlighted. Escape cancels without changing the value and leaves no field
+focused, so the next editor key works. `⇧P` opens the selector too instead of
+stepping; `⌘1`–`⌘4` still set priority directly. `z` does nothing in the editor.
+New tasks also open unfocused; `t` focuses Title and `n` Notes.
+
+Date selectors preview words such as `tomorrow`, `fri`, `nov 20`, `in 2 weeks`
+and `next mon 3pm` as you type; `none` clears an optional date. Arrows move the
+highlighted day in the compact month grid and Return picks it. Quick choices
+are Today, Tomorrow, This weekend, Next week and No date. Tab focuses the grid,
+where single keys `1`–`5` pick those choices without interfering with dates
+typed as numbers. “Add a time” remains optional, and typing a clock time enables
+it. Category selectors offer “Create ‘name’” when nothing matches; creation
+and all choices are local-first, with no network round trip. The same selectors
+serve event calendars and repeat rules, project status/category/weekly time,
+and category areas. Direct two-way toggles, the brief's two tabs and the event
+popover's Yes/Maybe/No RSVP buttons retain their faster direct controls and keys.
+
+One click in the task pane selects the row with a visible outline and fill,
+and moves keyboard focus there so `e`, Space and the other task keys act on it.
+Double-click opens its editor; the done circle still completes on one click.
+One click selects a calendar block and a double-click opens it.
+Drag a timed event to move it: it snaps to 15 minutes,
 keeps its length, and can cross day columns; an event with guests asks first,
 because Google emails them. An event that repeats asks whether this one moves
 or all of them. All Events is offered only for a drop on the event's own day:
@@ -124,7 +148,10 @@ day unless "Add a time" is on. The editor's Dates section holds Start (the task
 is not scheduled before it) above Due, and a start moved to or past the due
 date moves the due date to the day after. Categories are listed in one order
 everywhere: Inbox, work, personal, then those without an area, by name within
-each. Settings → Routine shows the weekly blocks tasks
+each, ignoring case. Category search preserves that order within each match
+rank, and the move palette does not reorder categories by relevance. A category
+with no Area sorts last; set Work or Personal directly in Settings → Categories.
+Settings → Routine shows the weekly blocks tasks
 are scheduled in; a task's context decides which blocks it may use, and a
 category's Area (Work or Personal) puts personal tasks first in the evening's
 suggestions.

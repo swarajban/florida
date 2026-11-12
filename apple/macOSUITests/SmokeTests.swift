@@ -179,32 +179,60 @@ final class SmokeTests: XCTestCase {
             let title = app.sheets.textFields.firstMatch
             XCTAssertTrue(title.waitForExistence(timeout: 5))
             title.typeText("Weekly planning")
-            let calendar = app.popUpButtons["event-calendar"]
+            let calendar = app.buttons["event-calendar"]
             XCTAssertEqual(calendar.value as? String, "demo@sempre-health.com")
             calendar.click()
+            let calendarSearch = app.textFields["event-calendar-search"]
+            XCTAssertTrue(calendarSearch.waitForExistence(timeout: 5))
             let choices = ["demo@sempre-health.com", "demo@personal.example", "A&S Family Calendar", "teammate@sempre-health.com"]
-                .map { app.menuItems[$0] }
+                .enumerated().map { index, name in
+                    let choice = app.buttons["event-calendar-option-\(index)"]
+                    XCTAssertTrue(choice.waitForExistence(timeout: 5))
+                    XCTAssertTrue(choice.label.contains(name))
+                    return choice
+                }
             XCTAssertTrue(choices.allSatisfy(\.exists))
             let tops = choices.map(\.frame.minY)
             XCTAssertEqual(tops, tops.sorted())
             capture(app.windows.firstMatch, "calendar-order-\(appearance)")
             choices[0].click()
-            let startTime = app.popUpButtons["time-Starts"]
+            XCTAssertTrue(calendarSearch.waitForNonExistence(timeout: 5))
+            let startTime = app.buttons["time-Starts"]
             XCTAssertTrue(startTime.exists)
             startTime.click()
+            let timeSearch = app.textFields["time-Starts-search"]
+            XCTAssertTrue(timeSearch.waitForExistence(timeout: 5))
             let at = Calendar.current.date(bySettingHour: 10, minute: 15, second: 0, of: Date())!
             let timeLabel = at.formatted(.dateTime.hour().minute())
-            XCTAssertFalse(app.menuItems[at.addingTimeInterval(60).formatted(.dateTime.hour().minute())].exists)
-            XCTAssertTrue(app.menuItems[at.addingTimeInterval(900).formatted(.dateTime.hour().minute())].exists)
-            app.menuItems[timeLabel].click()
+            let timeOptions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'time-Starts-option-'"))
+            app.typeText(at.addingTimeInterval(60).formatted(.dateTime.hour().minute()))
+            XCTAssertTrue(app.staticTexts["No matches"].waitForExistence(timeout: 5))
+            XCTAssertEqual(timeOptions.count, 0)
+            app.typeKey("a", modifierFlags: .command)
+            let followingTime = at.addingTimeInterval(900).formatted(.dateTime.hour().minute())
+            app.typeText(followingTime)
+            XCTAssertTrue(timeOptions.firstMatch.waitForExistence(timeout: 5))
+            XCTAssertTrue(timeOptions.firstMatch.label.contains(followingTime))
+            app.typeKey("a", modifierFlags: .command)
+            app.typeText(timeLabel)
+            waitForValue(timeLabel, of: timeSearch)
+            XCTAssertTrue(timeOptions.firstMatch.waitForExistence(timeout: 5))
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(timeSearch.waitForNonExistence(timeout: 5))
             XCTAssertEqual(startTime.value as? String, timeLabel)
-            let repeatPicker = app.popUpButtons["event-repeat"]
+            let repeatPicker = app.buttons["event-repeat"]
             XCTAssertTrue(repeatPicker.exists)
             app.buttons["Cancel"].hover()
             title.hover()
             repeatPicker.hover()
             repeatPicker.click()
-            app.menuItems["Weekly"].click()
+            let repeatSearch = app.textFields["event-repeat-search"]
+            XCTAssertTrue(repeatSearch.waitForExistence(timeout: 5))
+            app.typeText("Weekly")
+            waitForValue("Weekly", of: repeatSearch)
+            XCTAssertTrue(app.buttons["event-repeat-option-2"].waitForExistence(timeout: 5))
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(repeatSearch.waitForNonExistence(timeout: 5))
             XCTAssertTrue(app.staticTexts["Every 1 week"].waitForExistence(timeout: 5))
             app.switches["event-repeat-limit"].click()
             XCTAssertTrue(app.staticTexts["Ends after 10 occurrences"].exists)
@@ -298,32 +326,42 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(headline.waitForNonExistence(timeout: 5))
 
             app.typeKey("n", modifierFlags: .shift)
-            XCTAssertTrue(app.popUpButtons["task-project"].waitForExistence(timeout: 5))
-            XCTAssertTrue(app.popUpButtons["task-attention"].exists)
+            XCTAssertTrue(app.buttons["task-project"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["task-attention"].exists)
             capture(window, "task-editor-\(appearance)")
-            // A new task opens in its title: the first Escape leaves the field, the second cancels.
+            // A new task opens unfocused, so the first Escape cancels.
             app.typeKey(.escape, modifierFlags: [])
-            XCTAssertTrue(app.popUpButtons["task-project"].exists)
-            app.typeKey(.escape, modifierFlags: [])
-            XCTAssertTrue(app.popUpButtons["task-project"].waitForNonExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["task-project"].waitForNonExistence(timeout: 5))
 
             // An open task: Mark done on top, then both dates. This one was due yesterday, so
             // a start of today moves its due date to tomorrow. One click only selects the row;
             // the second opens it.
             let row = app.staticTexts["Renew VPN certificate"].firstMatch
-            let priority = app.popUpButtons["task-priority"]
+            let priority = app.buttons["task-priority"]
             row.click()
             XCTAssertFalse(priority.waitForExistence(timeout: 1.5), "one click should select, not open")
             row.doubleClick()
             XCTAssertTrue(priority.waitForExistence(timeout: 5))
-            app.checkBoxes["Start"].click()
+            app.buttons["task-start"].click()
+            let startSearch = app.textFields["task-start-search"]
+            XCTAssertTrue(startSearch.waitForExistence(timeout: 5))
+            app.typeText("today")
+            waitForValue("today", of: startSearch)
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(startSearch.waitForNonExistence(timeout: 5))
+            let today = Calendar.current.startOfDay(for: Date())
+            let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: today)!
+            XCTAssertEqual(app.buttons["task-start"].value as? String,
+                           today.formatted(.dateTime.month(.abbreviated).day().year()))
+            XCTAssertTrue((app.buttons["task-due"].value as? String)?.hasPrefix(
+                tomorrow.formatted(.dateTime.month(.abbreviated).day().year())) == true)
             capture(window, "task-editor-open-\(appearance)")
             app.typeKey(.escape, modifierFlags: [])
         }
     }
 
     /// The keys on an opened item. `f` and a label open a task with the keyboard in no field, so
-    /// each control's key acts: `p` steps the priority, `s` switches the start date on and ⇧S off,
+    /// each control's key acts: `p` searches priorities, `s` chooses a start date or clears it,
     /// Space marks the task done, and `z` on the calendar brings it back. An event's popover
     /// shows its keys the same way.
     @MainActor
@@ -339,24 +377,49 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 10))
 
             try typeJumpLabel(of: "demo-task-vpn", in: app)
-            let priority = app.popUpButtons["task-priority"]
+            let priority = app.buttons["task-priority"]
             XCTAssertTrue(priority.waitForExistence(timeout: 5), "the label should open the task")
             capture(window, "task-keys-\(appearance)")
 
             let before = try XCTUnwrap(priority.value as? String)
+            XCTAssertEqual(before, "High")
             app.typeKey("p", modifierFlags: [])
-            wait(for: [expectation(for: NSPredicate(format: "value != %@", before), evaluatedWith: priority)], timeout: 5)
-            let stepped = try XCTUnwrap(priority.value as? String)
+            let prioritySearch = app.textFields["task-priority-search"]
+            XCTAssertTrue(prioritySearch.waitForExistence(timeout: 5))
+            XCTAssertEqual(priority.value as? String, before)
+            app.typeText("Low")
+            waitForValue("Low", of: prioritySearch)
+            XCTAssertTrue(app.buttons["task-priority-option-3"].waitForExistence(timeout: 5))
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(prioritySearch.waitForNonExistence(timeout: 5))
+            waitForValue("Low", of: priority)
             app.typeKey("p", modifierFlags: .shift)
-            wait(for: [expectation(for: NSPredicate(format: "value == %@", before), evaluatedWith: priority)], timeout: 5)
-            XCTAssertNotEqual(stepped, before)
+            XCTAssertTrue(prioritySearch.waitForExistence(timeout: 5))
+            XCTAssertEqual(priority.value as? String, "Low")
+            app.typeText(before)
+            waitForValue(before, of: prioritySearch)
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(prioritySearch.waitForNonExistence(timeout: 5))
+            waitForValue(before, of: priority)
 
-            let start = app.checkBoxes["Start"]
-            XCTAssertEqual((start.value as? NSNumber)?.intValue, 0)
+            let start = app.buttons["task-start"]
+            XCTAssertEqual(start.value as? String, "No date")
             app.typeKey("s", modifierFlags: [])
-            wait(for: [expectation(for: NSPredicate(format: "value == 1"), evaluatedWith: start)], timeout: 5)
+            let startSearch = app.textFields["task-start-search"]
+            XCTAssertTrue(startSearch.waitForExistence(timeout: 5))
+            app.typeText("today")
+            waitForValue("today", of: startSearch)
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(startSearch.waitForNonExistence(timeout: 5))
+            let today = Calendar.current.startOfDay(for: Date())
+            waitForValue(today.formatted(.dateTime.month(.abbreviated).day().year()), of: start)
             app.typeKey("s", modifierFlags: .shift)
-            wait(for: [expectation(for: NSPredicate(format: "value == 0"), evaluatedWith: start)], timeout: 5)
+            XCTAssertTrue(startSearch.waitForExistence(timeout: 5))
+            app.typeText("none")
+            waitForValue("none", of: startSearch)
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(startSearch.waitForNonExistence(timeout: 5))
+            waitForValue("No date", of: start)
 
             // Space finishes the task: the editor closes and its row leaves the pane.
             let done = app.buttons["task-done-demo-task-vpn"]
@@ -378,6 +441,183 @@ final class SmokeTests: XCTestCase {
             capture(window, "event-keys-\(appearance)")
             app.typeKey(.escape, modifierFlags: [])
             XCTAssertTrue(app.buttons["Edit…"].waitForNonExistence(timeout: 5))
+        }
+    }
+
+    @MainActor
+    func testCategorySelectorInBothAppearances() throws {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-demoData", "YES", "-uiAppearance", appearance]
+            app.launch()
+            defer { app.terminate() }
+            XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 15))
+            try typeJumpLabel(of: "demo-task-vpn", in: app)
+            let editorTitle = app.textFields.matching(NSPredicate(format: "value == %@", "Renew VPN certificate")).firstMatch
+            XCTAssertTrue(editorTitle.waitForExistence(timeout: 5))
+            let category = app.buttons["task-category"]
+            XCTAssertEqual(category.value as? String, "Inbox")
+            let search = app.textFields["task-category-search"]
+            let options = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'task-category-option-'"))
+
+            app.typeKey("c", modifierFlags: [])
+            XCTAssertTrue(search.waitForExistence(timeout: 5))
+            app.typeText("engineering")
+            waitForValue("engineering", of: search)
+            XCTAssertTrue(options.firstMatch.waitForExistence(timeout: 5))
+            XCTAssertEqual(options.count, 1)
+            XCTAssertTrue(options.firstMatch.label.contains("Work Engineering"))
+            XCTAssertEqual(category.value as? String, "Inbox")
+            capture(app, "category-selector-\(appearance)")
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(search.waitForNonExistence(timeout: 5))
+            waitForValue("Work Engineering", of: category)
+            XCTAssertTrue(editorTitle.exists, "choosing a category must not save the editor")
+
+            app.typeKey("c", modifierFlags: [])
+            XCTAssertTrue(search.waitForExistence(timeout: 5))
+            app.typeText("infosec")
+            waitForValue("infosec", of: search)
+            XCTAssertTrue(options.firstMatch.waitForExistence(timeout: 5))
+            XCTAssertTrue(options.firstMatch.label.contains("Work Infosec"))
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(search.waitForNonExistence(timeout: 5))
+            XCTAssertEqual(category.value as? String, "Work Engineering")
+            XCTAssertTrue(editorTitle.exists)
+            app.typeKey("p", modifierFlags: [])
+            let prioritySearch = app.textFields["task-priority-search"]
+            XCTAssertTrue(prioritySearch.waitForExistence(timeout: 5), "a field key must work immediately after cancelling a query")
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(prioritySearch.waitForNonExistence(timeout: 5))
+
+            let createdName = "Selector Created \(appearance)"
+            app.typeKey("c", modifierFlags: [])
+            XCTAssertTrue(search.waitForExistence(timeout: 5))
+            app.typeText(createdName)
+            waitForValue(createdName, of: search)
+            let create = app.buttons["task-category-create"]
+            XCTAssertTrue(create.waitForExistence(timeout: 5))
+            XCTAssertEqual(options.count, 0)
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(search.waitForNonExistence(timeout: 5))
+            waitForValue(createdName, of: category)
+            XCTAssertTrue(editorTitle.exists, "creating a category must not save the editor")
+            app.typeKey("c", modifierFlags: [])
+            XCTAssertTrue(search.waitForExistence(timeout: 5))
+            app.typeText(createdName)
+            waitForValue(createdName, of: search)
+            XCTAssertTrue(options.firstMatch.waitForExistence(timeout: 5))
+            XCTAssertTrue(options.firstMatch.label.contains(createdName))
+            XCTAssertEqual(options.count, 1)
+            XCTAssertFalse(create.exists, "the locally created category should now be an existing choice")
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(search.waitForNonExistence(timeout: 5))
+            XCTAssertEqual(category.value as? String, createdName)
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(editorTitle.waitForNonExistence(timeout: 5))
+        }
+    }
+
+    @MainActor
+    func testDateSelectorsInBothAppearances() throws {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-demoData", "YES", "-uiAppearance", appearance]
+            app.launch()
+            defer { app.terminate() }
+            XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 15))
+            try typeJumpLabel(of: "demo-task-vpn", in: app)
+            let editorTitle = app.textFields.matching(NSPredicate(format: "value == %@", "Renew VPN certificate")).firstMatch
+            XCTAssertTrue(editorTitle.waitForExistence(timeout: 5))
+            let calendar = Calendar.current
+            let today = calendar.startOfDay(for: Date())
+            let daysToSunday = (8 - calendar.component(.weekday, from: today)) % 7
+            let monday = calendar.date(byAdding: .day, value: (daysToSunday == 0 ? 7 : daysToSunday) + 1, to: today)!
+            let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+            let due = calendar.date(bySettingHour: 15, minute: 0, second: 0, of: monday)!
+            let pinned = calendar.date(bySettingHour: 10, minute: 0, second: 0, of: tomorrow)!
+            let fields = [
+                (key: "d", identifier: "task-due", query: "next mon 3pm", date: due, timed: true),
+                (key: "s", identifier: "task-start", query: "tomorrow", date: tomorrow, timed: false),
+                (key: "i", identifier: "task-pinned-start", query: "tomorrow 10am", date: pinned, timed: true),
+            ]
+            for field in fields {
+                let button = app.buttons[field.identifier]
+                let before = try XCTUnwrap(button.value as? String)
+                let search = app.textFields["\(field.identifier)-search"]
+                app.typeKey(field.key, modifierFlags: [])
+                XCTAssertTrue(search.waitForExistence(timeout: 5))
+                app.typeText(field.query)
+                waitForValue(field.query, of: search)
+                let preview = app.staticTexts["\(field.identifier)-preview"]
+                let previewText = field.timed
+                    ? field.date.formatted(.dateTime.weekday(.wide).month(.wide).day().year().hour().minute())
+                    : field.date.formatted(.dateTime.weekday(.wide).month(.wide).day().year())
+                wait(for: [expectation(for: NSPredicate(format: "label == %@", previewText), evaluatedWith: preview)], timeout: 5)
+                XCTAssertEqual(button.value as? String, before)
+                if field.key == "d" { capture(app, "date-selector-\(appearance)") }
+                app.typeKey(.escape, modifierFlags: [])
+                XCTAssertTrue(search.waitForNonExistence(timeout: 5))
+                XCTAssertEqual(button.value as? String, before)
+                XCTAssertTrue(editorTitle.exists)
+
+                app.typeKey(field.key, modifierFlags: [])
+                XCTAssertTrue(search.waitForExistence(timeout: 5))
+                app.typeText(field.query)
+                waitForValue(field.query, of: search)
+                app.typeKey(.return, modifierFlags: [])
+                XCTAssertTrue(search.waitForNonExistence(timeout: 5))
+                let selectedText = field.timed
+                    ? field.date.formatted(.dateTime.month(.abbreviated).day().year().hour().minute())
+                    : field.date.formatted(.dateTime.month(.abbreviated).day().year())
+                waitForValue(selectedText, of: button)
+                XCTAssertTrue(editorTitle.exists, "choosing a date must not save the editor")
+            }
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(editorTitle.waitForNonExistence(timeout: 5))
+        }
+    }
+
+    @MainActor
+    func testTaskPaneClicksInBothAppearances() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-demoData", "YES", "-uiAppearance", appearance]
+            app.launch()
+            defer { app.terminate() }
+            let title = app.staticTexts["Renew VPN certificate"].firstMatch
+            XCTAssertTrue(title.waitForExistence(timeout: 15))
+            let row = app.descendants(matching: .any).matching(identifier: "task-row-demo-task-vpn").firstMatch
+            XCTAssertTrue(row.exists)
+            let priority = app.buttons["task-priority"]
+            title.click()
+            waitForValue("Selected", of: row)
+            capture(app.windows.firstMatch, "task-selection-\(appearance)")
+            XCTAssertFalse(priority.waitForExistence(timeout: 1.5), "a single click must select without opening the editor")
+
+            app.typeKey("e", modifierFlags: [])
+            let editorTitle = app.textFields.matching(NSPredicate(format: "value == %@", "Renew VPN certificate")).firstMatch
+            XCTAssertTrue(editorTitle.waitForExistence(timeout: 5), "E must edit the clicked task")
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(editorTitle.waitForNonExistence(timeout: 5))
+            waitForValue("Selected", of: row)
+
+            let done = app.buttons["task-done-demo-task-vpn"]
+            XCTAssertTrue(done.isHittable)
+            done.click()
+            XCTAssertTrue(title.waitForNonExistence(timeout: 5), "one click on the completion circle must finish the task")
+            XCTAssertTrue(done.waitForNonExistence(timeout: 5))
+            XCTAssertFalse(priority.exists)
+            app.typeKey("z", modifierFlags: [])
+            XCTAssertTrue(title.waitForExistence(timeout: 5))
+            XCTAssertTrue(done.waitForExistence(timeout: 5))
+            title.doubleClick()
+            XCTAssertTrue(editorTitle.waitForExistence(timeout: 5), "a double click must open the correct task")
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(editorTitle.waitForNonExistence(timeout: 5))
         }
     }
 
@@ -551,6 +791,11 @@ final class SmokeTests: XCTestCase {
             app.typeKey(String(key), modifierFlags: [])
         }
         XCTAssertTrue(label.waitForNonExistence(timeout: 5))
+    }
+
+    @MainActor
+    private func waitForValue(_ value: String, of element: XCUIElement) {
+        wait(for: [expectation(for: NSPredicate(format: "value == %@", value), evaluatedWith: element)], timeout: 5)
     }
 
     @MainActor
