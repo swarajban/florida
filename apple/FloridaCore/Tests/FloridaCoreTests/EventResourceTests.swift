@@ -122,6 +122,21 @@ struct EventResourceTests {
         #expect(resources.map(\.url.absoluteString) == ["https://example.com/target"])
     }
 
+    @Test func revalidatesGoogleRedirectTargets() {
+        for target in ["javascript:alert(1)", "file:///etc/passwd", "https://user:password@example.com", "/relative"] {
+            let encoded = target.addingPercentEncoding(withAllowedCharacters: .alphanumerics)!
+            let resources = EventResource.extract(
+                description: "<a href=\"https://www.google.com/url?q=\(encoded)\">Resource</a>", location: nil)
+            #expect(resources.isEmpty)
+        }
+    }
+
+    @Test func retainsResourcesBeyondTheDirectShortcutLimit() {
+        let urls = (0..<125).map { "https://example.com/resource/\($0)" }
+        let resources = EventResource.extract(description: urls.joined(separator: "\n"), location: nil)
+        #expect(resources.map(\.url.absoluteString) == urls)
+    }
+
     @Test func fallsBackFromURLAnchorLabelsAndBoundsLongTitles() {
         let resources = EventResource.extract(description: """
             <a href="https://docs.google.com/document/d/abc">https://docs.google.com/document/d/abc</a>

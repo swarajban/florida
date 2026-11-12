@@ -35,7 +35,7 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(app.staticTexts["Opened resource: https://docs.google.com/document/d/demo-scheduler/edit"].exists)
 
             app.typeKey("f", modifierFlags: [])
-            let label = app.staticTexts["event-jump-demo-event-design"]
+            let label = app.staticTexts["event-jump-demo-event-offsite"]
             XCTAssertTrue(label.waitForExistence(timeout: 5))
             let keys = try XCTUnwrap(label.value as? String).lowercased()
             XCTAssertFalse(keys.isEmpty)
