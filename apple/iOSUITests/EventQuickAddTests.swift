@@ -93,6 +93,12 @@ final class EventQuickAddTests: XCTestCase {
         XCTAssertTrue(app.textFields["event-quick-add-input"].waitForNonExistence(timeout: 5))
         let saved = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Day off")).firstMatch
         for _ in 0..<8 where !saved.exists { app.collectionViews.firstMatch.swipeDown() }
+        let list = app.collectionViews.firstMatch
+        for _ in 0..<12 where !saved.exists {
+            let from = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+            let to = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+            from.press(forDuration: 0.05, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.3)
+        }
         XCTAssertTrue(saved.waitForExistence(timeout: 5))
         XCTAssertTrue((saved.value as? String)?.contains("All day") == true)
         saved.tap()
