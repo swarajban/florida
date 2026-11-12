@@ -1573,6 +1573,7 @@ describe('calendar event writes', () => {
     expect((await api(`/api/events/${id}`, { method: 'DELETE' })).status).toBe(200)
     expect(fake.googleEvents.has(master)).toBe(true)
     expect(fake.googleEvents.has(`${master}_second`)).toBe(true)
+    await db.delete(events).where(eq(events.recurringEventId, master))
   })
 
   it('rejects invalid recurrence before creating anything on Google', async () => {
@@ -1740,14 +1741,14 @@ describe('day overrides', () => {
   }
 
   /**
-   * A future Saturday or Sunday in the seven-day capacity window with no timed event on it.
-   * All-day events do not block scheduling; their UTC midnight can fall on the prior Pacific date.
+   * A future Saturday or Sunday in the seven-day capacity window with no event on it.
+   * All-day dates are stored as UTC midnight, not as instants on the prior Pacific date.
    */
   async function nextWeekendDay(): Promise<string> {
     const busy = new Set(
       (await db.select().from(events))
-        .filter((e) => e.deletedAt === null && !e.allDay && e.startAt !== null)
-        .map((e) => isoDate(localDate(e.startAt!.getTime(), 'America/Los_Angeles'))),
+        .filter((e) => e.deletedAt === null && e.startAt !== null)
+        .map((e) => e.allDay ? e.startAt!.toISOString().slice(0, 10) : isoDate(localDate(e.startAt!.getTime(), 'America/Los_Angeles'))),
     )
     const today = dayNumber(localDate(Date.now(), 'America/Los_Angeles'))
     for (let day = today + 1; day < today + 7; day++) {
