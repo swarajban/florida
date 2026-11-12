@@ -1,7 +1,7 @@
 import Foundation
 
 public enum SelectorSearch {
-    public static func rankedIndices(in labels: [String], query: String) -> [Int] {
+    public static func rankedIndices(in labels: [String], query: String, preservingOrder: Bool = false) -> [Int] {
         let locale = Locale(identifier: "en_US_POSIX")
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
             .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: locale)
@@ -25,6 +25,7 @@ public enum SelectorSearch {
                 if next == query.endIndex { subsequences.append(index) }
             }
         }
-        return prefixes + substrings + subsequences
+        let matches = prefixes + substrings + subsequences
+        return preservingOrder ? matches.sorted() : matches
     }
 }

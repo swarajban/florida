@@ -106,7 +106,7 @@ struct TaskEditorSheet: View {
                     MacChoiceField("Category", selection: $draft.categoryId,
                                    options: model.orderedCategories.map { MacChoice($0.id, $0.name) },
                                    key: TaskEditorKey.category.keycap, isPresented: showing(.category),
-                                   identifier: "task-category", onDismiss: leaveField,
+                                   identifier: "task-category", preservesOrder: true, onDismiss: leaveField,
                                    create: { model.createCategory(name: $0)?.id })
                     LabeledContent {
                         HStack {

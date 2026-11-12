@@ -47,7 +47,7 @@ struct ProjectEditorSheet: View {
                         options: [MacChoice(String?.none, "None")] + model.orderedCategories.map {
                             MacChoice(String?.some($0.id), $0.name)
                         },
-                        identifier: "project-editor-category",
+                        identifier: "project-editor-category", preservesOrder: true,
                         create: { name in
                             guard let category = model.createCategory(name: name) else { return nil }
                             return category.id

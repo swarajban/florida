@@ -148,8 +148,8 @@ day unless "Add a time" is on. The editor's Dates section holds Start (the task
 is not scheduled before it) above Due, and a start moved to or past the due
 date moves the due date to the day after. Categories are listed in one order
 everywhere: Inbox, work, personal, then those without an area, by name within
-each, ignoring case. Category search preserves that order within each match
-rank, and the move palette does not reorder categories by relevance. A category
+each, ignoring case. Category search and the move palette preserve that order
+even while filtering, instead of reordering categories by relevance. A category
 with no Area sorts last; set Work or Personal directly in Settings → Categories.
 Settings → Routine shows the weekly blocks tasks
 are scheduled in; a task's context decides which blocks it may use, and a

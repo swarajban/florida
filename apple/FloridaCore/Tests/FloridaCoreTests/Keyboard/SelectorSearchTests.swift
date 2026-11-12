@@ -32,4 +32,11 @@ import Testing
         #expect(SelectorSearch.rankedIndices(in: [], query: "work").isEmpty)
         #expect(SelectorSearch.rankedIndices(in: ["Home"], query: "xyz").isEmpty)
     }
+
+    @Test func categorySearchKeepsAreaOrderAcrossMatchRanks() {
+        let labels = ["Inbox", "Work Home", "Work Habits", "Home", "Personal Home"]
+        #expect(SelectorSearch.rankedIndices(in: labels, query: "home") == [3, 1, 4])
+        #expect(SelectorSearch.rankedIndices(in: labels, query: "home", preservingOrder: true) == [1, 3, 4])
+        #expect(SelectorSearch.rankedIndices(in: labels, query: "wh", preservingOrder: true) == [1, 2])
+    }
 }

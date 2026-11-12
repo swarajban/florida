@@ -20,13 +20,15 @@ struct MacChoiceField<Value: Hashable>: View {
     var isPresented: Binding<Bool>?
     let identifier: String
     var showsLabel = true
+    var preservesOrder = false
     var onDismiss: () -> Void = {}
     var create: ((String) -> Value?)?
     @State private var localPresented = false
     @State private var originWindow: NSWindow?
 
     init(_ title: String, selection: Binding<Value>, options: [MacChoice<Value>], key: String? = nil,
-         isPresented: Binding<Bool>? = nil, identifier: String, showsLabel: Bool = true, onDismiss: @escaping () -> Void = {},
+         isPresented: Binding<Bool>? = nil, identifier: String, showsLabel: Bool = true,
+         preservesOrder: Bool = false, onDismiss: @escaping () -> Void = {},
          create: ((String) -> Value?)? = nil) {
         self.title = title
         _selection = selection
@@ -35,6 +37,7 @@ struct MacChoiceField<Value: Hashable>: View {
         self.isPresented = isPresented
         self.identifier = identifier
         self.showsLabel = showsLabel
+        self.preservesOrder = preservesOrder
         self.onDismiss = onDismiss
         self.create = create
     }
@@ -58,7 +61,7 @@ struct MacChoiceField<Value: Hashable>: View {
             .popover(isPresented: presented, arrowEdge: .bottom) {
                 MacChoiceSelector(
                     title: title, selection: $selection, options: options, identifier: identifier,
-                    create: create, close: { presented.wrappedValue = false })
+                    preservesOrder: preservesOrder, create: create, close: { presented.wrappedValue = false })
             }
         } label: {
             if showsLabel {
@@ -87,13 +90,16 @@ private struct MacChoiceSelector<Value: Hashable>: View {
     @Binding var selection: Value
     let options: [MacChoice<Value>]
     let identifier: String
+    let preservesOrder: Bool
     let create: ((String) -> Value?)?
     let close: () -> Void
     @State private var query = ""
     @State private var highlighted = 0
     @State private var error: String?
 
-    private var matches: [Int] { SelectorSearch.rankedIndices(in: options.map(\.title), query: query) }
+    private var matches: [Int] {
+        SelectorSearch.rankedIndices(in: options.map(\.title), query: query, preservingOrder: preservesOrder)
+    }
     private var newName: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var canCreate: Bool { create != nil && !newName.isEmpty && matches.isEmpty }
     private var count: Int { matches.count + (canCreate ? 1 : 0) }
