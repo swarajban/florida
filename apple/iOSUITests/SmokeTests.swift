@@ -66,7 +66,7 @@ final class SmokeTests: XCTestCase {
             }
             XCTAssertTrue(showBirthdays.isEnabled)
             XCTAssertEqual(showBirthdays.value as? String, "0")
-            showBirthdays.tap()
+            tapSwitch(showBirthdays)
             app.tabBars.buttons["Agenda"].tap()
             let birthday = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Mom's birthday")).firstMatch
             XCTAssertTrue(birthday.waitForExistence(timeout: 10))
@@ -682,17 +682,17 @@ final class SmokeTests: XCTestCase {
             XCTAssertEqual(visible.value as? String, "1")
             XCTAssertEqual(blocking.value as? String, "1")
 
-            blocking.tap()
+            tapSwitch(blocking)
             XCTAssertEqual(blocking.value as? String, "0")
             XCTAssertEqual(visible.value as? String, "1")
             app.tabBars.buttons["Agenda"].tap()
             waitForText("Marcus out of office", in: app)
             app.tabBars.buttons["Settings"].tap()
 
-            visible.tap()
+            tapSwitch(visible)
             XCTAssertEqual(visible.value as? String, "0")
             XCTAssertEqual(blocking.value as? String, "0")
-            blocking.tap()
+            tapSwitch(blocking)
             XCTAssertEqual(blocking.value as? String, "1")
             XCTAssertEqual(visible.value as? String, "0")
             capture(app, "calendar-hidden-blocking-\(appearance)")
@@ -702,10 +702,10 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(event.waitForNonExistence(timeout: 5))
             app.tabBars.buttons["Settings"].tap()
 
-            blocking.tap()
+            tapSwitch(blocking)
             XCTAssertEqual(blocking.value as? String, "0")
             XCTAssertEqual(visible.value as? String, "0")
-            visible.tap()
+            tapSwitch(visible)
             XCTAssertEqual(visible.value as? String, "1")
             XCTAssertEqual(blocking.value as? String, "0")
             capture(app, "calendar-visible-informational-\(appearance)")
@@ -713,6 +713,11 @@ final class SmokeTests: XCTestCase {
             waitForText("Marcus out of office", in: app)
             app.terminate()
         }
+    }
+
+    @MainActor
+    private func tapSwitch(_ control: XCUIElement) {
+        control.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
     }
 
     @MainActor
