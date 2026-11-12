@@ -31,8 +31,17 @@ public enum EventQuickAddParser {
         _ text: String, now: Date, calendar: Calendar, defaultStart: Date? = nil
     ) -> EventQuickAddDraft {
         let (body, notes) = QuickAddScanner.splitNotes(text)
+        var tokens = body.split(whereSeparator: \.isWhitespace).map(String.init)
+        let hint: String?
+        if let index = tokens.firstIndex(where: { $0.hasPrefix("#") }) {
+            let value = String(tokens[index].dropFirst())
+            hint = value
+            if isCalendarHintSyntax(value) { tokens.remove(at: index) }
+        } else {
+            hint = nil
+        }
         let scanner = QuickAddScanner(
-            tokens: body.split(whereSeparator: \.isWhitespace).map(String.init), now: now, calendar: calendar)
+            tokens: tokens, now: now, calendar: calendar)
         var day: Date?
         var clock: QuickAddScanner.Clock?
         var endClock: QuickAddScanner.Clock?
@@ -41,18 +50,12 @@ public enum EventQuickAddParser {
         var recurringDay: Date?
         var allDay = false
         var location: String?
-        var hint: String?
         var title: [String] = []
         var bareClockIndex: Int?
         var i = 0
 
         while i < scanner.tokens.count {
             let word = scanner.words[i]
-            if hint == nil, word == "#" || QuickAddScanner.categorySlug(scanner.tokens[i]) != nil {
-                hint = String(scanner.tokens[i].dropFirst())
-                i += 1
-                continue
-            }
             if !allDay, let count = allDayLength(scanner, at: i) {
                 allDay = true
                 i += count
@@ -152,6 +155,7 @@ public enum EventQuickAddParser {
     public static func matchingCalendars(
         hint: String, in calendars: [CalendarInfo], accounts: [GoogleAccount]
     ) -> [CalendarInfo] {
+        guard isCalendarHintSyntax(hint) else { return [] }
         let needle = normalize(hint)
         guard !needle.isEmpty else { return [] }
         let writable = calendars.filter { $0.accessRole == "owner" || $0.accessRole == "writer" }
@@ -171,6 +175,10 @@ public enum EventQuickAddParser {
         let slugExact = candidates.filter { $0.1.contains { calendarSlug($0) == slug } }.map(\.0)
         if !slugExact.isEmpty { return slugExact }
         return candidates.filter { $0.1.contains { $0.hasPrefix(needle) || calendarSlug($0).hasPrefix(slug) } }.map(\.0)
+    }
+
+    private static func isCalendarHintSyntax(_ value: String) -> Bool {
+        value.allSatisfy { $0.isLetter || $0.isNumber || $0.isWhitespace || "_-.@+".contains($0) }
     }
 
     private static func normalize(_ value: String) -> String {
@@ -228,6 +236,23 @@ public enum EventQuickAddParser {
     private static func unsupportedRecurrenceLength(_ scanner: QuickAddScanner, at i: Int) -> Int? {
         guard let first = scanner.word(i), first == "every" || EventRecurrence.Frequency(rawValue: first) != nil
         else { return nil }
+        if let rule = parseRecurrence(scanner, at: i) {
+            for index in (i + rule.consumed)..<scanner.tokens.count {
+                let word = scanner.words[index]
+                if ["until", "through", "ending"].contains(word) {
+                    var end = index + 1
+                    while end < scanner.tokens.count, !scanner.tokens[end].hasPrefix("#"), scanner.words[end] != "at" {
+                        end += 1
+                    }
+                    return end - i
+                }
+                if word == "for", let number = scanner.word(index + 1), Int(number) != nil,
+                   let unit = scanner.word(index + 2),
+                   ["day", "days", "week", "weeks", "month", "months", "year", "years", "time", "times", "occurrence", "occurrences"].contains(unit) {
+                    return index + 3 - i
+                }
+            }
+        }
         var j = i + 1
         if first == "every" {
             if let word = scanner.word(j), word == "other" || QuickAddScanner.integer(word[...]) != nil { j += 1 }
@@ -283,9 +308,13 @@ public enum EventQuickAddParser {
                 || left.word(0) == "noon" || left.word(0) == "midnight"
             let rightExplicit = halves[1].contains("am") || halves[1].contains("pm")
                 || right.word(0) == "noon" || right.word(0) == "midnight"
-            if !leftExplicit, rightExplicit, (1...12).contains(start.hour) {
+            let left24Hour = !leftExplicit && halves[0].contains(":")
+                && (!rightExplicit || left.word(0)?.hasPrefix("0") == true)
+            let right24Hour = !rightExplicit && halves[1].contains(":")
+                && (!leftExplicit || right.word(0)?.hasPrefix("0") == true)
+            if !leftExplicit, !left24Hour, rightExplicit, (1...12).contains(start.hour) {
                 start = inheritedClock(start, relativeTo: end, isStart: true)
-            } else if !rightExplicit, (1...12).contains(end.hour) {
+            } else if !rightExplicit, !right24Hour, (1...12).contains(end.hour) {
                 end = inheritedClock(end, relativeTo: start, isStart: false)
             }
             return (start, end, count)

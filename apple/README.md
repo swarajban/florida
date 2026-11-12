@@ -189,11 +189,15 @@ opens a local sentence composer, separate from task capture. Try “Lunch with D
 tomorrow 12-1 at Blue Bottle #work” or “Dentist fri 3pm 45m”. The preview shows the
 date, start/end, settings time zone, recurrence, location, and destination calendar
 and account before saving. `#` calendar hints must resolve to one writable calendar;
-unknown or ambiguous hints require a choice. Without a hint, the existing preferred
+names, slugs and email IDs such as `#me@gmail.com` are accepted; unknown or ambiguous
+hints require a choice. Without a hint, the existing preferred
 calendar order applies. Numeric dates use month/day; weekday names mean the next
 occurrence, and an end before the start clock crosses midnight. “All day” stores
 calendar dates, and “every Tuesday” creates a weekly series on that weekday.
 Daily, weekly, monthly and yearly rules use the existing recurrence model.
+Explicit 24-hour ranges such as `15:00-04:00` keep their clock values. Unsupported
+recurrence bounds (`until December 1`, `for 4 weeks`) stay literal rather than
+creating an unlimited series; use the Repeat chip to set an occurrence limit.
 
 Click a preview chip to correct it, or use `⌘1` Date, `⌘2` Time, `⌘3` Calendar,
 `⌘4` Repeat, `⌘5` Location and `⌘6` Title. Return commits a correction; Return in

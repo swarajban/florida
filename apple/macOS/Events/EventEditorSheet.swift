@@ -100,7 +100,7 @@ struct EventEditorSheet: View {
         .environment(\.calendar, calendar)
         .environment(\.timeZone, calendar.timeZone)
         .onAppear {
-            isTitleFocused = true
+            DispatchQueue.main.async { isTitleFocused = true }
         }
     }
 

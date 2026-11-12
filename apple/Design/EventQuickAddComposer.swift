@@ -186,6 +186,7 @@ struct EventQuickAddComposer: View {
             }
         }
         .accessibilityElement(children: .combine)
+        .accessibilityLabel(destinationAccessibilityLabel)
         .accessibilityIdentifier("event-quick-add-destination")
     }
 
@@ -265,7 +266,9 @@ struct EventQuickAddComposer: View {
                 .accessibilityIdentifier("event-quick-add-correction-done")
         }
         .onSubmit { activeField = nil }
-        .onAppear { correctionFocused = field == .title || field == .location }
+        .onAppear {
+            DispatchQueue.main.async { correctionFocused = field == .title || field == .location }
+        }
         .environment(\.calendar, calendar)
         .environment(\.timeZone, calendar.timeZone)
         .presentationDetents([.medium, .large])
@@ -277,6 +280,12 @@ struct EventQuickAddComposer: View {
     private var orderedCalendars: [CalendarInfo] {
         calendars.filter { $0.accessRole == "owner" || $0.accessRole == "writer" }
             .sorted { CalendarInfo.isPreferredForNewEvents($0, $1, accounts: accounts) }
+    }
+
+    private var destinationAccessibilityLabel: String {
+        guard let destination else { return "Choose a calendar and account before saving." }
+        let account = accounts.first { $0.id == destination.accountId }?.email ?? "Account unavailable"
+        return "Saving to \(destination.summary), account \(account)"
     }
 
     private var dateText: String {
@@ -322,6 +331,7 @@ struct EventQuickAddComposer: View {
 
     private func showEditor() {
         guard let event = session.event(in: calendars, accounts: accounts, allowUntitled: true) else { return }
+        inputFocused = false
         onOpenEditor(event, session.draft.recurrence)
     }
 

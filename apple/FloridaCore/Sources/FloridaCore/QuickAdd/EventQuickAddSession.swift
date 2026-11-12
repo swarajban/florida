@@ -12,6 +12,7 @@ public struct EventQuickAddSession: Sendable {
     private var correctedSchedule = false
     private var correctedLocation = false
     private var correctedRecurrence = false
+    private var timedShape: (hour: Int, minute: Int, duration: TimeInterval)?
 
     public init(event: CalendarEvent, now: Date, calendar: Calendar) {
         template = event
@@ -42,6 +43,7 @@ public struct EventQuickAddSession: Sendable {
         correctedRecurrence = false
         chosenCalendarID = nil
         hasCorrections = false
+        timedShape = nil
         updateText(text)
     }
 
@@ -102,13 +104,16 @@ public struct EventQuickAddSession: Sendable {
     public mutating func setAllDay(_ allDay: Bool) {
         guard allDay != draft.allDay else { return }
         if allDay {
+            let clock = calendar.dateComponents([.hour, .minute], from: draft.startAt)
+            timedShape = (clock.hour ?? 9, clock.minute ?? 0, draft.endAt.timeIntervalSince(draft.startAt))
             let last = max(draft.startAt, draft.endAt.addingTimeInterval(-1))
             draft.startAt = AllDayDate.storedInstant(forLocalDay: draft.startAt, calendar: calendar)
             draft.endAt = storedEnd(after: last)
         } else {
-            let start = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: localStart) ?? localStart
+            let shape = timedShape ?? (hour: 9, minute: 0, duration: 30 * 60)
+            let start = calendar.date(bySettingHour: shape.hour, minute: shape.minute, second: 0, of: localStart) ?? localStart
             draft.startAt = start
-            draft.endAt = start.addingTimeInterval(30 * 60)
+            draft.endAt = start.addingTimeInterval(shape.duration)
         }
         draft.allDay = allDay
         correctedSchedule = true

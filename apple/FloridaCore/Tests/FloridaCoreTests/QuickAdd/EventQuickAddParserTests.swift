@@ -89,6 +89,10 @@ private func eventParse(
             ("11-1am", 23, 0, 1, 0, 10),
             ("11pm-1am", 23, 0, 1, 0, 10),
             ("23:30-01:15", 23, 30, 1, 15, 10),
+            ("15:00-04:00", 15, 0, 4, 0, 10),
+            ("09:00-09:00", 9, 0, 9, 0, 10),
+            ("9am-04:00", 9, 0, 4, 0, 10),
+            ("9am-4:30", 9, 0, 16, 30, 9),
             ("9:30-10:45pm", 21, 30, 22, 45, 9),
             ("12am-1am", 0, 0, 1, 0, 9),
             ("noon-midnight", 12, 0, 0, 0, 10),
@@ -267,6 +271,21 @@ private func eventParse(
         #expect(draft.location == "Blue Bottle")
         #expect(draft.recurrence?.interval == 2)
         #expect(draft.startAt == eventDate(2026, 11, 10, 15))
+    }
+
+    @Test func unsupportedRecurrenceBoundsStayLiteralWithoutMovingStart() {
+        for text in [
+            "every tuesday until 12/1", "weekly until december 1", "every week for 4 weeks",
+            "every tuesday 3pm until 12/1", "every month for 3 months",
+            "every tuesday for 5 occurrences",
+        ] {
+            let template = eventDate(2026, 11, 9, 10)
+            let draft = eventParse("Call \(text) #work", defaultStart: template)
+            #expect(draft.title == "Call \(text)", "\(text)")
+            #expect(draft.recurrence == nil, "\(text)")
+            #expect(draft.startAt == template, "\(text)")
+            #expect(draft.calendarHint == "work", "\(text)")
+        }
     }
 
     @Test func draftHasPublicMutableValueSemantics() {

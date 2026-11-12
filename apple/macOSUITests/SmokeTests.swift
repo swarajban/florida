@@ -429,7 +429,7 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(savedTitle.waitForExistence(timeout: 5))
             XCTAssertEqual(savedTitle.value as? String, "Lunch with Dana and Lee")
             XCTAssertEqual(app.popUpButtons["event-calendar"].value as? String, "demo@personal.example")
-            XCTAssertEqual(app.staticTexts["event-editor-account"].label, "demo@personal.example")
+            XCTAssertEqual(app.staticTexts["event-editor-account"].value as? String, "demo@personal.example")
             XCTAssertFalse(app.popUpButtons["event-calendar"].isEnabled)
             XCTAssertEqual(app.textFields["event-editor-location"].value as? String, "Blue Bottle")
             XCTAssertEqual((app.switches["event-editor-all-day"].value as? NSNumber)?.intValue, 0)
@@ -469,7 +469,7 @@ final class SmokeTests: XCTestCase {
         XCTAssertEqual(app.popUpButtons["event-repeat"].value as? String, "Weekly")
         XCTAssertTrue(app.staticTexts["Every 1 week"].exists)
         XCTAssertEqual(app.popUpButtons["event-calendar"].value as? String, "demo@sempre-health.com")
-        XCTAssertEqual(app.staticTexts["event-editor-account"].label, "demo@sempre-health.com")
+        XCTAssertEqual(app.staticTexts["event-editor-account"].value as? String, "demo@sempre-health.com")
         capture(app.windows.firstMatch, "event-full-form-prefilled")
         app.sheets.buttons["Add Event"].click()
         XCTAssertTrue(title.waitForNonExistence(timeout: 5))
@@ -487,7 +487,7 @@ final class SmokeTests: XCTestCase {
         defer { app.terminate() }
         XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 15))
         app.menuBars.menuBarItems["File"].click()
-        app.menuItems["New Event…"].click()
+        app.menuBars.menuBarItems["File"].menus.menuItems["New Event…"].click()
         let input = app.textFields["event-quick-add-input"]
         XCTAssertTrue(input.waitForExistence(timeout: 5))
         input.typeText("Team retreat tomorrow all day")
@@ -511,8 +511,9 @@ final class SmokeTests: XCTestCase {
         XCTAssertTrue(app.windows.firstMatch.frame.contains(slot.screenPoint))
         slot.hover()
         slot.rightClick()
-        XCTAssertTrue(app.menuItems["New Event…"].waitForExistence(timeout: 5))
-        app.menuItems["New Event…"].click()
+        let createEvent = app.windows.firstMatch.menuItems["New Event…"]
+        XCTAssertTrue(createEvent.waitForExistence(timeout: 5))
+        createEvent.click()
         XCTAssertTrue(input.waitForExistence(timeout: 5))
         app.typeKey("e", modifierFlags: .command)
         XCTAssertTrue(title.waitForExistence(timeout: 5))

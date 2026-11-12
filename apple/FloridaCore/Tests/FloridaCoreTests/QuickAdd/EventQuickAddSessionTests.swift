@@ -52,7 +52,7 @@ struct EventQuickAddSessionTests {
 
     @Test func unknownAmbiguousAndReadOnlyHintsNeedChoice() {
         var session = session()
-        for hint in ["#missing", "#", "#read-only"] {
+        for hint in ["#missing", "#", "#read-only", "#bad!"] {
             session.updateText("Lunch tomorrow noon \(hint)")
             #expect(session.destination(in: calendars, accounts: accounts) == nil)
             #expect(session.event(in: calendars, accounts: accounts) == nil)
@@ -75,6 +75,43 @@ struct EventQuickAddSessionTests {
         session.updateText("Lunch with Dana tomorrow noon #sempre")
         #expect(session.chosenCalendarID == nil)
         #expect(session.destination(in: calendars, accounts: accounts)?.id == "primary")
+    }
+
+    @Test func emailHintsSelectTheRequestedAccountInsteadOfDefaulting() {
+        var session = session()
+        session.updateText("Therapy tomorrow 3pm #me@gmail.com")
+        #expect(session.draft.calendarHint == "me@gmail.com")
+        #expect(session.draft.title == "Therapy")
+        #expect(session.destination(in: calendars, accounts: accounts)?.id == "personal")
+        #expect(session.event(in: calendars, accounts: accounts)?.calendarId == "personal")
+        session.updateText("Therapy tomorrow 3pm #unknown@example.com")
+        #expect(session.event(in: calendars, accounts: accounts) == nil)
+        #expect(session.destination(in: calendars, accounts: accounts) == nil)
+    }
+
+    @Test func unsupportedRecurrenceCannotHideADestinationHint() {
+        var session = session()
+        session.updateText("Call every tuesday #personal until 12/1")
+        #expect(session.draft.calendarHint == "personal")
+        #expect(session.draft.recurrence == nil)
+        #expect(session.event(in: calendars, accounts: accounts)?.calendarId == "personal")
+        session.updateText("Call every tuesday #unknown for 5 weeks")
+        #expect(session.draft.calendarHint == "unknown")
+        #expect(session.draft.recurrence == nil)
+        #expect(session.event(in: calendars, accounts: accounts) == nil)
+    }
+
+    @Test func changingMalformedHintInvalidatesAnExplicitChoice() {
+        var session = session()
+        session.updateText("Call #bad!")
+        #expect(session.draft.calendarHint == "bad!")
+        #expect(session.event(in: calendars, accounts: accounts) == nil)
+        session.chooseCalendar("personal")
+        #expect(session.event(in: calendars, accounts: accounts)?.calendarId == "personal")
+        session.updateText("Call #different!")
+        #expect(session.chosenCalendarID == nil)
+        #expect(session.draft.calendarHint == "different!")
+        #expect(session.event(in: calendars, accounts: accounts) == nil)
     }
 
     @Test func correctionsSurviveTypingAndResetRestoresParsedValues() {
@@ -134,5 +171,15 @@ struct EventQuickAddSessionTests {
         session.setAllDay(false)
         #expect(session.draft.startAt == date("2026-03-08T16:00:00Z"))
         #expect(session.draft.endAt.timeIntervalSince(session.draft.startAt) == 30 * 60)
+    }
+
+    @Test func togglingAllDayRestoresTheCorrectedClockAndDuration() {
+        var session = session()
+        session.updateText("Dentist tomorrow 3pm 45m")
+        let start = session.draft.startAt
+        session.setAllDay(true)
+        session.setAllDay(false)
+        #expect(session.draft.startAt == start)
+        #expect(session.draft.endAt == start.addingTimeInterval(45 * 60))
     }
 }
