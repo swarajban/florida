@@ -29,7 +29,8 @@ jobs:
   build:
     name: Build (simulator)
     runs-on: macos-26
-    timeout-minutes: 30
+    # Cold simulator boot plus the full light/dark capture suite can exceed 30 minutes.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
 
@@ -102,8 +103,8 @@ jobs:
           path: apple/screenshots/
           if-no-files-found: ignore
 
-      - name: Upload build log on failure
-        if: failure()
+      - name: Upload build log on failure or cancellation
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: build-log
