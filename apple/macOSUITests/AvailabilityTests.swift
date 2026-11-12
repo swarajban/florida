@@ -11,6 +11,11 @@ final class AvailabilityTests: XCTestCase {
             XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 15))
             app.typeKey("w", modifierFlags: [])
             app.typeKey("l", modifierFlags: .shift)
+            let headers = app.groups["calendar-day-headers"]
+            XCTAssertTrue(headers.exists)
+            headers.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).rightClick()
+            XCTAssertTrue(app.menuItems["day-header-follow-routine"].waitForExistence(timeout: 5))
+            app.typeKey(.escape, modifierFlags: [])
 
             openAvailability(app)
             let preview = app.staticTexts["availability-preview"]
@@ -19,12 +24,11 @@ final class AvailabilityTests: XCTestCase {
             XCTAssertFalse(initial.isEmpty)
             XCTAssertTrue(app.buttons["availability-copy"].isEnabled)
             XCTAssertTrue(app.staticTexts["availability-sync-warning"].exists)
-            let headers = app.groups["calendar-day-headers"]
             XCTAssertTrue(headers.exists)
             headers.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).rightClick()
-            XCTAssertFalse(app.menuItems["Follow the Routine"].exists)
-            XCTAssertFalse(app.menuItems["Home"].exists)
-            XCTAssertFalse(app.menuItems["Office"].exists)
+            XCTAssertFalse(app.menuItems["day-header-follow-routine"].exists)
+            XCTAssertFalse(app.menuItems["day-header-set-home"].exists)
+            XCTAssertFalse(app.menuItems["day-header-set-office"].exists)
             app.typeKey(.downArrow, modifierFlags: [])
             let moved = preview.value as? String ?? preview.label
             XCTAssertNotEqual(moved, initial)

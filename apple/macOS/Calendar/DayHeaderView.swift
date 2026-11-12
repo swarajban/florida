@@ -63,12 +63,14 @@ struct DayHeaderView: View {
                                 Label(choice.label, systemImage: choice.symbolName)
                             }
                             .disabled(choice == kind)
+                            .accessibilityIdentifier("day-header-set-\(choice.rawValue)")
                         }
                         Divider()
                         Button("Follow the Routine") {
                             model.clearDayOverride(on: day)
                         }
                         .disabled(!isOverridden)
+                        .accessibilityIdentifier("day-header-follow-routine")
                     }
                 }
             }
