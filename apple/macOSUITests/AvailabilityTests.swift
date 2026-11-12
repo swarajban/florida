@@ -9,6 +9,7 @@ final class AvailabilityTests: XCTestCase {
             app.launchArguments = ["-demoData", "YES", "-uiAppearance", appearance]
             app.launch()
             XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 15))
+            XCTAssertTrue(app.buttons["Today"].isHittable)
             app.typeKey("w", modifierFlags: [])
             app.typeKey("l", modifierFlags: .shift)
             let headers = app.groups["calendar-day-headers"]

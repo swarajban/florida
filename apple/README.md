@@ -188,6 +188,10 @@ the change, and sync it; the widgets only read.
 
 ### macOS (`Florida-macOS`)
 
+The main window defaults to 1240×820 where it fits. New and restored windows are constrained
+to the current screen's visible area, including after a display change, so smaller screens
+keep the title bar and calendar controls on screen.
+
 One window: the calendar grid (day, 3-day, week, or month) with a task pane
 grouped by category, and a status bar with sync state. Every action has a key;
 press `?` for the full list (it is `Keymap.default` in FloridaCore). The main
