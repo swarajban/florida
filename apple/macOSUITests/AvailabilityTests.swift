@@ -19,7 +19,7 @@ final class AvailabilityTests: XCTestCase {
             XCTAssertFalse(initial.isEmpty)
             XCTAssertTrue(app.buttons["availability-copy"].isEnabled)
             XCTAssertTrue(app.staticTexts["availability-sync-warning"].exists)
-            let headers = app.otherElements["calendar-day-headers"]
+            let headers = app.groups["calendar-day-headers"]
             XCTAssertTrue(headers.exists)
             headers.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).rightClick()
             XCTAssertFalse(app.menuItems["Follow the Routine"].exists)
@@ -46,7 +46,7 @@ final class AvailabilityTests: XCTestCase {
             XCTAssertTrue(search.waitForNonExistence(timeout: 5))
             XCTAssertTrue((preview.value as? String ?? preview.label).contains("Asia/Tokyo"))
 
-            let grid = app.otherElements["calendar-time-grid"]
+            let grid = app.groups["calendar-time-grid"]
             XCTAssertTrue(grid.exists)
             let x = (56 + (grid.frame.width - 56) * 4.5 / 7) / grid.frame.width
             let start = grid.coordinate(withNormalizedOffset: CGVector(dx: x, dy: 540.0 / 1440))
