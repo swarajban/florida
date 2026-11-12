@@ -16,7 +16,6 @@ import SwiftUI
 struct AgendaView: View {
     @Environment(AppModel.self) private var model
     @State private var editingTask: TaskItem?
-    @State private var newTask: TaskEditorRequest?
     @State private var selectedEvent: CalendarEvent?
     @State private var newEvent: CalendarEvent?
     @State private var showsDayPicker = false
@@ -88,9 +87,6 @@ struct AgendaView: View {
             }
             .sheet(item: $editingTask) { task in
                 TaskEditorView(task: task)
-            }
-            .sheet(item: $newTask) { request in
-                TaskEditorView(request: request)
             }
             .sheet(item: $selectedEvent) { event in
                 EventDetailView(event: event)
@@ -330,12 +326,12 @@ struct AgendaView: View {
             set: { model.setCalendarSelected(id: info.id, selected: $0) })
     }
 
-    /// New task (the same editor as the Tasks tab) or new event, starting at the next quarter hour
+    /// New task (the same composer as Tasks and the widget) or new event, starting at the next quarter hour
     /// today or 9:00 on another day.
     private var addMenu: some View {
         Menu {
             Button {
-                newTask = TaskEditorRequest(task: model.newTaskTemplate(), isNew: true)
+                model.showingQuickAdd = true
             } label: {
                 Label("New Task", systemImage: "checkmark.circle")
             }

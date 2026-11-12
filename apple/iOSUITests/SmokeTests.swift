@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 /// Wait for real content before capturing; a fixed launch delay can silently save a blank screen.
 final class SmokeTests: XCTestCase {
@@ -161,7 +162,7 @@ final class SmokeTests: XCTestCase {
             waitForText("Infra offsite", in: app)
             app.open(URL(string: "florida://tasks/new")!)
             XCTAssertTrue(app.navigationBars["New Task"].waitForExistence(timeout: 10))
-            XCTAssertTrue(app.buttons["Add"].exists)
+            XCTAssertTrue(app.buttons["quick-add-save"].exists)
             capture(app, "widget-add-task-\(appearance)")
             app.buttons["Cancel"].tap()
             app.open(URL(string: "florida://agenda")!)
@@ -198,6 +199,168 @@ final class SmokeTests: XCTestCase {
             waitForText("Weekly planning", in: app)
             app.terminate()
         }
+    }
+
+    @MainActor
+    func testUnifiedTaskCapture() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = launch(appearance: appearance, tab: "tasks")
+            waitForText("Renew VPN certificate", in: app)
+            // The widget URL opens the same keyboard-ready composer as the in-app controls.
+            app.terminate()
+            app.open(URL(string: "florida://tasks/new")!)
+            let input = element("quick-add-input", in: app)
+            XCTAssertTrue(input.waitForExistence(timeout: 10))
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+            // Fresh simulators can show the system swipe-typing introduction over the keyboard.
+            if app.buttons["Continue"].exists { app.buttons["Continue"].tap() }
+            XCTAssertFalse(app.buttons["quick-add-save"].isEnabled)
+            capture(app, "capture-empty-\(appearance)")
+            input.typeText("Send security update 45m tomorrow #work #q4")
+            XCTAssertFalse(app.buttons["quick-add-save"].isEnabled, "#work must not silently pick one of two categories")
+            XCTAssertTrue(app.buttons["quick-add-category-demo-eng"].exists)
+            XCTAssertTrue(app.buttons["quick-add-category-demo-infosec"].exists)
+            capture(app, "capture-categories-\(appearance)")
+            app.buttons["quick-add-category-demo-infosec"].tap()
+            XCTAssertTrue(app.buttons["quick-add-category"].label.contains("Work Infosec"), app.buttons["quick-add-category"].debugDescription)
+            XCTAssertEqual(app.staticTexts["quick-add-title"].label, "Send security update #q4", "Later hashtags stay literal after resolving the first")
+            XCTAssertTrue(app.buttons["quick-add-save"].isEnabled)
+            capture(app, "capture-ready-\(appearance)")
+            app.buttons["Cancel"].tap()
+            app.tabBars.buttons["Agenda"].tap()
+            app.buttons["agenda-add"].tap()
+            app.buttons["New Task"].tap()
+            XCTAssertTrue(input.waitForExistence(timeout: 5))
+            XCTAssertEqual(input.value as? String, "Send security update 45m tomorrow #work #q4")
+            XCTAssertTrue(app.buttons["quick-add-category"].label.contains("Work Infosec"))
+            app.buttons["Details"].tap()
+            XCTAssertTrue(app.textFields["Title"].waitForExistence(timeout: 5))
+            XCTAssertEqual(app.textFields["Title"].value as? String, "Send security update #q4")
+            XCTAssertTrue(app.buttons["task-category"].label.contains("Work Infosec"))
+            app.buttons["task-editor-cancel"].tap()
+            XCTAssertTrue(input.waitForExistence(timeout: 5))
+            XCTAssertEqual(input.value as? String, "Send security update 45m tomorrow #work #q4")
+            if appearance == "dark" {
+                input.typeText("\n")
+            } else {
+                app.buttons["quick-add-save"].tap()
+            }
+            XCTAssertTrue(input.waitForNonExistence(timeout: 5))
+            app.tabBars.buttons["Tasks"].tap()
+            let filed = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Send security update"))
+            for _ in 0..<8 where !filed.firstMatch.isHittable || filed.firstMatch.frame.maxY > app.tabBars.firstMatch.frame.minY {
+                app.swipeUp()
+            }
+            XCTAssertTrue(filed.firstMatch.waitForExistence(timeout: 5))
+            XCTAssertEqual(filed.count, 1)
+            filed.firstMatch.tap()
+            XCTAssertTrue(app.buttons["task-category"].label.contains("Work Infosec"), "Categorized capture must skip Inbox")
+            app.buttons["Cancel"].tap()
+
+            // The Tasks toolbar is the same route. No hint means Inbox; Details saves once
+            // and consumes the draft just like the primary Add button.
+            app.buttons["New task"].tap()
+            XCTAssertTrue(input.waitForExistence(timeout: 5))
+            XCTAssertFalse(app.buttons["quick-add-save"].isEnabled)
+            input.typeText("Remember umbrella")
+            XCTAssertTrue(app.buttons["quick-add-category"].label.contains("Inbox"))
+            app.buttons["Details"].tap()
+            XCTAssertTrue(app.textFields["Title"].waitForExistence(timeout: 5))
+            app.buttons["Add"].tap()
+            XCTAssertTrue(app.navigationBars["New Task"].waitForNonExistence(timeout: 5))
+            let unfiled = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Remember umbrella"))
+            for _ in 0..<8 where !unfiled.firstMatch.isHittable || unfiled.firstMatch.frame.minY < app.navigationBars.firstMatch.frame.maxY {
+                app.swipeDown()
+            }
+            XCTAssertTrue(unfiled.firstMatch.waitForExistence(timeout: 5))
+            XCTAssertEqual(unfiled.count, 1)
+            unfiled.firstMatch.tap()
+            XCTAssertTrue(app.buttons["task-category"].label.contains("Inbox"))
+            app.buttons["task-category"].tap()
+            XCTAssertTrue(app.buttons["Home"].waitForExistence(timeout: 5))
+            app.buttons["Home"].tap()
+            app.buttons["Save"].tap()
+            // A row partly behind the floating tab bar can report hittable, but its center
+            // taps the bar instead. Bring the whole row into the visible list before opening it.
+            for _ in 0..<8 where !unfiled.firstMatch.isHittable || unfiled.firstMatch.frame.maxY > app.tabBars.firstMatch.frame.minY {
+                app.swipeUp()
+            }
+            unfiled.firstMatch.tap()
+            XCTAssertTrue(app.buttons["task-category"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["task-category"].label.contains("Home"), "Filing moves the task out of Inbox")
+            app.buttons["Cancel"].tap()
+            if appearance == "light" {
+                app.buttons["New task"].tap()
+                XCTAssertTrue(input.waitForExistence(timeout: 5))
+                input.typeText("Plan cabin trip #weekend")
+                XCTAssertFalse(app.buttons["quick-add-save"].isEnabled)
+                capture(app, "capture-new-category")
+                app.buttons["Create “Weekend”"].tap()
+                XCTAssertTrue(app.buttons["quick-add-category"].label.contains("Weekend"))
+                app.buttons["Details"].tap()
+                XCTAssertTrue(app.textFields["Title"].waitForExistence(timeout: 5))
+                XCTAssertEqual(app.textFields["Title"].value as? String, "Plan cabin trip")
+                XCTAssertTrue(app.buttons["task-category"].label.contains("Weekend"))
+                app.buttons["Add"].tap()
+                XCTAssertTrue(app.navigationBars["New Task"].waitForNonExistence(timeout: 5))
+            }
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testCapturePasteAndDeletedCategory() {
+        continueAfterFailure = false
+        let app = launch(tab: "tasks")
+        waitForText("Renew VPN certificate", in: app)
+        app.buttons["New task"].tap()
+        let input = app.textViews["quick-add-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        input.typeText("Read report")
+        app.buttons["quick-add-category"].tap()
+        app.buttons["Home"].tap()
+        input.typeText(" #")
+        XCTAssertFalse(app.buttons["quick-add-save"].isEnabled)
+        app.buttons["quick-add-category-demo-home"].tap()
+        XCTAssertEqual(input.value as? String, "Read report", "A bare # opens all categories even after a prior choice")
+        // The net edit is just a newline, but a real clipboard paste must never submit.
+        UIPasteboard.general.string = "Read report\n"
+        input.press(forDuration: 1)
+        app.menuItems["Select All"].tap()
+        app.menuItems["Paste"].tap()
+        if app.buttons["Allow Paste"].waitForExistence(timeout: 2) { app.buttons["Allow Paste"].tap() }
+        XCTAssertTrue(input.exists)
+        XCTAssertEqual(input.value as? String, "Read report\n")
+        XCTAssertEqual(app.staticTexts["quick-add-title"].label, "Read report")
+        UIPasteboard.general.string = "\n"
+        input.tap()
+        input.press(forDuration: 1)
+        app.menuItems["Paste"].tap()
+        XCTAssertTrue(input.exists, "Pasting a newline is not the Done key either")
+        XCTAssertEqual(input.value as? String, "Read report\n\n")
+        app.buttons["Cancel"].tap()
+
+        app.buttons["Categories"].tap()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Home")).firstMatch.tap()
+        app.buttons["Delete Category"].tap()
+        app.sheets.buttons["Delete Category"].tap()
+        XCTAssertTrue(app.navigationBars["Edit Category"].waitForNonExistence(timeout: 5))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.buttons["New task"].tap()
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        XCTAssertEqual(input.value as? String, "Read report\n\n")
+        XCTAssertFalse(app.buttons["quick-add-save"].isEnabled, "A deleted destination cannot be used by a retained draft")
+        XCTAssertFalse(app.buttons["Details"].isEnabled)
+        XCTAssertTrue(app.buttons["quick-add-category"].label.contains("Choose a category"))
+        app.buttons["quick-add-category"].tap()
+        app.buttons["Inbox"].tap()
+        input.typeText("\n")
+        XCTAssertTrue(input.waitForNonExistence(timeout: 5), "Done still submits after a multiline paste")
+        let saved = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Read report"))
+        XCTAssertTrue(saved.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertEqual(saved.count, 1)
+        app.terminate()
     }
 
     @MainActor
@@ -247,6 +410,15 @@ final class SmokeTests: XCTestCase {
         large.tabBars.buttons["Tasks"].tap()
         waitForText("Renew VPN certificate", in: large)
         capture(large, "tasks-large-text")
+        large.buttons["New task"].tap()
+        let input = large.textViews["quick-add-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        input.typeText("Read report #home")
+        XCTAssertTrue(large.buttons["Details"].isHittable)
+        XCTAssertTrue(large.buttons["quick-add-save"].isHittable)
+        capture(large, "capture-large-text")
+        large.buttons["quick-add-save"].tap()
+        XCTAssertTrue(input.waitForNonExistence(timeout: 5))
         large.terminate()
     }
 
@@ -299,8 +471,10 @@ final class SmokeTests: XCTestCase {
             editor.terminate()
 
             let tasks = launch(appearance: appearance, tab: "tasks")
+            waitForText("Renew VPN certificate", in: tasks)
             let row = tasks.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Fix flaky scheduler test")).firstMatch
-            XCTAssertTrue(row.waitForExistence(timeout: 20))
+            for _ in 0..<4 where !row.isHittable { tasks.swipeUp() }
+            XCTAssertTrue(row.isHittable)
             row.tap()
             XCTAssertTrue(tasks.buttons["Mark done"].waitForExistence(timeout: 20))
             // Mark done, then both dates, before any scrolling.

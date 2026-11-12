@@ -192,6 +192,7 @@ struct TaskEditorView: View {
                     Button("Cancel") {
                         dismiss()
                     }
+                    .accessibilityIdentifier("task-editor-cancel")
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(isNew ? "Add" : "Save") {

@@ -7,14 +7,16 @@ enum QuickAddTaskBuilder {
     static let defaultDurationMinutes = 30
 
     /// The category a `#hint` names, or nil when none matches. Case-insensitive; hyphens and
-    /// underscores count as spaces; an exact name wins over a prefix match.
+    /// underscores count as spaces; an exact name wins over a unique prefix match. Ambiguous
+    /// prefixes need a choice, rather than silently filing in whichever category sorts first.
     static func matchCategory(hint: String, in categories: [TaskCategory]) -> TaskCategory? {
         let needle = normalize(hint)
         guard !needle.isEmpty else { return nil }
         if let exact = categories.first(where: { normalize($0.name) == needle }) {
             return exact
         }
-        return categories.first { normalize($0.name).hasPrefix(needle) }
+        let matches = categories.filter { normalize($0.name).hasPrefix(needle) }
+        return matches.count == 1 ? matches.first : nil
     }
 
     /// `matchCategory` when the hint matches; otherwise Inbox, otherwise the first category; nil

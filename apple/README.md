@@ -139,11 +139,17 @@ circle. The
 evening's suggestions follow the day's plan ("Evening, if you're up for it"),
 each with a "Do tonight" button that pins it; in the day grids they are dotted
 blocks.
-**Tasks**: sections per category, a quick-add field with the same parser and
-chips as the Mac app, swipe to complete or delete, tap to edit. The editor
-opens on Mark done, the title, then Start and Due in one Dates section; Due is
-on for a new task from + (soft, the next weekday), both are whole days unless a
-time is added from the row's menu, and a start moved to or past the due date
+**Tasks**: sections per category, swipe to complete or delete, tap to edit.
+Quick add, both tabs' add-task buttons, and the widget shortcut open one focused
+text composer. It uses the same local parser as the Mac, previews the title and
+dates, and offers category matches for `#` hints. Ambiguous prefixes require a
+choice. Categorized tasks skip Inbox; unfiled tasks stay there until you choose
+a category or accept a suggested one. Closing capture keeps its draft for the
+current app session; saving locally clears it. **Details** opens the full editor
+with the parsed fields; **Parse with AI** remains optional and requires review.
+New tasks default to 30 minutes with no deadline unless one is typed. The editor
+opens on Mark done, the title, then Start and Due in one Dates section; dates are
+whole days unless a time is added from the row's menu, and a start moved to or past the due date
 moves the due date to the day after. **Settings**:
 server URL and token, sync now, run the scheduler, refresh Google calendars,
 and the connected accounts with their calendars. Projects, parallel lanes, the
@@ -173,7 +179,7 @@ app (`florida://agenda`, `florida://tasks`, `florida://tasks/new`):
 - **Today** (medium, large): the same agenda with more room. Both agenda widgets
   update at start/end boundaries, clear yesterday at midnight, and request a
   store refresh every 30 minutes. Medium/large layouts have a **+** shortcut to
-  a blank task editor; the small widget opens Agenda because it has one tap target.
+  the same quick-add composer as the app; the small widget opens Agenda because it has one tap target.
 - **Tasks** (small, medium): open tasks in scheduler order with the open count
   and each task's category color; late tasks in red.
 

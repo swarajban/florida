@@ -6,7 +6,6 @@ import SwiftUI
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
-    @State private var newTask: TaskEditorRequest?
 
     var body: some View {
         TabView(selection: Bindable(model).selectedTab) {
@@ -40,11 +39,11 @@ struct RootView: View {
                 model.selectedTab = tab
             }
             if tab == .tasks, url.path() == "/new" {
-                newTask = TaskEditorRequest(task: model.newTaskTemplate(), isNew: true)
+                model.showingQuickAdd = true
             }
         }
-        .sheet(item: $newTask) { request in
-            TaskEditorView(request: request)
+        .sheet(isPresented: Bindable(model).showingQuickAdd) {
+            QuickAddSheet()
         }
     }
 }

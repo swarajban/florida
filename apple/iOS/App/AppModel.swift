@@ -29,6 +29,13 @@ final class AppModel {
     var selectedTab: AppTab = LaunchOptions.initialTab ?? .agenda
     /// Bumped by `selectToday()`, so the agenda scrolls to now even when today was already showing.
     var todayRequests = 0
+    /// One capture draft for the app and widget shortcut. Closing the composer keeps it until
+    /// a local save succeeds or the user clears it.
+    var showingQuickAdd = false
+    var quickAddText = ""
+    var quickAddCategory: TaskCategory?
+    /// The first #hint this explicit choice resolves; changing the hint invalidates the choice.
+    var quickAddCategoryHint: String?
 
     // MARK: Observed store contents
 

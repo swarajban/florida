@@ -1,16 +1,13 @@
 import FloridaKit
 import SwiftUI
 
-/// The Tasks tab: quick-add field on top, then Inbox (with its triage count and AI chips) and
+/// The Tasks tab: quick-add entry on top, then Inbox (with its triage count and AI chips) and
 /// every other category, empty ones collapsed to their header. Swipe or long-press a row for its
 /// actions (`TaskActions`, all with Undo), tap to edit, pull to sync. The toolbar adds a task and
 /// opens Projects and Categories.
 struct TasksView: View {
     @Environment(AppModel.self) private var model
-    @State private var quickAddText = ""
     @State private var editor: TaskEditorRequest?
-    /// The unsaved task an AI parse opened, to clear the quick-add text once it is added.
-    @State private var parsedTaskId: String?
     @State private var openedLaunchSheet = false
     @State private var movingTask: TaskItem?
     @State private var doneForNowTask: TaskItem?
@@ -21,16 +18,28 @@ struct TasksView: View {
         NavigationStack(path: $path) {
             List {
                 Section {
-                    QuickAddField(
-                        text: $quickAddText, categories: model.categories, calendar: model.calendar,
-                        onSubmit: { draft, category in _ = try model.createTask(from: draft, in: category) },
-                        onCreateCategory: { try model.createCategory(fromHint: $0) },
-                        onParseWithAI: { text in
-                            let request = try await model.parseWithAI(text)
-                            parsedTaskId = request.id
-                            editor = request
-                        })
-                        .listRowBackground(FloridaStyle.panel)
+                    Button {
+                        model.showingQuickAdd = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.title3)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(model.quickAddText.isEmpty ? "Add a task" : model.quickAddText)
+                                    .font(.body.weight(.medium))
+                                    .lineLimit(1)
+                                Text(model.quickAddText.isEmpty ? "Just type. Use # to choose a category." : "Continue your draft")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Quick add")
+                    .listRowBackground(FloridaStyle.panel)
                     SyncErrorBanner()
                     if model.needsSetup {
                         Label("Not connected. Add the server URL and token in Settings.", systemImage: "exclamationmark.triangle")
@@ -53,8 +62,11 @@ struct TasksView: View {
                     } header: {
                         TaskSectionHeader(section: section)
                     } footer: {
-                        if section.isInbox, let reason = model.triageUnavailable, !section.tasks.isEmpty {
-                            Text(reason)
+                        if section.isInbox, !section.tasks.isEmpty {
+                            Text("Choose a category to move a task out of Inbox. A category with a ? is a suggestion—tap to accept.")
+                            if let reason = model.triageUnavailable {
+                                Text(reason)
+                            }
                         }
                     }
                 }
@@ -93,7 +105,7 @@ struct TasksView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        editor = TaskEditorRequest(task: model.newTaskTemplate(), isNew: true)
+                        model.showingQuickAdd = true
                     } label: {
                         Image(systemName: "plus")
                     }
@@ -123,7 +135,7 @@ struct TasksView: View {
                 case .projects: ProjectsView()
                 }
             }
-            .sheet(item: $editor, onDismiss: clearQuickAddIfAdded) { request in
+            .sheet(item: $editor) { request in
                 TaskEditorView(request: request)
             }
             .taskActionSheets(doneForNow: $doneForNowTask)
@@ -143,15 +155,6 @@ struct TasksView: View {
                 model.requestTriageSuggestions()
             }
             .toastOverlay()
-        }
-    }
-
-    /// After an AI-parsed task is added, the text it came from is done with.
-    private func clearQuickAddIfAdded() {
-        guard let id = parsedTaskId else { return }
-        parsedTaskId = nil
-        if (try? model.database?.task(id: id)) != nil {
-            quickAddText = ""
         }
     }
 
