@@ -260,8 +260,20 @@ enum DemoData {
     static func designReview(_ base: CalendarEvent) -> CalendarEvent {
         var event = base
         event.description = """
-            Walk through the <b>scheduler v2</b> design.<br><br>Doc: <a href="https://docs.example.com/scheduler-v2">Scheduler v2 RFC</a>\
-            <br>Notes go in https://notes.example.com/design-review<ul><li>Chunking rules</li><li>Hard deadlines</li></ul>
+            Walk through the <b>scheduler v2</b> design.<br><br>\
+            <a href="https://docs.google.com/document/d/demo-scheduler/edit">Scheduler v2 RFC</a><br>\
+            <a href="https://docs.google.com/spreadsheets/d/demo-capacity/edit">Capacity model</a><br>\
+            <a href="https://docs.google.com/presentation/d/demo-review/edit">Review slides</a><br>\
+            <a href="https://www.notion.so/demo/decisions">Decision log</a><br>\
+            <a href="https://www.figma.com/design/demo/calendar">Calendar mockups</a><br>\
+            <a href="https://github.com/example/florida/pull/42">Scheduler implementation</a><br>\
+            <a href="https://linear.app/demo/issue/DEMO-21">Scheduler follow-up</a><br>\
+            Notes go in https://notes.example.com/design-review<br>\
+            <a href="https://zoom.us/j/123456789">Backup room</a><br>\
+            <a href="https://meet.google.com/alt-room-xyz">Breakout room</a><br>\
+            <a href="https://wiki.example.com/scheduler">Scheduler runbook</a><br>\
+            Doc again: https://docs.google.com/document/d/demo-scheduler/edit<br>\
+            Join: https://meet.google.com/abc-defg-hij<ul><li>Chunking rules</li><li>Hard deadlines</li></ul>
             """
         event.organizer = EventOrganizer(email: "priya@work.example", displayName: "Priya Raman", isSelf: false)
         event.attendees = [

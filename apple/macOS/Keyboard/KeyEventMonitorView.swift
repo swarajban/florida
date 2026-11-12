@@ -1,4 +1,5 @@
 import AppKit
+import FloridaKit
 import SwiftUI
 
 /// An invisible view that installs one local key-down monitor for the window it lives in and
@@ -12,16 +13,17 @@ import SwiftUI
 struct KeyEventMonitorView: NSViewRepresentable {
     let model: AppModel
     var isEventPopover = false
+    var contextKeyHandler: (@MainActor (KeyChord) -> Bool)?
 
     func makeNSView(context: Context) -> KeyMonitorHostView {
         let view = KeyMonitorHostView()
         view.isEventPopover = isEventPopover
-        view.install(model: model)
+        view.install(model: model, contextKeyHandler: contextKeyHandler)
         return view
     }
 
     func updateNSView(_ nsView: KeyMonitorHostView, context: Context) {
-        nsView.install(model: model)
+        nsView.install(model: model, contextKeyHandler: contextKeyHandler)
     }
 }
 
@@ -35,9 +37,10 @@ final class KeyMonitorHostView: NSView {
     /// window is not the main window, and only the open event's keys run from it.
     var isEventPopover = false
 
-    func install(model: AppModel) {
+    func install(model: AppModel, contextKeyHandler: (@MainActor (KeyChord) -> Bool)? = nil) {
         box.model = model
         box.view = self
+        box.contextKeyHandler = contextKeyHandler
         if let window {
             if !isEventPopover {
                 model.mainWindow = window
@@ -65,6 +68,9 @@ final class KeyMonitorHostView: NSView {
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let handled = MainActor.assumeIsolated {
                 guard let window = box.view?.window, event.window === window else { return false }
+                if let chord = KeyChord(event: event), box.contextKeyHandler?(chord) == true {
+                    return true
+                }
                 return box.model?.handleKeyDown(event, inEventPopover: inEventPopover) ?? false
             }
             return handled ? nil : event
@@ -84,4 +90,5 @@ final class KeyMonitorHostView: NSView {
 private final class MonitorBox: @unchecked Sendable {
     weak var model: AppModel?
     weak var view: NSView?
+    var contextKeyHandler: (@MainActor (KeyChord) -> Bool)?
 }

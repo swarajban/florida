@@ -1,3 +1,4 @@
+import AppKit
 import FloridaKit
 import SwiftUI
 
@@ -11,9 +12,11 @@ import SwiftUI
 /// monitor, and each control shows its key.
 struct EventDetailView: View {
     @Environment(AppModel.self) private var model
+    @State private var resourceKeys: JumpLabels<String>?
     let event: CalendarEvent
 
     var body: some View {
+        let resources = event.resources
         VStack(alignment: .leading, spacing: 12) {
             header
             if let url = event.joinURL {
@@ -21,6 +24,9 @@ struct EventDetailView: View {
                     JoinButton(url: url, start: event.startAt)
                     Self.keycap(for: .joinMeeting)
                 }
+            }
+            if !resources.isEmpty {
+                resourceShelf(resources)
             }
             if let location = event.location?.trimmingCharacters(in: .whitespacesAndNewlines), !location.isEmpty {
                 Label {
@@ -71,7 +77,98 @@ struct EventDetailView: View {
         .padding(16)
         // Wide enough for Yes / Maybe / No with their keys beside "Going?".
         .frame(width: 400, alignment: .leading)
-        .background(KeyEventMonitorView(model: model, isEventPopover: true))
+        .background(KeyEventMonitorView(model: model, isEventPopover: true) { chord in
+            handleResourceKey(chord, resources: resources)
+        })
+        .onChange(of: resources) { resourceKeys = nil }
+    }
+
+    private func resourceShelf(_ resources: [EventResource]) -> some View {
+        let labels = JumpLabels(items: resources.map(\.id), alphabet: Array("1234567890"))
+        return VStack(alignment: .leading, spacing: 6) {
+            Button {
+                model.run(.openEventResources)
+            } label: {
+                HStack(spacing: 6) {
+                    Text("Resources")
+                        .font(.caption.weight(.semibold))
+                    Self.keycap(for: .openEventResources)
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Resources")
+            .help(Self.hint(for: .openEventResources))
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), alignment: .leading)], alignment: .leading, spacing: 6) {
+                    ForEach(resources) { resource in
+                        Button {
+                            model.openEventResource(resource)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "link")
+                                    .foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(resource.title)
+                                        .font(.callout)
+                                        .lineLimit(1)
+                                    Text(resource.kindLabel)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer(minLength: 0)
+                                if let key = (resourceKeys ?? labels).remaining[resource.id] {
+                                    Keycap(key.map(String.init).joined(separator: " "))
+                                } else if labels.remaining[resource.id] == nil {
+                                    Self.keycap(for: .openEventResources)
+                                }
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(FloridaStyle.ink.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+                            .contentShape(RoundedRectangle(cornerRadius: 6))
+                        }
+                        .buttonStyle(.plain)
+                        .help(labels.remaining[resource.id] == nil
+                              ? "Open event resources (g r) to find this link: \(resource.url.absoluteString)"
+                              : resource.url.absoluteString)
+                        .accessibilityLabel("\(resource.title), \(resource.kindLabel)")
+                        .accessibilityIdentifier("event-resource-\(resource.id)")
+                        .accessibilityValue(labels.remaining[resource.id] ?? "g r")
+                    }
+                }
+            }
+            .accessibilityIdentifier("event-resource-shelf")
+            .frame(maxHeight: 150)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func handleResourceKey(_ chord: KeyChord, resources: [EventResource]) -> Bool {
+        guard !model.isSheetOpen, !model.isPaletteOpen,
+              model.eventDetailID == event.id,
+              (NSApplication.shared.keyWindow?.firstResponder as? NSTextView)?.isEditable != true
+        else { return false }
+        guard chord.modifiers.isEmpty, chord.key.count == 1, "1234567890".contains(chord.key) else {
+            resourceKeys = nil
+            return false
+        }
+        model.matcher.reset()
+        model.pendingKeys = ""
+        var labels = resourceKeys ?? JumpLabels(items: resources.map(\.id), alphabet: Array("1234567890"))
+        switch labels.type(chord.key) {
+        case .selected(let id):
+            resourceKeys = nil
+            if let resource = resources.first(where: { $0.id == id }) {
+                model.openEventResource(resource)
+            }
+        case .pending:
+            resourceKeys = labels
+        case .unmatched:
+            resourceKeys = nil
+        }
+        return true
     }
 
     /// Yes / Maybe / No for an invitation, with the current answer shown pressed.

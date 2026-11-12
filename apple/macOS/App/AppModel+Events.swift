@@ -1,3 +1,4 @@
+import AppKit
 import FloridaKit
 import Foundation
 
@@ -89,6 +90,31 @@ extension AppModel {
             return
         }
         open(url: url)
+    }
+
+    func openEventResources() {
+        guard let event = commandEvent else {
+            statusMessage = "Select an event first"
+            return
+        }
+        guard !event.resources.isEmpty else {
+            statusMessage = "This event has no resources"
+            return
+        }
+        eventDetailID = nil
+        openPalette(mode: .eventResources(eventId: event.id))
+        mainWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    func openEventResource(_ resource: EventResource) {
+        eventDetailID = nil
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "demoData"), UserDefaults.standard.bool(forKey: "uiRecordResourceOpens") {
+            statusMessage = "Opened resource: \(resource.url.absoluteString)"
+            return
+        }
+        #endif
+        open(url: resource.url)
     }
 
     /// Opens the editor on the store's copy of `event`, closing its detail popover.
