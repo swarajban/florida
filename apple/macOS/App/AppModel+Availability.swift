@@ -2,6 +2,12 @@ import AppKit
 import FloridaKit
 
 extension AppModel {
+    var availabilityCalendar: Calendar {
+        var result = Calendar(identifier: .gregorian)
+        result.timeZone = Availability.routineTimeZone(userSettings)
+        return result
+    }
+
     var availabilitySchedule: Schedule? {
         guard let share = availabilityShare else { return nil }
         return schedules.first { $0.id == share.scheduleID && $0.deletedAt == nil }
@@ -36,12 +42,15 @@ extension AppModel {
             ?? schedules.first { $0.name.localizedCaseInsensitiveContains("work") }?.id
             ?? activeSchedules.first?.id
         availabilityShare = share
+        startAvailabilityEvents()
         refreshAvailability(propose: true)
         revealAvailabilityCursor()
     }
 
     func cancelAvailability() {
         let previousMode = availabilityShare?.previousViewMode
+        availabilityEventsObserver?.cancel()
+        availabilityEventsObserver = nil
         availabilityShare = nil
         isAvailabilityZoneOpen = false
         if let previousMode {
@@ -50,11 +59,50 @@ extension AppModel {
         }
     }
 
+    @discardableResult
+    func reloadAvailabilityEvents() -> Bool {
+        guard availabilityShare != nil else { return false }
+        guard let database else {
+            cancelAvailability()
+            statusMessage = "The local store is unavailable"
+            return false
+        }
+        do {
+            availabilityShare?.events = try database.availabilityEvents(in: visibleRange, calendar: availabilityCalendar)
+            return true
+        } catch {
+            cancelAvailability()
+            statusMessage = "Could not read availability: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    func startAvailabilityEvents() {
+        availabilityEventsObserver?.cancel()
+        guard reloadAvailabilityEvents(), let database else { return }
+        let range = visibleRange
+        let busyCalendar = availabilityCalendar
+        availabilityEventsObserver = Task { [weak self] in
+            do {
+                for try await events in database.observeAvailabilityEvents(in: range, calendar: busyCalendar) {
+                    guard !Task.isCancelled, let self, self.availabilityShare != nil else { return }
+                    self.availabilityShare?.events = events
+                    self.refreshAvailability()
+                }
+            } catch {
+                guard !Task.isCancelled, let self else { return }
+                self.cancelAvailability()
+                self.statusMessage = "Could not observe availability: \(error.localizedDescription)"
+            }
+        }
+    }
+
     func refreshAvailability(propose: Bool = false) {
         guard var share = availabilityShare else { return }
         share.free = Availability.freeRanges(
-            in: visibleRange, schedules: availabilitySchedule.map { [$0] } ?? [], events: events,
-            tasks: Array(tasksById.values), placements: placements, commitments: routineOccurrences, now: clockNow)
+            in: visibleRange, schedules: availabilitySchedule.map { [$0] } ?? [], events: share.events,
+            tasks: Array(tasksById.values), placements: placements, commitments: routineOccurrences, now: clockNow,
+            timeZone: availabilityCalendar.timeZone)
         share.suggestions = share.free.compactMap { range in
             let end = range.start.addingTimeInterval(Double(share.meetingMinutes) * 60)
             return end <= range.end ? AvailabilityRange(start: range.start, end: end) : nil
@@ -175,6 +223,7 @@ extension AppModel {
     }
 
     func copyAvailability() {
+        guard reloadAvailabilityEvents() else { return }
         refreshAvailability()
         let text = availabilityText
         guard availabilityShare?.selected.isEmpty == false, !text.isEmpty else {

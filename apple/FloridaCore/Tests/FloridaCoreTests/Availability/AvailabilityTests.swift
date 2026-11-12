@@ -159,6 +159,66 @@ import Testing
         }
     }
 
+    @Test func missingRoutineSettingsUseTheSameUTCFallbackAsTheServer() {
+        #expect(Availability.routineTimeZone(nil) == .gmt)
+        let settings = UserSettings(id: "settings", timeZone: "Asia/Tokyo", updatedAt: Self.epoch)
+        #expect(Availability.routineTimeZone(settings) == TimeZone(identifier: "Asia/Tokyo"))
+    }
+
+    @Test func eventPolicyMatchesFocusLocationOutOfOfficeAndDayOverrides() {
+        for type in ["focusTime", "workingLocation"] {
+            var event = Self.event()
+            event.eventType = type
+            #expect(!Availability.eventBlocksTime(event))
+            #expect(Self.free(events: [event]) == Self.free())
+        }
+        var event = Self.event()
+        event.eventType = "outOfOffice"
+        event.transparency = "transparent"
+        #expect(Availability.eventBlocksTime(event))
+        event.allDay = true
+        #expect(Availability.eventBlocksTime(event))
+        event.blocksDay = false
+        #expect(!Availability.eventBlocksTime(event))
+        event.eventType = "default"
+        event.blocksDay = true
+        #expect(Availability.eventBlocksTime(event))
+        event.blocksDay = nil
+        #expect(!Availability.eventBlocksTime(event))
+        event.blocksDay = true
+        event.responseStatus = "declined"
+        #expect(!Availability.eventBlocksTime(event))
+    }
+
+    @Test func allDayBlockingUsesTheRoutineDateAcrossDaylightSavingNotTheScheduleZone() {
+        var event = Self.event()
+        event.allDay = true
+        event.eventType = "outOfOffice"
+        event.startAt = Self.date("2026-11-01T00:00:00Z")
+        event.endAt = Self.date("2026-11-02T00:00:00Z")
+        let day = Self.range("2026-11-01T07:00:00Z", "2026-11-02T08:00:00Z")
+        #expect(Availability.blockingRange(event, timeZone: Self.pacific) == day)
+        let schedules = [Self.schedule(zone: "UTC", start: "00:00", end: "24:00")]
+        let free = Availability.freeRanges(
+            in: day.start..<day.end, schedules: schedules, events: [event], tasks: [], placements: [],
+            commitments: [], now: day.start, timeZone: Self.pacific)
+        #expect(free.isEmpty)
+        event.blocksDay = false
+        #expect(Availability.freeRanges(
+            in: day.start..<day.end, schedules: schedules, events: [event], tasks: [], placements: [],
+            commitments: [], now: day.start, timeZone: Self.pacific) == [day])
+    }
+
+    @Test func explicitAllDayProtectionUsesSpringForwardDayBounds() {
+        var event = Self.event()
+        event.allDay = true
+        event.blocksDay = true
+        event.startAt = Self.date("2026-03-08T00:00:00Z")
+        event.endAt = Self.date("2026-03-09T00:00:00Z")
+        #expect(Availability.blockingRange(event, timeZone: Self.pacific)
+            == Self.range("2026-03-08T08:00:00Z", "2026-03-09T07:00:00Z"))
+    }
+
     @Test func workingHoursMinusEventsSnapInwardWithoutOfferingPastOrOffscreenTime() {
         let visible = Self.range("2026-11-12T17:05:00Z", "2026-11-12T21:53:00Z")
         #expect(Self.free(visible, events: [Self.event()], now: Self.date("2026-11-12T17:16:00Z")) == [

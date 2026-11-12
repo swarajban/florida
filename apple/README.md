@@ -23,10 +23,12 @@ recipient-day rollover. **Return / C / Cmd-C** copies the live preview and exits
 without copying. A status-bar confirmation follows copying. Last sync older than 15 minutes,
 or no recorded sync, adds a warning to the preview and copied text.
 
-Availability is computed from the local store, without a server request. Timed, opaque,
-non-declined, non-cancelled calendar events, pinned tasks and routine commitment occurrences
-block time. Flexible placements do not.
-All-day events currently follow the existing scheduler's timed-only rule; the single
+Availability is computed from the local store, without a server request. Events are read from
+calendars that block scheduling, even when hidden; visible non-blocking calendars do not take
+time. Busy rules match the scheduler: live timed opaque events block, focus time and working
+location do not, and out-of-office blocks even when transparent. All-day out-of-office and
+explicitly protected dates block the routine's local day, with the per-event override honored.
+Pinned tasks and routine commitments block; flexible task placements do not. The small
 `Availability.eventBlocksTime` predicate is the alignment point for future busy-time changes.
 This is static text, not a reservation or a live booking link.
 

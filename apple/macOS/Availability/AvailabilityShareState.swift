@@ -5,6 +5,7 @@ struct AvailabilityShareState {
     var meetingMinutes = 30
     var scheduleID: String?
     var free: [AvailabilityRange] = []
+    var events: [CalendarEvent] = []
     var suggestions: [AvailabilityRange] = []
     var selected: [AvailabilityRange] = []
     var cursor: AvailabilityRange?

@@ -13,25 +13,38 @@ public struct AvailabilityRange: Hashable, Sendable {
 public enum Availability {
     public static let timeZoneIdentifiers: [String] = TimeZone.knownTimeZoneIdentifiers.sorted()
 
+    public static func routineTimeZone(_ settings: UserSettings?) -> TimeZone {
+        settings.flatMap { TimeZone(identifier: $0.timeZone) } ?? .gmt
+    }
+
     public static func eventBlocksTime(_ event: CalendarEvent) -> Bool {
-        guard event.isVisible, !event.allDay, event.transparency != "transparent",
-              let start = event.startAt, let end = event.endAt
+        guard event.isVisible, let start = event.startAt, let end = event.endAt, start < end
         else { return false }
-        return start < end
+        if event.allDay { return event.blocksDay ?? event.isOutOfOffice }
+        if event.eventType == "focusTime" || event.eventType == "workingLocation" { return false }
+        return event.isOutOfOffice || event.transparency != "transparent"
+    }
+
+    public static func blockingRange(_ event: CalendarEvent, timeZone: TimeZone) -> AvailabilityRange? {
+        guard eventBlocksTime(event), let start = event.startAt, let end = event.endAt else { return nil }
+        guard event.allDay else { return AvailabilityRange(start: start, end: end) }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let days = AllDayDate.localDays(start: start, end: end, calendar: calendar)
+        guard days.lowerBound < days.upperBound else { return nil }
+        return AvailabilityRange(start: days.lowerBound, end: days.upperBound)
     }
 
     public static func freeRanges(
         in visible: Range<Date>, schedules: [Schedule], events: [CalendarEvent], tasks: [TaskItem],
-        placements: [Placement], commitments: [RoutineOccurrence], now: Date
+        placements: [Placement], commitments: [RoutineOccurrence], now: Date, timeZone: TimeZone? = nil
     ) -> [AvailabilityRange] {
         let lower = max(visible.lowerBound, now)
         guard lower < visible.upperBound else { return [] }
         let liveTasks = tasks.filter { $0.deletedAt == nil && $0.completedAt == nil && $0.remainingMinutes > 0 }
         let liveTaskIds = Set(liveTasks.map(\.id))
-        var busy = events.filter(eventBlocksTime).compactMap { event -> AvailabilityRange? in
-            guard let start = event.startAt, let end = event.endAt else { return nil }
-            return AvailabilityRange(start: start, end: end)
-        }
+        let busyZone = timeZone ?? schedules.lazy.compactMap { TimeZone(identifier: $0.timeZone) }.first ?? .gmt
+        var busy = events.compactMap { blockingRange($0, timeZone: busyZone) }
         busy += placements.filter { $0.pinned && liveTaskIds.contains($0.taskId) }.map {
             AvailabilityRange(start: $0.startAt, end: $0.endAt)
         }

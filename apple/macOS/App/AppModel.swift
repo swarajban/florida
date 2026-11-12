@@ -129,6 +129,7 @@ final class AppModel {
     var statusMessage: String?
     var availabilityShare: AvailabilityShareState?
     var isAvailabilityZoneOpen = false
+    @ObservationIgnored var availabilityEventsObserver: Task<Void, Never>?
     var ghost: Ghost?
     /// Writes `z` can revert, oldest first.
     var undoStack: [UndoEntry] = []

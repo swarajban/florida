@@ -72,6 +72,10 @@ struct AvailabilityShareBar: View {
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("availability-bar")
             .onChange(of: model.clockNow) { model.refreshAvailability() }
+            .onChange(of: model.userSettings?.timeZone) {
+                model.startAvailabilityEvents()
+                model.refreshAvailability()
+            }
         }
     }
 }
