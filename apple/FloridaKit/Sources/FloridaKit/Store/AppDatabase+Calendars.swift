@@ -12,4 +12,12 @@ extension AppDatabase {
                 arguments: [selected, now, id])
         }
     }
+
+    public func setCalendarBlocksScheduling(id: String, blocksScheduling: Bool, now: Date = Date()) throws {
+        try writer.write { db in
+            try db.execute(
+                sql: "UPDATE calendar SET blocksScheduling = ?, updatedAt = ? WHERE id = ?",
+                arguments: [blocksScheduling, now, id])
+        }
+    }
 }

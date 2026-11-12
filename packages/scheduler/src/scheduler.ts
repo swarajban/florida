@@ -290,7 +290,7 @@ interface Prior extends Span {
  * weekday; an `off` day follows none; a `home` or `office` day that is not already one follows
  * the first weekday, Monday first, that is.
  */
-function weekdayResolver(routine: Routine, overrides: DayOverride[]): (date: LocalDate) => number | undefined {
+export function weekdayResolver(routine: Routine, overrides: DayOverride[]): (date: LocalDate) => number | undefined {
   const planned = (weekday: number) => routine.blocks.filter((b) => b.optional !== true && b.days.includes(weekday))
   const kindOf = (weekday: number): DayKind => {
     const blocks = planned(weekday)

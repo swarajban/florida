@@ -646,6 +646,7 @@ public struct CalendarEvent: Codable, Hashable, Sendable, Identifiable {
     public var startAt: Date?
     public var endAt: Date?
     public var allDay: Bool
+    public var blocksDay: Bool?
     /// "opaque" (busy, default) or "transparent" (free).
     public var transparency: String?
     /// The user's own attendee response: "accepted", "declined", "tentative", "needsAction".
@@ -671,7 +672,7 @@ public struct CalendarEvent: Codable, Hashable, Sendable, Identifiable {
         transparency: String? = nil, responseStatus: String? = nil, htmlLink: String? = nil,
         description: String? = nil, conferenceUrl: String? = nil, attendees: [EventAttendee]? = nil,
         organizer: EventOrganizer? = nil, eventType: String? = nil, recurringEventId: String? = nil,
-        icalUid: String? = nil, updatedAt: Date, deletedAt: Date? = nil
+        icalUid: String? = nil, updatedAt: Date, deletedAt: Date? = nil, blocksDay: Bool? = nil
     ) {
         self.id = id
         self.calendarId = calendarId
@@ -682,6 +683,7 @@ public struct CalendarEvent: Codable, Hashable, Sendable, Identifiable {
         self.startAt = startAt
         self.endAt = endAt
         self.allDay = allDay
+        self.blocksDay = blocksDay
         self.transparency = transparency
         self.responseStatus = responseStatus
         self.htmlLink = htmlLink
@@ -709,6 +711,7 @@ public struct CalendarEvent: Codable, Hashable, Sendable, Identifiable {
         startAt = try container.decodeIfPresent(Date.self, forKey: .startAt)
         endAt = try container.decodeIfPresent(Date.self, forKey: .endAt)
         allDay = try container.decode(Bool.self, forKey: .allDay)
+        blocksDay = try container.decodeIfPresent(Bool.self, forKey: .blocksDay)
         transparency = try container.decodeIfPresent(String.self, forKey: .transparency)
         responseStatus = try container.decodeIfPresent(String.self, forKey: .responseStatus)
         htmlLink = try container.decodeIfPresent(String.self, forKey: .htmlLink)
@@ -809,13 +812,14 @@ public struct CalendarInfo: Codable, Hashable, Sendable, Identifiable {
     public var summary: String
     public var color: String?
     public var accessRole: String
-    /// Whether events from this calendar are mirrored and block time.
+    /// Whether events from this calendar are visible.
     public var selected: Bool
+    public var blocksScheduling: Bool
     public var updatedAt: Date
 
     public init(
         id: String, accountId: String, googleId: String, summary: String, color: String? = nil,
-        accessRole: String, selected: Bool, updatedAt: Date
+        accessRole: String, selected: Bool, blocksScheduling: Bool = true, updatedAt: Date
     ) {
         self.id = id
         self.accountId = accountId
@@ -824,7 +828,25 @@ public struct CalendarInfo: Codable, Hashable, Sendable, Identifiable {
         self.color = color
         self.accessRole = accessRole
         self.selected = selected
+        self.blocksScheduling = blocksScheduling
         self.updatedAt = updatedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, accountId, googleId, summary, color, accessRole, selected, blocksScheduling, updatedAt
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        accountId = try container.decode(String.self, forKey: .accountId)
+        googleId = try container.decode(String.self, forKey: .googleId)
+        summary = try container.decode(String.self, forKey: .summary)
+        color = try container.decodeIfPresent(String.self, forKey: .color)
+        accessRole = try container.decode(String.self, forKey: .accessRole)
+        selected = try container.decode(Bool.self, forKey: .selected)
+        blocksScheduling = try container.decodeIfPresent(Bool.self, forKey: .blocksScheduling) ?? true
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
     }
 }
 
@@ -1298,11 +1320,12 @@ public struct EventWrite: Codable, Hashable, Sendable {
     public var recurrence: EventRecurrence?
     /// Nil, which the JSON omits, moves the instance alone.
     public var scope: Scope?
+    public var blocksDay: Bool?
 
     public init(
         calendarId: String, summary: String, location: String? = nil, description: String? = nil,
         startAt: Date, endAt: Date, allDay: Bool, responseStatus: String? = nil,
-        recurrence: EventRecurrence? = nil, scope: Scope? = nil
+        recurrence: EventRecurrence? = nil, scope: Scope? = nil, blocksDay: Bool? = nil
     ) {
         self.calendarId = calendarId
         self.summary = summary
@@ -1314,6 +1337,7 @@ public struct EventWrite: Codable, Hashable, Sendable {
         self.responseStatus = responseStatus
         self.recurrence = recurrence
         self.scope = scope
+        self.blocksDay = blocksDay
     }
 
     /// The body for an existing row, or nil for a row without `startAt` or `endAt` (Google omits
@@ -1327,7 +1351,23 @@ public struct EventWrite: Codable, Hashable, Sendable {
         self.startAt = startAt
         self.endAt = endAt
         allDay = event.allDay
+        blocksDay = event.blocksDay
         responseStatus = event.responseStatus
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(calendarId, forKey: .calendarId)
+        try container.encode(summary, forKey: .summary)
+        try container.encodeIfPresent(location, forKey: .location)
+        try container.encodeIfPresent(description, forKey: .description)
+        try container.encode(startAt, forKey: .startAt)
+        try container.encode(endAt, forKey: .endAt)
+        try container.encode(allDay, forKey: .allDay)
+        try container.encodeIfPresent(responseStatus, forKey: .responseStatus)
+        try container.encodeIfPresent(recurrence, forKey: .recurrence)
+        try container.encodeIfPresent(scope, forKey: .scope)
+        try container.encode(blocksDay, forKey: .blocksDay)
     }
 }
 

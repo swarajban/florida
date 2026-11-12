@@ -78,6 +78,29 @@ struct EventDetailView: View {
                     }
                 }
 
+                if event.allDay {
+                    Section {
+                        Picker("Blocks my day", selection: Binding(
+                            get: { event.blocksDay },
+                            set: { model.setBlocksDay(event, blocksDay: $0) })) {
+                            Text("Automatic").tag(nil as Bool?)
+                            Text("Blocks").tag(true as Bool?)
+                            Text("Does not block").tag(false as Bool?)
+                        }
+                        .pickerStyle(.menu)
+                        .accessibilityIdentifier("event-blocks-day-\(event.id)")
+                        .accessibilityValue(event.blocksDay.map { $0 ? "Blocks" : "Does not block" } ?? "Automatic")
+                        let calendarBlocks = model.calendarInfo(id: event.calendarId)?.blocksScheduling ?? true
+                        Text(calendarBlocks && event.isVisible && (event.blocksDay ?? event.isOutOfOffice)
+                            ? "Blocks your day" : "Does not block scheduling")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("event-blocks-day-effective-\(event.id)")
+                    } footer: {
+                        Text("Automatic blocks only out-of-office events. Florida only; this occurrence only. Google Calendar is unchanged.")
+                    }
+                }
+
                 Section {
                     HStack(spacing: 10) {
                         EventBar(style: style)

@@ -265,8 +265,20 @@ review, and `y` asks it why the selected task sits where it does. All three need
 `ANTHROPIC_API_KEY` on the server and say so plainly without it.
 
 First run: Settings (`⌘,`) → server URL and bearer token (kept in the Keychain),
-then toggle which calendars to show. While open, the app listens to the
+then choose each calendar's independent **Show calendar** and **Blocks scheduling**
+switches. Both apps update these locally at once: hidden calendars can still
+block tasks, and visible calendars can be informational only. While open, the app listens to the
 server's `/api/events` stream and also syncs every 60 s.
+
+Ordinary all-day events do not block tasks by default, regardless of Google's busy/free
+setting. In either app's all-day event details, **Blocks my day** offers **Automatic**,
+**Blocks**, and **Does not block**, and shows the effective state. Automatic blocks
+only out-of-office events; an explicit choice overrides that, including for OOO.
+The choice applies to this occurrence only, even on a read-only Google calendar,
+and is saved locally and queued for Florida sync without editing Google. On Mac,
+`r b` cycles the three choices in the popover or on the selected all-day event;
+"Cycle day blocking" is also in the command palette. The calendar's
+**Blocks scheduling** switch remains the outer control.
 
 ### iOS (`Florida-iOS`)
 

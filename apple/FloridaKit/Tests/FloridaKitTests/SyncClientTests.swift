@@ -511,7 +511,7 @@ import Testing
             startAt: Fixtures.instant("2026-11-09T17:00:00Z"), endAt: Fixtures.instant("2026-11-09T17:30:00Z"),
             allDay: false, responseStatus: "tentative"))
         let keys = try #require(JSONSerialization.jsonObject(with: requestBody) as? [String: Any]).keys
-        #expect(Set(keys) == ["calendarId", "summary", "description", "startAt", "endAt", "allDay", "responseStatus"])
+        #expect(Set(keys) == ["calendarId", "summary", "description", "startAt", "endAt", "allDay", "responseStatus", "blocksDay"])
 
         #expect(try db.event(id: "e1") == serverCopy, "the server's copy, Google id included, replaces the row")
         #expect(try db.events(in: Fixtures.allTime, calendar: Fixtures.utc).map(\.googleId) == ["g-dentist"])

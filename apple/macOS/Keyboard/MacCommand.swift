@@ -43,13 +43,14 @@ enum MacCommand: Hashable, Sendable {
     /// `v`: opens the video call of the selected event, or the one whose detail popover is open.
     case joinMeeting
     case openEventResources
+    case cycleEventDayBlocking
 
     /// Grouping in the help overlay, reusing the shared sections.
     var section: AppCommand.Section {
         switch self {
         case .core(let command): command.section
         case .undo, .move, .acceptSuggestion, .newTaskEditor, .doNow, .doneForNow, .repeatLast,
-             .editEvent, .respondYes, .respondMaybe, .respondNo, .joinMeeting, .openEventResources:
+             .editEvent, .respondYes, .respondMaybe, .respondNo, .joinMeeting, .openEventResources, .cycleEventDayBlocking:
             .editing
         case .newCategory, .showRoutine, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind: .actions
         case .centerOnNow, .jumpToFirst, .jumpToLast, .jump: .navigation
@@ -87,6 +88,7 @@ enum MacCommand: Hashable, Sendable {
         case .jump: "Jump to…"
         case .joinMeeting: "Join meeting"
         case .openEventResources: "Open event resources"
+        case .cycleEventDayBlocking: "Cycle day blocking"
         }
     }
 
@@ -95,7 +97,7 @@ enum MacCommand: Hashable, Sendable {
     var actsOnOpenEvent: Bool {
         switch self {
         case .core(.edit), .core(.delete), .core(.openInGoogle), .core(.copyLink), .core(.cancel),
-             .editEvent, .respondYes, .respondMaybe, .respondNo, .joinMeeting, .openEventResources, .undo:
+             .editEvent, .respondYes, .respondMaybe, .respondNo, .joinMeeting, .openEventResources, .cycleEventDayBlocking, .undo:
             true
         default:
             false
@@ -105,7 +107,7 @@ enum MacCommand: Hashable, Sendable {
     /// Every command in palette and help order: the shared commands first, then the Mac ones.
     static let all: [MacCommand] = AppCommand.allCases.map(MacCommand.core) + [
         .newTaskEditor, .doNow, .doneForNow, .repeatLast, .undo, .move, .acceptSuggestion,
-        .editEvent, .respondYes, .respondMaybe, .respondNo, .joinMeeting, .openEventResources,
+        .editEvent, .respondYes, .respondMaybe, .respondNo, .joinMeeting, .openEventResources, .cycleEventDayBlocking,
         .newCategory, .showRoutine, .centerOnNow, .jumpToFirst, .jumpToLast, .jump,
         .showProjects, .showBrief, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind,
     ]

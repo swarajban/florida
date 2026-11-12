@@ -114,8 +114,9 @@ struct SettingsView: View {
                             }
                         } header: {
                             Text(account.email)
+                                .accessibilityIdentifier("calendar-account-header-\(account.id)")
                         } footer: {
-                            Text("Label: \(account.label). Calendars that are off are hidden from the agenda and ignored when scheduling.")
+                            Text("Label: \(account.label). Show calendar controls visibility only. Blocks scheduling keeps busy time unavailable to tasks, even when hidden.")
                         }
                     }
                 }
@@ -166,32 +167,44 @@ struct SettingsView: View {
     }
 }
 
-/// One Google calendar: color, name, and a toggle for whether its events are mirrored. The toggle
-/// flips the local flag at once and tells the server in the background.
+/// One Google calendar with independent visibility and scheduling controls.
 private struct CalendarRow: View {
     @Environment(AppModel.self) private var model
     let calendar: CalendarInfo
 
     var body: some View {
-        Toggle(isOn: isSelected) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 Circle()
                     .fill(calendar.color.flatMap(Color.init(hex:)) ?? .secondary)
                     .frame(width: 10, height: 10)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(calendar.summary)
+                        .accessibilityIdentifier("calendar-name-\(calendar.id)")
                     Text(calendar.accessRole)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
+            .accessibilityAddTraits(.isHeader)
+            Toggle("Show calendar", isOn: isSelected)
+                .accessibilityIdentifier("calendar-selected-\(calendar.id)")
+            Toggle("Blocks scheduling", isOn: blocksScheduling)
+                .accessibilityIdentifier("calendar-blocks-scheduling-\(calendar.id)")
         }
-        .disabled(model.needsSetup)
+        .disabled(model.needsSetup && !LaunchOptions.demoData)
+        .padding(.vertical, 4)
     }
 
     private var isSelected: Binding<Bool> {
         Binding(
             get: { calendar.selected },
             set: { model.setCalendarSelected(id: calendar.id, selected: $0) })
+    }
+
+    private var blocksScheduling: Binding<Bool> {
+        Binding(
+            get: { calendar.blocksScheduling },
+            set: { model.setCalendarBlocksScheduling(id: calendar.id, blocksScheduling: $0) })
     }
 }

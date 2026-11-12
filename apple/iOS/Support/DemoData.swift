@@ -43,12 +43,13 @@ enum DemoData {
         }
         func event(
             _ id: String, _ calendarId: String, _ summary: String, _ start: Date, _ end: Date,
-            allDay: Bool = false, location: String? = nil, meet: String? = nil, series: String? = nil
+            allDay: Bool = false, location: String? = nil, meet: String? = nil, series: String? = nil,
+            eventType: String? = nil
         ) -> CalendarEvent {
             var event = CalendarEvent(
                 id: id, calendarId: calendarId, googleId: "g-\(id)", summary: summary, location: location,
                 startAt: start, endAt: end, allDay: allDay, responseStatus: "accepted",
-                htmlLink: "https://calendar.google.com/calendar/event?eid=\(id)", updatedAt: now)
+                htmlLink: "https://calendar.google.com/calendar/event?eid=\(id)", eventType: eventType, updatedAt: now)
             event.conferenceUrl = meet
             event.recurringEventId = series
             return event
@@ -134,7 +135,7 @@ enum DemoData {
                                             location: "Room 4 / Meet", meet: "https://meet.google.com/abc-defg-hij")),
                 event("demo-event-lunch", personal, "Lunch with Priya", at(0, 12, 30), at(0, 13, 30), location: "Souvla"),
                 event("demo-event-1on1", work, "1:1 with Sam", at(0, 14, 30), at(0, 15)),
-                event("demo-event-ooo", ooo, "Marcus out of office", utcDay(0), utcDay(1), allDay: true),
+                event("demo-event-ooo", ooo, "Marcus out of office", utcDay(0), utcDay(1), allDay: true, eventType: "outOfOffice"),
                 DemoData.designReview(event("demo-event-offsite", work, "Infra offsite", utcDay(-1), utcDay(2), allDay: true,
                                             location: "Half Moon Bay", meet: "https://meet.google.com/abc-defg-hij")),
                 event("demo-event-birthday", birthdays, "Mom's birthday", utcDay(0), utcDay(1), allDay: true),

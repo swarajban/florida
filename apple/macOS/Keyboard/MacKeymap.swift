@@ -45,6 +45,7 @@ struct MacKeymap: Sendable {
         ("r y", .respondYes),
         ("r m", .respondMaybe),
         ("r n", .respondNo),
+        ("r b", .cycleEventDayBlocking),
         ("g p", .showProjects),
         ("g b", .showBrief),
         ("y", .explain),

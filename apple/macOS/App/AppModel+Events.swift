@@ -145,6 +145,25 @@ extension AppModel {
         return true
     }
 
+    func cycleEventDayBlocking() {
+        guard let event = commandEvent else {
+            statusMessage = "Select an all-day event first"
+            return
+        }
+        let current = storedVersion(of: event)
+        guard current.allDay else {
+            statusMessage = "Blocks my day is only for all-day events"
+            return
+        }
+        let next: Bool?
+        switch current.blocksDay {
+        case nil: next = true
+        case true?: next = false
+        case false?: next = nil
+        }
+        setBlocksDay(current, blocksDay: next)
+    }
+
     /// Opens the editor on the store's copy of `event`, closing its detail popover.
     func openEventEditor(_ event: CalendarEvent) {
         guard requireEditable(event) else { return }
@@ -202,6 +221,18 @@ extension AppModel {
         }
         scheduleSync()
         return true
+    }
+
+    func setBlocksDay(_ event: CalendarEvent, blocksDay: Bool?) {
+        let current = storedVersion(of: event)
+        guard current.allDay, let database else { return }
+        do {
+            try database.setEventBlocksDay(id: current.id, blocksDay: blocksDay)
+        } catch {
+            statusMessage = "Could not save: \(error.localizedDescription)"
+            return
+        }
+        scheduleSync()
     }
 
     // MARK: - Drag

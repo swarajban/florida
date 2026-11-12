@@ -691,7 +691,7 @@ describe('google', () => {
     expect(new Date(body.accounts[0]!.updatedAt).toISOString()).toBe(body.accounts[0]!.updatedAt)
   })
 
-  it('deselecting a calendar tombstones its events for clients; selecting re-downloads it', async () => {
+  it('hiding a calendar preserves its events, sync token, busy setting and webhook sync', async () => {
     const start = new Date(Date.now() + 2 * 86_400_000)
     const end = new Date(start.getTime() + 3_600_000)
     const event = { status: 'confirmed', startAt: start, endAt: end, allDay: false }
@@ -699,7 +699,6 @@ describe('google', () => {
     await db.insert(events).values([
       { ...event, id: 'ev-mine', calendarId: 'cal-1', googleId: 'g-mine', summary: 'Mine' },
       { ...event, id: 'ev-old', calendarId: 'cal-1', googleId: 'g-old', summary: 'Gone', deletedAt: new Date('2026-01-01T00:00:00Z') },
-      // A deselected calendar's live row (e.g. written by a sync that raced the toggle) never goes out.
       { ...event, id: 'ev-hidden', calendarId: 'cal-hidden', googleId: 'g-hidden', summary: 'Hidden' },
     ])
     await db.update(calendars).set({ syncToken: 'tok-1' }).where(eq(calendars.id, 'cal-1'))
@@ -708,18 +707,17 @@ describe('google', () => {
       (await (await api(since === undefined ? '/api/sync' : `/api/sync?since=${encodeURIComponent(since)}`)).json()) as SyncEvents
 
     const before = await sync()
-    expect(before.events.map((e) => e.id).sort()).toEqual(['ev-mine', 'ev-old'])
+    expect(before.events.map((e) => e.id).sort()).toEqual(['ev-hidden', 'ev-mine', 'ev-old'])
 
     const off = await api('/api/calendars/cal-1', { method: 'PATCH', json: { selected: false } })
     expect(off.status).toBe(200)
     const offBody = (await off.json()) as { calendar: { id: string; selected: boolean }; scheduling: unknown }
-    expect(offBody.calendar).toEqual({ id: 'cal-1', googleId: 'me@example.com', selected: false })
+    expect(offBody.calendar).toMatchObject({ id: 'cal-1', googleId: 'me@example.com', selected: false, blocksScheduling: true })
     const afterOff = await sync(before.cursor)
-    expect(afterOff.events).toEqual([expect.objectContaining({ id: 'ev-mine', deletedAt: expect.any(String) })])
-    expect((await sync()).events.map((e) => e.id).sort()).toEqual(['ev-mine', 'ev-old'])
-    expect((await sync()).events.every((e) => e.deletedAt !== null)).toBe(true)
+    expect(afterOff.events).toEqual([])
+    expect((await sync()).events.find((e) => e.id === 'ev-mine')?.deletedAt).toBeNull()
+    expect((await sync()).events.find((e) => e.id === 'ev-old')?.deletedAt).not.toBeNull()
 
-    // Push notifications for the deselected calendar no longer trigger a sync.
     const syncsBefore = fake.syncCalendarCalls.length
     const ping = await webhook({
       'x-goog-channel-id': 'chan-1',
@@ -728,28 +726,40 @@ describe('google', () => {
     })
     expect(ping.status).toBe(200)
     await sleep(WEBHOOK_DEBOUNCE_MS * 5)
-    expect(fake.syncCalendarCalls).toHaveLength(syncsBefore)
-
-    const resynced = new Promise<void>((resolve) => {
-      let seenNotices = 0
-      const unsubscribe = changes.subscribe(() => {
-        // One notice for the PATCH reply's reschedule, one after the background sync.
-        if (++seenNotices < 2) return
-        unsubscribe()
-        resolve()
-      })
-    })
+    expect(fake.syncCalendarCalls).toHaveLength(syncsBefore + 1)
     const on = await api('/api/calendars/cal-1', { method: 'PATCH', json: { selected: true } })
     expect(on.status).toBe(200)
-    expect(((await on.json()) as { calendar: unknown }).calendar).toEqual({ id: 'cal-1', googleId: 'me@example.com', selected: true })
-    await resynced
-    expect(fake.syncCalendarCalls.slice(syncsBefore).map((c) => [c.id, c.syncToken])).toEqual([['cal-1', null]])
+    expect(((await on.json()) as { calendar: unknown }).calendar).toMatchObject({ id: 'cal-1', googleId: 'me@example.com', selected: true, blocksScheduling: true })
+    expect(fake.syncCalendarCalls.slice(syncsBefore).map((c) => [c.id, c.syncToken])).toEqual([['cal-1', 'tok-1']])
     const [stored] = await db.select({ syncToken: calendars.syncToken }).from(calendars).where(eq(calendars.id, 'cal-1'))
-    expect(stored?.syncToken).toBeNull()
+    expect(stored?.syncToken).toBe('tok-1')
 
     expect((await api('/api/calendars/nope', { method: 'PATCH', json: { selected: true } })).status).toBe(404)
     await db.delete(events).where(inArray(events.id, ['ev-mine', 'ev-old', 'ev-hidden']))
     await db.delete(calendars).where(eq(calendars.id, 'cal-hidden'))
+  })
+
+  it('edits blocking independently and re-downloads a previously inactive calendar when activated', async () => {
+    await db.update(calendars).set({ selected: false, blocksScheduling: false, syncToken: 'stale' }).where(eq(calendars.id, 'cal-1'))
+    const syncsBefore = fake.syncCalendarCalls.length
+    const resynced = new Promise<void>((resolve) => {
+      let notices = 0
+      const unsubscribe = changes.subscribe(() => {
+        if (++notices < 2) return
+        unsubscribe()
+        resolve()
+      })
+    })
+    const on = await api('/api/calendars/cal-1', { method: 'PATCH', json: { blocksScheduling: true } })
+    expect(on.status).toBe(200)
+    expect(await on.json()).toMatchObject({ calendar: { selected: false, blocksScheduling: true } })
+    await resynced
+    expect(fake.syncCalendarCalls.slice(syncsBefore).map((c) => [c.id, c.syncToken])).toEqual([['cal-1', null]])
+    const off = await api('/api/calendars/cal-1', { method: 'PATCH', json: { selected: true, blocksScheduling: false } })
+    expect(await off.json()).toMatchObject({ calendar: { selected: true, blocksScheduling: false } })
+    expect((await api('/api/calendars/cal-1', { method: 'PATCH', json: {} })).status).toBe(400)
+    expect((await api('/api/calendars/cal-1', { method: 'PATCH', json: { blocksScheduling: 'yes' } })).status).toBe(400)
+    await db.update(calendars).set({ blocksScheduling: true }).where(eq(calendars.id, 'cal-1'))
   })
 
   it('POST /api/google/sync syncs everything then reschedules', async () => {
@@ -759,10 +769,11 @@ describe('google', () => {
     expect(await res.json()).toMatchObject(noScheduling)
   })
 
-  it('POST /api/google/resync drops the sync tokens of selected calendars only, then runs a full sync', async () => {
+  it('POST /api/google/resync resets visible and hidden blocking calendars but not inactive ones', async () => {
     await db.insert(calendars).values([
       { id: 'cal-resync-on', accountId: 'acc-1', googleId: 'team@group.calendar.google.com', summary: 'Team', accessRole: 'writer', syncToken: 'tok-on' },
-      { id: 'cal-resync-off', accountId: 'acc-1', googleId: 'holidays', summary: 'Holidays', accessRole: 'reader', selected: false, syncToken: 'tok-off' },
+      { id: 'cal-resync-off', accountId: 'acc-1', googleId: 'holidays', summary: 'Holidays', accessRole: 'reader', selected: false, blocksScheduling: false, syncToken: 'tok-off' },
+      { id: 'cal-resync-busy', accountId: 'acc-1', googleId: 'busy', summary: 'Busy', accessRole: 'reader', selected: false, blocksScheduling: true, syncToken: 'tok-busy' },
     ])
     const before = fake.syncAllCalls
     const res = await api('/api/google/resync', { method: 'POST' })
@@ -772,9 +783,9 @@ describe('google', () => {
     const tokens = await db
       .select({ id: calendars.id, syncToken: calendars.syncToken })
       .from(calendars)
-      .where(inArray(calendars.id, ['cal-resync-on', 'cal-resync-off']))
-    expect(Object.fromEntries(tokens.map((t) => [t.id, t.syncToken]))).toEqual({ 'cal-resync-on': null, 'cal-resync-off': 'tok-off' })
-    await db.delete(calendars).where(inArray(calendars.id, ['cal-resync-on', 'cal-resync-off']))
+      .where(inArray(calendars.id, ['cal-resync-on', 'cal-resync-off', 'cal-resync-busy']))
+    expect(Object.fromEntries(tokens.map((t) => [t.id, t.syncToken]))).toEqual({ 'cal-resync-on': null, 'cal-resync-off': 'tok-off', 'cal-resync-busy': null })
+    await db.delete(calendars).where(inArray(calendars.id, ['cal-resync-on', 'cal-resync-off', 'cal-resync-busy']))
   })
 
   it('guards /auth/google/start with the API token and label format, then redirects to Google', async () => {
@@ -1526,6 +1537,7 @@ describe('calendar event writes', () => {
     const master = id.replaceAll('-', '')
     const body: EventBody = {
       ...write, summary: 'Fortnightly planning', allDay,
+      blocksDay: allDay ? true : null,
       startAt: allDay ? '2026-10-25T00:00:00.000Z' : '2026-10-25T16:00:00.000Z',
       endAt: allDay ? '2026-10-26T00:00:00.000Z' : '2026-10-25T17:00:00.000Z',
       recurrence: { frequency: 'weekly', interval: 2, timeZone: 'America/Los_Angeles', count: 2 },
@@ -1557,6 +1569,9 @@ describe('calendar event writes', () => {
     expect(fake.eventWrites).toHaveLength(beforeRetry)
     const rows = await db.select().from(events).where(eq(events.recurringEventId, master))
     expect(rows).toHaveLength(2)
+    expect(rows.filter((row) => row.blocksDay === true).map((row) => row.id)).toEqual(allDay ? [id] : [])
+    expect(rows.filter((row) => row.id !== id).every((row) => row.blocksDay === null)).toBe(true)
+    expect(fake.eventWrites.every((write) => !Object.hasOwn(write.body ?? {}, 'blocksDay'))).toBe(true)
     expect(rows.map((row) => row.startAt?.toISOString()).sort()).toEqual([
       body.startAt, allDay ? '2026-11-08T00:00:00.000Z' : '2026-11-08T17:00:00.000Z',
     ])

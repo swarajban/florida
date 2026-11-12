@@ -278,10 +278,12 @@ extension AppDatabase {
     public enum WriteError: Error, Hashable, Sendable, LocalizedError {
         /// `saveEvent` of a row without `startAt` or `endAt`; the server requires both.
         case eventWithoutTimes(id: String)
+        case eventNotAllDay(id: String)
 
         public var errorDescription: String? {
             switch self {
             case .eventWithoutTimes(let id): "Event \(id) has no start or end time."
+            case .eventNotAllDay(let id): "Event \(id) is not an all-day event."
             }
         }
     }
@@ -439,6 +441,10 @@ extension AppDatabase {
         guard let initial = EventWrite(event) else { throw WriteError.eventWithoutTimes(id: event.id) }
         try writer.write { db in
             var write = initial
+            if let stored = try CalendarEvent.fetchOne(db, key: event.id) {
+                event.blocksDay = stored.blocksDay
+                write.blocksDay = stored.blocksDay
+            }
             write.recurrence = recurrence
             if let pending = try PendingWrite.filter(Column("entity") == "event" && Column("entityId") == event.id).fetchOne(db),
                pending.op == .put, let body = pending.body {

@@ -28,6 +28,7 @@ export const eventBody = z
     startAt: isoInstant,
     endAt: isoInstant,
     allDay: z.boolean(),
+    blocksDay: z.boolean().nullable().optional(),
     /** The user's own RSVP. `null` leaves it alone; it is ignored when creating. */
     responseStatus: responseStatus.nullish(),
     /** Creation only. Google owns the series; stored rows are individual instances. */
@@ -50,6 +51,19 @@ export const eventBody = z
     path: ['startAt'],
   })
 export type EventBody = z.infer<typeof eventBody>
+
+export const eventBlockingPatch = z.object({ blocksDay: z.boolean().nullable() }).strict()
+
+export async function setEventBlocksDay(db: Db, id: string, blocksDay: boolean | null, now: Date = new Date()): Promise<EventRow> {
+  return db.transaction(async (tx) => {
+    const [current] = await tx.select().from(events).where(eq(events.id, id)).for('update')
+    if (current === undefined || current.deletedAt !== null) throw notFound(`event ${id}`)
+    if (!current.allDay) throw badRequest('Blocks my day is only available for all-day events')
+    const [event] = await tx.update(events).set({ blocksDay, updatedAt: now }).where(eq(events.id, id)).returning()
+    if (event === undefined) throw notFound(`event ${id}`)
+    return event
+  })
+}
 
 const WRITABLE_ROLES: readonly string[] = ['owner', 'writer']
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -120,13 +134,16 @@ async function createEvent(db: Db, sync: CalendarSyncService, id: string, body: 
   return db.transaction(async (tx) => {
     // A sync that ran between Google's reply and this write already holds the event under a random
     // id. The client's id wins, so its optimistic row and the server's row are the same record.
+    const [raced] = await tx.select({ blocksDay: events.blocksDay }).from(events)
+      .where(and(eq(events.calendarId, calendar.id), eq(events.googleId, row.googleId))).for('update')
+    const fields = { ...row, blocksDay: body.blocksDay === undefined ? raced?.blocksDay ?? null : body.blocksDay }
     await tx
       .delete(events)
       .where(and(eq(events.calendarId, calendar.id), eq(events.googleId, row.googleId), ne(events.id, id)))
     const [stored] = await tx
       .insert(events)
-      .values({ id, ...row })
-      .onConflictDoUpdate({ target: events.id, set: row })
+      .values({ id, ...fields })
+      .onConflictDoUpdate({ target: events.id, set: fields })
       .returning()
     if (stored === undefined) throw new Error(`insert of event ${id} returned no row`)
     for (const occurrence of occurrences.slice(1)) {
@@ -145,9 +162,13 @@ async function updateEvent(
   now: Date,
 ): Promise<EventRow> {
   const seriesId = body.scope === 'series' ? current.recurringEventId : null
+  if (body.calendarId !== current.calendarId) throw badRequest('moving an event to another calendar is not supported')
+  if (body.blocksDay !== undefined && current.allDay && seriesId === null && Object.keys(changedFields(current, body)).length === 0
+    && (body.responseStatus == null || body.responseStatus === current.responseStatus)) {
+    return setEventBlocksDay(db, current.id, body.blocksDay, now)
+  }
   let moved = false
   try {
-    if (body.calendarId !== current.calendarId) throw badRequest('moving an event to another calendar is not supported')
     const calendar = await writableCalendar(db, current.calendarId)
     // The times of a series move go to the series; this instance is patched for what else changed.
     const stored = await updateInstance(db, sync, calendar, current, body, now, seriesId === null)
@@ -204,10 +225,13 @@ async function updateInstance(
     if (!isGone(err)) throw err
     return tombstoneEvent(db, current.id, now)
   }
-  if (updated === undefined) return current
+  if (updated === undefined && (body.blocksDay === undefined || body.blocksDay === current.blocksDay)) return current
   const [row] = await db
     .update(events)
-    .set(mapEvent(calendar.id, updated, now))
+    .set({
+      ...(updated === undefined ? { updatedAt: now } : mapEvent(calendar.id, updated, now)),
+      ...(body.blocksDay === undefined ? {} : { blocksDay: body.blocksDay }),
+    })
     .where(eq(events.id, current.id))
     .returning()
   if (row === undefined) throw notFound(`event ${current.id}`)

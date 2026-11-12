@@ -31,6 +31,7 @@ import type {
   TaskRow,
 } from './db/schema.js'
 import { materializeRecurringTasks } from './tasks.js'
+import { parseCalendarDate } from './validation.js'
 
 /** Smallest piece of shared work: long enough for an agent to get somewhere between check-ins. */
 export const SHARED_CHUNK_MINUTES = 60
@@ -110,13 +111,37 @@ export interface SchedulerSources {
   completedProjectTasks?: TaskRow[]
 }
 
+export function blockingEventInterval(event: EventRow, timeZone: string): Interval | undefined {
+  if (event.deletedAt !== null || event.status === 'cancelled' || event.responseStatus === 'declined') return undefined
+  if (event.allDay) {
+    if (!(event.blocksDay ?? event.eventType === 'outOfOffice')) return undefined
+  } else {
+    if (event.eventType === 'focusTime' || event.eventType === 'workingLocation') return undefined
+    if (event.eventType !== 'outOfOffice' && event.transparency === 'transparent') return undefined
+  }
+  if (event.startAt === null || event.endAt === null) return undefined
+  let start = event.startAt.getTime()
+  let end = event.endAt.getTime()
+  if (event.allDay) {
+    const first = parseCalendarDate(event.startAt.toISOString().slice(0, 10))
+    const last = parseCalendarDate(event.endAt.toISOString().slice(0, 10))
+    if (first === undefined || last === undefined) return undefined
+    start = zonedToUtc(first, 0, timeZone)
+    end = zonedToUtc(last, 0, timeZone)
+  }
+  if (end <= start) return undefined
+  return { start: new Date(start).toISOString(), end: new Date(end).toISOString() }
+}
+
 /**
  * Maps database rows to scheduler input. Pure.
  *
  * Live routine blocks become the routine; each task carries its own `context`, and the scheduler
  * places it only in blocks that allow it. A task takes its `area` from its category, which orders
  * the suggestions for optional blocks. Tasks that are deleted, completed, or belong to a
- * deleted category are skipped. Busy time is every live, timed, opaque, not-declined event from
+ * deleted category are skipped. Busy time is live, not-declined timed opaque events and
+ * out-of-office, excluding focus time and working locations. All-day dates use their manual
+ * override, otherwise only out-of-office blocks, in the routine's zone, from
  * the Sunday of the current week to the horizon: the earlier days decide where this week's
  * commitments landed (a gym session that moved off a booked Tuesday morning stays moved once the
  * meeting is over).
@@ -190,13 +215,9 @@ export function buildSchedulerInput(src: SchedulerSources): SchedulerInput {
 
   const busy: Interval[] = []
   for (const e of src.events) {
-    if (e.deletedAt !== null || e.status === 'cancelled' || e.allDay) continue
-    if (e.transparency === 'transparent' || e.responseStatus === 'declined') continue
-    if (e.startAt === null || e.endAt === null) continue
-    const start = e.startAt.getTime()
-    const end = e.endAt.getTime()
-    if (end <= start || end <= weekStart || start >= horizonEnd) continue
-    busy.push({ start: e.startAt.toISOString(), end: e.endAt.toISOString() })
+    const interval = blockingEventInterval(e, src.timeZone)
+    if (interval === undefined || Date.parse(interval.end) <= weekStart || Date.parse(interval.start) >= horizonEnd) continue
+    busy.push(interval)
   }
 
   const input: SchedulerInput = {
@@ -352,7 +373,7 @@ export async function runScheduling(
       .select(getTableColumns(events))
       .from(events)
       .innerJoin(calendars, eq(events.calendarId, calendars.id))
-      .where(and(eq(calendars.selected, true), isNull(events.deletedAt)))
+      .where(and(eq(calendars.blocksScheduling, true), isNull(events.deletedAt)))
     const previousRows = await tx.select().from(placements)
     const projectRows = await tx.select().from(projects).where(isNull(projects.deletedAt))
     const overrideRows = await tx.select().from(dayOverrides).where(isNull(dayOverrides.deletedAt))

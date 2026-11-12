@@ -22,6 +22,7 @@ struct FloridaMacApp: App {
         Settings {
             SettingsView()
                 .environment(appDelegate.model)
+                .preferredColorScheme(FloridaStyle.captureColorScheme)
         }
 
         // Replaces a separate date / next-meeting menu bar app, so it is always there.

@@ -30,6 +30,33 @@ struct EventDetailView: View {
     private func detailContent(_ resources: [EventResource]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             header
+            if event.allDay {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Picker("Blocks my day", selection: Binding(
+                            get: { event.blocksDay },
+                            set: { model.setBlocksDay(event, blocksDay: $0) })) {
+                            Text("Automatic").tag(nil as Bool?)
+                            Text("Blocks").tag(true as Bool?)
+                            Text("Does not block").tag(false as Bool?)
+                        }
+                        .pickerStyle(.menu)
+                        .accessibilityIdentifier("event-blocks-day-\(event.id)")
+                        .accessibilityValue(event.blocksDay.map { $0 ? "Blocks" : "Does not block" } ?? "Automatic")
+                        Self.keycap(for: .cycleEventDayBlocking)
+                    }
+                    .help(Self.hint(for: .cycleEventDayBlocking))
+                    let calendarBlocks = model.calendarsById[event.calendarId]?.blocksScheduling ?? true
+                    Text(calendarBlocks && event.isVisible && (event.blocksDay ?? event.isOutOfOffice)
+                        ? "Blocks your day" : "Does not block scheduling")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("event-blocks-day-effective-\(event.id)")
+                    Text("Automatic blocks only out-of-office events. Florida only; this occurrence only. Google Calendar is unchanged.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
             if let url = event.joinURL {
                 HStack(spacing: 8) {
                     JoinButton(url: url, start: event.startAt)

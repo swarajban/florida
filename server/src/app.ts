@@ -1,6 +1,6 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { SchedulerResult } from '@florida/scheduler'
-import { and, eq, getTableColumns, gt, isNotNull, isNull, or } from 'drizzle-orm'
+import { and, eq, gt, isNull, or } from 'drizzle-orm'
 import type { PgColumn } from 'drizzle-orm/pg-core'
 import { Hono } from 'hono'
 import type { MiddlewareHandler } from 'hono'
@@ -36,7 +36,7 @@ import {
   unscheduled,
 } from './db/schema.js'
 import type { GoogleAccountRow } from './db/schema.js'
-import { eventBody, softDeleteEvent, upsertEvent } from './events.js'
+import { eventBlockingPatch, eventBody, setEventBlocksDay, softDeleteEvent, upsertEvent } from './events.js'
 import { GoogleApiError, GoogleTokenError, authorizationUrl, exchangeCode } from './google/client.js'
 import type { CalendarSyncService } from './google/sync.js'
 import { mountMcp } from './mcp.js'
@@ -99,6 +99,7 @@ const publicCalendarColumns = {
   color: calendars.color,
   accessRole: calendars.accessRole,
   selected: calendars.selected,
+  blocksScheduling: calendars.blocksScheduling,
   lastSyncedAt: calendars.lastSyncedAt,
   channelExpiresAt: calendars.channelExpiresAt,
   updatedAt: calendars.updatedAt,
@@ -163,7 +164,8 @@ const scheduleBody = z.object({
     .min(1),
 })
 
-const calendarPatch = z.object({ selected: z.boolean() })
+const calendarPatch = z.object({ selected: z.boolean().optional(), blocksScheduling: z.boolean().optional() })
+  .refine((body) => body.selected !== undefined || body.blocksScheduling !== undefined, 'provide a calendar setting')
 
 const suggestCategoryBody = z.object({
   title: z.string().trim().min(1).max(2000),
@@ -256,12 +258,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
     const projectRows = await db.select().from(projects).where(changedAfter(projects.updatedAt))
     const dayOverrideRows = await db.select().from(dayOverrides).where(changedAfter(dayOverrides.updatedAt))
     const taskRows = await db.select().from(tasks).where(changedAfter(tasks.updatedAt))
-    // Events of deselected calendars stay server-side; their tombstones still go out so clients drop them.
-    const eventRows = await db
-      .select(getTableColumns(events))
-      .from(events)
-      .innerJoin(calendars, eq(events.calendarId, calendars.id))
-      .where(and(changedAfter(events.updatedAt), or(eq(calendars.selected, true), isNotNull(events.deletedAt))))
+    const eventRows = await db.select().from(events).where(changedAfter(events.updatedAt))
     // Small tables without tombstones: always sent in full so clients can replace them wholesale.
     const placementRows = await db.select().from(placements)
     const optionalPlacementRows = await db.select().from(optionalPlacements)
@@ -580,6 +577,13 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
     return c.json({ event, scheduling })
   })
 
+  app.patch('/api/events/:id', async (c) => {
+    const { blocksDay } = eventBlockingPatch.parse(await c.req.json())
+    const event = await setEventBlocksDay(db, c.req.param('id'), blocksDay)
+    const scheduling = await reschedule()
+    return c.json({ event, scheduling })
+  })
+
   app.delete('/api/events/:id', async (c) => {
     await softDeleteEvent(db, sync, c.req.param('id'))
     const scheduling = await reschedule()
@@ -644,31 +648,25 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
     return c.json({ accounts })
   })
 
-  // Deselecting tombstones the calendar's events so clients drop them. Selecting forgets the sync
-  // token and re-downloads the calendar in the background, so every event comes back with a fresh
-  // `updatedAt` that since-based sync picks up.
   app.patch('/api/calendars/:id', async (c) => {
     const id = c.req.param('id')
     const body = calendarPatch.parse(await c.req.json())
     const now = new Date()
     const calendar = await db.transaction(async (tx) => {
+      const [current] = await tx.select().from(calendars).where(eq(calendars.id, id)).for('update')
+      if (current === undefined) return undefined
+      const activated = !current.selected && !current.blocksScheduling && (body.selected === true || body.blocksScheduling === true)
       const [row] = await tx
         .update(calendars)
-        .set(body.selected ? { selected: true, syncToken: null, updatedAt: now } : { selected: false, updatedAt: now })
+        .set({ ...body, ...(activated ? { syncToken: null } : {}), updatedAt: now })
         .where(eq(calendars.id, id))
-        .returning({ id: calendars.id, googleId: calendars.googleId, selected: calendars.selected })
-      if (row !== undefined && !body.selected) {
-        await tx
-          .update(events)
-          .set({ deletedAt: now, updatedAt: now })
-          .where(and(eq(events.calendarId, id), isNull(events.deletedAt)))
-      }
-      return row
+        .returning(publicCalendarColumns)
+      return row === undefined ? undefined : { row, activated }
     })
     if (calendar === undefined) throw notFound(`calendar ${id}`)
     const scheduling = await reschedule()
-    if (body.selected) void runCalendarSync(id)
-    return c.json({ calendar, scheduling })
+    if (calendar.activated) void runCalendarSync(id)
+    return c.json({ calendar: calendar.row, scheduling })
   })
 
   app.post('/api/google/sync', async (c) => {
@@ -676,10 +674,10 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
     return c.json(await reschedule())
   })
 
-  // Full re-download of every selected calendar: rewrites every event row (and bumps `updatedAt`),
+  // Full re-download of every visible or blocking calendar: rewrites every event row (and bumps `updatedAt`),
   // e.g. to backfill columns added after the rows were first synced.
   app.post('/api/google/resync', async (c) => {
-    await db.update(calendars).set({ syncToken: null, updatedAt: new Date() }).where(eq(calendars.selected, true))
+    await db.update(calendars).set({ syncToken: null, updatedAt: new Date() }).where(or(eq(calendars.selected, true), eq(calendars.blocksScheduling, true)))
     await sync.syncAll()
     return c.json(await reschedule())
   })
@@ -761,8 +759,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
   async function runCalendarSync(calendarId: string): Promise<void> {
     try {
       const [calendar] = await db.select().from(calendars).where(eq(calendars.id, calendarId)).limit(1)
-      // A deselected calendar's channel can still fire until it expires; its events stay tombstoned.
-      if (calendar === undefined || !calendar.selected) return
+      if (calendar === undefined || (!calendar.selected && !calendar.blocksScheduling)) return
       await sync.syncCalendar(calendar)
       await reschedule()
     } catch (err) {

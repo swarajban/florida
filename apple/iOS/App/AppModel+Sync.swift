@@ -84,6 +84,28 @@ extension AppModel {
         }
     }
 
+    func setCalendarBlocksScheduling(id: String, blocksScheduling: Bool) {
+        guard let database else { return }
+        do {
+            try database.setCalendarBlocksScheduling(id: id, blocksScheduling: blocksScheduling)
+        } catch {
+            lastError = "Could not update the calendar: \(error.localizedDescription)"
+            return
+        }
+        guard let syncClient else { return }
+        Task { [weak self] in
+            self?.activeOperations += 1
+            defer { self?.activeOperations -= 1 }
+            do {
+                try await syncClient.setCalendarBlocksScheduling(id: id, blocksScheduling: blocksScheduling)
+                self?.lastError = nil
+            } catch {
+                self?.lastError = Self.describe(error)
+            }
+            await self?.syncNow()
+        }
+    }
+
     /// Stores the server settings in the keychain, swaps the sync client, and syncs.
     func saveServerConfig(_ config: ServerConfig) {
         do {

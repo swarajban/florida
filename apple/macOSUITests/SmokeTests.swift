@@ -138,6 +138,132 @@ final class SmokeTests: XCTestCase {
     }
 
     @MainActor
+    func testEventDayBlockingOverrides() throws {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-demoData", "YES", "-uiAppearance", appearance]
+            app.launch()
+            XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 15))
+            app.typeKey(",", modifierFlags: .command)
+            let calendars = app.toolbars.buttons["Calendars"]
+            XCTAssertTrue(calendars.waitForExistence(timeout: 5))
+            calendars.click()
+            let showBirthdays = app.checkBoxes["calendar-selected-demo-cal-birthdays"]
+            XCTAssertTrue(showBirthdays.waitForExistence(timeout: 5))
+            XCTAssertTrue(showBirthdays.isEnabled)
+            XCTAssertEqual((showBirthdays.value as? NSNumber)?.boolValue, false)
+            showBirthdays.click()
+            app.typeKey("w", modifierFlags: .command)
+
+            app.typeKey("k", modifierFlags: .command)
+            let palette = app.textFields.firstMatch
+            XCTAssertTrue(palette.waitForExistence(timeout: 5))
+            palette.typeText("Cycle day blocking")
+            XCTAssertTrue(app.staticTexts["Cycle day blocking"].exists)
+            app.typeKey(.escape, modifierFlags: [])
+
+            app.typeKey("f", modifierFlags: [])
+            let birthday = app.staticTexts["event-jump-demo-event-birthday"]
+            XCTAssertTrue(birthday.waitForExistence(timeout: 5))
+            let keys = try XCTUnwrap(birthday.value as? String).lowercased()
+            for key in keys { app.typeKey(String(key), modifierFlags: []) }
+            let choice = app.popUpButtons["event-blocks-day-demo-event-birthday"]
+            let effective = app.staticTexts["event-blocks-day-effective-demo-event-birthday"]
+            XCTAssertTrue(choice.waitForExistence(timeout: 5))
+            XCTAssertTrue(choice.isEnabled)
+            XCTAssertEqual(choice.value as? String, "Automatic")
+            XCTAssertEqual(effective.value as? String, "Does not block scheduling")
+            XCTAssertFalse(app.buttons["Edit…"].exists)
+            for expected in ["Blocks", "Does not block", "Automatic"] {
+                app.typeKey("r", modifierFlags: [])
+                app.typeKey("b", modifierFlags: [])
+                XCTAssertEqual(choice.value as? String, expected)
+            }
+            choice.click()
+            app.menuItems["Blocks"].click()
+            XCTAssertEqual(effective.value as? String, "Blocks your day")
+            capture(app, "event-day-blocking-read-only-mac-\(appearance)")
+            choice.click()
+            app.menuItems["Automatic"].click()
+            app.typeKey(.escape, modifierFlags: [])
+
+            app.typeKey("f", modifierFlags: [])
+            let ooo = app.staticTexts["event-jump-demo-event-ooo"]
+            XCTAssertTrue(ooo.waitForExistence(timeout: 5))
+            let oooKeys = try XCTUnwrap(ooo.value as? String).lowercased()
+            for key in oooKeys { app.typeKey(String(key), modifierFlags: []) }
+            let oooChoice = app.popUpButtons["event-blocks-day-demo-event-ooo"]
+            let oooEffective = app.staticTexts["event-blocks-day-effective-demo-event-ooo"]
+            XCTAssertTrue(oooChoice.waitForExistence(timeout: 5))
+            XCTAssertEqual(oooChoice.value as? String, "Automatic")
+            XCTAssertEqual(oooEffective.value as? String, "Blocks your day")
+            oooChoice.click()
+            app.menuItems["Does not block"].click()
+            XCTAssertEqual(oooEffective.value as? String, "Does not block scheduling")
+            capture(app, "event-day-blocking-ooo-override-mac-\(appearance)")
+            oooChoice.click()
+            app.menuItems["Automatic"].click()
+            XCTAssertEqual(oooEffective.value as? String, "Blocks your day")
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testCalendarVisibilityAndBlockingAreIndependent() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-demoData", "YES", "-uiAppearance", appearance]
+            app.launch()
+            XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 15))
+            app.typeKey(",", modifierFlags: .command)
+            let calendars = app.toolbars.buttons["Calendars"]
+            XCTAssertTrue(calendars.waitForExistence(timeout: 5))
+            calendars.click()
+            let visible = app.checkBoxes["calendar-selected-demo-cal-ooo"]
+            let blocking = app.checkBoxes["calendar-blocks-scheduling-demo-cal-ooo"]
+            let account = app.staticTexts["calendar-account-header-demo-personal"]
+            let firstCalendar = app.staticTexts["calendar-name-demo-family"]
+            XCTAssertTrue(firstCalendar.waitForExistence(timeout: 5))
+            XCTAssertTrue(account.isHittable)
+            XCTAssertTrue(firstCalendar.isHittable)
+            let gap = firstCalendar.frame.minY - account.frame.maxY
+            XCTAssertGreaterThanOrEqual(gap, 0)
+            XCTAssertLessThanOrEqual(gap, 40, "The first account must not reserve an empty section-header band")
+            capture(app.windows.firstMatch, "calendar-account-spacing-mac-\(appearance)")
+            for _ in 0..<8 where !(blocking.exists && blocking.isHittable) {
+                app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65))
+                    .scroll(byDeltaX: 0, deltaY: -180)
+            }
+            XCTAssertTrue(visible.isHittable)
+            XCTAssertTrue(blocking.isHittable)
+            XCTAssertEqual((visible.value as? NSNumber)?.boolValue, true)
+            XCTAssertEqual((blocking.value as? NSNumber)?.boolValue, true)
+
+            blocking.click()
+            XCTAssertEqual((blocking.value as? NSNumber)?.boolValue, false)
+            XCTAssertEqual((visible.value as? NSNumber)?.boolValue, true)
+            visible.click()
+            XCTAssertEqual((visible.value as? NSNumber)?.boolValue, false)
+            XCTAssertEqual((blocking.value as? NSNumber)?.boolValue, false)
+            blocking.click()
+            XCTAssertEqual((blocking.value as? NSNumber)?.boolValue, true)
+            XCTAssertEqual((visible.value as? NSNumber)?.boolValue, false)
+            capture(app.windows.firstMatch, "calendar-hidden-blocking-mac-\(appearance)")
+
+            blocking.click()
+            XCTAssertEqual((blocking.value as? NSNumber)?.boolValue, false)
+            XCTAssertEqual((visible.value as? NSNumber)?.boolValue, false)
+            visible.click()
+            XCTAssertEqual((visible.value as? NSNumber)?.boolValue, true)
+            XCTAssertEqual((blocking.value as? NSNumber)?.boolValue, false)
+            capture(app.windows.firstMatch, "calendar-visible-informational-mac-\(appearance)")
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testCompletionStamp() {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {
