@@ -12,11 +12,22 @@ import SwiftUI
 /// monitor, and each control shows its key.
 struct EventDetailView: View {
     @Environment(AppModel.self) private var model
-    @State private var resourceKeys: JumpLabels<String>?
     let event: CalendarEvent
 
     var body: some View {
         let resources = event.resources
+        ScrollView {
+            detailContent(resources)
+                .padding(16)
+        }
+        .frame(width: 400, alignment: .leading)
+        .frame(maxHeight: min(620, (NSScreen.main?.visibleFrame.height ?? 700) - 80))
+        .fixedSize(horizontal: false, vertical: true)
+        .background(KeyEventMonitorView(model: model, isEventPopover: true))
+        .onChange(of: resources) { model.eventResourceKeys = nil }
+    }
+
+    private func detailContent(_ resources: [EventResource]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             header
             if let url = event.joinURL {
@@ -74,13 +85,6 @@ struct EventDetailView: View {
                 }
             }
         }
-        .padding(16)
-        // Wide enough for Yes / Maybe / No with their keys beside "Going?".
-        .frame(width: 400, alignment: .leading)
-        .background(KeyEventMonitorView(model: model, isEventPopover: true) { chord in
-            handleResourceKey(chord, resources: resources)
-        })
-        .onChange(of: resources) { resourceKeys = nil }
     }
 
     private func resourceShelf(_ resources: [EventResource]) -> some View {
@@ -117,7 +121,7 @@ struct EventDetailView: View {
                                         .lineLimit(1)
                                 }
                                 Spacer(minLength: 0)
-                                if let key = (resourceKeys ?? labels).remaining[resource.id] {
+                                if let key = (model.eventResourceKeys ?? labels).remaining[resource.id] {
                                     Keycap(key.map(String.init).joined(separator: " "))
                                 } else if labels.remaining[resource.id] == nil {
                                     Self.keycap(for: .openEventResources)
@@ -143,32 +147,6 @@ struct EventDetailView: View {
             .frame(maxHeight: 150)
             .fixedSize(horizontal: false, vertical: true)
         }
-    }
-
-    private func handleResourceKey(_ chord: KeyChord, resources: [EventResource]) -> Bool {
-        guard !model.isSheetOpen, !model.isPaletteOpen,
-              model.eventDetailID == event.id,
-              (NSApplication.shared.keyWindow?.firstResponder as? NSTextView)?.isEditable != true
-        else { return false }
-        guard chord.modifiers.isEmpty, chord.key.count == 1, "1234567890".contains(chord.key) else {
-            resourceKeys = nil
-            return false
-        }
-        model.matcher.reset()
-        model.pendingKeys = ""
-        var labels = resourceKeys ?? JumpLabels(items: resources.map(\.id), alphabet: Array("1234567890"))
-        switch labels.type(chord.key) {
-        case .selected(let id):
-            resourceKeys = nil
-            if let resource = resources.first(where: { $0.id == id }) {
-                model.openEventResource(resource)
-            }
-        case .pending:
-            resourceKeys = labels
-        case .unmatched:
-            resourceKeys = nil
-        }
-        return true
     }
 
     /// Yes / Maybe / No for an invitation, with the current answer shown pressed.

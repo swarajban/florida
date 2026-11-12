@@ -44,7 +44,7 @@ final class SmokeTests: XCTestCase {
             capture(app, "event-resources-scrolled-\(appearance)")
             app.buttons["Done"].tap()
             XCTAssertTrue(document.waitForNonExistence(timeout: 5))
-            let lunch = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Lunch with Priya")).firstMatch
+            let lunch = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Lunch with Priya")).firstMatch
             for _ in 0..<5 where !lunch.isHittable { app.swipeUp() }
             XCTAssertTrue(lunch.waitForExistence(timeout: 5))
             lunch.tap()

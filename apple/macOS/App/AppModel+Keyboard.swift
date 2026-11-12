@@ -32,6 +32,10 @@ extension AppModel {
             return true
         }
 
+        if handleEventResourceKey(chord) {
+            return true
+        }
+
         if isHelpOpen, !isCommandChord {
             isHelpOpen = false
             if isEscape || chord == KeyChord("?") {

@@ -96,7 +96,10 @@ final class AppModel {
     /// Text the new-task editor should send to the AI parser when it opens (quick add's ⌘↩).
     var editorAIText: String?
     /// The event whose detail popover is open.
-    var eventDetailID: String?
+    var eventDetailID: String? {
+        didSet { eventResourceKeys = nil }
+    }
+    var eventResourceKeys: JumpLabels<String>?
     /// The event open in the editor sheet (a stored one, or the draft of a new one).
     var eventEditor: EventEditorRequest?
     /// The event whose delete is waiting for confirmation: nothing undoes an event delete.
