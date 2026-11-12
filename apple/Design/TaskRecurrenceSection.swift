@@ -10,12 +10,24 @@ struct TaskRecurrenceSection: View {
 
     var body: some View {
         Section {
+            #if os(macOS)
+            MacChoiceField(
+                "Repeat", selection: frequency,
+                options: [
+                    MacChoice("none", "None"),
+                    MacChoice("day", "Daily"),
+                    MacChoice("week", "Weekly"),
+                    MacChoice("month", "Monthly"),
+                ],
+                identifier: "task-repeat")
+            #else
             Picker("Repeat", selection: frequency) {
                 Text("None").tag("none")
                 Text("Daily").tag("day")
                 Text("Weekly").tag("week")
                 Text("Monthly").tag("month")
             }
+            #endif
             if let rule = recurrence {
                 Stepper(value: field(\.interval, default: 1), in: 1...999) {
                     Text("Every \(rule.interval) \(intervalUnit(rule))")
@@ -24,26 +36,54 @@ struct TaskRecurrenceSection: View {
                     weekdayPicker(rule)
                 }
                 if rule.frequency == .month {
+                    #if os(macOS)
+                    MacChoiceField(
+                        "Day of month", selection: monthlyDay(rule),
+                        options: (1...31).map { MacChoice($0, "\($0)") },
+                        identifier: "task-repeat-month-day")
+                    #else
                     Picker("Day of month", selection: monthlyDay(rule)) {
                         ForEach(1...31, id: \.self) { day in
                             Text("\(day)").tag(day)
                         }
                     }
+                    #endif
                 }
+                #if os(macOS)
+                MacDateField("Starts", date: startDate(rule), identifier: "task-repeat-start")
+                    .environment(\.timeZone, rule.calendar.timeZone)
+                    .environment(\.calendar, rule.calendar)
+                #else
                 DatePicker("Starts", selection: startDate(rule), displayedComponents: .date)
                     .environment(\.timeZone, rule.calendar.timeZone)
                     .environment(\.calendar, rule.calendar)
+                #endif
                 Toggle("Ends", isOn: hasEndDate(rule))
                 if rule.endDate != nil {
+                    #if os(macOS)
+                    MacDateField("Through (inclusive)", date: endDate(rule), identifier: "task-repeat-end")
+                        .environment(\.timeZone, rule.calendar.timeZone)
+                        .environment(\.calendar, rule.calendar)
+                    #else
                     DatePicker("Through (inclusive)", selection: endDate(rule), displayedComponents: .date)
                         .environment(\.timeZone, rule.calendar.timeZone)
                         .environment(\.calendar, rule.calendar)
+                    #endif
                 }
+                #if os(macOS)
+                MacChoiceField(
+                    "Time zone", selection: field(\.timeZone, default: defaultTimeZone),
+                    options: timeZones(rule).map {
+                        MacChoice($0, $0.replacingOccurrences(of: "_", with: " "))
+                    },
+                    identifier: "task-repeat-time-zone")
+                #else
                 Picker("Time zone", selection: field(\.timeZone, default: defaultTimeZone)) {
                     ForEach(timeZones(rule), id: \.self) { zone in
                         Text(zone.replacingOccurrences(of: "_", with: " ")).tag(zone)
                     }
                 }
+                #endif
                 Text(rule.summary)
                     .font(.footnote)
                     .foregroundStyle(.secondary)

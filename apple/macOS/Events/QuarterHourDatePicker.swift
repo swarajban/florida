@@ -9,22 +9,25 @@ struct QuarterHourDatePicker: View {
     @Environment(\.calendar) private var calendar
 
     var body: some View {
-        HStack {
-            DatePicker(title, selection: $date, displayedComponents: .date)
-            if showsTime {
-                Picker("\(title) time", selection: minutes) {
-                    if minutes.wrappedValue % 15 != 0 {
-                        Text(date.formatted(.dateTime.hour().minute())).tag(minutes.wrappedValue)
-                    }
-                    ForEach(Array(stride(from: 0, to: 1440, by: 15)), id: \.self) { minute in
-                        Text(timeLabel(minute)).tag(minute)
-                    }
+        LabeledContent(title) {
+            HStack(spacing: 8) {
+                MacDateField(title, date: $date, identifier: "date-\(title)", showsLabel: false)
+                    .fixedSize()
+                if showsTime {
+                    MacChoiceField(
+                        "\(title) time", selection: minutes,
+                        options: timeChoices,
+                        identifier: "time-\(title)", showsLabel: false)
+                    .fixedSize()
                 }
-                .labelsHidden()
-                .fixedSize()
-                .accessibilityIdentifier("time-\(title)")
             }
         }
+    }
+
+    private var timeChoices: [MacChoice<Int>] {
+        let current = minutes.wrappedValue
+        let offGrid = current % 15 != 0 ? [MacChoice(current, date.formatted(.dateTime.hour().minute()))] : []
+        return offGrid + stride(from: 0, to: 1440, by: 15).map { MacChoice($0, timeLabel($0)) }
     }
 
     private var minutes: Binding<Int> {

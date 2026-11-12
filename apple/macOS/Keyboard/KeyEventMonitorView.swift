@@ -65,6 +65,7 @@ final class KeyMonitorHostView: NSView {
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let handled = MainActor.assumeIsolated {
                 guard let window = box.view?.window, event.window === window else { return false }
+                guard !SelectorInput.isEditing(in: window) else { return false }
                 return box.model?.handleKeyDown(event, inEventPopover: inEventPopover) ?? false
             }
             return handled ? nil : event

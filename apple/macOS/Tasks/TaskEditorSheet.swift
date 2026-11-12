@@ -14,8 +14,8 @@ import SwiftUI
 /// start always has a time.
 ///
 /// Every control shows its key (`TaskEditorKey`). An open task comes up with the keyboard in no
-/// field, so the keys act at once: Space marks it done, `d` goes to the due date, `p` steps the
-/// priority. A new task comes up in its title; Escape leaves a field, and then the keys act.
+/// field, so the keys act at once: Space marks it done, `d` opens the due date, `p` opens the
+/// priority selector. Escape leaves a field, and then the keys act.
 struct TaskEditorSheet: View {
     @Environment(AppModel.self) private var model
     @State private var draft: TaskItem
@@ -33,6 +33,7 @@ struct TaskEditorSheet: View {
     let isNew: Bool
     @FocusState private var focus: TextFocus?
     @State private var keyboard = TaskEditorKeyboard()
+    @State private var openField: TaskEditorKey?
 
     /// The text fields a key can put the keyboard in.
     private enum TextFocus {
@@ -89,28 +90,24 @@ struct TaskEditorSheet: View {
                     .lineLimit(3...8)
                 }
                 Section("Dates") {
-                    OptionalDateRow(
-                        title: "Start", key: TaskEditorKey.start.keycap, isOn: $hasStart, date: $startAt,
-                        hasTime: startHasTime)
-                    OptionalDateRow(
-                        title: "Due", key: TaskEditorKey.due.keycap, isOn: $hasDue, date: $dueAt, hasTime: dueHasTime)
-                    Picker(selection: deadline) {
-                        ForEach([DeadlineType.soft, .hard], id: \.self) { type in
-                            Text(type.displayName).tag(type)
-                        }
-                    } label: {
-                        keyLabel("Deadline", .deadline)
-                    }
+                    MacDateField("Start", date: $startAt, isOn: $hasStart, hasTime: startHasTime,
+                                 key: TaskEditorKey.start.keycap, isPresented: showing(.start), identifier: "task-start",
+                                 onDismiss: leaveField, dayOnly: { TaskDay.notBefore(on: $0, calendar: model.calendar) })
+                    MacDateField("Due", date: $dueAt, isOn: $hasDue, hasTime: dueHasTime,
+                                 key: TaskEditorKey.due.keycap, isPresented: showing(.due), identifier: "task-due",
+                                 onDismiss: leaveField, dayOnly: { TaskDay.due(on: $0, calendar: model.calendar) })
+                    MacChoiceField("Deadline", selection: deadline,
+                                   options: [DeadlineType.soft, .hard].map { MacChoice($0, $0.displayName) },
+                                   key: TaskEditorKey.deadline.keycap, isPresented: showing(.deadline),
+                                   identifier: "task-deadline", onDismiss: leaveField)
                     .disabled(!hasDue)
                 }
                 Section {
-                    Picker(selection: $draft.categoryId) {
-                        ForEach(model.orderedCategories) { category in
-                            Text(category.name).tag(category.id)
-                        }
-                    } label: {
-                        keyLabel("Category", .category)
-                    }
+                    MacChoiceField("Category", selection: $draft.categoryId,
+                                   options: model.orderedCategories.map { MacChoice($0.id, $0.name) },
+                                   key: TaskEditorKey.category.keycap, isPresented: showing(.category),
+                                   identifier: "task-category", preservesOrder: true, onDismiss: leaveField,
+                                   create: { model.createCategory(name: $0)?.id })
                     LabeledContent {
                         HStack {
                             TextField("Minutes", value: $draft.durationMinutes, format: .number)
@@ -126,51 +123,26 @@ struct TaskEditorSheet: View {
                     } label: {
                         keyLabel("Duration", .duration)
                     }
-                    Picker(selection: $draft.priority) {
-                        ForEach(Priority.allCases, id: \.self) { priority in
-                            Text(priority.displayName).tag(priority)
-                        }
-                    } label: {
-                        keyLabel("Priority", .priority)
-                    }
-                    .accessibilityIdentifier("task-priority")
-                    Picker(selection: $draft.context) {
-                        ForEach(TaskContext.allCases, id: \.self) { context in
-                            Text(context.displayName).tag(context)
-                        }
-                    } label: {
-                        keyLabel("Context", .context)
-                    }
-                    Picker(selection: $draft.projectId) {
-                        Text("None").tag(String?.none)
-                        if let id = draft.projectId, model.project(id: id)?.deletedAt != nil || model.project(id: id) == nil {
-                            // Keeps the picker from going blank while a delete is still syncing.
-                            Text("Deleted project").tag(String?.some(id))
-                        }
-                        ForEach(model.projectSections) { section in
-                            Section(section.status.label) {
-                                ForEach(section.projects) { project in
-                                    Text(project.name).tag(String?.some(project.id))
-                                }
-                            }
-                        }
-                    } label: {
-                        keyLabel("Project", .project)
-                    }
-                    .accessibilityIdentifier("task-project")
-                    Picker(selection: $draft.attention) {
-                        Text(defaultAttentionLabel).tag(TaskAttention?.none)
-                        ForEach(TaskAttention.allCases, id: \.self) { attention in
-                            Text(attention.displayName).tag(TaskAttention?.some(attention))
-                        }
-                    } label: {
-                        keyLabel("Attention", .attention)
-                    }
+                    MacChoiceField("Priority", selection: $draft.priority,
+                                   options: Priority.allCases.map { MacChoice($0, $0.displayName) },
+                                   key: TaskEditorKey.priority.keycap, isPresented: showing(.priority),
+                                   identifier: "task-priority", onDismiss: leaveField)
+                    MacChoiceField("Context", selection: $draft.context,
+                                   options: TaskContext.allCases.map { MacChoice($0, $0.displayName) },
+                                   key: TaskEditorKey.context.keycap, isPresented: showing(.context),
+                                   identifier: "task-context", onDismiss: leaveField)
+                    MacChoiceField("Project", selection: $draft.projectId, options: projectChoices,
+                                   key: TaskEditorKey.project.keycap, isPresented: showing(.project),
+                                   identifier: "task-project", onDismiss: leaveField)
+                    MacChoiceField("Attention", selection: $draft.attention,
+                                   options: [MacChoice(TaskAttention?.none, defaultAttentionLabel)]
+                                       + TaskAttention.allCases.map { MacChoice(TaskAttention?.some($0), $0.displayName) },
+                                   key: TaskEditorKey.attention.keycap, isPresented: showing(.attention),
+                                   identifier: "task-attention", onDismiss: leaveField)
                     .help("Work that can run in parallel shares an hour with up to two other such tasks.")
-                    .accessibilityIdentifier("task-attention")
-                    OptionalDateRow(
-                        title: "Pinned start", key: TaskEditorKey.pinnedStart.keycap, isOn: $hasPinnedStart,
-                        date: $pinnedStart)
+                    MacDateField("Pinned start", date: $pinnedStart, isOn: $hasPinnedStart, hasTime: .constant(true),
+                                 key: TaskEditorKey.pinnedStart.keycap, isPresented: showing(.pinnedStart),
+                                 identifier: "task-pinned-start", onDismiss: leaveField, requiresTime: true)
                 }
                 TaskRecurrenceSection(
                     recurrence: $draft.recurrence,
@@ -187,7 +159,7 @@ struct TaskEditorSheet: View {
                 }
                 .keyboardShortcut(.cancelAction)
                 Spacer()
-                Text("Key again for the next choice · ⇧ steps back or clears a date · esc leaves a field")
+                Text("Field key: search choices · ↑ ↓ then ↩ · esc leaves without changing")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -205,13 +177,8 @@ struct TaskEditorSheet: View {
             .padding()
         }
         .frame(width: 560, height: 720)
-        .background(TaskEditorKeyMonitor(keyboard: keyboard, startsUnfocused: !isNew, onPress: handle))
-        .onAppear {
-            // A new task is typed first. An open one is acted on, so no field has the keyboard.
-            if isNew, model.editorAIText == nil {
-                focus = .title
-            }
-        }
+        .background(TaskEditorKeyMonitor(keyboard: keyboard, startsUnfocused: true, onPress: handle,
+                                         onPriority: { draft.priority = $0 }))
         .onChange(of: startAt) { keepDueAfterStart() }
         .onChange(of: hasStart) { keepDueAfterStart() }
         .onChange(of: hasDue) { keepDueAfterStart() }
@@ -221,11 +188,8 @@ struct TaskEditorSheet: View {
         KeyLabel(title, key: key.keycap)
     }
 
-    /// One of the editor's keys. A text key puts the keyboard in its field. A date key switches
-    /// the date on and puts the keyboard in it, where the arrows change it; with Shift it switches
-    /// the date off. A choice key steps to the next choice, or with Shift to the one before.
+    /// One of the editor's keys. Text keys focus their fields; choice and date keys open selectors.
     private func handle(_ press: TaskEditorKey.Press) {
-        let backward = press.isShifted
         switch press.key {
         case .markDone:
             if !isNew, original.isOpen {
@@ -237,38 +201,30 @@ struct TaskEditorSheet: View {
             focus = .notes
         case .duration:
             focus = .duration
-        case .start:
-            setDate($hasStart, on: !backward, field: 0)
-        case .due:
-            setDate($hasDue, on: !backward, field: 1)
-        case .pinnedStart:
-            setDate($hasPinnedStart, on: !backward, field: 2)
+        case .start, .due, .pinnedStart, .category, .priority, .context, .project, .attention:
+            focus = nil
+            openField = press.key
         case .deadline:
             guard hasDue else { return }
-            deadline.wrappedValue = TaskEditorKey.step(deadline.wrappedValue, in: [.soft, .hard], backward: backward)
-        case .category:
-            draft.categoryId = TaskEditorKey.step(
-                draft.categoryId, in: model.orderedCategories.map(\.id), backward: backward)
-        case .priority:
-            draft.priority = TaskEditorKey.step(draft.priority, in: Array(Priority.allCases), backward: backward)
-        case .context:
-            draft.context = TaskEditorKey.step(draft.context, in: Array(TaskContext.allCases), backward: backward)
-        case .project:
-            let projects = model.projectSections.flatMap(\.projects).map { String?.some($0.id) }
-            draft.projectId = TaskEditorKey.step(draft.projectId, in: [nil] + projects, backward: backward)
-        case .attention:
-            let choices = [nil] + TaskAttention.allCases.map { TaskAttention?.some($0) }
-            draft.attention = TaskEditorKey.step(draft.attention, in: choices, backward: backward)
+            openField = .deadline
         }
     }
 
-    private func setDate(_ isOn: Binding<Bool>, on: Bool, field: Int) {
-        isOn.wrappedValue = on
-        if on {
-            keyboard.focusDateField(at: field)
-        } else {
-            keyboard.dropFocus()
+    private func showing(_ field: TaskEditorKey) -> Binding<Bool> {
+        Binding(get: { openField == field }, set: { openField = $0 ? field : nil })
+    }
+
+    private func leaveField() {
+        focus = nil
+        keyboard.dropFocus()
+    }
+
+    private var projectChoices: [MacChoice<String?>] {
+        var choices = [MacChoice(String?.none, "None")]
+        if let id = draft.projectId, model.project(id: id) == nil || model.project(id: id)?.deletedAt != nil {
+            choices.append(MacChoice(String?.some(id), "Deleted project"))
         }
+        return choices + model.projectSections.flatMap(\.projects).map { MacChoice(String?.some($0.id), $0.name) }
     }
 
     /// A start that reaches or passes the due date leaves no time for the task, so the due date
@@ -413,41 +369,6 @@ struct TaskEditorSheet: View {
         if isNew {
             model.selection = .task(task.id)
             model.showGhost("Added to \(model.categoriesById[task.categoryId]?.name ?? "Inbox")")
-        }
-    }
-}
-
-/// A checkbox that enables a date picker. With `hasTime` the row asks for a day only, and its
-/// "Add a time" box shows the clock; without it the row always has a time. `key` is the keycap
-/// shown after the title, where the sheet has a key for the row.
-struct OptionalDateRow: View {
-    let title: String
-    var key: String?
-    @Binding var isOn: Bool
-    @Binding var date: Date
-    var hasTime: Binding<Bool>?
-
-    var body: some View {
-        HStack {
-            Toggle(isOn: $isOn) {
-                HStack(spacing: 6) {
-                    Text(title)
-                    if let key {
-                        Keycap(key)
-                    }
-                }
-            }
-            .toggleStyle(.checkbox)
-            Spacer()
-            if let hasTime {
-                Toggle("Add a time", isOn: hasTime)
-                    .toggleStyle(.checkbox)
-                    .foregroundStyle(.secondary)
-                    .disabled(!isOn)
-            }
-            QuarterHourDatePicker(title: title, date: $date, showsTime: hasTime?.wrappedValue ?? true)
-                .labelsHidden()
-                .disabled(!isOn)
         }
     }
 }

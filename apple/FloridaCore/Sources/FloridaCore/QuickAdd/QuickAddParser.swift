@@ -389,6 +389,21 @@ struct QuickAddScanner {
             return (addDays(1, to: today), 1)
         case "eow":
             return (weekday(6, onOrAfter: today), 1)
+        case "in":
+            guard let number = word(i + 1), let count = Self.integer(number[...]),
+                  count <= 10_000 * 366, let unit = word(i + 2)
+            else { return nil }
+            let component: Calendar.Component
+            switch unit {
+            case "day", "days": component = .day
+            case "week", "weeks": component = .weekOfYear
+            case "month", "months": component = .month
+            default: return nil
+            }
+            guard let day = calendar.date(byAdding: component, value: count, to: today),
+                  (1...9999).contains(calendar.component(.year, from: day))
+            else { return nil }
+            return (calendar.startOfDay(for: day), 3)
         case "next":
             guard let next = word(i + 1) else { return nil }
             let nextWeek = addDays(1, to: weekday(1, strictlyAfter: today))

@@ -25,7 +25,7 @@ public enum TaskEditorKey: String, CaseIterable, Hashable, Sendable {
     /// A key press that reaches a control.
     public struct Press: Hashable, Sendable {
         public let key: TaskEditorKey
-        /// Shift was held: a choice steps backward, a date is switched off.
+        /// Shift was held. Selectors open the same way with or without it.
         public let isShifted: Bool
 
         public init(key: TaskEditorKey, isShifted: Bool = false) {
@@ -58,9 +58,7 @@ public enum TaskEditorKey: String, CaseIterable, Hashable, Sendable {
         key.count == 1 ? key.uppercased() : key
     }
 
-    /// Steps through a list of choices (the key again for the next one), or holds a date that
-    /// Shift switches off. The rest only put the keyboard in a field or press a button, and
-    /// ignore Shift.
+    /// Opens a selector with or without Shift. Text fields and buttons only take the plain key.
     public var takesShift: Bool {
         switch self {
         case .start, .due, .pinnedStart, .deadline, .category, .priority, .context, .project, .attention: true

@@ -17,23 +17,6 @@ final class TaskEditorKeyboard {
         window?.makeFirstResponder(nil)
     }
 
-    /// Puts the keyboard in the `index`-th date field from the top (Start, Due, Pinned start).
-    /// The field is disabled until SwiftUI has drawn the date switched on, so this waits for
-    /// that, a fifth of a second at most.
-    func focusDateField(at index: Int) {
-        Task { @MainActor [weak self] in
-            for _ in 0..<10 {
-                guard let window = self?.window else { return }
-                let fields = Self.dateFields(in: window)
-                if fields.indices.contains(index), fields[index].isEnabled {
-                    window.makeFirstResponder(fields[index])
-                    return
-                }
-                try? await Task.sleep(for: .milliseconds(20))
-            }
-        }
-    }
-
     /// What has the keyboard in `window`, as `TaskEditorKey` sorts it.
     static func focus(in window: NSWindow) -> TaskEditorKey.Focus {
         guard let responder = window.firstResponder, responder !== window else { return .none }
@@ -46,21 +29,6 @@ final class TaskEditorKeyboard {
         return .control
     }
 
-    /// The window's date fields from top to bottom.
-    private static func dateFields(in window: NSWindow) -> [NSDatePicker] {
-        var found: [NSDatePicker] = []
-        func collect(_ view: NSView) {
-            if let field = view as? NSDatePicker {
-                found.append(field)
-            }
-            view.subviews.forEach(collect)
-        }
-        if let content = window.contentView {
-            collect(content)
-        }
-        // Window coordinates start at the bottom.
-        return found.sorted { $0.convert($0.bounds, to: nil).midY > $1.convert($1.bounds, to: nil).midY }
-    }
 }
 
 /// An invisible view that watches the editor sheet's key presses. A press that `TaskEditorKey`
@@ -74,17 +42,20 @@ struct TaskEditorKeyMonitor: NSViewRepresentable {
     let keyboard: TaskEditorKeyboard
     let startsUnfocused: Bool
     let onPress: (TaskEditorKey.Press) -> Void
+    var onPriority: ((Priority) -> Void)?
 
     func makeNSView(context: Context) -> TaskEditorKeyHostView {
         let view = TaskEditorKeyHostView()
         view.keyboard = keyboard
         view.startsUnfocused = startsUnfocused
         view.onPress = onPress
+        view.onPriority = onPriority
         return view
     }
 
     func updateNSView(_ view: TaskEditorKeyHostView, context: Context) {
         view.onPress = onPress
+        view.onPriority = onPriority
     }
 }
 
@@ -92,6 +63,7 @@ final class TaskEditorKeyHostView: NSView {
     var keyboard: TaskEditorKeyboard?
     var startsUnfocused = false
     var onPress: ((TaskEditorKey.Press) -> Void)?
+    var onPriority: ((Priority) -> Void)?
     private var monitor: Any?
     private var focusObservation: NSKeyValueObservation?
     private let box = HostBox()
@@ -139,12 +111,19 @@ final class TaskEditorKeyHostView: NSView {
 
     private func handle(_ event: NSEvent) -> Bool {
         guard let window, event.window === window else { return false }
+        guard !SelectorInput.isEditing(in: window) else { return false }
         guard event.type == .keyDown, let chord = KeyChord(event: event) else {
             // A click, or a key that is no chord: the user has taken over.
             isUntouched = false
             return false
         }
         let focus = TaskEditorKeyboard.focus(in: window)
+        if chord.modifiers == [.command], let number = Int(chord.key), (1...4).contains(number) {
+            let priorities: [Priority] = [.asap, .high, .medium, .low]
+            isUntouched = false
+            onPriority?(priorities[number - 1])
+            return onPriority != nil
+        }
         if chord == KeyChord("escape") {
             guard focus == .text || focus == .date else { return false }
             // Escape first belongs to text that is still being composed.

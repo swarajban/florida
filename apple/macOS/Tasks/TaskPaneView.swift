@@ -1,3 +1,4 @@
+import AppKit
 import FloridaKit
 import SwiftUI
 
@@ -7,6 +8,9 @@ import SwiftUI
 /// move it, and tells the model which rows are on screen, for jump mode.
 struct TaskPaneView: View {
     @Environment(AppModel.self) private var model
+    @State private var clickedItem: ItemID?
+
+    private let opensTaskOnSingleClick = true
 
     static let width: CGFloat = 320
     /// About the height of a section header, which stays pinned over the top of the list once it
@@ -79,6 +83,9 @@ struct TaskPaneView: View {
                     .animation(.easeOut(duration: 0.15), value: model.openTasks.map(\.id))
                 }
                 .onChange(of: model.selection) { _, selection in
+                    let clicked = clickedItem
+                    clickedItem = nil
+                    guard selection != clicked else { return }
                     if let selection, selection.isTask || selection.isSuggestion {
                         proxy.scrollTo(selection)
                     }
@@ -108,8 +115,7 @@ struct TaskPaneView: View {
             TaskActionsMenu(task: pick.task)
         }
         .onClick { isDouble in
-            model.select(item, in: .tasks)
-            if isDouble { model.editSelection() }
+            handleRowClick(item, isDouble: isDouble)
         }
     }
 
@@ -135,9 +141,15 @@ struct TaskPaneView: View {
             TaskActionsMenu(task: task)
         }
         .onClick { isDouble in
-            model.select(item, in: .tasks)
-            if isDouble { model.editSelection() }
+            handleRowClick(item, isDouble: isDouble)
         }
+    }
+
+    private func handleRowClick(_ item: ItemID, isDouble: Bool) {
+        clickedItem = model.selection == item ? nil : item
+        model.mainWindow?.makeFirstResponder(nil)
+        model.select(item, in: .tasks)
+        if isDouble || opensTaskOnSingleClick { model.editSelection() }
     }
 }
 

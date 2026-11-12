@@ -78,17 +78,11 @@ struct CategorySettingsRow: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             if !category.isInbox {
-                Picker("Area", selection: areaBinding) {
-                    // "Not set" is offered only until an area is chosen: a write without an area leaves the
-                    // server's as it is, so the choice could not be taken back.
-                    if category.area == nil {
-                        Text("Not set").tag(CategoryArea?.none)
-                    }
-                    ForEach(CategoryArea.allCases, id: \.self) { area in
-                        Text(area.displayName).tag(CategoryArea?.some(area))
-                    }
-                }
-                .labelsHidden()
+                MacChoiceField(
+                    "Area", selection: areaBinding,
+                    options: (category.area == nil ? [MacChoice(CategoryArea?.none, "Not set")] : [])
+                        + CategoryArea.allCases.map { MacChoice(CategoryArea?.some($0), $0.displayName) },
+                    identifier: "category-area-\(category.id)", showsLabel: false)
                 .frame(width: 110)
                 .help(CategoryArea.footnote)
             }

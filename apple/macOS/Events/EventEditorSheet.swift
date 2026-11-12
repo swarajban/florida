@@ -38,13 +38,11 @@ struct EventEditorSheet: View {
                 Section(isNew ? "New event" : "Event") {
                     TextField("Title", text: title)
                         .focused($isTitleFocused)
-                    Picker("Calendar", selection: $draft.calendarId) {
-                        ForEach(calendarChoices) { info in
-                            Text(info.summary).tag(info.id)
-                        }
-                    }
+                    MacChoiceField(
+                        "Calendar", selection: $draft.calendarId,
+                        options: calendarChoices.map { MacChoice($0.id, $0.summary) },
+                        identifier: "event-calendar")
                     .disabled(!isNew)
-                    .accessibilityIdentifier("event-calendar")
                 }
                 Section {
                     Toggle("All-day", isOn: allDay)

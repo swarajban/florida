@@ -9,9 +9,7 @@ struct GoToDateView: View {
         VStack(spacing: 16) {
             Text("Go to date")
                 .font(.headline)
-            DatePicker("Date", selection: $date, displayedComponents: .date)
-                .datePickerStyle(.graphical)
-                .labelsHidden()
+            MacDateField("Date", date: $date, identifier: "go-to-date")
             HStack {
                 Button("Cancel") {
                     model.isGoToDateOpen = false
