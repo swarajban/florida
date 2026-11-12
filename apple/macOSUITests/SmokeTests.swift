@@ -4,6 +4,114 @@ import XCTest
 /// Kept screenshots are exported from the result bundle by CI for light/dark visual review.
 final class SmokeTests: XCTestCase {
     @MainActor
+    func testEventResourcesInBothAppearances() throws {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-demoData", "YES", "-uiAppearance", appearance, "-uiRecordResourceOpens", "YES"]
+            app.launch()
+            defer { app.terminate() }
+            let window = app.windows.firstMatch
+            XCTAssertTrue(window.waitForExistence(timeout: 15))
+            XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 10))
+
+            app.typeKey("/", modifierFlags: [])
+            let input = app.textFields.firstMatch
+            XCTAssertTrue(input.waitForExistence(timeout: 5))
+            input.typeText("Design review: scheduler v2")
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(input.waitForNonExistence(timeout: 5))
+            app.typeKey(.return, modifierFlags: [])
+            let edit = app.buttons["Edit…"]
+            XCTAssertTrue(edit.waitForExistence(timeout: 5))
+            let document = app.buttons["event-resource-https://docs.google.com/document/d/demo-scheduler/edit"]
+            XCTAssertTrue(document.waitForExistence(timeout: 5))
+            XCTAssertEqual(document.label, "Scheduler v2 RFC, Google Docs")
+            XCTAssertTrue(app.buttons["Resources"].exists)
+            XCTAssertFalse(app.buttons["event-resource-https://meet.google.com/abc-defg-hij"].exists)
+            capture(app.popovers.firstMatch, "event-resources-\(appearance)")
+            document.click()
+            XCTAssertTrue(edit.waitForNonExistence(timeout: 5))
+            XCTAssertTrue(app.staticTexts["Opened resource: https://docs.google.com/document/d/demo-scheduler/edit"].exists)
+
+            app.typeKey("f", modifierFlags: [])
+            let label = app.staticTexts["event-jump-demo-event-offsite"]
+            XCTAssertTrue(label.waitForExistence(timeout: 5))
+            let keys = try XCTUnwrap(label.value as? String).lowercased()
+            XCTAssertFalse(keys.isEmpty)
+            for key in keys { app.typeKey(String(key), modifierFlags: []) }
+            XCTAssertTrue(document.waitForExistence(timeout: 5))
+            let resourceKeys = try XCTUnwrap(document.value as? String)
+            XCTAssertFalse(resourceKeys.isEmpty)
+            XCTAssertTrue(resourceKeys.allSatisfy(\.isNumber))
+            for key in resourceKeys { app.typeKey(String(key), modifierFlags: []) }
+            XCTAssertTrue(edit.waitForNonExistence(timeout: 5))
+            XCTAssertTrue(app.staticTexts["Opened resource: https://docs.google.com/document/d/demo-scheduler/edit"].exists)
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(document.waitForExistence(timeout: 5))
+            let shelf = app.scrollViews["event-resource-shelf"]
+            let runbook = app.buttons["event-resource-https://wiki.example.com/scheduler"]
+            let tiles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'event-resource-'"))
+            var shortcuts = Set(tiles.allElementsBoundByIndex.compactMap { $0.value as? String })
+            for _ in 0..<4 where !runbook.isHittable {
+                shelf.scroll(byDeltaX: 0, deltaY: -80)
+                shortcuts.formUnion(tiles.allElementsBoundByIndex.compactMap { $0.value as? String })
+            }
+            XCTAssertTrue(runbook.isHittable)
+            XCTAssertEqual(shortcuts.count, 11)
+            for key in shortcuts {
+                XCTAssertFalse(shortcuts.contains { $0 != key && $0.hasPrefix(key) })
+            }
+            let runbookKeys = try XCTUnwrap(runbook.value as? String)
+            XCTAssertEqual(runbookKeys.count, 2)
+            capture(app.popovers.firstMatch, "event-resource-two-digit-\(appearance)")
+            for key in runbookKeys { app.typeKey(String(key), modifierFlags: []) }
+            XCTAssertTrue(edit.waitForNonExistence(timeout: 5))
+            XCTAssertTrue(app.staticTexts["Opened resource: https://wiki.example.com/scheduler"].exists)
+            XCTAssertEqual((app.radioButtons["3 Days"].value as? NSNumber)?.intValue, 1)
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(document.waitForExistence(timeout: 5))
+            app.typeKey("g", modifierFlags: [])
+            app.typeKey("r", modifierFlags: [])
+            XCTAssertTrue(input.waitForExistence(timeout: 5))
+            XCTAssertTrue(edit.waitForNonExistence(timeout: 5))
+            XCTAssertTrue(app.staticTexts["Capacity model"].exists)
+            XCTAssertTrue(app.staticTexts["Scheduler follow-up"].exists)
+            capture(window, "event-resource-picker-\(appearance)")
+            app.typeKey(.downArrow, modifierFlags: [])
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(input.waitForNonExistence(timeout: 5))
+            XCTAssertTrue(app.staticTexts["Opened resource: https://docs.google.com/spreadsheets/d/demo-capacity/edit"].exists)
+
+            app.typeKey("k", modifierFlags: .command)
+            XCTAssertTrue(input.waitForExistence(timeout: 5))
+            input.typeText("Open event resources")
+            XCTAssertTrue(app.staticTexts["Open event resources"].exists)
+            app.typeKey(.return, modifierFlags: [])
+            let resources = app.textFields["Open an event resource…"]
+            XCTAssertTrue(resources.waitForExistence(timeout: 5))
+            resources.typeText("Scheduler follow-up")
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(resources.waitForNonExistence(timeout: 5))
+            XCTAssertTrue(app.staticTexts["Opened resource: https://linear.app/demo/issue/DEMO-21"].exists)
+
+            app.typeKey("/", modifierFlags: [])
+            XCTAssertTrue(input.waitForExistence(timeout: 5))
+            input.typeText("Lunch with Priya")
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(input.waitForNonExistence(timeout: 5))
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(edit.waitForExistence(timeout: 5))
+            XCTAssertFalse(app.buttons["Resources"].exists)
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(edit.waitForNonExistence(timeout: 5))
+            app.typeKey("g", modifierFlags: [])
+            app.typeKey("r", modifierFlags: [])
+            XCTAssertTrue(app.staticTexts["This event has no resources"].exists)
+        }
+    }
+
+    @MainActor
     func testCompletionStamp() {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {

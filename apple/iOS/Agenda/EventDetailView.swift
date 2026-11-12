@@ -12,10 +12,14 @@ struct EventDetailView: View {
     @Environment(\.openURL) private var openURL
     @State private var editing = false
     @State private var confirmingDelete = false
+    #if DEBUG
+    @State private var recordedResourceURL: URL?
+    #endif
     let event: CalendarEvent
 
     var body: some View {
         let event = current
+        let resources = event.resources
         let style = model.eventStyle(event)
         let canEdit = model.canEdit(event)
         NavigationStack {
@@ -42,6 +46,35 @@ struct EventDetailView: View {
                     if let joinURL = event.joinURL {
                         JoinButton(url: joinURL, start: event.allDay ? nil : event.startAt, end: event.allDay ? nil : event.endAt)
                             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 12, trailing: 16))
+                    }
+                }
+
+                if !resources.isEmpty {
+                    Section("Resources") {
+                        ForEach(resources) { resource in
+                            Button {
+                                openResource(resource)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "link")
+                                        .foregroundStyle(.secondary)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(resource.title)
+                                        Text(resource.kindLabel)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer(minLength: 0)
+                                    Image(systemName: "arrow.up.right")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .accessibilityLabel("\(resource.title), \(resource.kindLabel)")
+                            .accessibilityValue(resourceValue(resource))
+                            .accessibilityHint("Opens in your browser or the linked app")
+                            .accessibilityIdentifier("event-resource-\(resource.id)")
+                        }
                     }
                 }
 
@@ -145,6 +178,25 @@ struct EventDetailView: View {
     /// copy (a declined or moved event leaves the day while staying in the store), else the copy given.
     private var current: CalendarEvent {
         model.agenda?.events.first { $0.id == event.id } ?? model.storedVersion(of: event)
+    }
+
+    private func openResource(_ resource: EventResource) {
+        #if DEBUG
+        if LaunchOptions.demoData, UserDefaults.standard.bool(forKey: "uiRecordResourceOpens") {
+            recordedResourceURL = resource.url
+            return
+        }
+        #endif
+        openURL(resource.url)
+    }
+
+    private func resourceValue(_ resource: EventResource) -> String {
+        #if DEBUG
+        if recordedResourceURL == resource.url {
+            return "Opened \(resource.url.absoluteString)"
+        }
+        #endif
+        return resource.url.absoluteString
     }
 
     /// Yes / Maybe / No in place of the "Your response" line, the current answer filled. A tap

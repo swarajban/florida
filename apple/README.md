@@ -78,6 +78,7 @@ ones:
 | `z` or `u`, `g n` | undo the last change, scroll to now |
 | `p` / `⇧P`, `s`, `⌘1`–`⌘4` | pin / unpin to its slot (on an evening suggestion: do it tonight), snooze to tomorrow, priority ASAP…low |
 | `⇧E`, `r y` / `r m` / `r n`, `v` | edit the selected event, RSVP yes / maybe / no, join its video call |
+| `g r` | open the selected event's resources in a searchable picker; arrows select, Return opens |
 | `g p`, `g b`, `y` | projects, today's brief and the weekly review, "Why here?" for the selected task |
 | `o`, `⇧⌘C`, `⌘R`, `esc` | open in Google Calendar, copy link, sync now, cancel |
 
@@ -99,6 +100,20 @@ the series takes the new time of day and every instance keeps its day
 (`moveEventSeries` in FloridaKit shifts the stored instances at once and queues
 one write with `scope: "series"`, which the server needs to move the series on
 Google). Tasks do not drag, because the scheduler places them.
+
+Event details show a compact resource shelf under Join, including when opened
+through a jump label. Links are extracted locally from the description and
+location: Google Docs, Sheets and Slides, Notion, Figma, GitHub, Linear, meeting
+links and other websites show readable titles and provider labels. Duplicate
+URLs appear once, and the primary meeting link stays in Join. Click a resource
+to open it in your browser or its app, or type its digit keycap while the
+popover is open. Resource labels are prefix-free and become two digits for
+larger shelves; they don't change the calendar's existing view keys. The first
+100 resources have direct digit labels. Further links show `g r` instead and
+remain available through the searchable picker.
+Run **Open event resources** in the
+command palette (`g r` also works while the event popover is open). The picker
+can filter by title and reaches every resource without numbered-link limits.
 
 The scheduler's suggestions for an optional routine block (the evening) sit
 on top of the task pane and as dotted blocks in the grid. They are not on the
@@ -160,6 +175,13 @@ review opens from it), and "Why here?" is in the task editor under Project and
 Attention. A task row shows its context. The app syncs on launch, when
 it returns to the foreground, and every two minutes while active; after each
 sync it reloads the widget timelines.
+
+The iPhone event detail has the same **Resources** list below Join. Tap a row to
+open its URL in your browser or the linked app; extraction needs no network.
+The light/dark UI tests cover the shelf, duplicate/Join exclusion, and opening
+resources; Mac tests also cover jump labels, `g r`, and the command palette.
+Debug demo runs can pass `-uiRecordResourceOpens YES` to record resource actions
+without opening a browser. The flag is ignored outside demo data and in Release.
 
 Both event editors offer daily, weekly, monthly and yearly repeats when creating an
 event, with an interval and an optional occurrence count. The rule uses the app's

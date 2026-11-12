@@ -4,6 +4,57 @@ import UIKit
 /// Wait for real content before capturing; a fixed launch delay can silently save a blank screen.
 final class SmokeTests: XCTestCase {
     @MainActor
+    func testEventResourcesInBothAppearances() {
+        continueAfterFailure = false
+        let expected = [
+            ("https://docs.google.com/document/d/demo-scheduler/edit", "Scheduler v2 RFC, Google Docs"),
+            ("https://docs.google.com/spreadsheets/d/demo-capacity/edit", "Capacity model, Google Sheets"),
+            ("https://docs.google.com/presentation/d/demo-review/edit", "Review slides, Google Slides"),
+            ("https://www.notion.so/demo/decisions", "Decision log, Notion"),
+            ("https://www.figma.com/design/demo/calendar", "Calendar mockups, Figma"),
+            ("https://github.com/example/florida/pull/42", "Scheduler implementation, GitHub"),
+            ("https://linear.app/demo/issue/DEMO-21", "Scheduler follow-up, Linear"),
+            ("https://notes.example.com/design-review", "notes.example.com, notes.example.com"),
+            ("https://zoom.us/j/123456789", "Backup room, Zoom"),
+            ("https://meet.google.com/alt-room-xyz", "Breakout room, Google Meet"),
+            ("https://wiki.example.com/scheduler", "Scheduler runbook, wiki.example.com"),
+        ]
+        for appearance in ["light", "dark"] {
+            let app = launch(appearance: appearance, sheet: "event", recordResourceOpens: true)
+            let document = app.buttons["event-resource-\(expected[0].0)"]
+            XCTAssertTrue(document.waitForExistence(timeout: 20))
+            for _ in 0..<4 where !document.isHittable { app.swipeUp() }
+            XCTAssertTrue(document.isHittable)
+            XCTAssertEqual(document.label, expected[0].1)
+            XCTAssertEqual(app.buttons.matching(identifier: document.identifier).count, 1)
+            XCTAssertFalse(app.buttons["event-resource-https://meet.google.com/abc-defg-hij"].exists)
+            capture(app, "event-resources-\(appearance)")
+            document.tap()
+            XCTAssertEqual(document.value as? String, "Opened \(expected[0].0)")
+
+            for (url, title) in expected.dropFirst() {
+                let resource = app.buttons["event-resource-\(url)"]
+                for _ in 0..<6 where !resource.isHittable { app.swipeUp() }
+                XCTAssertTrue(resource.waitForExistence(timeout: 5))
+                XCTAssertTrue(resource.isHittable)
+                XCTAssertEqual(resource.label, title)
+                resource.tap()
+                XCTAssertEqual(resource.value as? String, "Opened \(url)")
+            }
+            capture(app, "event-resources-scrolled-\(appearance)")
+            app.buttons["Done"].tap()
+            XCTAssertTrue(document.waitForNonExistence(timeout: 5))
+            let lunch = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Lunch with Priya")).firstMatch
+            for _ in 0..<5 where !lunch.isHittable { app.swipeUp() }
+            XCTAssertTrue(lunch.waitForExistence(timeout: 5))
+            lunch.tap()
+            XCTAssertTrue(app.navigationBars["Event"].waitForExistence(timeout: 5))
+            XCTAssertFalse(app.staticTexts["Resources"].exists)
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testCompletionStampAndQuarterHourPicker() {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {
@@ -540,13 +591,15 @@ final class SmokeTests: XCTestCase {
 
     @MainActor
     private func launch(
-        appearance: String = "light", tab: String = "agenda", sheet: String? = nil, mode: String = "list", largeText: Bool = false
+        appearance: String = "light", tab: String = "agenda", sheet: String? = nil, mode: String = "list", largeText: Bool = false,
+        recordResourceOpens: Bool = false
     ) -> XCUIApplication {
         let app = XCUIApplication()
         // The agenda mode is always passed: the app remembers the last one in the App Group
         // defaults, which the simulator keeps between the launches of one test run.
         app.launchArguments = ["-demoData", "YES", "-uiTab", tab, "-uiAppearance", appearance, "-uiAgendaMode", mode]
         if let sheet { app.launchArguments += ["-uiSheet", sheet] }
+        if recordResourceOpens { app.launchArguments += ["-uiRecordResourceOpens", "YES"] }
         app.launchArguments += [
             "-UIPreferredContentSizeCategoryName",
             largeText ? "UICTContentSizeCategoryXXXL" : "UICTContentSizeCategoryL",

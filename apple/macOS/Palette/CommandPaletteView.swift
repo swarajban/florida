@@ -77,6 +77,19 @@ struct CommandPaletteView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+            case .eventResources:
+                PaletteResultList(items: model.palette.resourceResults, selectedIndex: model.palette.selectedIndex) { resource in
+                    HStack(spacing: 10) {
+                        Image(systemName: "link")
+                            .foregroundStyle(.secondary)
+                        Text(resource.title)
+                            .lineLimit(1)
+                        Spacer()
+                        Text(resource.kindLabel)
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityIdentifier("event-resource-result-\(resource.id)")
+                }
             case .move(let taskId):
                 PaletteResultList(items: model.palette.categoryResults, selectedIndex: model.palette.selectedIndex) { category in
                     HStack {
@@ -127,6 +140,7 @@ struct CommandPaletteView: View {
         case .search: "magnifyingglass"
         case .move: "folder"
         case .fit: "calendar.badge.plus"
+        case .eventResources: "link"
         }
     }
 
@@ -137,6 +151,7 @@ struct CommandPaletteView: View {
         case .search: "Search tasks and events…"
         case .move(let taskId): "Move “\(model.tasksById[taskId]?.title ?? "task")” to…"
         case .fit(let start, let minutes): "Fill \(minutes) min free at \(DateText.time(start)) with…"
+        case .eventResources: "Open an event resource…"
         }
     }
 }

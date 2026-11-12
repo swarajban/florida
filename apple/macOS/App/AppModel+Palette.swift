@@ -40,6 +40,9 @@ extension AppModel {
             palette.categoryResults = FuzzyMatch.filter(orderedCategories, query: palette.query, label: \.name)
         case .fit(_, let minutes):
             palette.taskResults = FuzzyMatch.filter(tasksThatFit(minutes: minutes), query: palette.query, label: \.title)
+        case .eventResources(let eventId):
+            let resources = events.first { $0.id == eventId }?.resources ?? []
+            palette.resourceResults = FuzzyMatch.filter(resources, query: palette.query, label: \.title)
         case .quickAdd, .command:
             break
         }
@@ -77,6 +80,11 @@ extension AppModel {
             let command = palette.commands[palette.selectedIndex]
             closePalette()
             run(command)
+        case .eventResources:
+            guard palette.resourceResults.indices.contains(palette.selectedIndex) else { return }
+            let resource = palette.resourceResults[palette.selectedIndex]
+            closePalette()
+            openEventResource(resource)
         case .search:
             guard palette.searchResults.indices.contains(palette.selectedIndex) else { return }
             let result = palette.searchResults[palette.selectedIndex]

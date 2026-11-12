@@ -20,6 +20,7 @@ struct PaletteState {
         case move(taskId: String)
         /// Fill a free gap: the tasks that fit in `minutes` from `start`.
         case fit(start: Date, minutes: Int)
+        case eventResources(eventId: String)
     }
 
     var text = ""
@@ -29,6 +30,7 @@ struct PaletteState {
     var searchResults: [SearchResult] = []
     var categoryResults: [TaskCategory] = []
     var taskResults: [TaskItem] = []
+    var resourceResults: [EventResource] = []
     private var baseMode: Mode = .quickAdd
 
     init(mode: Mode = .quickAdd) {
@@ -38,7 +40,7 @@ struct PaletteState {
         case .command:
             baseMode = .quickAdd
             text = ">"
-        case .search, .move, .fit:
+        case .search, .move, .fit, .eventResources:
             baseMode = mode
         }
     }
@@ -59,6 +61,7 @@ struct PaletteState {
         case .search: searchResults.count
         case .move: categoryResults.count
         case .fit: taskResults.count
+        case .eventResources: resourceResults.count
         }
     }
 
@@ -71,7 +74,7 @@ struct PaletteState {
             draft = QuickAddParser.parse(text, now: now, calendar: calendar)
         case .command:
             commands = FuzzyMatch.filter(MacCommand.paletteCommands, query: query, label: \.label)
-        case .search, .move, .fit:
+        case .search, .move, .fit, .eventResources:
             break
         }
     }

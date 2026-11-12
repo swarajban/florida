@@ -50,6 +50,7 @@ struct MacKeymap: Sendable {
         ("y", .explain),
         ("f", .jump),
         ("v", .joinMeeting),
+        ("g r", .openEventResources),
     ]
 
     static let `default`: MacKeymap = {

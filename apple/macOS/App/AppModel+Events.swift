@@ -1,3 +1,4 @@
+import AppKit
 import FloridaKit
 import Foundation
 
@@ -89,6 +90,59 @@ extension AppModel {
             return
         }
         open(url: url)
+    }
+
+    func openEventResources() {
+        guard let event = commandEvent else {
+            statusMessage = "Select an event first"
+            return
+        }
+        guard !event.resources.isEmpty else {
+            statusMessage = "This event has no resources"
+            return
+        }
+        eventDetailID = nil
+        openPalette(mode: .eventResources(eventId: event.id))
+        mainWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    func openEventResource(_ resource: EventResource) {
+        eventDetailID = nil
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "demoData"), UserDefaults.standard.bool(forKey: "uiRecordResourceOpens") {
+            statusMessage = "Opened resource: \(resource.url.absoluteString)"
+            return
+        }
+        #endif
+        open(url: resource.url)
+    }
+
+    func handleEventResourceKey(_ chord: KeyChord) -> Bool {
+        guard !isSheetOpen, !isPaletteOpen, !isHelpOpen,
+              let id = eventDetailID, let event = events.first(where: { $0.id == id }),
+              (NSApplication.shared.keyWindow?.firstResponder as? NSTextView)?.isEditable != true
+        else { return false }
+        guard chord.modifiers.isEmpty, chord.key.count == 1, "1234567890".contains(chord.key) else {
+            eventResourceKeys = nil
+            return false
+        }
+        let resources = event.resources
+        guard !resources.isEmpty else { return false }
+        matcher.reset()
+        pendingKeys = ""
+        var labels = eventResourceKeys ?? JumpLabels(items: resources.map(\.id), alphabet: Array("1234567890"))
+        switch labels.type(chord.key) {
+        case .selected(let id):
+            eventResourceKeys = nil
+            if let resource = resources.first(where: { $0.id == id }) {
+                openEventResource(resource)
+            }
+        case .pending:
+            eventResourceKeys = labels
+        case .unmatched:
+            eventResourceKeys = nil
+        }
+        return true
     }
 
     /// Opens the editor on the store's copy of `event`, closing its detail popover.
