@@ -1,42 +1,160 @@
-# Florida — handoff (Nov 10)
+# Florida — handoff (Nov 12)
 
-Written at the end of [the build thread](https://ampcode.com/threads/T-01a1b9ee-199d-75e9-ae6f-ac6547974cd8) for whoever continues on a new thread from `main`. It covers the work of Nov 9–10: scheduling v2, the task editor and agenda pass, and the Mac jump mode. Everything under "State" was checked on Nov 10 after the last push; anything I only know second-hand says so.
+**Live in TestFlight: iOS 362 and Mac 161.** Apple reports both builds `VALID` and `IN_BETA_TESTING`, confirmed Nov 12 at 07:27 UTC. The latest app code unifies iPhone task capture across the widget, Tasks and Agenda. Its independent review findings are fixed, local verification passes, and the release workflows passed after the CI timeout adjustment and unchanged retries described below. Fly remains on healthy v10; this release needed no server deploy.
 
-This file is a copy of the [handoff artifact](https://ampcode.com/artifacts/florida-handoff-nov-10-0e2d7333-4a6e-4e97-bfaa-cdbec55748ec) in Amp, taken at its revision 2. The Amp links in it open only for Swaraj's account.
+This handoff combines [the iPhone/widget release thread](https://ampcode.com/threads/T-01a1c7ff-d283-7088-8ac6-dc24839a6618) with [the Mac/server thread](https://ampcode.com/threads/T-01a1b9ee-199d-75e9-ae6f-ac6547974cd8). The State and Nov 11–12 sections are current; the three historical project sections preserve the Nov 9–10 implementation background and their original verification limits. The [Nov 10 handoff artifact](https://ampcode.com/artifacts/florida-handoff-nov-10-0e2d7333-4a6e-4e97-bfaa-cdbec55748ec) is an older snapshot, no longer a synchronized copy of this file. Amp links require access to the corresponding threads/artifacts.
 
 When sources disagree, trust them in this order: the code on `main`, then `README.md`, `apple/README.md` and `server/README.md`, then this file, then the older artifacts listed at the end.
 
-## State
+## State checked on Nov 12
 
 **Git**
 
-- The last code commit on `main` is `8776b97`. The only commit after it adds this file. Nothing was uncommitted or unpushed when this was written.
-- The last code push (Nov 10, about 23:57 UTC) added two commits, `5090c63` and `8776b97`: jump labels only on what is on screen. The push before it (about 22:50 UTC) added `69b8a71`, `77e68cd`, `8991afd`, `f11477c`.
+- Latest app code: [58b7307 — Unify iPhone and widget task capture](https://github.com/swarajban/florida/commit/58b7307001a948fbee0c68883e7e6221d1c721c0), pushed to `main` Nov 12 around 05:29 UTC. [864a530](https://github.com/swarajban/florida/commit/864a5309c36621b9dd64d738f12be5bc7938ab33) then increased the iOS CI time budget, with no app-code changes. This handoff is a later documentation-only commit; it does not represent another app binary.
+- The preceding head was [7fb658e](https://github.com/swarajban/florida/commit/7fb658e58fd0214daae20cd471712538dd38b289). The release contains all intervening widget, carousel, recurring-event and Mac changes, not only the latest capture change.
 
 **CI**
 
-- `f11477c`: all six checks passed, including both TestFlight uploads.
-- `8776b97`: the three workflows (CI, iOS, macOS TestFlight) were still running when this was written. Read their results on the [commit page](https://github.com/swarajban/florida/commit/8776b9756edb2e80d3e6641bf890de0e81c78e02) before building on it. The macOS workflow runs the whole Mac UI suite and uploads only if it passes.
+- Release runs: [CI](https://github.com/swarajban/florida/actions/runs/43165380369), [iOS](https://github.com/swarajban/florida/actions/runs/43165380622), [macOS TestFlight](https://github.com/swarajban/florida/actions/runs/43161707147).
+- The [first iOS attempt](https://github.com/swarajban/florida/actions/runs/43161707041) compiled successfully, then hit the 30-minute job timeout while the full UI suite was running. Its upload was skipped, and cancellation left an unfinished result bundle. `864a530` raises that budget to 45 minutes and uploads raw logs on cancellation as well as failure. No test was skipped and the full UI suite still gates upload. General CI and the Mac release passed on the original app commit.
+- The next iOS run completed within that budget but failed the existing recurring-event menu assertion in dark mode. All new capture tests and the carousel/quarter-hour tests passed. Its failed-job-only rerun passed the full suite on identical sources and uploaded successfully. General CI passed on its own unchanged rerun after a separate Mac picker flake, detailed below.
+- Final CI status: **all checks passed**. iOS upload completed at 07:22:47 UTC; Mac release completed at 05:46:31 UTC. An upload job succeeding is not enough to call a build installable; Apple processing and group availability are recorded separately below.
 
 **TestFlight** (app "Florida Tasks", App Store Connect app ID `6832337704`, bundle id `com.swarajban.florida` on both platforms)
 
-- Newest processed builds: iOS **261** and Mac **71**, both VALID and in internal testing. They were built from `f11477c`, so Mac 71 has jump mode, `v` and the menu bar title, but it labels every item, on screen or not.
-- The Mac build from `8776b97` will be the first with on-screen-only labels. Build numbers are `run_number * 10 + run_attempt`; the last steps were iOS 251 → 261 and Mac 61 → 71, so the next are probably iOS 271 and Mac 81.
+- Mac **161** is confirmed `VALID` and `IN_BETA_TESTING` as of 05:48 UTC, built from `58b7307`. Its What to Test is set and the internal group has access to all builds. No Mac upload is needed for the CI-only change.
+- iOS **362**, built from `864a530`, is confirmed `VALID` and `IN_BETA_TESTING` as of 07:27 UTC. It includes the same app sources as `58b7307`. Both platforms are version **1.0**, unexpired, with no non-exempt encryption. Builds 351 and 361 were never uploaded; 362 comes from workflow run 36, attempt 2.
+- Apple build resource IDs: iOS `27fa1c7b-16f7-46be-8317-f333192d478a`; Mac `ced8e535-0fc4-40b4-a49d-5d9d81fbf705`.
+- Internal group: **Florida tests**, ID `8f34501c-ee27-4880-9540-71b5a25a9ed7`. Apple Team ID: `8G7N7547R6`.
 
 **Server**
 
-- Fly app `florida-swaraj`, region `lax`, release **v8**, image `git-7c65fa9`, one machine, health check passing, `/health` answers 200.
-- Nothing under `server/`, `packages/` or `fly.toml` has changed since `7c65fa9`, so the deployed server is the server on `main`. No deploy is pending.
+- Fly app `florida-swaraj`, region `lax`, release **v10**, image `deployment-01M76GJPJCXBRGQCXY2BR2WJA7`, one started machine (`8ee161c7154038`), one passing health check. Rechecked Nov 12 around 05:36 UTC; `https://florida-swaraj.fly.dev/health` returned `{"ok":true}`.
+- v10 includes recurring-series movement from [413498d](https://github.com/swarajban/florida/commit/413498d). Nothing in the latest capture release changes server code or the wire contract; no new server deploy or migration was needed.
 - Fly secrets that are set: `ANTHROPIC_API_KEY`, `API_TOKEN`, `DATABASE_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `PUBLIC_URL`, `TOKEN_ENCRYPTION_KEY`.
-- `GOOGLE_SITE_VERIFICATION` is not set. `server/README.md` says that without it Google's push registration fails and calendar changes arrive with the hourly poll. I did not check the logs to see which is happening.
+- The secret-name inventory above is from Nov 10, not re-audited in this release. `GOOGLE_SITE_VERIFICATION` was absent then. `server/README.md` says that without it Google's push registration fails and calendar changes arrive with the hourly poll; current Google push behavior was not verified.
 
 **Tests**
 
-- `pnpm test`, last run at `f11477c` in the orb: scheduler 95 tests, server 174 tests, all passing. No TypeScript has changed since.
-- FloridaCore, run at `5090c63` in the orb: 221 tests in 21 suites, all passing.
-- FloridaKit, last run at `f11477c`: 114 tests in 9 suites, all passing. It was not rerun after the FloridaCore change it depends on; CI's Linux job does that.
-- Mac UI suite (3 tests): `testJumpLabelsInBothAppearances` passed on a Mac satellite on the files that are now `8776b97`. The other two last passed one edit earlier, before the change to how `CalendarGridView.swift` tracks a scroll that a key started. The macOS TestFlight workflow runs all three.
-- The iOS app was not touched by the last two code pushes.
+- `pnpm build && pnpm typecheck && pnpm test`: scheduler **95**, server **183**, all passing on the release tree.
+- `swift build --build-tests && swift test`: FloridaCore **238** Swift Testing tests; FloridaKit **116** Swift Testing tests plus its App Group XCTest, all passing with Swift 6.4.2 on Linux.
+- Full iPhone simulator run: **10 passed, 0 failed** (8 smoke tests and 2 widget tests), Xcode 26.1.1, iPhone 17 Pro, iOS 26.1. This includes the carousel and quarter-hour picker. After a final accessibility-layout adjustment, the affected screen/capture tests passed again (2 tests).
+- Additional disposable simulator checks passed: delayed AI cancellation/category changes, bare `#` after a prior destination choice, and accessibility XL capture. The temporary HTTP transport, test file and demo hook were removed before committing.
+- The latest release does not change Mac UI code. Its Mac verification is the release CI, not a new local Mac UI run.
+
+## Nov 12: one iPhone capture surface, including the widget
+
+**User request:** the widget's add-task shortcut should open the nicer single free-text input with `#category` support, and adding tasks should feel unified across the app and widget. Swaraj also asked when a categorized task leaves Inbox. He authorized review, pushing all outstanding work to `main`, deployment, notification after TestFlight is live, and this checked-in handoff.
+
+### Behavior and defaults
+
+- Widget `+`, the Tasks quick-add row, the Tasks toolbar `+`, and Agenda → New Task all open the same keyboard-focused `QuickAddSheet`. The widget route is `florida://tasks/new`; it opens Tasks and the composer, including from a cold launch.
+- The local parser immediately previews title, duration and dates. No network is needed to save. Example: `Write update 45m tomorrow #work`.
+- Exact category names match case-insensitively; `-` and `_` count as spaces. A unique prefix resolves immediately. An ambiguous prefix such as `#work` requires an explicit choice between Work Engineering and Work Infosec. Bare `#` lists all categories, including after choosing a destination earlier.
+- An unknown hint offers category creation and Use Inbox. Creation is local-first too. A retained selection is checked against live categories, including the local store during the observation gap after creation; deleted categories cannot be reused from a cancelled draft.
+- Only the first category token belongs to the parser. Selecting the destination for `Plan #work #q4` keeps `#q4` in the task title. The first hint stays visible in the input and its explicit resolution is invalidated if that hint changes.
+- No category means Inbox. Choosing a real category files directly there, without an Inbox stage. An existing Inbox task leaves as soon as its category is changed or a `Category?` suggestion is accepted; a suggestion alone does not file it. Inbox membership is a category ID, not a second status or background graduation rule.
+- The default is **30 minutes and no deadline** unless the user types a date. This aligns the new capture entry points with quick add; the underlying blank editor template still has its older defaults for other callers.
+- Cancel preserves text and the chosen destination for the current app session, shared across entry points. Add, successful Details save, or Clear consumes the draft. Session-only preservation was an agent choice: killing/relaunching the app does not restore it.
+- Details opens the full editor with parsed fields. Cancelling Details preserves the capture draft; saving adds once and closes capture. AI remains optional, is offered for longer/multiline text, and always opens a review editor rather than saving directly.
+- Keyboard Done submits; clipboard paste is always an edit, including a paste consisting only of a newline. Accessibility text sizes stack the action buttons so labels do not break across lines.
+
+### Ownership and contracts
+
+- `apple/iOS/App/AppModel.swift`: `showingQuickAdd`, `quickAddText`, `quickAddCategory`, and `quickAddCategoryHint` own the session draft and explicit resolution.
+- `apple/iOS/App/RootView.swift`: owns the composer sheet and URL routing. `Agenda/AgendaView.swift` and `Tasks/TasksView.swift` only request that sheet. Existing-item editors remain separate.
+- `apple/iOS/Tasks/QuickAddSheet.swift`: input, parsed preview, category selection/creation, local save, optional Details/AI review. `QuickAddField.swift` was deleted; there is no second iPhone capture implementation to keep in sync.
+- The private `QuickAddInput` wraps `UITextView`. Its edit delegate recognizes Done; `UITextPasteDelegate` marks the actual insertion after permission/item-provider completion. A synchronous `paste(_:)` flag is insufficient, and comparing old/new strings confuses some real pastes with Return.
+- AI operations are cancelled when text or destination changes. Success and error paths check cancellation and the captured input text before publishing or clearing the pending handle. A cancelled old request must not clear a newer request's handle; transport cancellation is wrapped by `AppModel.parseWithAI`.
+- `QuickAddTaskBuilder.swift` supplies defaults and category matching; `AppModel+NewTask.swift` builds AI review requests. The shared parser remains `FloridaCore/.../QuickAdd/QuickAddParser.swift`; this release does not change it or the Mac's capture surface.
+- `TaskEditorView.swift` adds a stable cancellation accessibility identifier. `apple/README.md` documents the unified entry points and Inbox behavior.
+
+### Review findings and verification
+
+An independent reviewer inspected the full uncommitted feature against `7fb658e`, then re-reviewed the fixes. Four P2 findings were fixed: saving to a deleted retained category, applying the old category after an AI response, promoting a later literal hashtag to category syntax, and submitting a multiline clipboard replacement as if it were Return. The inherited cancelled-AI-request cleanup race was fixed too.
+
+A subsequent minor bare-`#` precedence issue was fixed. Real simulator testing then caught two additional details: newline-only paste completes outside the synchronous paste action, and Swift `String.contains("")` does not populate the bare-hint choices. Both have fixes and regression coverage. The final source re-review found no blockers; the later empty-hint and accessibility adjustments were verified directly in the simulator.
+
+Permanent coverage in `apple/iOSUITests/SmokeTests.swift`:
+
+- `testUnifiedTaskCapture`: cold widget URL, focused input, ambiguous hints, later literal hashtags, cancellation and draft sharing with Agenda, Details cancel/save, button versus Done submission, no duplicate rows, direct filing, Inbox → Home, and creating an unknown category, in both appearances.
+- `testCapturePasteAndDeletedCategory`: bare `#` after an explicit choice, actual clipboard select-all paste, newline-only paste, deleting a retained destination through the UI, blocked Add/Details, choosing Inbox and submitting once.
+- `testTaskShortcutAndRecurringEvent`: warm widget URL route, plus existing recurring-event/calendar-order checks.
+- `testScreensInBothAppearances`: readable capture controls at large text sizes and a successful Add.
+
+The delayed-transport probe deliberately let request A's cancelled error arrive while B was pending, then edited to cancel B before its late success. Neither stale result opened an editor; a final fresh result retained the explicit Home category over the AI's Engineering guess. This used a disposable fake transport through the real AI client and app UI, not a live Anthropic call.
+
+**Limits:** no new real-account Google/Anthropic end-to-end test; no physical iPhone/widget-extension run in this release. The actual widget URL is exercised by UI tests. Session persistence across process termination, interrupted presentation while another modal is already open, and injected local-save failures were not verified. Simulator recordings/captures in the release thread show the UI, not those unexercised behaviors.
+
+The iOS upload passed its pre-export App Group sealing checks but warned that `DistributionSummary.plist` was absent after export, so CI could not independently confirm the final distribution signature's entitlements. This is a verification gap, not evidence that the entitlement was lost. Check the installed widget's shared data on a physical device; the pipeline's warning path remains unchanged.
+
+## Nov 11: widgets, recurring events and calendar navigation
+
+- [b6175e3](https://github.com/swarajban/florida/commit/b6175e3) and [2acd8c4](https://github.com/swarajban/florida/commit/2acd8c420e80eca7e60818f102eaf1f51d0f8a3c): recurring Google event creation on the server and repeat controls in both apps (`apple/Design/EventRecurrenceSection.swift`, per-platform event editors). Local event creation queues the recurrence; the server creates the Google series and returns instances.
+- The same app commit made agenda widgets compact and **today-only**, with today's date and a task-add shortcut on medium/large layouts. Small widgets have one tap target and open Agenda. The existing Today and Up Next widget kinds reuse `TodayAgendaView`; the separate Tasks widget was removed from the offered widget bundle, though its source remains.
+- `apple/Widgets/Today/TodayWidget.swift`: `TodayProvider` shows all-day items and timed items that have not ended, updates at relevant boundaries, clears yesterday at midnight and requests a refresh after at most 30 minutes. The app's last sync still bounds data freshness.
+- [cc517d8](https://github.com/swarajban/florida/commit/cc517d80304b4deefdae1c672d34ec684937b12f): removed redundant date navigation, added durable completion-time calendar stamps using `completedAt`, quarter-hour time selectors, preferred event calendars and event opening from Mac jump labels. Reopening a task removes its completion stamp. Stamps survive scheduler replans and app reloads because they derive from stored completion times, not only transient animation ghosts.
+- [a2fb9c3](https://github.com/swarajban/florida/commit/a2fb9c39887778c96bb6e686c37d551ddc45599d): replaced three-day paging with continuous native horizontal scrolling and inertia. It keeps hour position, supports moving across several days in a drag/flick, replenishes the day runway, and preserves task/event interactions. `apple/iOS/Calendar/DayGridView.swift`, `DayGridHeader.swift`, `DayGridCanvas.swift` own this.
+- Event calendar priority is **Sempre → Personal → A&S Family Calendar → others**. `FloridaCore/.../Models/CalendarOrder.swift` uses connected account identities when Google displays email addresses instead of friendly calendar names; a shared Sempre teammate calendar must not beat the user's primary Sempre calendar. Visibility only breaks ties and does not change that preference.
+- [38279f3](https://github.com/swarajban/florida/commit/38279f3f2d960ecd6b576e2b9cb4d8c68c704b08): precise carousel tests use a controlled slow drag and stop before release; a separate fast-flick assertion tests inertia. XCTest `.slow` still has enough velocity to coast on newer runtimes.
+- [3b476fa](https://github.com/swarajban/florida/commit/3b476fa790be056ddcfd5bae88f8de867404a772): fixed orb setup by adding missing Swift system prerequisites (`binutils-gold`, `pkg-config`). The old setup log ends after Swift installation because Swiftly reported those dependencies under `set -e`. `.agents/setup` pins 6.4.2; this release also checks in its generated `.swift-version`. Swift package builds work in the current orb.
+
+## Nov 11–12: Mac editing and recurring-series moves
+
+These changes came from the Mac/server thread, committed as [4be4f63](https://github.com/swarajban/florida/commit/4be4f63), [413498d](https://github.com/swarajban/florida/commit/413498d), [9acad8a](https://github.com/swarajban/florida/commit/9acad8a) and [3a0cdf8](https://github.com/swarajban/florida/commit/3a0cdf8), followed by CI-test fixes [ec11599](https://github.com/swarajban/florida/commit/ec11599) and [7fb658e](https://github.com/swarajban/florida/commit/7fb658e58fd0214daae20cd471712538dd38b289). They were already in Mac 151 and Fly v10 before the latest capture release.
+
+- `f` then an on-screen label **opens** a task or event, not just selects it. A task appearing in both grid and pane gets one label. `apple/macOS/App/AppModel+Jump.swift` owns the route.
+- The task editor and event popover show keycaps and accept their shortcuts. Code: `macOS/Tasks/TaskEditorKeys.swift`, `TaskEditorSheet.swift`, `macOS/Keyboard/Keycap.swift`, `macOS/Calendar/EventDetailView.swift`; shared mapping: `FloridaCore/.../Keyboard/TaskEditorKey.swift`.
+- `z` undoes where the app keyboard route permits it; `u` remains an alias. **`z` intentionally does nothing inside the task editor**, by the user's choice. `g n` replaces `z z` for centering on now. `x` deletes. This does not imply every possible event operation is undoable.
+- A click selects on mouse-up without waiting for a double-click; a double-click opens. The click no longer reveal-scrolls a different item under the second click. Code: `macOS/Calendar/CalendarGridView.swift`, `macOS/Keyboard/Clicks.swift`.
+- Mac event dragging preserves duration and snaps to quarter hours, including across day columns. Repeating events ask **This Event / All Events / Cancel**, as requested. Tasks do not drag on Mac. All Events is offered only for same-day drops; these limits and guest confirmation were agent choices. Code: `macOS/Calendar/GridDrag.swift`, `macOS/App/AppModel+Events.swift`, `macOS/App/RootView.swift`.
+- `EventWrite.scope` is optional (`instance` / `series`). `FloridaKit/Store/Queries.swift` optimistically moves local series siblings and queues one PUT; a later unchanged-time save preserves its series scope.
+- `server/src/events.ts` (`moveSeries`, `storeSeries`) changes the Google master and transactionally restores its instances. It refuses a move to another series-local date or a series with individually changed times/durations, before patching the master's time. Series failures reaching its reconciliation path stamp rows for the next pull; invalid bodies rejected earlier do not have that guarantee.
+- On the GitHub macos-26 runner, confirmation buttons are also exposed under a Touch Bar element. Scope repeating-event dialog queries to `app.sheets`; otherwise All Events matches twice. The completion-stamp test must use `g n`, not the old `z z` which now undoes the completion.
+- The shared demo Standup gained a `recurringEventId` in `apple/iOS/Support/DemoData.swift`. Thus this batch did change iOS demo/shared sources, even though it did not change iPhone interaction code.
+
+## Remaining issues are separate from the capture release
+
+### iPhone UI-test timing is still a known risk
+
+On the earlier main heads `3a0cdf8` and `7fb658e`, `testThreeDayNavigation` failed "The task should move by half an hour" in runs `43123402511` and `43125874772`. They ran around 00:03–00:43 UTC; results were 322 versus 252 ±15 and 337 versus 273 ±15 respectively. This was the task drag assertion, not the horizontal carousel distance assertion.
+
+The **unconfirmed hypothesis** is that the demo block at now minus 20 minutes sits near midnight, the test's 80-point scroll moves it under the header, and tapping it scrolls it back so `originalY` is stale. The latest local full run passed around 05:07–05:20 UTC without changing this scenario. A daytime pass does not establish that the midnight problem is fixed. If it recurs, reproduce around midnight and compare viewport geometry before and after the tap rather than weakening the assertion.
+
+`testCompletionStampAndQuarterHourPicker` also once read 00 instead of 30 after a wheel gesture, then passed on identical iOS code. Cause unknown. Both tests gate the iOS upload; the earlier failures left iOS on 311 while Mac advanced to 151.
+
+In this release, `testTaskShortcutAndRecurringEvent` passed its light-mode flow but failed in dark mode at line 192: the Weekly tap left Monthly visible and Does not repeat selected. CI was on iOS 26.5; local iOS 26.1 passed both appearances. The CI accessibility hierarchy and recording show the unchanged selection; its synthesized event targeted (245, 488.33), the center of the Weekly row. The cause of the missed selection is unconfirmed. The recurrence implementation and this test segment were unchanged by unified capture. The unchanged full-suite rerun passed at 07:18 UTC; no assertions were removed or relaxed. A passing retry does not establish that this intermittent interaction is fixed.
+
+### Mac time-picker smoke test can select the adjacent option
+
+During this release, `testRecurringEventCreation` failed in general CI run `43165380369` attempt 1: after clicking the 10:15 menu item, `time-Starts` read 10:30. The same Mac code and test had passed in general CI and the Mac TestFlight workflow for `58b7307`; the only intervening change was the iOS workflow timeout. The failed-job-only rerun passed with no code changes, confirmed at 06:25 UTC. Root cause remains unconfirmed; no picker assertion or Mac code was changed to obtain a pass.
+
+### Mac/series findings carried forward, not fixed here
+
+These were reported by the Mac thread's review/probes, not re-run during capture work:
+
+- **Confirmed local DST mismatch:** `moveEventSeries` shifts siblings by a delta instead of assigning the dropped wall-clock time. A daily 01:30 → 03:30 move across fall-back placed an instance at 02:30 PST locally instead of the server's 03:30. It can snap on sync.
+- **Confirmed local validation gap:** the store accepts `end <= start` series moves; server body validation rejects them before reconciliation, potentially leaving optimistically shifted siblings.
+- The queued-scope preservation fix covers unchanged-time edits. A subsequent time-changing instance edit or delete can replace the sole queued series operation.
+- **Confirmed `BlockDrag` edges:** a 23:20–24:00 block dragged down 10 pt moves up to 23:15; zero-length blocks clamp to minute 1440; +7.5 pt advances a slot while −7.5 does not. This shared helper is distinct from the iPhone's existing drag implementation.
+- Mac offers All Events even when individually moved instances cause the server to reject it. The refusal prevents the unsupported Google operation; it is not a complete local UX fix.
+- **Suspected:** a click moving 4 pt on a task/read-only event/empty slot may select nothing when `beginDrag` returns nil. Removing the grid mid-drag (for example ⇧M) may leave `gridDrag` alive. Neither was reproduced on-device in the final review.
+- No real-Google validation of exception preservation, changed instance IDs, incremental sync of old IDs or `UNTIL` boundaries. The server restrictions are conservative partly because of this gap.
+- Completed-block drag refusal and `d`/`i` date-field focus were not checked on a Mac. `TaskEditorKeyTests` explicitly pins only d, s, c, p and Space.
+
+The older scheduling-review findings below are historical carry-forwards too. They are not approvals to expand the next task; confirm their relevance and current behavior before changing them.
+
+## Credentials and release operations
+
+- Non-secret identifiers: App Store Connect app `6832337704`; both app bundle IDs `com.swarajban.florida`; App Group `group.com.swarajban.florida`; Apple team `8G7N7547R6`.
+- The Amp-connected personal API key currently has ID `VT77KFZ8UY` and provisioning access. Its Issuer ID is available in App Store Connect → Users and Access → Integrations; it was not returned by the status tool. Do not assume the GitHub workflow uses the same key without checking.
+- GitHub workflows expect `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_KEY_P8`, and optionally `APPLE_TEAM_ID`. They map these to job-local `ASC_*` names. These credentials were **not** present in this orb's environment; the Amp connection and GitHub secret store are separate from injected orb secrets. GitHub cannot return stored secret values.
+- Names can be listed with `amp secrets list --workspace`, `amp secrets list --project`, or `amp secrets list --user`. Keep credentials out of handoffs, logs, screenshots and commits. No secret values are in this document.
+- App pushes touching `apple/` start both TestFlight workflows. Do not create a second manual upload while the first is running. CI build numbers are derived from workflow run number and attempt; read the actual uploaded numbers from Apple.
+- Build numbers can overlap between platforms. For example, `find_build` for 161 returns both the new Mac build and an older iOS build; check the returned platform before using its build ID or announcing availability.
+- After upload, confirm `VALID`, export-compliance status, `IN_BETA_TESTING`, and group access; set What to Test. An install-link card from `app_store_connect` is the supported QR code. Do not synthesize another one.
+- Server deployment is separate. This capture release needed none. A future server deployment may run migrations and seed through Fly's release command; obtain authorization for that deployment.
+- The owner asked for a notification **when the builds are live**, then this detailed handoff committed to `main`. A docs-only push does not upload another iOS or Mac binary, though the general CI workflow still runs.
 
 ## How Swaraj works
 
@@ -49,7 +167,9 @@ Observed in the build thread, not rules he wrote down.
 - Server deploys are separate and by hand; he said "Deploy" for v8.
 - Choices made for him get listed briefly so he can veto them.
 
-## Project 1: Mac jump mode, `v`, and the menu bar title
+## Historical: Nov 10 Mac jump mode, `v`, and the menu bar title
+
+This section records the original implementation. The Nov 11–12 section above supersedes its select-only jump behavior: labels now open the item. Old build numbers below identify when each feature first shipped, not the latest available build.
 
 Commits `69b8a71`, `77e68cd`, `8991afd`, `f11477c`, then `5090c63` and `8776b97` for on-screen-only labels. All but the last two are in TestFlight Mac 71.
 
@@ -115,7 +235,7 @@ Commits `69b8a71`, `77e68cd`, `8991afd`, `f11477c`, then `5090c63` and `8776b97`
 - `TaskPaneView.pinnedHeaderHeight = 34` is my estimate of the pinned header's height, not a measured value.
 - Nothing on this project is waiting on Swaraj.
 
-## Project 2: task editor, category order, iOS agenda look
+## Historical: Nov 10 task editor, category order, iOS agenda look
 
 Commits `7c314d8`, `bddb97c`, `6b80eec`, `a837304`. In TestFlight iOS 251 and Mac 61.
 
@@ -136,7 +256,7 @@ Commits `7c314d8`, `bddb97c`, `6b80eec`, `a837304`. In TestFlight iOS 251 and Ma
 
 He accepted these by asking to commit and push, and has not sent feedback on builds 251 and 61 since.
 
-## Project 3: scheduling v2
+## Historical: Nov 9–10 scheduling v2
 
 Commits `0679a33` through `7c65fa9`, Nov 9–10. Live: Fly v6 (step 1), v7 (step 2), v8 (steps 3–6); in every build since iOS 241 and Mac 51.
 
@@ -180,13 +300,13 @@ The plan and its eight decisions are in the [scheduling v2 proposal](https://amp
 
 ## Not built
 
-Checked by searching the code on Nov 10.
+The feature-gap inventory was checked on Nov 10; the deep-link entry is updated for this release. The other entries were not comprehensively re-audited on Nov 12.
 
 - **APNs silent push.** No code. Widgets are only as fresh as the app's last sync. It needs an APNs key from Swaraj, and the `aps-environment` entitlement was removed from `project.yml` and must come back with it.
 - **Slack saved items and Linear.** No code. Both are on his original list of future adds.
 - **Scheduler on the device** (JavaScriptCore). No code.
 - **Availability sharing on the Mac.** No code.
-- **Deep links to one item.** Only `florida://agenda` and `florida://tasks` exist.
+- **Deep links to one item.** No item-specific route. The iPhone accepts `florida://agenda`, `florida://tasks`, `florida://settings`, and now `florida://tasks/new` for shared capture.
 - **Out of office and focus time.** `eventType` is stored and synced, but `server/src/scheduling.ts` does not read it. All-day events do not block time.
 
 Built and worth knowing about, since older docs call them future work: the MCP endpoint (`POST /mcp`, 16 tools, including projects, `set_day`, `clear_day` and `get_brief`), recurring tasks, event create, edit, RSVP and delete, the Mac menu bar extra, and live changes over SSE on both apps.
@@ -207,6 +327,7 @@ Status unknown, not checked: de-duplicating an event shared into both Google acc
 
 - Image `macos-26`, synced path `apple`. The repo lands at `/Users/runner/workspace/repo`. `xcodegen` is installed; `rg` is not.
 - After adding or removing a source file, run `xcodegen generate` in `apple`.
+- iPhone tests in this release used Xcode 26.1.1 and an available iPhone 17 Pro/iOS 26.1 simulator. Select its UDID with `xcrun simctl list devices available`; from `apple`, run `xcodebuild test -project Florida.xcodeproj -scheme Florida-iOS -destination "id=$UDID" -parallel-testing-enabled NO -derivedDataPath build -resultBundlePath /tmp/capture-check.xcresult CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO`. Use a fresh result-bundle path for each run. Add `-only-testing:Florida-iOSUITests/SmokeTests/testUnifiedTaskCapture` for capture alone. The full local run took about 13 minutes with an existing build cache.
 - Mac UI tests, in `apple`, after removing `mac-ui.xcresult`: `xcodebuild test -project Florida.xcodeproj -scheme Florida-macOS -configuration Debug -destination 'platform=macOS' -parallel-testing-enabled NO -derivedDataPath build -resultBundlePath mac-ui.xcresult CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=""`. Add `-only-testing:Florida-macOSUITests/SmokeTests/<testName>` for one test. It takes several minutes, so it was run in the background with output to a log file.
 - Captures: `xcrun xcresulttool export attachments --path mac-ui.xcresult --output-path mac-screenshots`; `manifest.json` maps each exported file to a readable name such as `jump-light_0_<uuid>.png`.
 - Both apps' UI tests launch with `-demoData YES -uiAppearance light|dark`. The demo data is `apple/iOS/Support/DemoData.swift` and is shared by both apps; ids look like `demo-task-keys`.
@@ -216,7 +337,7 @@ Status unknown, not checked: de-duplicating an event shared into both Google acc
 - `ci.yml` runs on every push to `main` and on pull requests: scheduler and server, the Swift packages on Linux, and an Xcode build of the apps.
 - `ios.yml` runs on changes under `apple/`; on `main` it also uploads to TestFlight.
 - `macos.yml` runs on pushes to `main` that change `apple/`: the Mac UI smoke test, then a TestFlight upload.
-- So a push to `main` that touches `apple/` ships two builds, about 20 minutes later. Apple allows about 20 uploads per app per day.
+- A push to `main` that touches `apple/` starts two test-gated releases. Allow for runner capacity, the full UI suites and Apple processing; the previous 20-minute estimate is no longer reliable. Apple allows about 20 uploads per app per day.
 - There is no deploy workflow. The server is deployed by hand with `fly deploy` from the repo root; the release command runs the migrations and then the seed. `.agents/setup` installs `flyctl` and `neonctl`, which read `FLY_API_TOKEN` and `NEON_API_KEY` from the Amp project's secrets.
 - Deploy the server before shipping an app build that needs a new route or field.
 
