@@ -552,7 +552,7 @@ final class SmokeTests: XCTestCase {
                 let previewText = field.timed
                     ? field.date.formatted(.dateTime.weekday(.wide).month(.wide).day().year().hour().minute())
                     : field.date.formatted(.dateTime.weekday(.wide).month(.wide).day().year())
-                wait(for: [expectation(for: NSPredicate(format: "label == %@", previewText), evaluatedWith: preview)], timeout: 5)
+                waitForValue(previewText, of: preview)
                 XCTAssertEqual(button.value as? String, before)
                 if field.key == "d" { capture(app, "date-selector-\(appearance)") }
                 app.typeKey(.escape, modifierFlags: [])
@@ -685,14 +685,14 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(row.exists)
             let priority = app.buttons["task-priority"]
             title.click()
-            waitForValue("Selected", of: row)
+            waitForLabel("Selected task, Renew VPN certificate", of: row)
             capture(app.windows.firstMatch, "task-selection-\(appearance)")
             let editorTitle = app.textFields.matching(NSPredicate(format: "value == %@", "Renew VPN certificate")).firstMatch
             XCTAssertTrue(editorTitle.waitForExistence(timeout: 5), "one click must open the clicked task")
             XCTAssertTrue(priority.exists)
             app.typeKey(.escape, modifierFlags: [])
             XCTAssertTrue(editorTitle.waitForNonExistence(timeout: 5))
-            waitForValue("Selected", of: row)
+            waitForLabel("Selected task, Renew VPN certificate", of: row)
             app.typeKey("e", modifierFlags: [])
             XCTAssertTrue(editorTitle.waitForExistence(timeout: 5), "E must act on the task-pane selection after the editor closes")
             app.typeKey(.escape, modifierFlags: [])
@@ -889,6 +889,11 @@ final class SmokeTests: XCTestCase {
     @MainActor
     private func waitForValue(_ value: String, of element: XCUIElement) {
         wait(for: [expectation(for: NSPredicate(format: "value == %@", value), evaluatedWith: element)], timeout: 5)
+    }
+
+    @MainActor
+    private func waitForLabel(_ label: String, of element: XCUIElement) {
+        wait(for: [expectation(for: NSPredicate(format: "label == %@", label), evaluatedWith: element)], timeout: 5)
     }
 
     @MainActor

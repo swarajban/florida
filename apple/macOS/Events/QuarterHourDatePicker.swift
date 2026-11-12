@@ -9,14 +9,17 @@ struct QuarterHourDatePicker: View {
     @Environment(\.calendar) private var calendar
 
     var body: some View {
-        HStack {
-            MacDateField(title, date: $date, identifier: "date-\(title)")
-            if showsTime {
-                MacChoiceField(
-                    "\(title) time", selection: minutes,
-                    options: timeChoices,
-                    identifier: "time-\(title)", showsLabel: false)
-                .fixedSize()
+        LabeledContent(title) {
+            HStack(spacing: 8) {
+                MacDateField(title, date: $date, identifier: "date-\(title)", showsLabel: false)
+                    .fixedSize()
+                if showsTime {
+                    MacChoiceField(
+                        "\(title) time", selection: minutes,
+                        options: timeChoices,
+                        identifier: "time-\(title)", showsLabel: false)
+                    .fixedSize()
+                }
             }
         }
     }

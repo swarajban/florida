@@ -45,30 +45,18 @@ struct MacChoiceField<Value: Hashable>: View {
     private var presented: Binding<Bool> { isPresented ?? $localPresented }
 
     var body: some View {
-        LabeledContent {
-            Button {
-                originWindow = NSApp.keyWindow
-                presented.wrappedValue = true
-            } label: {
-                HStack(spacing: 6) {
-                    Text(options.first { $0.value == selection }?.title ?? "Choose…")
-                        .lineLimit(1)
-                    Image(systemName: "chevron.up.chevron.down").font(.caption2)
-                }
-            }
-            .accessibilityIdentifier(identifier)
-            .accessibilityValue(options.first { $0.value == selection }?.title ?? "")
-            .popover(isPresented: presented, arrowEdge: .bottom) {
-                MacChoiceSelector(
-                    title: title, selection: $selection, options: options, identifier: identifier,
-                    preservesOrder: preservesOrder, create: create, close: { presented.wrappedValue = false })
-            }
-        } label: {
+        Group {
             if showsLabel {
-                HStack(spacing: 6) {
-                    Text(title)
-                    if let key { Keycap(key) }
+                LabeledContent {
+                    control
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(title)
+                        if let key { Keycap(key) }
+                    }
                 }
+            } else {
+                control
             }
         }
         .onChange(of: presented.wrappedValue) {
@@ -81,6 +69,26 @@ struct MacChoiceField<Value: Hashable>: View {
                     onDismiss()
                 }
             }
+        }
+    }
+
+    private var control: some View {
+        Button {
+            originWindow = NSApp.keyWindow
+            presented.wrappedValue = true
+        } label: {
+            HStack(spacing: 6) {
+                Text(options.first { $0.value == selection }?.title ?? "Choose…")
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down").font(.caption2)
+            }
+        }
+        .accessibilityIdentifier(identifier)
+        .accessibilityValue(options.first { $0.value == selection }?.title ?? "")
+        .popover(isPresented: presented, arrowEdge: .bottom) {
+            MacChoiceSelector(
+                title: title, selection: $selection, options: options, identifier: identifier,
+                preservesOrder: preservesOrder, create: create, close: { presented.wrappedValue = false })
         }
     }
 }
@@ -128,7 +136,7 @@ private struct MacChoiceSelector<Value: Hashable>: View {
                             .accessibilityIdentifier("\(identifier)-option-\(index)")
                             .accessibilityValue(highlighted == row ? "Highlighted" : "Not highlighted")
                             .accessibilityAddTraits(highlighted == row ? .isSelected : [])
-                            .id(row)
+                            .id(index)
                         }
                         if canCreate {
                             Button { choose(0) } label: {
@@ -146,7 +154,9 @@ private struct MacChoiceSelector<Value: Hashable>: View {
                     }
                 }
                 .frame(maxHeight: 240)
-                .onChange(of: highlighted) { proxy.scrollTo(highlighted) }
+                .onChange(of: highlighted) {
+                    if matches.indices.contains(highlighted) { proxy.scrollTo(matches[highlighted]) }
+                }
             }
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
             Text("↑ ↓ / ⌃N ⌃P to move · ↩ to choose · esc to cancel")

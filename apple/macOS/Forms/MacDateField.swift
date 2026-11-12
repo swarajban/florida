@@ -10,6 +10,7 @@ struct MacDateField: View {
     var key: String?
     var isPresented: Binding<Bool>?
     let identifier: String
+    var showsLabel = true
     var onDismiss: () -> Void = {}
     var dayOnly: ((Date) -> Date)?
     var requiresTime = false
@@ -18,7 +19,7 @@ struct MacDateField: View {
     @Environment(\.calendar) private var calendar
 
     init(_ title: String, date: Binding<Date>, isOn: Binding<Bool>? = nil, hasTime: Binding<Bool>? = nil,
-         key: String? = nil, isPresented: Binding<Bool>? = nil, identifier: String,
+         key: String? = nil, isPresented: Binding<Bool>? = nil, identifier: String, showsLabel: Bool = true,
          onDismiss: @escaping () -> Void = {}, dayOnly: ((Date) -> Date)? = nil, requiresTime: Bool = false) {
         self.title = title
         _date = date
@@ -27,6 +28,7 @@ struct MacDateField: View {
         self.key = key
         self.isPresented = isPresented
         self.identifier = identifier
+        self.showsLabel = showsLabel
         self.onDismiss = onDismiss
         self.dayOnly = dayOnly
         self.requiresTime = requiresTime
@@ -35,40 +37,18 @@ struct MacDateField: View {
     private var presented: Binding<Bool> { isPresented ?? $localPresented }
 
     var body: some View {
-        LabeledContent {
-            Button {
-                originWindow = NSApp.keyWindow
-                presented.wrappedValue = true
-            } label: {
-                HStack(spacing: 6) {
-                    Text(isOn?.wrappedValue == false ? "No date" : label)
-                    Image(systemName: "calendar").foregroundStyle(.secondary)
-                }
-            }
-            .accessibilityIdentifier(identifier)
-            .accessibilityValue(isOn?.wrappedValue == false ? "No date" : label)
-            .popover(isPresented: presented, arrowEdge: .bottom) {
-                MacDateSelector(title: title, current: date, hasTime: hasTime?.wrappedValue ?? false,
-                                allowsTime: hasTime != nil, requiresTime: requiresTime,
-                                allowsClear: isOn != nil, identifier: identifier) { result in
-                    switch result {
-                    case .date(let value, let timed):
-                        hasTime?.wrappedValue = timed
-                        date = timed ? value : (dayOnly?(value) ?? preservingClock(on: value))
-                        isOn?.wrappedValue = true
-                    case .clear: isOn?.wrappedValue = false
-                    case .invalid: return
+        Group {
+            if showsLabel {
+                LabeledContent {
+                    control
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(title)
+                        if let key { Keycap(key) }
                     }
-                    presented.wrappedValue = false
-                } cancel: {
-                    presented.wrappedValue = false
                 }
-                .environment(\.calendar, calendar)
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Text(title)
-                if let key { Keycap(key) }
+            } else {
+                control
             }
         }
         .onChange(of: presented.wrappedValue) {
@@ -81,6 +61,38 @@ struct MacDateField: View {
                     onDismiss()
                 }
             }
+        }
+    }
+
+    private var control: some View {
+        Button {
+            originWindow = NSApp.keyWindow
+            presented.wrappedValue = true
+        } label: {
+            HStack(spacing: 6) {
+                Text(isOn?.wrappedValue == false ? "No date" : label).lineLimit(1)
+                Image(systemName: "calendar").foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityIdentifier(identifier)
+        .accessibilityValue(isOn?.wrappedValue == false ? "No date" : label)
+        .popover(isPresented: presented, arrowEdge: .bottom) {
+            MacDateSelector(title: title, current: date, hasTime: hasTime?.wrappedValue ?? false,
+                            allowsTime: hasTime != nil, requiresTime: requiresTime,
+                            allowsClear: isOn != nil, identifier: identifier) { result in
+                switch result {
+                case .date(let value, let timed):
+                    hasTime?.wrappedValue = timed
+                    date = timed ? value : (dayOnly?(value) ?? preservingClock(on: value))
+                    isOn?.wrappedValue = true
+                case .clear: isOn?.wrappedValue = false
+                case .invalid: return
+                }
+                presented.wrappedValue = false
+            } cancel: {
+                presented.wrappedValue = false
+            }
+            .environment(\.calendar, calendar)
         }
     }
 

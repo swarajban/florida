@@ -130,8 +130,8 @@ struct TaskRowView: View {
         .padding(.horizontal, 6)
         .contentShape(Rectangle())
         .accessibilityElement(children: .contain)
+        .accessibilityLabel(isSelected ? "Selected task, \(task.title)" : "Task, \(task.title)")
         .accessibilityIdentifier("task-row-\(task.id)")
-        .accessibilityValue(isSelected ? "Selected" : "Not selected")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
