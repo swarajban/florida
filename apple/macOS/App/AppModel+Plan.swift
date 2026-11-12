@@ -116,7 +116,7 @@ extension AppModel {
     /// override already on the day keeps its note. Nothing is written when the routine already
     /// makes the day that kind.
     func setDay(_ day: Date, kind: DayKind) {
-        guard let database else { return }
+        guard availabilityShare == nil, let database else { return }
         let existing = dayOverride(on: day)
         guard existing != nil || dayKind(of: day) != kind else {
             statusMessage = "\(DateText.day(day, calendar: calendar)) is already \(kind.sentenceLabel)"
@@ -134,7 +134,7 @@ extension AppModel {
 
     /// Puts `day` back on its weekday's routine.
     func clearDayOverride(on day: Date) {
-        guard let database else { return }
+        guard availabilityShare == nil, let database else { return }
         guard dayOverride(on: day) != nil else {
             statusMessage = "\(DateText.day(day, calendar: calendar)) already follows the routine"
             return
