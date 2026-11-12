@@ -5,25 +5,33 @@ struct AvailabilityGridOverlay: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        let share = model.availabilityShare
+        let days = model.visibleDays
+        let calendar = model.calendar
+        let flexible = model.placements.filter {
+            !$0.pinned && model.tasksById[$0.taskId]?.isOpen == true && model.tasksById[$0.taskId]?.pinnedStart == nil
+        }
         Canvas { context, size in
-            guard let share = model.availabilityShare else { return }
+            guard let share else { return }
             let geometry = GridGeometry(
-                size: size, gutterWidth: CalendarGridView.gutterWidth, dayCount: model.visibleDays.count,
+                size: size, gutterWidth: CalendarGridView.gutterWidth, dayCount: days.count,
                 grid: CalendarGridView.grid)
-            for (index, day) in model.visibleDays.enumerated() {
-                guard let end = model.calendar.date(byAdding: .day, value: 1, to: day) else { continue }
+            for (index, day) in days.enumerated() {
+                guard let end = calendar.date(byAdding: .day, value: 1, to: day) else { continue }
+                func minute(_ date: Date) -> Int {
+                    let parts = calendar.dateComponents([.hour, .minute], from: date)
+                    return (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+                }
                 func rect(_ range: AvailabilityRange) -> CGRect? {
                     guard range.start < end, range.end > day else { return nil }
                     return geometry.rect(
                         dayIndex: index, column: 0, columnCount: 1,
-                        startMinute: range.start <= day ? 0 : model.minuteOfDay(range.start),
-                        endMinute: range.end >= end ? 1440 : model.minuteOfDay(range.end)).insetBy(dx: 3, dy: 0)
+                        startMinute: range.start <= day ? 0 : minute(range.start),
+                        endMinute: range.end >= end ? 1440 : minute(range.end)).insetBy(dx: 3, dy: 0)
                 }
                 func movesTasks(_ range: AvailabilityRange) -> Bool {
-                    model.placements.contains { placement in
-                        !placement.pinned && model.tasksById[placement.taskId]?.isOpen == true
-                            && model.tasksById[placement.taskId]?.pinnedStart == nil
-                            && placement.startAt < min(range.end, end) && placement.endAt > max(range.start, day)
+                    flexible.contains { placement in
+                        placement.startAt < min(range.end, end) && placement.endAt > max(range.start, day)
                     }
                 }
                 for range in share.suggestions {
