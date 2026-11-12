@@ -784,7 +784,10 @@ final class SmokeTests: XCTestCase {
         let expectedBefore = "\(start.formatted(date: .omitted, time: .shortened)) – \(end.formatted(date: .omitted, time: .shortened))"
         XCTAssertEqual(task.value as? String, expectedBefore)
         let originalFrame = task.frame
-        let column = element(start.formatted(.dateTime.weekday(.wide).month(.wide).day()), in: app).frame
+        let dayHeader = element(start.formatted(.dateTime.weekday(.wide).month(.wide).day()), in: app).frame
+        let nextDay = Calendar.current.date(byAdding: .day, value: 1, to: start)!
+        let nextHeader = element(nextDay.formatted(.dateTime.weekday(.wide).month(.wide).day()), in: app).frame
+        let columnWidth = nextHeader.midX - dayHeader.midX
         let heading = app.buttons["Go to day"].value as? String
         let center = task.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         center.press(forDuration: 0.5, thenDragTo: center.withOffset(CGVector(dx: 0, dy: 30)),
@@ -794,8 +797,10 @@ final class SmokeTests: XCTestCase {
         let expectedAfter = "\(newStart.formatted(date: .omitted, time: .shortened)) – \(newEnd.formatted(date: .omitted, time: .shortened))"
         XCTAssertEqual(task.value as? String, expectedAfter, "The task must move exactly half an hour, preserving its duration")
         XCTAssertEqual(task.frame.minY, originalFrame.minY + 30, accuracy: 2, "The task should move by half an hour")
-        XCTAssertGreaterThanOrEqual(task.frame.minX, column.minX)
-        XCTAssertLessThanOrEqual(task.frame.maxX, column.maxX, "A vertical drag must keep the task in its day column")
+        XCTAssertGreaterThan(columnWidth, 0)
+        XCTAssertGreaterThanOrEqual(task.frame.minX, dayHeader.midX - columnWidth / 2)
+        XCTAssertLessThanOrEqual(task.frame.maxX, dayHeader.midX + columnWidth / 2,
+                                 "A vertical drag must keep the task in its day column")
         XCTAssertEqual(app.buttons["Go to day"].value as? String, heading)
     }
 
