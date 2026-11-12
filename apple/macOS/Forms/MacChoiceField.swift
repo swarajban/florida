@@ -25,6 +25,8 @@ struct MacChoiceField<Value: Hashable>: View {
     var create: ((String) -> Value?)?
     @State private var localPresented = false
     @State private var originWindow: NSWindow?
+    @State private var ownsOrigin = false
+    @State private var origin = SelectorOrigin()
 
     init(_ title: String, selection: Binding<Value>, options: [MacChoice<Value>], key: String? = nil,
          isPresented: Binding<Bool>? = nil, identifier: String, showsLabel: Bool = true,
@@ -61,8 +63,13 @@ struct MacChoiceField<Value: Hashable>: View {
         }
         .onChange(of: presented.wrappedValue) {
             if presented.wrappedValue {
-                if originWindow == nil { originWindow = NSApp.keyWindow }
+                originWindow = origin.window ?? originWindow ?? NSApp.keyWindow
+                if let originWindow, !ownsOrigin {
+                    SelectorWindowHost.register(originWindow)
+                    ownsOrigin = true
+                }
             } else {
+                releaseOrigin()
                 Task { @MainActor in
                     await Task.yield()
                     originWindow?.makeFirstResponder(nil)
@@ -70,11 +77,17 @@ struct MacChoiceField<Value: Hashable>: View {
                 }
             }
         }
+        .onDisappear(perform: releaseOrigin)
+    }
+
+    private func releaseOrigin() {
+        if ownsOrigin, let originWindow { SelectorWindowHost.unregister(originWindow) }
+        ownsOrigin = false
     }
 
     private var control: some View {
         Button {
-            originWindow = NSApp.keyWindow
+            originWindow = origin.window ?? NSApp.keyWindow
             presented.wrappedValue = true
         } label: {
             HStack(spacing: 6) {
@@ -85,6 +98,7 @@ struct MacChoiceField<Value: Hashable>: View {
         }
         .accessibilityIdentifier(identifier)
         .accessibilityValue(options.first { $0.value == selection }?.title ?? "")
+        .background(SelectorOriginView(origin: origin))
         .popover(isPresented: presented, arrowEdge: .bottom) {
             MacChoiceSelector(
                 title: title, selection: $selection, options: options, identifier: identifier,

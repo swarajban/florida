@@ -16,6 +16,8 @@ struct MacDateField: View {
     var requiresTime = false
     @State private var localPresented = false
     @State private var originWindow: NSWindow?
+    @State private var ownsOrigin = false
+    @State private var origin = SelectorOrigin()
     @Environment(\.calendar) private var calendar
 
     init(_ title: String, date: Binding<Date>, isOn: Binding<Bool>? = nil, hasTime: Binding<Bool>? = nil,
@@ -53,8 +55,13 @@ struct MacDateField: View {
         }
         .onChange(of: presented.wrappedValue) {
             if presented.wrappedValue {
-                if originWindow == nil { originWindow = NSApp.keyWindow }
+                originWindow = origin.window ?? originWindow ?? NSApp.keyWindow
+                if let originWindow, !ownsOrigin {
+                    SelectorWindowHost.register(originWindow)
+                    ownsOrigin = true
+                }
             } else {
+                releaseOrigin()
                 Task { @MainActor in
                     await Task.yield()
                     originWindow?.makeFirstResponder(nil)
@@ -62,11 +69,17 @@ struct MacDateField: View {
                 }
             }
         }
+        .onDisappear(perform: releaseOrigin)
+    }
+
+    private func releaseOrigin() {
+        if ownsOrigin, let originWindow { SelectorWindowHost.unregister(originWindow) }
+        ownsOrigin = false
     }
 
     private var control: some View {
         Button {
-            originWindow = NSApp.keyWindow
+            originWindow = origin.window ?? NSApp.keyWindow
             presented.wrappedValue = true
         } label: {
             HStack(spacing: 6) {
@@ -76,6 +89,7 @@ struct MacDateField: View {
         }
         .accessibilityIdentifier(identifier)
         .accessibilityValue(isOn?.wrappedValue == false ? "No date" : label)
+        .background(SelectorOriginView(origin: origin))
         .popover(isPresented: presented, arrowEdge: .bottom) {
             MacDateSelector(title: title, current: date, hasTime: hasTime?.wrappedValue ?? false,
                             allowsTime: hasTime != nil, requiresTime: requiresTime,

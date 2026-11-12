@@ -26,6 +26,7 @@ struct SelectorInput: NSViewRepresentable {
 
     static func isEditing(in window: NSWindow) -> Bool {
         SelectorWindowHost.counts[ObjectIdentifier(window), default: 0] > 0
+            || (window.firstResponder as? NSTextView)?.delegate is SelectorTextField
     }
 
     final class Coordinator: NSObject, NSTextFieldDelegate {
@@ -50,19 +51,53 @@ struct SelectorWindowGuard: NSViewRepresentable {
     func updateNSView(_ view: SelectorWindowHost, context: Context) {}
 }
 
+@MainActor
+final class SelectorOrigin {
+    weak var window: NSWindow?
+}
+
+struct SelectorOriginView: NSViewRepresentable {
+    let origin: SelectorOrigin
+
+    func makeNSView(context: Context) -> SelectorOriginHost {
+        let view = SelectorOriginHost()
+        view.origin = origin
+        return view
+    }
+
+    func updateNSView(_ view: SelectorOriginHost, context: Context) {}
+}
+
+final class SelectorOriginHost: NSView {
+    var origin: SelectorOrigin?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        origin?.window = window
+    }
+}
+
 final class SelectorWindowHost: NSView {
     static var counts: [ObjectIdentifier: Int] = [:]
     private weak var registeredWindow: NSWindow?
 
+    static func register(_ window: NSWindow) {
+        counts[ObjectIdentifier(window), default: 0] += 1
+    }
+
+    static func unregister(_ window: NSWindow) {
+        let id = ObjectIdentifier(window)
+        counts[id, default: 1] -= 1
+        if counts[id] == 0 { counts[id] = nil }
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if let registeredWindow {
-            let id = ObjectIdentifier(registeredWindow)
-            Self.counts[id, default: 1] -= 1
-            if Self.counts[id] == 0 { Self.counts[id] = nil }
+            Self.unregister(registeredWindow)
         }
         registeredWindow = window
-        if let window { Self.counts[ObjectIdentifier(window), default: 0] += 1 }
+        if let window { Self.register(window) }
     }
 }
 
