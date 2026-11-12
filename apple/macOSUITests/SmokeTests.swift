@@ -267,8 +267,9 @@ final class SmokeTests: XCTestCase {
         let block = window.coordinate(withNormalizedOffset: .zero)
             .withOffset(CGVector(dx: home.minX - windowFrame.minX - 40, dy: home.midY - windowFrame.minY))
         block.press(forDuration: 0.3, thenDragTo: block.withOffset(CGVector(dx: 0, dy: 90)), withVelocity: .slow, thenHoldForDuration: 0.3)
-        let thisEvent = app.buttons["This Event"]
-        let allEvents = app.buttons["All Events"]
+        // Scoped to the sheet: CI's Mac also lists the dialog's buttons under a Touch Bar element.
+        let thisEvent = app.sheets.buttons["This Event"]
+        let allEvents = app.sheets.buttons["All Events"]
         XCTAssertTrue(allEvents.waitForExistence(timeout: 5), "a repeating event dropped on its own day should ask which to move")
         XCTAssertTrue(thisEvent.exists)
         capture(window, "move-repeating-event")
