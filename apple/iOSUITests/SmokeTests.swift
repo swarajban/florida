@@ -348,7 +348,10 @@ final class SmokeTests: XCTestCase {
             capture(app, "event-recurring-\(appearance)")
             app.navigationBars["New Event"].buttons["Add"].tap()
             XCTAssertTrue(app.navigationBars["New Event"].waitForNonExistence(timeout: 5))
+            let planning = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Weekly planning")).firstMatch
+            for _ in 0..<8 where !planning.exists { app.swipeUp() }
             waitForText("Weekly planning", in: app)
+            capture(app, "event-recurring-saved-\(appearance)")
             app.terminate()
         }
     }
