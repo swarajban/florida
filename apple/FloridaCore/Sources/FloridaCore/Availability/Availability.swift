@@ -113,6 +113,25 @@ public enum Availability {
         return merge(normalized + [range])
     }
 
+    public static func selection(_ ranges: [AvailabilityRange], minimumMinutes: Int) -> [AvailabilityRange] {
+        merge(ranges).filter { $0.end.timeIntervalSince($0.start) >= Double(max(0, minimumMinutes)) * 60 }
+    }
+
+    public static func paintedRange(
+        on day: Date, fromMinute: Int, toMinute: Int, calendar: Calendar
+    ) -> AvailabilityRange {
+        let grid = TimeGrid()
+        let first = grid.snappedMinute(forY: Double(fromMinute))
+        let last = grid.snappedMinute(forY: Double(toMinute))
+        let low = min(1425, min(first, last))
+        let high = max(low + 15, max(first, last))
+        let start = BlockDrag.date(onDay: day, minute: low, calendar: calendar)
+        let end = high == 1440
+            ? calendar.startOfDay(for: calendar.date(byAdding: .day, value: 1, to: day) ?? day)
+            : BlockDrag.date(onDay: day, minute: high, calendar: calendar)
+        return AvailabilityRange(start: start, end: end)
+    }
+
     public static func clipped(
         _ range: AvailabilityRange, to free: [AvailabilityRange], minimumMinutes: Int
     ) -> [AvailabilityRange] {

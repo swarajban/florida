@@ -90,8 +90,10 @@ extension AppModel {
     }
 
     func toggleAvailabilityCursor() {
-        guard let cursor = availabilityShare?.cursor else { return }
-        availabilityShare?.selected = Availability.toggle(cursor, in: availabilityShare?.selected ?? [])
+        guard var share = availabilityShare, let cursor = share.cursor else { return }
+        share.selected = Availability.selection(
+            Availability.toggle(cursor, in: share.selected), minimumMinutes: share.meetingMinutes)
+        availabilityShare = share
     }
 
     func nextAvailabilitySuggestion(backwards: Bool = false) {
@@ -121,7 +123,8 @@ extension AppModel {
             return
         }
         if share.selected.contains(where: { $0.start <= old.start && $0.end >= old.end }) {
-            share.selected = Availability.merge(Availability.subtract(share.selected, removing: old) + [range])
+            share.selected = Availability.selection(
+                Availability.subtract(share.selected, removing: old) + [range], minimumMinutes: share.meetingMinutes)
         }
         share.cursor = range
         availabilityShare = share
@@ -143,17 +146,11 @@ extension AppModel {
                 removes: share.selected.contains { $0.start <= start && start < $0.end })
         }
         guard let paint = share.paint else { return }
-        let low = min(paint.minute, endMinute)
-        let high = max(paint.minute + 15, endMinute)
-        let start = BlockDrag.date(onDay: paint.day, minute: low, calendar: calendar)
-        let end = high >= 1440
-            ? calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: paint.day)) ?? start
-            : BlockDrag.date(onDay: paint.day, minute: high, calendar: calendar)
-        let range = AvailabilityRange(start: start, end: end)
+        let range = Availability.paintedRange(
+            on: paint.day, fromMinute: paint.minute, toMinute: endMinute, calendar: calendar)
         if paint.removes {
-            share.selected = Availability.subtract(paint.original, removing: range).filter {
-                $0.end.timeIntervalSince($0.start) >= Double(share.meetingMinutes) * 60
-            }
+            share.selected = Availability.selection(
+                Availability.subtract(paint.original, removing: range), minimumMinutes: share.meetingMinutes)
         } else {
             let additions = Availability.clipped(range, to: share.free, minimumMinutes: share.meetingMinutes)
             share.selected = Availability.merge(paint.original + additions)

@@ -19,6 +19,12 @@ final class AvailabilityTests: XCTestCase {
             XCTAssertFalse(initial.isEmpty)
             XCTAssertTrue(app.buttons["availability-copy"].isEnabled)
             XCTAssertTrue(app.staticTexts["availability-sync-warning"].exists)
+            let headers = app.otherElements["calendar-day-headers"]
+            XCTAssertTrue(headers.exists)
+            headers.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).rightClick()
+            XCTAssertFalse(app.menuItems["Follow the Routine"].exists)
+            XCTAssertFalse(app.menuItems["Home"].exists)
+            XCTAssertFalse(app.menuItems["Office"].exists)
             app.typeKey(.downArrow, modifierFlags: [])
             let moved = preview.value as? String ?? preview.label
             XCTAssertNotEqual(moved, initial)
@@ -71,6 +77,34 @@ final class AvailabilityTests: XCTestCase {
             XCTAssertTrue(app.staticTexts["Book dentist appointment"].exists)
             app.terminate()
         }
+    }
+
+    @MainActor
+    func testTogglingPartOfExtendedRangeNeverOffersAShortFragment() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-demoData", "YES"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 15))
+        app.typeKey("d", modifierFlags: [])
+        app.typeKey("l", modifierFlags: .shift)
+        let daysToMonday = (9 - Calendar.current.component(.weekday, from: Date())) % 7
+        for _ in 0..<daysToMonday { app.typeKey("l", modifierFlags: []) }
+        openAvailability(app)
+        let preview = app.staticTexts["availability-preview"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["availability-copy"].isEnabled)
+        app.typeKey(.downArrow, modifierFlags: .shift)
+        app.typeKey(.tab, modifierFlags: [])
+        app.typeKey(.space, modifierFlags: [])
+        XCTAssertFalse(app.buttons["availability-copy"].isEnabled)
+        XCTAssertTrue((preview.value as? String ?? preview.label).contains("Select a suggested range"))
+        app.typeKey(.return, modifierFlags: [])
+        XCTAssertTrue(preview.exists)
+        XCTAssertTrue(app.staticTexts["Select at least one free range to copy"].exists)
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(preview.waitForNonExistence(timeout: 5))
     }
 
     @MainActor

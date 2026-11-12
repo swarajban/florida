@@ -90,6 +90,33 @@ import Testing
         #expect(Availability.clipped(Self.hours(5, 2), to: free, minimumMinutes: -1).isEmpty)
     }
 
+    @Test func selectingPartOfAnExtendedRangeDoesNotLeaveAnUnusableFragment() {
+        let start = Self.date("2026-11-12T17:00:00Z")
+        let suggestion = AvailabilityRange(start: start, end: start.addingTimeInterval(1800))
+        let extended = AvailabilityRange(start: start, end: start.addingTimeInterval(2700))
+        #expect(Availability.selection(Availability.toggle(suggestion, in: [extended]), minimumMinutes: 30).isEmpty)
+        let moved = AvailabilityRange(start: start.addingTimeInterval(1800), end: start.addingTimeInterval(3600))
+        #expect(Availability.selection(
+            Availability.subtract([extended], removing: suggestion) + [moved], minimumMinutes: 30
+        ) == [moved])
+        #expect(Availability.selection([suggestion], minimumMinutes: 30) == [suggestion])
+    }
+
+    @Test func paintingIsSymmetricSnappedAndHasAOneSlotMinimum() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = Self.pacific
+        let day = Self.date("2026-11-12T08:00:00Z")
+        let forward = Availability.paintedRange(on: day, fromMinute: 540, toMinute: 600, calendar: calendar)
+        let backward = Availability.paintedRange(on: day, fromMinute: 600, toMinute: 540, calendar: calendar)
+        #expect(forward == backward)
+        #expect(forward == Self.range("2026-11-12T17:00:00Z", "2026-11-12T18:00:00Z"))
+        #expect(Availability.paintedRange(on: day, fromMinute: 541, toMinute: 599, calendar: calendar) == forward)
+        #expect(Availability.paintedRange(on: day, fromMinute: 540, toMinute: 540, calendar: calendar)
+            == Self.range("2026-11-12T17:00:00Z", "2026-11-12T17:15:00Z"))
+        #expect(Availability.paintedRange(on: day, fromMinute: 1440, toMinute: 1440, calendar: calendar)
+            == Self.range("2026-11-13T07:45:00Z", "2026-11-13T08:00:00Z"))
+    }
+
     @Test func eventPredicateUsesTimedLiveOpaqueNotDeclinedOrCancelledEventsOnly() {
         let event = Self.event()
         #expect(Availability.eventBlocksTime(event))

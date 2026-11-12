@@ -23,6 +23,10 @@ struct CalendarGridView: View {
     var body: some View {
         VStack(spacing: 0) {
             DayHeaderView(gutterWidth: Self.gutterWidth)
+                .disabled(model.availabilityShare != nil)
+                .allowsHitTesting(model.availabilityShare == nil)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("calendar-day-headers")
             Divider()
             AllDayStripView(gutterWidth: Self.gutterWidth)
                 .disabled(model.availabilityShare != nil)
