@@ -4,7 +4,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { eq } from 'drizzle-orm'
 import type { Hono } from 'hono'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../src/app.js'
 import { ChangeBus } from '../src/changes.js'
 import type { Db } from '../src/db/client.js'
@@ -15,6 +15,8 @@ import { createTestDb } from './db.js'
 import { FakeSync, testConfig as config } from './fixtures.js'
 
 const LA = 'America/Los_Angeles'
+
+vi.setSystemTime(new Date('2026-11-09T09:00:00-08:00'))
 
 interface RpcResponse {
   jsonrpc: '2.0'
@@ -63,7 +65,13 @@ beforeAll(async () => {
   app = createApp({ db, config, sync: new FakeSync(), reschedule: () => runScheduling(db, config), changes })
 })
 
-afterAll(() => close())
+afterAll(async () => {
+  try {
+    await close()
+  } finally {
+    vi.useRealTimers()
+  }
+})
 
 async function post(body: unknown, extraHeaders: Record<string, string> = {}): Promise<Response> {
   return app.request('/mcp', { method: 'POST', headers: { ...headers, ...extraHeaders }, body: JSON.stringify(body) })

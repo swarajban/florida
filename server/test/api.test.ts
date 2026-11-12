@@ -906,7 +906,10 @@ describe('calendar event writes', () => {
     })
   })
 
-  afterAll(() => unsubscribe())
+  afterAll(async () => {
+    unsubscribe()
+    await db.delete(events).where(eq(events.calendarId, 'cal-rw'))
+  })
 
   it('PUT with a new id creates the event on Google and stores it under the client id', async () => {
     const before = notices
@@ -1573,7 +1576,6 @@ describe('calendar event writes', () => {
     expect((await api(`/api/events/${id}`, { method: 'DELETE' })).status).toBe(200)
     expect(fake.googleEvents.has(master)).toBe(true)
     expect(fake.googleEvents.has(`${master}_second`)).toBe(true)
-    await db.delete(events).where(eq(events.recurringEventId, master))
   })
 
   it('rejects invalid recurrence before creating anything on Google', async () => {
