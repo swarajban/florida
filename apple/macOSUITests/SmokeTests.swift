@@ -64,11 +64,16 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(document.waitForExistence(timeout: 5))
             let shelf = app.scrollViews["event-resource-shelf"]
             let runbook = app.buttons["event-resource-https://wiki.example.com/scheduler"]
+            let unexpectedTiles = shelf.buttons.matching(NSPredicate(
+                format: "identifier BEGINSWITH %@ AND NOT (identifier IN %@)",
+                argumentArray: ["event-resource-", resourceURLs.map { "event-resource-\($0)" }]))
+            XCTAssertEqual(unexpectedTiles.count, 0)
             var shortcuts = Set<String>()
             for url in resourceURLs {
                 let tile = shelf.buttons["event-resource-\(url)"]
                 for _ in 0..<4 where !tile.isHittable {
                     shelf.scroll(byDeltaX: 0, deltaY: -80)
+                    XCTAssertEqual(unexpectedTiles.count, 0)
                 }
                 XCTAssertTrue(tile.waitForExistence(timeout: 5), url)
                 XCTAssertTrue(tile.isHittable, url)
@@ -76,6 +81,7 @@ final class SmokeTests: XCTestCase {
                 XCTAssertFalse(shortcut.isEmpty, url)
                 XCTAssertTrue(shortcut.allSatisfy(\.isNumber), url)
                 XCTAssertTrue(shortcuts.insert(shortcut).inserted, url)
+                XCTAssertEqual(unexpectedTiles.count, 0)
             }
             XCTAssertTrue(runbook.isHittable)
             XCTAssertEqual(shortcuts.count, 11)
