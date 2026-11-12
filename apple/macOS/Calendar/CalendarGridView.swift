@@ -71,8 +71,11 @@ struct CalendarGridView: View {
             }
             .onScrollGeometryChange(for: CGRect.self) { geometry in
                 geometry.visibleRect
-            } action: { _, rect in
+            } action: { old, rect in
                 model.gridVisibleRect = rect
+                if old.height != rect.height, model.availabilityShare != nil {
+                    model.revealAvailabilityCursor()
+                }
                 if let target = model.gridScrollTarget, abs(rect.minY - target) < 0.5 {
                     model.gridScrollTarget = nil
                 }
