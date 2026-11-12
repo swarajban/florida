@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 
 public enum WindowBounds {
     public static func clamped(_ frame: CGRect, to visibleFrame: CGRect) -> CGRect {
