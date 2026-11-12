@@ -21,7 +21,7 @@ on:
 
 concurrency:
   group: ${{ inputs.ui_only && format('apple-ui-{0}', github.ref) || format('ios-run-{0}', github.run_id) }}
-  cancel-in-progress: ${{ inputs.ui_only }}
+  cancel-in-progress: ${{ inputs.ui_only == true }}
 
 jobs:
   policy:
