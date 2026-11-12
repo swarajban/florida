@@ -78,9 +78,8 @@ final class EventQuickAddTests: XCTestCase {
         app.textFields["event-quick-add-input"].typeText("Day off today all day #missing-calendar")
         XCTAssertFalse(app.buttons["event-quick-add-save"].isEnabled)
         XCTAssertTrue(element("event-quick-add-error", in: app).exists)
-        let scroll = app.scrollViews["event-quick-add-scroll"]
-        for _ in 0..<5 where !app.buttons["event-quick-add-calendar"].isHittable { scroll.swipeUp() }
-        app.buttons["event-quick-add-calendar"].tap()
+        XCTAssertTrue(app.buttons["event-quick-add-calendar"].exists)
+        app.buttons["event-quick-add-destination"].tap()
         let personal = app.buttons["event-quick-add-calendar-demo-cal-personal"]
         XCTAssertTrue(personal.waitForExistence(timeout: 5))
         personal.tap()

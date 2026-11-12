@@ -16,8 +16,13 @@ struct EventQuickAddComposer: View {
     @State private var session: EventQuickAddSession
     @State private var activeField: Field?
     @State private var error: String?
+    #if os(iOS)
+    @State private var inputFocused = false
+    @State private var correctionFocused = false
+    #else
     @FocusState private var inputFocused: Bool
     @FocusState private var correctionFocused: Bool
+    #endif
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(
@@ -99,6 +104,13 @@ struct EventQuickAddComposer: View {
 
     private var input: some View {
         VStack(alignment: .leading, spacing: 12) {
+            #if os(iOS)
+            EventComposerTextField(
+                placeholder: "Lunch tomorrow 12-1 at Blue Bottle #work",
+                text: Binding(get: { session.text }, set: { session.updateText($0); error = nil }),
+                focused: $inputFocused, identifier: "event-quick-add-input",
+                onSubmit: { if activeField == nil { save() } })
+            #else
             TextField("Lunch tomorrow 12-1 at Blue Bottle #work", text: Binding(
                 get: { session.text },
                 set: { session.updateText($0); error = nil }))
@@ -107,11 +119,7 @@ struct EventQuickAddComposer: View {
                 .focused($inputFocused)
                 .onSubmit { if activeField == nil { save() } }
                 .accessibilityIdentifier("event-quick-add-input")
-                #if os(iOS)
-                .submitLabel(.done)
-                .textInputAutocapitalization(.sentences)
-                .autocorrectionDisabled()
-                #endif
+            #endif
             Text("Dates use month/day. Times use \(calendar.timeZone.identifier).")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -134,13 +142,7 @@ struct EventQuickAddComposer: View {
             .buttonStyle(.plain)
             .keyboardShortcut("6", modifiers: .command)
             .accessibilityIdentifier("event-quick-add-title")
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: dynamicTypeSize.isAccessibilitySize ? 230 : 145), alignment: .leading)], alignment: .leading, spacing: 10) {
-                chip(.date, value: dateText, symbol: "calendar", key: "1")
-                chip(.time, value: timeText, symbol: "clock", key: "2")
-                chip(.calendar, value: destination?.summary ?? "Choose calendar", symbol: "tray", key: "3")
-                chip(.recurrence, value: recurrenceText, symbol: "repeat", key: "4")
-                chip(.location, value: session.draft.location ?? "Add location", symbol: "mappin.and.ellipse", key: "5")
-            }
+            previewChips
             if session.hasCorrections {
                 Button("Reset corrections") { session.resetCorrections(); error = nil }
                     .font(.caption)
@@ -154,6 +156,34 @@ struct EventQuickAddComposer: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             #endif
+        }
+    }
+
+    @ViewBuilder
+    private var previewChips: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(spacing: 10) {
+                chip(.date, value: dateText, symbol: "calendar", key: "1")
+                chip(.time, value: timeText, symbol: "clock", key: "2")
+                chip(.calendar, value: destination?.summary ?? "Choose calendar", symbol: "tray", key: "3")
+                chip(.recurrence, value: recurrenceText, symbol: "repeat", key: "4")
+                chip(.location, value: session.draft.location ?? "Add location", symbol: "mappin.and.ellipse", key: "5")
+            }
+        } else {
+            Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 10) {
+                GridRow {
+                    chip(.date, value: dateText, symbol: "calendar", key: "1")
+                    chip(.time, value: timeText, symbol: "clock", key: "2")
+                }
+                GridRow {
+                    chip(.calendar, value: destination?.summary ?? "Choose calendar", symbol: "tray", key: "3")
+                    chip(.recurrence, value: recurrenceText, symbol: "repeat", key: "4")
+                }
+                GridRow {
+                    chip(.location, value: session.draft.location ?? "Add location", symbol: "mappin.and.ellipse", key: "5")
+                        .gridCellColumns(2)
+                }
+            }
         }
     }
 
@@ -174,18 +204,29 @@ struct EventQuickAddComposer: View {
     }
 
     private var destinationLabel: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("SAVING TO").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-            if let destination {
-                Text(destination.summary).font(.subheadline.weight(.semibold))
-                Text(accounts.first { $0.id == destination.accountId }?.email ?? "Account unavailable")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("Choose a calendar and account before saving.").font(.subheadline)
+        Button { open(.calendar) } label: {
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("SAVING TO").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    if let destination {
+                        let email = accounts.first { $0.id == destination.accountId }?.email ?? "Account unavailable"
+                        Text(destination.summary).font(.subheadline.weight(.semibold))
+                        if destination.summary != email {
+                            Text(email).font(.subheadline).foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Text("Choose calendar").font(.subheadline)
+                    }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.down").font(.caption)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
-        .accessibilityElement(children: .combine)
+        .buttonStyle(.plain)
+        .multilineTextAlignment(.leading)
         .accessibilityLabel(destinationAccessibilityLabel)
         .accessibilityIdentifier("event-quick-add-destination")
     }
@@ -221,13 +262,27 @@ struct EventQuickAddComposer: View {
             Form {
                 switch field {
                 case .title:
+                    #if os(iOS)
+                    EventComposerTextField(
+                        placeholder: "Title", text: Binding(get: { session.draft.title }, set: { session.setTitle($0) }),
+                        focused: Binding(get: { correctionFocused }, set: { correctionFocused = $0 }),
+                        identifier: "event-quick-add-edit-title", onSubmit: { activeField = nil })
+                    #else
                     TextField("Title", text: Binding(get: { session.draft.title }, set: { session.setTitle($0) }))
                         .focused($correctionFocused)
                         .accessibilityIdentifier("event-quick-add-edit-title")
+                    #endif
                 case .location:
+                    #if os(iOS)
+                    EventComposerTextField(
+                        placeholder: "Location", text: Binding(get: { session.draft.location ?? "" }, set: { session.setLocation($0) }),
+                        focused: Binding(get: { correctionFocused }, set: { correctionFocused = $0 }),
+                        identifier: "event-quick-add-edit-location", onSubmit: { activeField = nil })
+                    #else
                     TextField("Location", text: Binding(get: { session.draft.location ?? "" }, set: { session.setLocation($0) }))
                         .focused($correctionFocused)
                         .accessibilityIdentifier("event-quick-add-edit-location")
+                    #endif
                 case .date:
                     DatePicker("Date", selection: Binding(get: { session.localStart }, set: { session.moveStart(to: $0) }), displayedComponents: .date)
                         .accessibilityIdentifier("event-quick-add-date-picker")

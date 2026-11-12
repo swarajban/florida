@@ -403,7 +403,7 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(app.buttons["event-quick-add-location"].exists)
             let destination = app.descendants(matching: .any).matching(identifier: "event-quick-add-destination").firstMatch
             XCTAssertTrue(destination.waitForExistence(timeout: 5))
-            XCTAssertTrue(destination.label.contains("demo@sempre-health.com"))
+            XCTAssertTrue((destination.value as? String ?? destination.label).contains("demo@sempre-health.com"), destination.debugDescription)
             capture(app.windows.firstMatch, "event-preview-\(appearance)")
 
             app.typeKey("6", modifierFlags: .command)
@@ -419,7 +419,7 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(personal.waitForExistence(timeout: 5))
             personal.click()
             XCTAssertTrue(personal.waitForNonExistence(timeout: 5))
-            XCTAssertTrue(destination.label.contains("demo@personal.example"))
+            XCTAssertTrue((destination.value as? String ?? destination.label).contains("demo@personal.example"), destination.debugDescription)
             capture(app.windows.firstMatch, "event-corrected-\(appearance)")
             app.typeKey(.return, modifierFlags: [])
             XCTAssertTrue(input.waitForNonExistence(timeout: 5))

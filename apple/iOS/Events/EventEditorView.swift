@@ -16,7 +16,7 @@ struct EventEditorView: View {
     /// The clock and length of the timed event from before All-day was switched on, so switching
     /// it off again brings them back on whatever day is chosen by then.
     @State private var timedShape: (hour: Int, minute: Int, duration: TimeInterval)?
-    @FocusState private var titleFocused: Bool
+    @State private var titleFocused = false
     private let isNew: Bool
 
     init(event: CalendarEvent, isNew: Bool, recurrence: EventRecurrence? = nil) {
@@ -36,10 +36,10 @@ struct EventEditorView: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Title", text: title)
-                        .focused($titleFocused)
-                        .submitLabel(.done)
-                        .onSubmit { titleFocused = false }
+                    EventComposerTextField(
+                        placeholder: "Title", text: title,
+                        focused: Binding(get: { titleFocused }, set: { titleFocused = $0 }),
+                        onSubmit: { titleFocused = false })
                 }
 
                 Section {
