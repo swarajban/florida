@@ -606,6 +606,75 @@ final class SmokeTests: XCTestCase {
     }
 
     @MainActor
+    func testSelectorKeyboardRoutingInBothAppearances() throws {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-demoData", "YES", "-uiAppearance", appearance]
+            app.launch()
+            defer { app.terminate() }
+            let dentist = app.buttons["task-done-demo-task-dentist"]
+            XCTAssertTrue(dentist.waitForExistence(timeout: 15))
+            dentist.click()
+            XCTAssertTrue(dentist.waitForNonExistence(timeout: 5))
+            try typeJumpLabel(of: "demo-task-vpn", in: app)
+            let priority = app.buttons["task-priority"]
+            XCTAssertTrue(priority.waitForExistence(timeout: 5))
+            for (number, value) in [("1", "ASAP"), ("2", "High"), ("3", "Medium"), ("4", "Low"), ("3", "Medium")] {
+                app.typeKey(number, modifierFlags: .command)
+                waitForValue(value, of: priority)
+            }
+            app.typeKey("z", modifierFlags: [])
+            XCTAssertTrue(priority.exists)
+            XCTAssertFalse(dentist.exists, "z must not undo a completion while the editor is open")
+            app.typeKey("p", modifierFlags: [])
+            let prioritySearch = app.textFields["task-priority-search"]
+            XCTAssertTrue(prioritySearch.waitForExistence(timeout: 5))
+            let medium = app.buttons["task-priority-option-2"]
+            let low = app.buttons["task-priority-option-3"]
+            waitForValue("Highlighted", of: medium)
+            app.typeKey(.downArrow, modifierFlags: [])
+            waitForValue("Highlighted", of: low)
+            app.typeKey("p", modifierFlags: .control)
+            waitForValue("Highlighted", of: medium)
+            app.typeKey("n", modifierFlags: .control)
+            waitForValue("Highlighted", of: low)
+            app.typeKey(.upArrow, modifierFlags: [])
+            waitForValue("Highlighted", of: medium)
+            app.typeKey("n", modifierFlags: .control)
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(prioritySearch.waitForNonExistence(timeout: 5))
+            waitForValue("Low", of: priority)
+
+            app.typeKey("d", modifierFlags: [])
+            let dueSearch = app.textFields["task-due-search"]
+            XCTAssertTrue(dueSearch.waitForExistence(timeout: 5))
+            app.typeKey(.rightArrow, modifierFlags: [])
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(dueSearch.waitForNonExistence(timeout: 5))
+            let calendar = Calendar.current
+            let today = calendar.startOfDay(for: Date())
+            waitForValue(today.formatted(.dateTime.month(.abbreviated).day().year()), of: app.buttons["task-due"])
+
+            app.typeKey("s", modifierFlags: [])
+            let startSearch = app.textFields["task-start-search"]
+            XCTAssertTrue(startSearch.waitForExistence(timeout: 5))
+            app.typeKey(.tab, modifierFlags: [])
+            app.typeKey("2", modifierFlags: [])
+            XCTAssertTrue(startSearch.waitForNonExistence(timeout: 5), "a single number on the calendar must pick its quick date")
+            let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+            let afterTomorrow = calendar.date(byAdding: .day, value: 2, to: today)!
+            waitForValue(tomorrow.formatted(.dateTime.month(.abbreviated).day().year()), of: app.buttons["task-start"])
+            waitForValue(afterTomorrow.formatted(.dateTime.month(.abbreviated).day().year()), of: app.buttons["task-due"])
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(priority.waitForNonExistence(timeout: 5))
+            XCTAssertFalse(dentist.exists)
+            app.typeKey("z", modifierFlags: [])
+            XCTAssertTrue(dentist.waitForExistence(timeout: 5), "z must work again after leaving the editor")
+        }
+    }
+
+    @MainActor
     func testTaskPaneClicksInBothAppearances() {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {

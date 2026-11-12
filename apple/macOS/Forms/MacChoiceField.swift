@@ -126,6 +126,7 @@ private struct MacChoiceSelector<Value: Hashable>: View {
                             }
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("\(identifier)-option-\(index)")
+                            .accessibilityValue(highlighted == row ? "Highlighted" : "Not highlighted")
                             .accessibilityAddTraits(highlighted == row ? .isSelected : [])
                             .id(row)
                         }
