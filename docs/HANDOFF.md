@@ -321,7 +321,7 @@ Status unknown, not checked: de-duplicating an event shared into both Google acc
 
 - TypeScript, from the root: `pnpm build && pnpm typecheck && pnpm test`.
 - Swift packages, inside `apple/FloridaCore` or `apple/FloridaKit` in an orb: `. ~/.local/share/swiftly/env.sh && swift build --build-tests && swift test`.
-- The app targets (SwiftUI, AppKit, WidgetKit) only compile with Xcode. On a connected Mac, use `bash apple/scripts/check.sh build`, then `ios` and `macos` for the UI suites before pushing. Single-test commands are in `apple/README.md`. PR CI is a backstop; a Linux build does not catch Darwin-only name clashes. If no Mac is connected, report local app verification as unavailable.
+- The app targets (SwiftUI, AppKit, WidgetKit) only compile with Xcode. On a connected Mac, use `bash apple/scripts/check.sh build` and targeted UI tests while editing; use `ios` and `macos` for full local suites. PR CI compiles every Apple-changing push; request its full UI gate once the head is otherwise ready with `gh workflow run ios.yml --ref <PR-branch> -f ui_only=true`, then require green UI checks on that head before merge. Single-test commands are in `apple/README.md`. If no Mac is connected, report local app verification as unavailable.
 
 **Historical Mac satellite, as used in the build thread**
 
@@ -334,7 +334,7 @@ Status unknown, not checked: de-duplicating an event shared into both Google acc
 
 **CI and shipping**
 
-- `ci.yml` runs on every push to `main` and on pull requests: scheduler and server plus the Swift packages on Linux. Apple-changing PRs also build both app schemes once, run Darwin package tests, and reuse test products in separate Mac and sharded iPhone UI jobs. See `apple/README.md` for caching, bounded failed-test retries and artifacts.
+- `ci.yml` runs on every push to `main` and on pull requests: scheduler and server plus the Swift packages on Linux. Apple-changing PRs also compile both apps, widgets and UI bundles once, with no UI execution. An explicit `ui_only` dispatch of `ios.yml` runs the cached build plus Darwin package tests and reuses its products in separate Mac and sharded iPhone UI jobs. See `apple/README.md` for requesting the pre-merge gate, retries and artifacts.
 - `ios.yml` runs on changes under `apple/` on `main` (not branch pushes or PRs): the full iPhone and widget suite, then TestFlight. Manual releases remain available.
 - `macos.yml` runs on pushes to `main` that change `apple/`: the Mac UI smoke test, then a TestFlight upload.
 - A push to `main` that touches `apple/` starts two test-gated releases. Allow for runner capacity, the full UI suites and Apple processing; the previous 20-minute estimate is no longer reliable. Apple allows about 20 uploads per app per day.

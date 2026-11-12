@@ -9,7 +9,7 @@ Single-user personal calendar + auto-scheduled tasks (Motion replacement). Speed
 - `apple/` — XcodeGen spec (`project.yml`), two local Swift packages, and the `iOS/`, `Widgets/`, `macOS/` target sources.
   - `apple/FloridaCore/` — dependency-free models (wire-compatible with the server JSON), quick-add parser, keyboard engine, calendar layout math. Pure logic, no I/O.
   - `apple/FloridaKit/` — GRDB/SQLite store, sync client, token store; re-exports FloridaCore. Depends on GRDB 7.
-  - Both packages build and test on Linux (`swift build --build-tests && swift test` inside each; Swift 6.4 via swiftly). App targets need Xcode: on a connected Mac, run `bash apple/scripts/check.sh build` before pushing, then `bash apple/scripts/check.sh ios` and `bash apple/scripts/check.sh macos` for UI changes. See `apple/README.md` for single-test commands. PR CI is the backstop, not the compile loop; report when no Mac is available.
+  - Both packages build and test on Linux (`swift build --build-tests && swift test` inside each; Swift 6.4 via swiftly). App targets need Xcode: on a connected Mac, run `bash apple/scripts/check.sh build` before pushing and targeted UI tests while editing. PR CI compiles both apps, widgets and test bundles on every Apple-changing push, but does not run UI tests. Once the head is otherwise ready, request the complete UI gate with `gh workflow run ios.yml --ref <PR-branch> -f ui_only=true`; require its checks to pass on the current head before merge. See `apple/README.md` for full/local/single-test commands. PR CI is the backstop, not the compile loop; report when no Mac is available.
 
 ## Commands
 

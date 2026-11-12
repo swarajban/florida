@@ -110,10 +110,26 @@ jobs:
             -configuration Debug \
             -destination 'platform=macOS' \
             -parallel-testing-enabled NO \
+            -retry-tests-on-failure -test-iterations 2 \
             -derivedDataPath build \
             -resultBundlePath mac-ui.xcresult \
             CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM="" \
             | tee mac-ui-test.log | xcbeautify --renderer github-actions
+
+      - name: Report retried UI failures
+        if: always()
+        run: bash apple/scripts/report-ui-failures.sh apple/mac-ui-test.log
+
+      - name: Upload UI results and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-release-ui-results
+          path: |
+            apple/mac-ui.xcresult/
+            apple/mac-ui-test.log
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Archive for Apple silicon and Intel
         working-directory: apple

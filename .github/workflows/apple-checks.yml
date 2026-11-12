@@ -1,0 +1,117 @@
+name: Apple checks
+
+on:
+  workflow_call:
+    inputs:
+      run_ui:
+        description: Run the full UI suites after compiling
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  apple:
+    name: Build (Xcode)
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - run: brew install xcodegen
+      - name: Identify toolchain
+        id: xcode
+        run: |
+          xcodebuild -version
+          echo "version=$(xcodebuild -version | shasum -a 256 | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Cache SwiftPM downloads
+        uses: actions/cache@v4
+        with:
+          path: apple/build/SourcePackages
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('apple/**/Package.resolved', 'apple/**/Package.swift') }}
+      - name: Cache derived data
+        uses: actions/cache@v4
+        with:
+          path: |
+            apple/build/ios
+            apple/build/macos
+          key: xcode-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('apple/**/*.swift', 'apple/**/*.yml', 'apple/**/*.plist', 'apple/**/*.entitlements', 'apple/**/Package.resolved', 'apple/Design/Assets.xcassets/**', 'apple/scripts/**') }}
+          restore-keys: |
+            xcode-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-
+      - name: Build both apps, widgets, and test runners once
+        run: |
+          set -o pipefail
+          bash apple/scripts/check.sh build | tee apple/build.log | xcbeautify --renderer github-actions
+      - name: FloridaCore tests (macOS)
+        if: inputs.run_ui
+        run: swift test
+        working-directory: apple/FloridaCore
+      - name: FloridaKit tests (macOS)
+        if: inputs.run_ui
+        run: swift test
+        working-directory: apple/FloridaKit
+      - name: Package reusable test products
+        if: inputs.run_ui
+        run: |
+          xcodebuild -version > apple/build/xcode-version.txt
+          tar -czf "$RUNNER_TEMP/apple-tests.tgz" -C apple/build ios/Build/Products macos/Build/Products xcode-version.txt
+      - uses: actions/upload-artifact@v4
+        if: inputs.run_ui
+        with:
+          name: apple-test-products
+          path: ${{ runner.temp }}/apple-tests.tgz
+          retention-days: 1
+      - name: Upload build log on failure
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-build-log
+          path: apple/*.log
+          if-no-files-found: ignore
+
+  apple-ui:
+    name: UI (${{ matrix.suite }})
+    needs: apple
+    if: inputs.run_ui
+    runs-on: macos-26
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [macos, ios-capture, ios-other]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: apple-test-products
+          path: ${{ runner.temp }}/apple-tests
+      - name: Restore test products
+        run: |
+          mkdir -p apple/build
+          tar -xzf "$RUNNER_TEMP/apple-tests/apple-tests.tgz" -C apple/build
+          diff apple/build/xcode-version.txt <(xcodebuild -version)
+      - name: Run suite without rebuilding
+        env:
+          TEST_WITHOUT_BUILDING: '1'
+          RETRY_FAILED_TESTS: '1'
+        run: |
+          set -o pipefail
+          case '${{ matrix.suite }}' in
+            macos) args=(macos) ;;
+            ios-capture) args=(ios -only-testing:Florida-iOSUITests/SmokeTests/testUnifiedTaskCapture -only-testing:Florida-iOSUITests/SmokeTests/testCapturePasteAndDeletedCategory -only-testing:Florida-iOSUITests/SmokeTests/testPlanScreensInBothAppearances) ;;
+            ios-other) args=(ios -skip-testing:Florida-iOSUITests/SmokeTests/testUnifiedTaskCapture -skip-testing:Florida-iOSUITests/SmokeTests/testCapturePasteAndDeletedCategory -skip-testing:Florida-iOSUITests/SmokeTests/testPlanScreensInBothAppearances) ;;
+          esac
+          bash apple/scripts/check.sh "${args[@]}" | tee apple/ui-test.log | xcbeautify --renderer github-actions
+      - name: Report retried failures
+        if: always()
+        run: bash apple/scripts/report-ui-failures.sh apple/ui-test.log
+      - name: Upload UI results and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-${{ matrix.suite }}
+          path: |
+            apple/build/results/
+            apple/ui-test.log
+          retention-days: 7
+          if-no-files-found: ignore

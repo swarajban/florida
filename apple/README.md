@@ -60,25 +60,49 @@ failed tests without changing assertions. A passing retry is not a flake fix.
 
 ### Pull request and release checks
 
-`ci.yml` keeps TypeScript and both Linux Swift package suites on every PR. Apple
-jobs run only if the PR changes `apple/**` or one of the three CI/release
-workflows. One Xcode job
-builds both schemes for testing, caches SwiftPM downloads and derived data by
-toolchain/architecture, and uploads the compiled products. Three independent
-jobs run `test-without-building`: the full Mac suite, iPhone capture/plan tests, and
-all remaining iPhone tests plus widget tests. The capture shard explicitly
-selects three long tests; the other shard excludes only those three, so new tests
-automatically join the gate. Each shard is serial to avoid desktop/simulator
-interaction races; failure in one does not cancel the others.
+On **every PR push**, `ci.yml` runs TypeScript and both Linux Swift package
+suites. If the PR changes `apple/**` or an Apple CI/release workflow, one
+compile-only Xcode job builds both apps, the widgets and UI test bundles. It
+caches SwiftPM and derived data by toolchain/architecture, but runs no UI tests.
+Superseded PR runs are cancelled. Branch pushes do not start a duplicate iPhone
+workflow, and unrelated PRs use no macOS runners.
 
-Superseded PR runs are cancelled, and branch pushes no longer duplicate the
-iPhone PR suite. Failed PR UI tests get at most one native XCTest retry; the
-first failure stays in the raw log and xcresult, with a warning and job summary
-when a failed test is logged. Results and logs are artifacts for seven days.
+**Once before merge**, when the head is otherwise ready, request both UI suites:
+
+```sh
+gh workflow run ios.yml --ref <PR-branch> -f ui_only=true
+gh run list --workflow ios.yml --branch <PR-branch> --event workflow_dispatch
+```
+
+This explicit dispatch uses the existing iOS workflow's `ui_only` mode: it never
+starts a release or reads release secrets. It runs against the branch head, so
+its **On-demand Apple UI** checks appear on that commit in the PR. Unlike a
+sticky label, it does not rerun on each subsequent push. Confirm the run's
+`headSha` matches the PR's current `headRefOid` (`gh run view <run-id> --json headSha`
+and `gh pr view <PR> --json headRefOid`) and require all UI checks to pass before
+merge. A later push invalidates that result: cancel any stale run with
+`gh run cancel <run-id>` and request a new run when ready. A new UI request on
+the same branch automatically cancels a superseded request. UI-only requests
+have a separate concurrency group, so they cannot cancel or replace a queued
+release, even if dispatched on main.
+
+The on-demand run uses the same cached build recipe as the compile gate, builds both
+schemes once and runs Darwin package tests, then uploads the compiled products.
+Three independent jobs use `test-without-building`: the full Mac suite, iPhone
+capture/plan tests, and all remaining iPhone tests plus widget tests. The capture
+shard selects three long tests; the other excludes only those three, so new
+tests automatically join the gate. Each shard is serial to avoid desktop and
+simulator interaction races; failure in one does not cancel the others.
+
+PR and release UI tests get at most one native XCTest retry of failed tests
+only, without weakening assertions. First failures remain in the raw log and
+xcresult and are listed in the run summary even if the retry passes. Results
+and logs are artifacts for seven days; a passing retry is not a flake fix.
 
 Main's release workflows remain separate: `ios.yml` runs the complete iPhone
 and widget suite before upload; `macos.yml` runs the full Mac suite before its
-upload. Release runs are not cancelled by later pushes, do not use PR test
+upload. Ordinary manual iOS dispatches still release (`ui_only` defaults to
+false). Release runs are not cancelled by later pushes, do not use PR test
 artifacts, and retain `run_number * 10 + run_attempt` build numbering. A change
 under `apple/`, even a README or script, still triggers both releases on main.
 

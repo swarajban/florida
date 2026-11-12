@@ -1,6 +1,7 @@
 name: iOS
 
-# build:      runs the full simulator suite before an iOS release. PR checks live in ci.yml.
+# build:      runs the full simulator suite before an iOS release. PR compilation is ci.yml.
+# ui:         explicit ui_only dispatch runs both PR UI suites without release credentials.
 # testflight: archives, signs and uploads to TestFlight on pushes to main and on manual runs.
 #             Needs the App Store Connect secrets described in apple/README.md.
 on:
@@ -10,20 +11,33 @@ on:
       - "apple/**"
       - ".github/workflows/ios.yml"
   workflow_dispatch:
+    inputs:
+      ui_only:
+        description: Run both PR UI suites only (never upload)
+        type: boolean
+        default: false
 
 concurrency:
-  group: ios-${{ github.ref }}
-  # Superseded branch builds are cancelled, but never a main run: it may be mid-upload to
-  # TestFlight. Main runs queue instead.
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: ${{ inputs.ui_only && 'apple-ui' || 'ios' }}-${{ github.ref }}
+  # UI requests cannot displace releases. Superseded UI/branch runs are cancelled;
+  # main releases queue instead because they may be mid-upload to TestFlight.
+  cancel-in-progress: ${{ inputs.ui_only || github.ref != 'refs/heads/main' }}
 
 env:
   # Also set in apple/project.yml (the widget extension is $BUNDLE_ID.widgets).
   BUNDLE_ID: com.swarajban.florida
 
 jobs:
+  ui:
+    name: On-demand Apple UI
+    if: github.event_name == 'workflow_dispatch' && inputs.ui_only
+    uses: ./.github/workflows/apple-checks.yml
+    with:
+      run_ui: true
+
   build:
     name: Build (simulator)
+    if: inputs.ui_only != true
     runs-on: macos-26
     # Cold simulator boot plus the full light/dark capture suite can exceed 30 minutes.
     timeout-minutes: 45
@@ -78,10 +92,26 @@ jobs:
             -configuration Debug \
             -destination "id=$UDID" \
             -parallel-testing-enabled NO \
+            -retry-tests-on-failure -test-iterations 2 \
             -derivedDataPath build \
             -resultBundlePath ios-ui.xcresult \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             | tee ui-test.log | xcbeautify --renderer github-actions
+
+      - name: Report retried UI failures
+        if: always()
+        run: bash apple/scripts/report-ui-failures.sh apple/ui-test.log
+
+      - name: Upload UI results and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-release-ui-results
+          path: |
+            apple/ios-ui.xcresult/
+            apple/ui-test.log
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Export screenshots
         if: always()
@@ -110,7 +140,7 @@ jobs:
   testflight:
     name: Upload to TestFlight
     needs: build
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    if: inputs.ui_only != true && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
     runs-on: macos-26
     timeout-minutes: 45
     env:
