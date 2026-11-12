@@ -185,9 +185,9 @@ export class GoogleSync implements CalendarSyncService {
   }
 
   private async sync(calendar: CalendarRow, token: string, syncToken: string | null): Promise<void> {
-    const now = new Date()
-    const timeMin = new Date(now.getTime() - FULL_SYNC_PAST_DAYS * DAY).toISOString()
-    const timeMax = new Date(now.getTime() + FULL_SYNC_FUTURE_DAYS * DAY).toISOString()
+    const startedAt = new Date()
+    const timeMin = new Date(startedAt.getTime() - FULL_SYNC_PAST_DAYS * DAY).toISOString()
+    const timeMax = new Date(startedAt.getTime() + FULL_SYNC_FUTURE_DAYS * DAY).toISOString()
     const seen = new Set<string>()
     let pageToken: string | undefined
     let nextSyncToken: string | undefined
@@ -198,7 +198,7 @@ export class GoogleSync implements CalendarSyncService {
       const page = await listEvents(token, calendar.googleId, params)
       for (const item of page.items) {
         seen.add(item.id)
-        const row = mapEvent(calendar.id, item, now)
+        const row = mapEvent(calendar.id, item)
         await this.db
           .insert(events)
           .values({ id: randomUUID(), ...row })
@@ -216,13 +216,15 @@ export class GoogleSync implements CalendarSyncService {
         .where(and(eq(events.calendarId, calendar.id), isNull(events.deletedAt)))
       const stale = live.filter((e) => !seen.has(e.googleId)).map((e) => e.id)
       if (stale.length > 0) {
+        const now = new Date()
         await this.db.update(events).set({ deletedAt: now, updatedAt: now }).where(inArray(events.id, stale))
       }
     }
 
+    const completedAt = new Date()
     await this.db
       .update(calendars)
-      .set({ syncToken: nextSyncToken ?? syncToken, lastSyncedAt: now, updatedAt: now })
+      .set({ syncToken: nextSyncToken ?? syncToken, lastSyncedAt: completedAt, updatedAt: completedAt })
       .where(eq(calendars.id, calendar.id))
   }
 

@@ -1,6 +1,6 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { SchedulerResult } from '@florida/scheduler'
-import { and, eq, gt, isNull, or } from 'drizzle-orm'
+import { and, eq, getTableColumns, gt, isNotNull, isNull, or } from 'drizzle-orm'
 import type { PgColumn } from 'drizzle-orm/pg-core'
 import { Hono } from 'hono'
 import type { MiddlewareHandler } from 'hono'
@@ -258,7 +258,14 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
     const projectRows = await db.select().from(projects).where(changedAfter(projects.updatedAt))
     const dayOverrideRows = await db.select().from(dayOverrides).where(changedAfter(dayOverrides.updatedAt))
     const taskRows = await db.select().from(tasks).where(changedAfter(tasks.updatedAt))
-    const eventRows = await db.select().from(events).where(changedAfter(events.updatedAt))
+    const eventRows = await db
+      .select(getTableColumns(events))
+      .from(events)
+      .innerJoin(calendars, eq(events.calendarId, calendars.id))
+      .where(and(
+        changedAfter(events.updatedAt),
+        or(eq(calendars.selected, true), eq(calendars.blocksScheduling, true), isNotNull(events.deletedAt)),
+      ))
     // Small tables without tombstones: always sent in full so clients can replace them wholesale.
     const placementRows = await db.select().from(placements)
     const optionalPlacementRows = await db.select().from(optionalPlacements)
