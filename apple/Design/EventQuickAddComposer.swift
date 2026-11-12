@@ -16,6 +16,7 @@ struct EventQuickAddComposer: View {
     @State private var session: EventQuickAddSession
     @State private var activeField: Field?
     @State private var error: String?
+    @State private var resumeInputAfterCorrection = false
     #if os(iOS)
     @State private var inputFocused = false
     @State private var correctionFocused = false
@@ -95,7 +96,7 @@ struct EventQuickAddComposer: View {
         }
         .onAppear { inputFocused = true }
         .onChange(of: activeField) { _, field in
-            if field == nil { inputFocused = true }
+            if field == nil { inputFocused = resumeInputAfterCorrection }
         }
         #if os(macOS)
         .frame(width: 560, height: 540)
@@ -380,6 +381,7 @@ struct EventQuickAddComposer: View {
     }
 
     private func open(_ field: Field) {
+        resumeInputAfterCorrection = inputFocused
         inputFocused = false
         activeField = field
     }

@@ -17,6 +17,12 @@ struct EventComposerTextField: UIViewRepresentable {
         field.returnKeyType = .done
         field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         field.addTarget(context.coordinator, action: #selector(Coordinator.changed(_:)), for: .editingChanged)
+        let toolbar = UIToolbar()
+        let hide = UIBarButtonItem(title: "Hide keyboard", style: .plain, target: context.coordinator, action: #selector(Coordinator.hideKeyboard))
+        hide.accessibilityIdentifier = "event-quick-add-hide-keyboard"
+        toolbar.items = [UIBarButtonItem(systemItem: .flexibleSpace), hide]
+        toolbar.sizeToFit()
+        field.inputAccessoryView = toolbar
         return field
     }
 
@@ -37,6 +43,7 @@ struct EventComposerTextField: UIViewRepresentable {
         init(_ parent: EventComposerTextField) { self.parent = parent }
 
         @objc func changed(_ field: UITextField) { parent.text = field.text ?? "" }
+        @objc func hideKeyboard() { parent.focused = false }
         func textFieldDidBeginEditing(_ field: UITextField) { parent.focused = true }
         func textFieldDidEndEditing(_ field: UITextField) { parent.focused = false }
         func textFieldShouldReturn(_ field: UITextField) -> Bool {

@@ -76,6 +76,8 @@ final class EventQuickAddTests: XCTestCase {
         let app = launch(largeText: true)
         openComposer(app)
         app.textFields["event-quick-add-input"].typeText("Day off today all day #missing-calendar")
+        app.buttons["event-quick-add-hide-keyboard"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
         XCTAssertFalse(app.buttons["event-quick-add-save"].isEnabled)
         XCTAssertTrue(element("event-quick-add-error", in: app).exists)
         XCTAssertTrue(app.buttons["event-quick-add-calendar"].exists)
@@ -90,7 +92,12 @@ final class EventQuickAddTests: XCTestCase {
         app.buttons["event-quick-add-save"].tap()
         XCTAssertTrue(app.textFields["event-quick-add-input"].waitForNonExistence(timeout: 5))
         let saved = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Day off")).firstMatch
+        for _ in 0..<8 where !saved.exists { app.collectionViews.firstMatch.swipeDown() }
         XCTAssertTrue(saved.waitForExistence(timeout: 5))
+        XCTAssertTrue((saved.value as? String)?.contains("All day") == true)
+        saved.tap()
+        XCTAssertTrue(app.navigationBars["Event"].waitForExistence(timeout: 5))
+        capture(app, "event-composer-all-day-saved")
         app.terminate()
     }
 

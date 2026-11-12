@@ -309,7 +309,9 @@ and is saved locally and queued for Florida sync without editing Google. On Mac,
 sentence composer, styled like task quick add. Tap any preview chip to correct it,
 use **Details** for the full prefilled form, and tap **Add event** or Return to save.
 The calendar and account stay visible above the save button, including while the
-keyboard is open. Task capture, its retained draft and optional AI action are unchanged.
+keyboard is open. **Hide keyboard** exposes more of the preview without saving,
+and the destination footer opens the calendar chooser directly. Task capture, its
+retained draft and optional AI action are unchanged.
 
 Three tabs. **Agenda**: a week strip over the day's all-day events, timed
 events, and scheduled task blocks; swipe to change day, pull to refresh. An
