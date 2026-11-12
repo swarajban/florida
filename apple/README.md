@@ -8,6 +8,9 @@ ignores `apple/*.xcodeproj`), so regenerate it after cloning or after editing
 
 ## Generate and open
 
+Use a Mac with Xcode for the local app build and UI-test loop before opening a
+pull request; Linux package tests cannot catch Darwin-only compile errors.
+
 ```sh
 brew install xcodegen
 cd apple
