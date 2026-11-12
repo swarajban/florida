@@ -1,4 +1,4 @@
-export { schedule } from './scheduler.js'
+export { schedule, weekdayResolver } from './scheduler.js'
 export type {
   Attention,
   DayCapacity,

@@ -70,6 +70,25 @@ extension AppModel {
         }
     }
 
+    func setCalendarBlocksScheduling(id: String, blocksScheduling: Bool) {
+        guard let database else { return }
+        do {
+            try database.setCalendarBlocksScheduling(id: id, blocksScheduling: blocksScheduling)
+        } catch {
+            statusMessage = "Could not update the calendar: \(error.localizedDescription)"
+            return
+        }
+        guard let client = syncClient else { return }
+        Task { [weak self] in
+            do {
+                try await client.setCalendarBlocksScheduling(id: id, blocksScheduling: blocksScheduling)
+            } catch {
+                self?.lastSyncError = Self.describe(error)
+            }
+            await self?.runSync(client)
+        }
+    }
+
     private func runSync(_ client: SyncClient) async {
         syncsInFlight += 1
         defer { syncsInFlight -= 1 }

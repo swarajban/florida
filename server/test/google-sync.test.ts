@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { Db } from '../src/db/client.js'
 import { calendars, events, googleAccounts } from '../src/db/schema.js'
@@ -167,6 +167,32 @@ describe('GoogleSync event writes', () => {
 
   afterAll(() => close())
 
+  it('syncs and watches hidden blocking and visible free calendars, skipping inactive calendars', async () => {
+    await db.insert(calendars).values([
+      { id: 'hidden-busy', accountId: 'acc-1', googleId: 'hidden', summary: 'Hidden', accessRole: 'owner', selected: false, blocksScheduling: true },
+      { id: 'visible-free', accountId: 'acc-1', googleId: 'visible', summary: 'Visible', accessRole: 'reader', blocksScheduling: false },
+      { id: 'inactive', accountId: 'acc-1', googleId: 'inactive', summary: 'Inactive', accessRole: 'reader', selected: false, blocksScheduling: false },
+    ])
+    const synced = vi.spyOn(sync, 'syncCalendar').mockResolvedValue()
+    const watched = vi.spyOn(sync, 'ensureWatch').mockResolvedValue()
+    try {
+      const [account] = await db.select().from(googleAccounts).where(eq(googleAccounts.id, 'acc-1'))
+      await sync.syncAccount(account!)
+      expect(synced.mock.calls.map(([c]) => c.id)).toEqual(['cal-1', 'hidden-busy', 'visible-free'])
+      expect(watched.mock.calls.map(([c]) => c.id)).toEqual(['cal-1', 'hidden-busy', 'visible-free'])
+      synced.mockClear()
+      watched.mockClear()
+      await sync.syncAll()
+      await sync.ensureAllWatches()
+      expect(synced.mock.calls.map(([c]) => c.id).sort()).toEqual(['cal-1', 'hidden-busy', 'visible-free'])
+      expect(watched.mock.calls.map(([c]) => c.id).sort()).toEqual(['cal-1', 'hidden-busy', 'visible-free'])
+    } finally {
+      synced.mockRestore()
+      watched.mockRestore()
+      await db.delete(calendars).where(inArray(calendars.id, ['hidden-busy', 'visible-free', 'inactive']))
+    }
+  })
+
   it("calls Google with the calendar's account token", async () => {
     const calls = stubFetch(Response.json({ id: 'g-1', summary: 'New' }))
     const write = { summary: 'New', start: { date: '2026-11-13' }, end: { date: '2026-11-14' } }
@@ -200,16 +226,17 @@ describe('GoogleSync event writes', () => {
     await expect(sync.deleteEvent(calendar, 'g-theirs')).rejects.toThrow('Google API responded 403: Forbidden')
   })
 
-  it('a later sync updates the row an app created instead of inserting a second one', async () => {
-    const start = new Date('2026-11-12T15:00:00Z')
-    const end = new Date('2026-11-12T16:00:00Z')
+  it.each([true, false, null])('a later sync preserves blocksDay=%s and updates the existing row', async (blocksDay) => {
+    const start = new Date('2026-11-12T00:00:00Z')
+    const end = new Date('2026-11-13T00:00:00Z')
     await db.insert(events).values({
       id: 'client-chosen-id',
       calendarId: 'cal-1',
       googleId: 'g-app',
       status: 'confirmed',
       summary: 'As created',
-      allDay: false,
+      allDay: true,
+      blocksDay,
       startAt: start,
       endAt: end,
     })
@@ -217,15 +244,16 @@ describe('GoogleSync event writes', () => {
       id: 'g-app',
       status: 'confirmed',
       summary: 'As Google has it',
-      start: { dateTime: start.toISOString() },
-      end: { dateTime: end.toISOString() },
+      start: { date: '2026-11-12' },
+      end: { date: '2026-11-13' },
     }
     stubFetch(Response.json({ items: [fromGoogle], nextSyncToken: 'tok-1' }))
     await sync.syncCalendar(calendar)
     const rows = await db
-      .select({ id: events.id, summary: events.summary, deletedAt: events.deletedAt })
+      .select({ id: events.id, summary: events.summary, deletedAt: events.deletedAt, blocksDay: events.blocksDay })
       .from(events)
       .where(eq(events.calendarId, 'cal-1'))
-    expect(rows).toEqual([{ id: 'client-chosen-id', summary: 'As Google has it', deletedAt: null }])
+    expect(rows).toEqual([{ id: 'client-chosen-id', summary: 'As Google has it', deletedAt: null, blocksDay }])
+    await db.delete(events).where(eq(events.id, 'client-chosen-id'))
   })
 })

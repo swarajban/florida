@@ -1,3 +1,4 @@
+import { schedule } from '@florida/scheduler'
 import { eq, inArray } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import {
@@ -16,7 +17,7 @@ import {
   unscheduled,
 } from '../src/db/schema.js'
 import type { EventRow, CategoryRow, ProjectPlacementRow, ProjectRow, RoutineBlockRow, TaskRow } from '../src/db/schema.js'
-import { buildSchedulerInput, runScheduling, splitProjectTime } from '../src/scheduling.js'
+import { blockingEventInterval, buildSchedulerInput, runScheduling, splitProjectTime } from '../src/scheduling.js'
 import { seed } from '../src/seed.js'
 import { createTestDb } from './db.js'
 
@@ -119,6 +120,7 @@ function eventRow(id: string, over: Partial<EventRow> = {}): EventRow {
     startAt: new Date('2026-11-10T18:00:00Z'),
     endAt: new Date('2026-11-10T19:00:00Z'),
     allDay: false,
+    blocksDay: null,
     transparency: null,
     responseStatus: 'accepted',
     htmlLink: null,
@@ -227,14 +229,14 @@ describe('buildSchedulerInput', () => {
     expect(input.tasks.map((t) => t.id)).toEqual(['open'])
   })
 
-  it('turns only live, timed, opaque, not-declined events inside the horizon into busy time', () => {
+  it('turns live opaque not-declined timed events and opted-in all-day events into busy time', () => {
     const input = buildSchedulerInput({
       ...base,
       categories: [],
       tasks: [],
       events: [
         eventRow('busy'),
-        eventRow('all-day', { allDay: true, startAt: new Date('2026-11-10T00:00:00Z'), endAt: new Date('2026-11-11T00:00:00Z') }),
+        eventRow('all-day', { allDay: true, blocksDay: true, startAt: new Date('2026-11-10T00:00:00Z'), endAt: new Date('2026-11-11T00:00:00Z') }),
         eventRow('declined', { responseStatus: 'declined' }),
         eventRow('transparent', { transparency: 'transparent' }),
         eventRow('cancelled', { status: 'cancelled' }),
@@ -248,9 +250,85 @@ describe('buildSchedulerInput', () => {
     })
     expect(input.busy).toEqual([
       { start: '2026-11-10T18:00:00.000Z', end: '2026-11-10T19:00:00.000Z' },
+      { start: '2026-11-10T08:00:00.000Z', end: '2026-11-11T08:00:00.000Z' },
       { start: '2026-11-09T16:30:00.000Z', end: '2026-11-09T17:30:00.000Z' },
       { start: '2026-11-10T18:00:00.000Z', end: '2026-11-10T19:00:00.000Z' },
     ])
+  })
+
+  it.each([
+    ['default', false, 'opaque', true],
+    ['default', false, 'transparent', false],
+    ['default', true, 'opaque', false],
+    ['default', true, 'transparent', false],
+    ['outOfOffice', false, 'opaque', true],
+    ['outOfOffice', true, 'opaque', true],
+    ['outOfOffice', true, 'transparent', true],
+    ['outOfOffice', false, 'transparent', true],
+    ['focusTime', false, 'opaque', false],
+    ['focusTime', true, 'opaque', false],
+    ['workingLocation', false, 'opaque', false],
+    ['workingLocation', true, 'opaque', false],
+  ])('%s allDay=%s transparency=%s blocks=%s', (eventType, allDay, transparency, blocks) => {
+    const e = eventRow('special', { eventType, allDay, transparency })
+    if (allDay) {
+      e.startAt = new Date('2026-11-10T00:00:00Z')
+      e.endAt = new Date('2026-11-11T00:00:00Z')
+    }
+    expect(blockingEventInterval(e, LA) !== undefined).toBe(blocks)
+  })
+
+  it.each(['cancelled', 'declined', 'deleted'])('ignores %s out-of-office events', (kind) => {
+    const e = eventRow('ooo', { eventType: 'outOfOffice', allDay: true,
+      ...(kind === 'cancelled' ? { status: 'cancelled' } : {}),
+      ...(kind === 'declined' ? { responseStatus: 'declined' } : {}),
+      ...(kind === 'deleted' ? { deletedAt: NOW } : {}),
+    })
+    expect(blockingEventInterval(e, LA)).toBeUndefined()
+  })
+
+  it('uses exclusive all-day calendar dates in the routine zone across DST', () => {
+    expect(blockingEventInterval(eventRow('dst', {
+      allDay: true, blocksDay: true, startAt: new Date('2026-10-31T00:00:00Z'), endAt: new Date('2026-11-02T00:00:00Z'),
+    }), LA)).toEqual({ start: '2026-10-31T07:00:00.000Z', end: '2026-11-02T08:00:00.000Z' })
+  })
+
+  it('blocks all schedulable hours of an opted-in all-day event, but not the next day', () => {
+    const input = buildSchedulerInput({ ...base, now: new Date('2026-11-09T16:00:00Z'),
+      categories: [categoryRow('inbox')], tasks: [taskRow('task', 'inbox')],
+      events: [eventRow('away', { allDay: true, blocksDay: true, startAt: new Date('2026-11-09T00:00:00Z'), endAt: new Date('2026-11-10T00:00:00Z') })],
+    })
+    expect(schedule(input).placements[0]?.start).toBe('2026-11-10T17:00:00.000Z')
+  })
+
+  it.each(['opaque', 'transparent', null])('all-day opt-in blocks regardless of transparency=%s', (transparency) => {
+    const e = eventRow('holiday', { allDay: true, blocksDay: true, transparency,
+      startAt: new Date('2026-11-09T00:00:00Z'), endAt: new Date('2026-11-10T00:00:00Z'),
+    })
+    expect(blockingEventInterval(e, LA)).toEqual({ start: '2026-11-09T08:00:00.000Z', end: '2026-11-10T08:00:00.000Z' })
+    expect(blockingEventInterval({ ...e, blocksDay: false }, LA)).toBeUndefined()
+  })
+
+  it('lets an all-day manual override force either way and reset to automatic', () => {
+    const e = eventRow('ooo', { allDay: true, eventType: 'outOfOffice', blocksDay: null,
+      startAt: new Date('2026-11-09T00:00:00Z'), endAt: new Date('2026-11-10T00:00:00Z'),
+    })
+    expect(blockingEventInterval(e, LA)).toBeDefined()
+    expect(blockingEventInterval({ ...e, blocksDay: false }, LA)).toBeUndefined()
+    expect(blockingEventInterval({ ...e, blocksDay: true }, LA)).toBeDefined()
+    expect(blockingEventInterval({ ...e, eventType: 'default', blocksDay: null }, LA)).toBeUndefined()
+  })
+
+  it('unions duplicate busy copies without changing placements, capacity or unscheduled work', () => {
+    const meeting = eventRow('meeting', { startAt: new Date('2026-11-09T17:00:00Z'), endAt: new Date('2026-11-09T19:00:00Z'), icalUid: 'shared' })
+    const src = { ...base, now: new Date('2026-11-09T16:00:00Z'), horizonDays: 1,
+      categories: [categoryRow('inbox')], tasks: [taskRow('task', 'inbox', { durationMinutes: 480, minChunkMinutes: 60 })], events: [meeting],
+    }
+    const once = schedule(buildSchedulerInput(src))
+    const twice = schedule(buildSchedulerInput({ ...src, events: [meeting, { ...meeting, id: 'copy', calendarId: 'other' }] }))
+    expect(twice).toEqual(once)
+    expect(once.unscheduled).not.toHaveLength(0)
+    expect(once.placements[0]?.start).toBe('2026-11-09T19:00:00.000Z')
   })
 
   it('leaves out tasks of a project that is not active, and takes attention from the project unless the task sets it', () => {
@@ -389,6 +467,35 @@ describe('splitProjectTime', () => {
 })
 
 describe('runScheduling', () => {
+  it('uses blocking rather than visibility for all three calendar sources and reschedules when blocking changes', async () => {
+    const { db, close } = await createTestDb()
+    try {
+      await seed(db)
+      await db.insert(googleAccounts).values({ id: 'account', email: 'me@example.com', label: 'me', refreshTokenEnc: 'unused' })
+      await db.insert(calendars).values([
+        { id: 'work-cal', accountId: 'account', googleId: 'work', summary: 'Sempre', accessRole: 'owner', selected: false },
+        { id: 'personal-cal', accountId: 'account', googleId: 'personal', summary: 'Personal', accessRole: 'owner' },
+        { id: 'family-cal', accountId: 'account', googleId: 'family', summary: 'A&S', accessRole: 'owner', selected: false },
+        { id: 'display-cal', accountId: 'account', googleId: 'display', summary: 'Display only', accessRole: 'reader', blocksScheduling: false },
+      ])
+      await db.insert(events).values([
+        eventRow('work', { calendarId: 'work-cal', startAt: new Date('2026-11-09T17:00:00Z'), endAt: new Date('2026-11-09T18:00:00Z') }),
+        eventRow('personal', { calendarId: 'personal-cal', startAt: new Date('2026-11-09T18:00:00Z'), endAt: new Date('2026-11-09T19:00:00Z') }),
+        eventRow('family', { calendarId: 'family-cal', startAt: new Date('2026-11-09T19:00:00Z'), endAt: new Date('2026-11-09T20:00:00Z') }),
+        eventRow('display', { calendarId: 'display-cal', startAt: new Date('2026-11-09T20:00:00Z'), endAt: new Date('2026-11-10T01:00:00Z') }),
+      ])
+      await db.insert(tasks).values(taskRow('task', 'inbox'))
+      const early = new Date('2026-11-09T16:00:00Z')
+      expect((await runScheduling(db, { HORIZON_DAYS: 28 }, early)).placements[0]?.start).toBe('2026-11-09T20:00:00.000Z')
+      await db.update(calendars).set({ selected: false }).where(eq(calendars.id, 'personal-cal'))
+      expect((await runScheduling(db, { HORIZON_DAYS: 28 }, early)).placements[0]?.start).toBe('2026-11-09T20:00:00.000Z')
+      await db.update(calendars).set({ blocksScheduling: false }).where(eq(calendars.id, 'work-cal'))
+      expect((await runScheduling(db, { HORIZON_DAYS: 28 }, early)).placements[0]?.start).toBe('2026-11-09T17:00:00.000Z')
+    } finally {
+      await close()
+    }
+  })
+
   it('keeps a block the user is in the middle of where it was', async () => {
     const { db, close } = await createTestDb()
     try {

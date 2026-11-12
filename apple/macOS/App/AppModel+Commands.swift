@@ -26,7 +26,7 @@ extension AppModel {
              .doNow, .doneForNow, .repeatLast, .centerOnNow, .jumpToFirst, .jumpToLast,
              .editEvent, .respondYes, .respondMaybe, .respondNo,
              .showProjects, .showBrief, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind,
-             .jump, .joinMeeting, .openEventResources:
+             .jump, .joinMeeting, .openEventResources, .cycleEventDayBlocking:
             guard !isSheetOpen else { return }
             statusMessage = nil
             jump = nil
@@ -60,6 +60,7 @@ extension AppModel {
             case .jump: startJump()
             case .joinMeeting: joinMeeting()
             case .openEventResources: openEventResources()
+            case .cycleEventDayBlocking: cycleEventDayBlocking()
             case .core: break
             }
         }

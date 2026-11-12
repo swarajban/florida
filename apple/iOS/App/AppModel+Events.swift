@@ -45,6 +45,12 @@ extension AppModel {
         return write { try $0.saveEvent(event, recurrence: recurrence) }
     }
 
+    func setBlocksDay(_ event: CalendarEvent, blocksDay: Bool?) {
+        let current = storedVersion(of: event)
+        guard current.allDay else { return }
+        write { try $0.setEventBlocksDay(id: current.id, blocksDay: blocksDay) }
+    }
+
     /// Moves the event to `start`–`end` (stored instants: UTC midnights for an all-day event) and
     /// says where it went: "Moved to 3:00 PM", or with the day when that changed too.
     func reschedule(_ event: CalendarEvent, start: Date, end: Date) {

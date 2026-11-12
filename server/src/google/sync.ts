@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto'
-import { and, eq, inArray, isNull } from 'drizzle-orm'
+import { and, eq, inArray, isNull, or } from 'drizzle-orm'
 import type { Config } from '../config.js'
 import { decrypt, encrypt } from '../crypto.js'
 import type { Db } from '../db/client.js'
@@ -148,12 +148,12 @@ export class GoogleSync implements CalendarSyncService {
     return account
   }
 
-  /** Syncs, then watches, every selected calendar of one account, the primary calendar first. */
+  /** Syncs, then watches, every visible or blocking calendar, the primary calendar first. */
   async syncAccount(account: GoogleAccountRow): Promise<void> {
     const selected = await this.db
       .select()
       .from(calendars)
-      .where(and(eq(calendars.accountId, account.id), eq(calendars.selected, true)))
+      .where(and(eq(calendars.accountId, account.id), or(eq(calendars.selected, true), eq(calendars.blocksScheduling, true))))
     selected.sort((a, b) => Number(b.googleId === account.email) - Number(a.googleId === account.email))
     for (const calendar of selected) {
       await this.guarded(`sync ${calendar.googleId}`, () => this.syncCalendar(calendar))
@@ -262,13 +262,13 @@ export class GoogleSync implements CalendarSyncService {
   }
 
   async syncAll(): Promise<void> {
-    for (const calendar of await this.selectedCalendars()) {
+    for (const calendar of await this.activeCalendars()) {
       await this.guarded(`sync ${calendar.googleId}`, () => this.syncCalendar(calendar))
     }
   }
 
   async ensureAllWatches(): Promise<void> {
-    for (const calendar of await this.selectedCalendars()) {
+    for (const calendar of await this.activeCalendars()) {
       await this.guarded(`watch ${calendar.googleId}`, () => this.ensureWatch(calendar))
     }
   }
@@ -305,8 +305,8 @@ export class GoogleSync implements CalendarSyncService {
     return this.accessTokenFor(await this.accountFor(calendar))
   }
 
-  private selectedCalendars(): Promise<CalendarRow[]> {
-    return this.db.select().from(calendars).where(eq(calendars.selected, true))
+  private activeCalendars(): Promise<CalendarRow[]> {
+    return this.db.select().from(calendars).where(or(eq(calendars.selected, true), eq(calendars.blocksScheduling, true)))
   }
 
   private async accountFor(calendar: CalendarRow): Promise<GoogleAccountRow> {

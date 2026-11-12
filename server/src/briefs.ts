@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { DAY, MINUTE, dateFromDayNumber, dayNumber, isoDate, localDate, localParts, weekdayOf, zonedToUtc } from '@florida/scheduler'
+import { DAY, MINUTE, dateFromDayNumber, dayNumber, isoDate, localDate, localParts, parseClock, weekdayOf, weekdayResolver, zonedToUtc } from '@florida/scheduler'
 import type { LocalDate } from '@florida/scheduler'
 import { and, asc, desc, eq, getTableColumns, gt, gte, isNotNull, isNull, lt, or } from 'drizzle-orm'
 import type { BriefWriter, PlacementExplainer } from './ai/brief.js'
@@ -21,7 +21,7 @@ import {
   unscheduled,
 } from './db/schema.js'
 import type { BriefKind, BriefRow, ProjectRow, RoutineBlockRow, TaskRow } from './db/schema.js'
-import { effectiveAttention, localWeeks } from './scheduling.js'
+import { blockingEventInterval, effectiveAttention, localWeeks } from './scheduling.js'
 import { getTask } from './tasks.js'
 import { parseCalendarDate } from './validation.js'
 
@@ -66,8 +66,20 @@ async function loadPlan(db: Db, now: Date) {
     .where(and(isNull(tasks.deletedAt), isNull(tasks.completedAt)))
   const [summary] = await db.select().from(planSummary)
   const overrideRows = await db.select().from(dayOverrides).where(isNull(dayOverrides.deletedAt))
+  const horizonEnd = now.getTime() + 28 * DAY
+  const busyRows = await db.select(getTableColumns(events)).from(events)
+    .innerJoin(calendars, eq(events.calendarId, calendars.id))
+    .where(and(eq(calendars.blocksScheduling, true), isNull(events.deletedAt),
+      gt(events.endAt, new Date(now.getTime() - DAY)), lt(events.startAt, new Date(horizonEnd + DAY))))
+    .orderBy(asc(events.startAt))
   return {
     timeZone,
+    now: now.getTime(),
+    horizonEnd,
+    busyEvents: busyRows.flatMap((e) => {
+      const interval = blockingEventInterval(e, timeZone)
+      return interval === undefined ? [] : [{ title: e.summary ?? '(no title)', start: Date.parse(interval.start), end: Date.parse(interval.end) }]
+    }),
     today,
     todayKey: isoDate(today),
     blocks: await db.select().from(routineBlocks).where(isNull(routineBlocks.deletedAt)),
@@ -86,6 +98,33 @@ async function loadPlan(db: Db, now: Date) {
 }
 
 type Plan = Awaited<ReturnType<typeof loadPlan>>
+
+function calendarBusyTime(task: TaskRow, plan: Plan, before = plan.horizonEnd) {
+  const start = Math.max(plan.now, task.startAt?.getTime() ?? plan.now)
+  const end = Math.min(before, task.deadlineType === 'hard' ? task.dueAt?.getTime() ?? before : before)
+  const resolveWeekday = weekdayResolver({ timeZone: plan.timeZone, blocks: plan.blocks.map((b) => ({
+    id: b.id, days: b.days, start: b.start, end: b.end, allows: b.allows, optional: b.optional,
+  })) }, plan.overrideRows.map((o) => ({ date: o.date, kind: o.kind })))
+  const relevant = plan.busyEvents.filter((event) => {
+    if (event.end <= start || event.start >= end) return false
+    const first = dayNumber(localDate(Math.max(start, event.start), plan.timeZone))
+    const last = dayNumber(localDate(Math.min(end, event.end) - 1, plan.timeZone))
+    for (let day = first; day <= last; day++) {
+      const date = dateFromDayNumber(day)
+      const weekday = resolveWeekday(date)
+      if (weekday === undefined) continue
+      for (const block of plan.blocks) {
+        if (block.optional || !block.days.includes(weekday) || !block.allows.includes(task.context)) continue
+        const a = zonedToUtc(date, parseClock(block.start), plan.timeZone)
+        const b = zonedToUtc(date, parseClock(block.end), plan.timeZone)
+        if (Math.max(start, a, event.start) < Math.min(end, b, event.end)) return true
+      }
+    }
+    return false
+  })
+  const unique = [...new Map(relevant.map((e) => [`${e.title}\0${e.start}\0${e.end}`, e])).values()]
+  return { count: unique.length, first: unique.slice(0, FACT_LIST_LIMIT).map((e) => ({ title: e.title, start: stamp(new Date(e.start), plan.timeZone), end: stamp(new Date(e.end), plan.timeZone) })) }
+}
 
 function taskFact(task: TaskRow, plan: Plan) {
   const project = task.projectId === null ? undefined : plan.projects.get(task.projectId)
@@ -127,7 +166,7 @@ function unscheduledFacts(plan: Plan) {
   const all = plan.unscheduled
     .flatMap((u) => {
       const task = plan.openTasks.get(u.taskId)
-      return task === undefined ? [] : [{ title: task.title, reason: u.reason, unplacedMinutes: u.unplacedMinutes }]
+      return task === undefined ? [] : [{ title: task.title, reason: u.reason, unplacedMinutes: u.unplacedMinutes, calendarBusyTime: calendarBusyTime(task, plan) }]
     })
     .sort((a, b) => b.unplacedMinutes - a.unplacedMinutes || a.title.localeCompare(b.title))
   return { unscheduled: all.slice(0, FACT_LIST_LIMIT), unscheduledCount: all.length }
@@ -325,6 +364,7 @@ export async function explainFacts(db: Db, taskId: string, now: Date = new Date(
     },
     planned: mine.map((p) => ({ start: stamp(p.startAt, timeZone), end: clock(p.endAt, timeZone), ...(p.lane !== null ? { lane: p.lane } : {}) })),
     unscheduled: plan.unscheduled.find((u) => u.taskId === taskId) ?? null,
+    calendarBusyTime: calendarBusyTime(task, plan, firstStart),
     routineHoursAllowingItsContext: plan.blocks
       .filter((b) => !b.optional && b.allows.includes(task.context))
       .map((b) => ({ name: b.name, days: b.days.map((d) => WEEKDAYS[d]), start: b.start, end: b.end })),

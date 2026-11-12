@@ -343,6 +343,19 @@ public final class AppDatabase: Sendable {
             try db.execute(sql: "DELETE FROM syncState WHERE key = 'cursor'")
         }
 
+        migrator.registerMigration("v7-calendar-blocking") { db in
+            try db.alter(table: "calendar") { t in
+                t.add(column: "blocksScheduling", .boolean).notNull().defaults(to: true)
+            }
+        }
+
+        migrator.registerMigration("v8-event-blocks-day") { db in
+            try db.alter(table: "event") { t in
+                t.add(column: "blocksDay", .boolean)
+            }
+            try db.execute(sql: "DELETE FROM syncState WHERE key = 'cursor'")
+        }
+
         return migrator
     }
 }

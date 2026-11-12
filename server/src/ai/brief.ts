@@ -59,6 +59,7 @@ export const DAILY_SYSTEM = [
   '- The plan: the first task, and anything due today or overdue.',
   '- Parallel work: entries of `plan` and `projectTime` that share a time range and have a `lane` run side by side. Name the projects and the time, as in "From 10 to 12 you can run Atlas, Billing and Florida side by side."',
   '- What could not be scheduled, and how much free time is left today.',
+  'When calendarBusyTime constrains a task, name the event rather than saying only "calendar conflicts". These are overlapping constraints, not proof that one event alone caused the placement or lack of room.',
   '- When `evening` is not empty, one line on what to pick up if they work tonight.',
 ].join('\n')
 
@@ -71,6 +72,7 @@ export const WEEKLY_SYSTEM = [
   '- What was finished, as a count and one or two notable titles.',
   '- Projects on hold or still being thought about, in one line, only when there are any.',
   '- What is late or could not be scheduled.',
+  'When calendarBusyTime constrains unscheduled work, name the event; do not claim it is the sole cause.',
   '- The coming week: hard deadlines, days that differ from the routine, the gym sessions in `ahead.gym` (and a week listed in `ahead.weeksWithoutOfficeMorningGym`, which has no office-morning session), and the day with the least room.',
 ].join('\n')
 
@@ -80,6 +82,7 @@ export const EXPLAIN_SYSTEM = [
   'The planner places tasks by priority and deadline into the hours of the weekly routine that allow the task’s context (computer, errand, home, office), around calendar events and commitments such as the gym.',
   'Tasks of a project that is not active are not scheduled. Shared-attention work can run beside other projects’ shared work, in up to three lanes.',
   'Say when it is planned, and the one or two facts that most explain that time: its context and which routine hours allow it, what is ahead of it, its deadline, its project’s status, or that it runs in parallel. If it is not planned, say why.',
+  'calendarBusyTime names events that occupy the task’s allowed routine hours before its placement or deadline. Name the relevant blocking event instead of a generic calendar conflict; the list is not proof that one event alone caused the outcome.',
 ].join('\n')
 
 /** Writes briefs and explanations with Claude using structured output. */
