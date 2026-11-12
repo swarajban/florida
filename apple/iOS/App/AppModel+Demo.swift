@@ -8,10 +8,10 @@ extension AppModel {
     /// without touching the keychain, and with no `SyncClient` nothing reaches the network.
     func configureForDemo() {
         serverConfig = ServerConfig(token: "demo")
-        lastSyncAt = Date()
+        lastSyncAt = now
         guard let database else { return }
         do {
-            try database.apply(DemoData.syncResponse(now: Date(), calendar: calendar))
+            try database.apply(DemoData.syncResponse(now: now, calendar: calendar))
             // A block finished this morning, as a ghost (not persisted: demo runs are throwaway).
             if let start = calendar.date(bySettingHour: 8, minute: 30, second: 0, of: today) {
                 ghostBlocks = [GhostBlock(

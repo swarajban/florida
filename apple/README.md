@@ -372,6 +372,13 @@ The demo launch arguments are Debug-only (`iOS/Support/LaunchOptions.swift`):
 contain personal data and never reach a server. They work the same way from
 Xcode's scheme editor (Run → Arguments).
 
+On iPhone, add `-demoNow 2026-11-12T00:10:00Z` to freeze the demo calendar's
+clock: its selected day, Today, seed data, now line and initial hour position
+all use that instant. It is ignored without `-demoData YES` and in Release
+builds. Omitting it keeps the real clock. The grid UI tests cover midnight,
+late evening and real-clock launches, and verify each drag advances the task
+by exactly 30 minutes without moving the viewport.
+
 ### One-time TestFlight setup
 
 1. **Apple Developer Program:** a paid membership.

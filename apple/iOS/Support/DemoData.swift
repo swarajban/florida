@@ -8,6 +8,12 @@ import Foundation
 /// tonight and tomorrow night. All times are relative to `now`, so the Agenda tab's "today" is
 /// always populated.
 enum DemoData {
+    static let fixedNow: Date? = {
+        guard UserDefaults.standard.bool(forKey: "demoData"),
+              let value = UserDefaults.standard.string(forKey: "demoNow") else { return nil }
+        return ISO8601DateFormatter().date(from: value)
+    }()
+
     static func syncResponse(now: Date, calendar: Calendar) -> SyncResponse {
         let today = calendar.startOfDay(for: now)
         let evening = "demo-routine-evening"

@@ -48,7 +48,7 @@ extension AppModel {
 
     /// A second past the next local midnight, so `startOfDay` has certainly moved on.
     private func secondsUntilNextMidnight() -> Double {
-        let next = calendar.date(byAdding: .day, value: 1, to: today) ?? Date().addingTimeInterval(86_400)
-        return max(1, next.timeIntervalSinceNow + 1)
+        let next = calendar.date(byAdding: .day, value: 1, to: today) ?? now.addingTimeInterval(86_400)
+        return max(1, next.timeIntervalSince(now) + 1)
     }
 }

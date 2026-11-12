@@ -125,12 +125,20 @@ final class AppModel {
     var isSyncing: Bool { activeOperations > 0 }
     var needsSetup: Bool { serverConfig == nil }
     var pendingWriteCount: Int { pendingWrites.count }
-    var today: Date { calendar.startOfDay(for: Date()) }
+    static var currentTime: Date {
+        #if DEBUG
+        return DemoData.fixedNow ?? Date()
+        #else
+        return Date()
+        #endif
+    }
+    var now: Date { Self.currentTime }
+    var today: Date { calendar.startOfDay(for: now) }
 
     init() {
         let calendar = Calendar.autoupdatingCurrent
         self.calendar = calendar
-        let today = calendar.startOfDay(for: Date())
+        let today = calendar.startOfDay(for: Self.currentTime)
         selectedDay = today
         anchoredToday = today
 
@@ -195,7 +203,7 @@ final class AppModel {
     /// watch `todayRequests` so the scroll happens even when today was already showing.
     func selectToday() {
         anchoredToday = today
-        select(day: Date())
+        select(day: now)
         todayRequests += 1
     }
 
