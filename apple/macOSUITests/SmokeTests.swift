@@ -334,13 +334,10 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(app.buttons["task-project"].waitForNonExistence(timeout: 5))
 
             // An open task: Mark done on top, then both dates. This one was due yesterday, so
-            // a start of today moves its due date to tomorrow. One click only selects the row;
-            // the second opens it.
+            // a start of today moves its due date to tomorrow. One click opens the row.
             let row = app.staticTexts["Renew VPN certificate"].firstMatch
             let priority = app.buttons["task-priority"]
             row.click()
-            XCTAssertFalse(priority.waitForExistence(timeout: 1.5), "one click should select, not open")
-            row.doubleClick()
             XCTAssertTrue(priority.waitForExistence(timeout: 5))
             app.buttons["task-start"].click()
             let startSearch = app.textFields["task-start-search"]
@@ -690,14 +687,16 @@ final class SmokeTests: XCTestCase {
             title.click()
             waitForValue("Selected", of: row)
             capture(app.windows.firstMatch, "task-selection-\(appearance)")
-            XCTAssertFalse(priority.waitForExistence(timeout: 1.5), "a single click must select without opening the editor")
-
-            app.typeKey("e", modifierFlags: [])
             let editorTitle = app.textFields.matching(NSPredicate(format: "value == %@", "Renew VPN certificate")).firstMatch
-            XCTAssertTrue(editorTitle.waitForExistence(timeout: 5), "E must edit the clicked task")
+            XCTAssertTrue(editorTitle.waitForExistence(timeout: 5), "one click must open the clicked task")
+            XCTAssertTrue(priority.exists)
             app.typeKey(.escape, modifierFlags: [])
             XCTAssertTrue(editorTitle.waitForNonExistence(timeout: 5))
             waitForValue("Selected", of: row)
+            app.typeKey("e", modifierFlags: [])
+            XCTAssertTrue(editorTitle.waitForExistence(timeout: 5), "E must act on the task-pane selection after the editor closes")
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(editorTitle.waitForNonExistence(timeout: 5))
 
             let done = app.buttons["task-done-demo-task-vpn"]
             XCTAssertTrue(done.isHittable)

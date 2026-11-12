@@ -112,9 +112,9 @@ serve event calendars and repeat rules, project status/category/weekly time,
 and category areas. Direct two-way toggles, the brief's two tabs and the event
 popover's Yes/Maybe/No RSVP buttons retain their faster direct controls and keys.
 
-One click in the task pane selects the row with a visible outline and fill,
-and moves keyboard focus there so `e`, Space and the other task keys act on it.
-Double-click opens its editor; the done circle still completes on one click.
+One click in the task pane selects the row with a visible outline and fill
+and immediately opens its editor. The done circle still completes on one click
+without opening the editor; after closing it, task keys act on that selection.
 One click selects a calendar block and a double-click opens it.
 Drag a timed event to move it: it snaps to 15 minutes,
 keeps its length, and can cross day columns; an event with guests asks first,

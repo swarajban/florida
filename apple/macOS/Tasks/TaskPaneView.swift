@@ -10,7 +10,7 @@ struct TaskPaneView: View {
     @Environment(AppModel.self) private var model
     @State private var clickedItem: ItemID?
 
-    private let opensTaskOnSingleClick = false
+    private let opensTaskOnSingleClick = true
 
     static let width: CGFloat = 320
     /// About the height of a section header, which stays pinned over the top of the list once it
