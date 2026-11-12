@@ -16,8 +16,9 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(app.sheets.buttons["Mark done"].waitForExistence(timeout: 5))
             app.sheets.buttons["Mark done"].click()
             XCTAssertTrue(row.waitForNonExistence(timeout: 5))
-            app.typeKey("z", modifierFlags: [])
-            app.typeKey("z", modifierFlags: [])
+            // Center on now, where the stamp is. `z` is undo.
+            app.typeKey("g", modifierFlags: [])
+            app.typeKey("n", modifierFlags: [])
             let stamp = app.staticTexts["Completed: Renew VPN certificate"]
             XCTAssertTrue(stamp.waitForExistence(timeout: 5))
             XCTAssertTrue((stamp.value as? String)?.hasPrefix("Done at ") == true)
