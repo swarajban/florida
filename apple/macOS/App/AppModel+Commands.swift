@@ -19,6 +19,10 @@ extension AppModel {
 
     /// Runs a Mac command: shared commands go to `perform`, Mac-only ones are handled here.
     func run(_ command: MacCommand) {
+        if availabilityShare != nil {
+            if command == .core(.cancel) { cancelAvailability() }
+            return
+        }
         switch command {
         case .core(let shared):
             perform(shared)
@@ -26,7 +30,7 @@ extension AppModel {
              .doNow, .doneForNow, .repeatLast, .centerOnNow, .jumpToFirst, .jumpToLast,
              .editEvent, .respondYes, .respondMaybe, .respondNo,
              .showProjects, .showBrief, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind,
-             .jump, .joinMeeting, .openEventResources, .cycleEventDayBlocking:
+             .jump, .joinMeeting, .openEventResources, .cycleEventDayBlocking, .shareAvailability:
             guard !isSheetOpen else { return }
             statusMessage = nil
             jump = nil
@@ -61,6 +65,7 @@ extension AppModel {
             case .joinMeeting: joinMeeting()
             case .openEventResources: openEventResources()
             case .cycleEventDayBlocking: cycleEventDayBlocking()
+            case .shareAvailability: startAvailability()
             case .core: break
             }
         }
@@ -69,6 +74,10 @@ extension AppModel {
     /// Runs one command. Synchronous: every state change lands before this returns, and anything
     /// that needs the network is started in the background.
     func perform(_ command: AppCommand) {
+        if availabilityShare != nil {
+            if command == .cancel { cancelAvailability() }
+            return
+        }
         if isSheetOpen, command != .cancel, command != .sync { return }
         statusMessage = nil
         // A command from a menu or the toolbar while the jump labels are up replaces them.
@@ -122,6 +131,10 @@ extension AppModel {
 
     /// Escape: closes the topmost overlay, else clears the selection and any pending key sequence.
     func cancel() {
+        if availabilityShare != nil {
+            cancelAvailability()
+            return
+        }
         pendingKeys = ""
         matcher.reset()
         jump = nil

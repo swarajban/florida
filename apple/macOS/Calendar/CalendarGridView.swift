@@ -25,19 +25,28 @@ struct CalendarGridView: View {
             DayHeaderView(gutterWidth: Self.gutterWidth)
             Divider()
             AllDayStripView(gutterWidth: Self.gutterWidth)
+                .disabled(model.availabilityShare != nil)
             ScrollView(.vertical) {
                 GeometryReader { geometry in
                     // Paused except while blocks slide; `clockNow` redraws the now line each minute.
-                    TimelineView(.animation(minimumInterval: nil, paused: model.layoutTransition == nil)) { timeline in
-                        TimeGridCanvas(
-                            layout: model.gridLayout, selection: model.selection,
-                            jumpLabels: model.jump?.remaining ?? [:],
-                            jumpViewport: model.jump == nil ? nil : model.jumpGridViewport, drag: model.gridDrag,
-                            selectedDay: model.selectedDay,
-                            now: model.clockNow, frameDate: timeline.date, transition: model.layoutTransition,
-                            showsProgress: showsProgress, calendar: model.calendar, hourLabels: model.hourLabels,
-                            grid: Self.grid, gutterWidth: Self.gutterWidth)
+                    ZStack {
+                        TimelineView(.animation(minimumInterval: nil, paused: model.layoutTransition == nil)) { timeline in
+                            TimeGridCanvas(
+                                layout: model.gridLayout, selection: model.selection,
+                                jumpLabels: model.jump?.remaining ?? [:],
+                                jumpViewport: model.jump == nil ? nil : model.jumpGridViewport, drag: model.gridDrag,
+                                selectedDay: model.selectedDay,
+                                now: model.clockNow, frameDate: timeline.date, transition: model.layoutTransition,
+                                showsProgress: showsProgress, calendar: model.calendar, hourLabels: model.hourLabels,
+                                grid: Self.grid, gutterWidth: Self.gutterWidth)
+                        }
+                        if model.availabilityShare != nil {
+                            AvailabilityGridOverlay()
+                                .allowsHitTesting(false)
+                        }
                     }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("calendar-time-grid")
                     .onClickAt { point, isDouble in
                         handleTap(at: point, width: geometry.size.width, isDouble: isDouble)
                     }
@@ -134,6 +143,10 @@ struct CalendarGridView: View {
         let layout = model.gridLayout
         let geometry = gridGeometry(width: width)
         guard let dayIndex = geometry.dayIndex(atX: point.x) else { return }
+        if model.availabilityShare != nil {
+            model.tapAvailability(day: layout.days[dayIndex], minute: Self.grid.snappedMinute(forY: point.y))
+            return
+        }
         if let block = geometry.block(at: point, in: layout) {
             if model.jumpLabel(for: block.item) != nil {
                 model.selectJumped(block.item)
@@ -167,6 +180,14 @@ struct CalendarGridView: View {
     /// follows the pointer by slots and day columns. The model is told only when the slot
     /// changes, so the canvas redraws a few times per drag, not once per pointer event.
     private func dragChanged(_ value: DragGesture.Value, width: CGFloat) {
+        if model.availabilityShare != nil {
+            let geometry = gridGeometry(width: width)
+            guard let index = geometry.dayIndex(atX: value.startLocation.x) else { return }
+            model.paintAvailability(
+                day: model.gridLayout.days[index], startMinute: Self.grid.snappedMinute(forY: value.startLocation.y),
+                endMinute: Self.grid.snappedMinute(forY: value.location.y))
+            return
+        }
         guard !ignoresDrag else { return }
         let layout = model.gridLayout
         let geometry = gridGeometry(width: width)
@@ -191,6 +212,10 @@ struct CalendarGridView: View {
     }
 
     private func dragEnded() {
+        if model.availabilityShare != nil {
+            model.availabilityShare?.paint = nil
+            return
+        }
         defer { ignoresDrag = false }
         guard let drag = model.gridDrag, !drag.isDropped else { return }
         model.drop(drag)

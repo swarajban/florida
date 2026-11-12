@@ -127,6 +127,8 @@ final class AppModel {
     /// (`tracksJumpVisibility`). Not observed, for the same reason.
     @ObservationIgnored var paneItemsOnScreen: Set<ItemID> = []
     var statusMessage: String?
+    var availabilityShare: AvailabilityShareState?
+    var isAvailabilityZoneOpen = false
     var ghost: Ghost?
     /// Writes `z` can revert, oldest first.
     var undoStack: [UndoEntry] = []
@@ -286,6 +288,7 @@ final class AppModel {
            !gridLayout.blocksByDay.joined().contains(where: drag.applies) {
             gridDrag = nil
         }
+        refreshAvailability()
     }
 
     /// Joins the gym's occurrences and project time with their names, then lays the grid out again.

@@ -44,6 +44,7 @@ enum MacCommand: Hashable, Sendable {
     case joinMeeting
     case openEventResources
     case cycleEventDayBlocking
+    case shareAvailability
 
     /// Grouping in the help overlay, reusing the shared sections.
     var section: AppCommand.Section {
@@ -52,7 +53,7 @@ enum MacCommand: Hashable, Sendable {
         case .undo, .move, .acceptSuggestion, .newTaskEditor, .doNow, .doneForNow, .repeatLast,
              .editEvent, .respondYes, .respondMaybe, .respondNo, .joinMeeting, .openEventResources, .cycleEventDayBlocking:
             .editing
-        case .newCategory, .showRoutine, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind: .actions
+        case .newCategory, .showRoutine, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind, .shareAvailability: .actions
         case .centerOnNow, .jumpToFirst, .jumpToLast, .jump: .navigation
         case .showProjects, .showBrief: .panels
         }
@@ -89,6 +90,7 @@ enum MacCommand: Hashable, Sendable {
         case .joinMeeting: "Join meeting"
         case .openEventResources: "Open event resources"
         case .cycleEventDayBlocking: "Cycle day blocking"
+        case .shareAvailability: "Share availability"
         }
     }
 
@@ -110,6 +112,7 @@ enum MacCommand: Hashable, Sendable {
         .editEvent, .respondYes, .respondMaybe, .respondNo, .joinMeeting, .openEventResources, .cycleEventDayBlocking,
         .newCategory, .showRoutine, .centerOnNow, .jumpToFirst, .jumpToLast, .jump,
         .showProjects, .showBrief, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind,
+        .shareAvailability,
     ]
 
     /// The palette lists everything except Escape.

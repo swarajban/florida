@@ -1,5 +1,35 @@
 # Florida — Apple apps
 
+## Share availability (Mac)
+
+Run **Share availability** from the command palette. It proposes up to three times on distinct
+visible days, using the Work category's schedule (or a schedule named Work, then the first
+active schedule). Change the Hours picker to use another local schedule. Month view temporarily
+shows a week; leaving the mode restores the month. Nothing is booked or saved.
+
+The default meeting length is 30 minutes. **1 / 2 / 3 / 4** selects 15 / 30 / 45 / 60 minutes;
+**+ / −** adjusts by 15 minutes. Changing the length or hours replaces the initial proposals.
+**Tab / Shift-Tab** focuses the next/previous suggestion; **Space** toggles it. **Arrows / HJKL**
+move the focused range by a day or 15 minutes; **Shift-Up / Shift-Down** shortens/extends its end.
+Moving or extending a selected range updates the reply. Drag within a day to add snapped free
+time, or start inside a selected range to erase. Click a selected range to remove it, or click
+free time to add a meeting-length range. Blue/orange filled ranges are included in the reply;
+dashed blue ranges are suggestions, and the dotted outline is the keyboard cursor. Orange
+means flexible tasks would move; copying does not actually move them.
+
+**Z** opens an offline, searchable IANA time-zone list. Type a city or identifier and Return to
+choose the first match, or click a result. The reply includes dates in both zones, including
+recipient-day rollover. **Return / C / Cmd-C** copies the live preview and exits; **Esc** exits
+without copying. A status-bar confirmation follows copying. Last sync older than 15 minutes,
+or no recorded sync, adds a warning to the preview and copied text.
+
+Availability is computed from the local store, without a server request. Timed, opaque,
+non-declined, non-cancelled calendar events, pinned tasks and routine commitment occurrences
+block time. Flexible placements do not.
+All-day events currently follow the existing scheduler's timed-only rule; the single
+`Availability.eventBlocksTime` predicate is the alignment point for future busy-time changes.
+This is static text, not a reservation or a live booking link.
+
 The macOS app, the iOS app, and the iOS widget extension live here. The Xcode
 project is generated from `project.yml` with [XcodeGen](https://github.com/yonaskolb/XcodeGen);
 `Florida.xcodeproj` is a build artifact and is git-ignored (the root `.gitignore`
