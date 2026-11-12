@@ -6,6 +6,19 @@ final class SmokeTests: XCTestCase {
     @MainActor
     func testEventResourcesInBothAppearances() throws {
         continueAfterFailure = false
+        let resourceURLs = [
+            "https://docs.google.com/document/d/demo-scheduler/edit",
+            "https://docs.google.com/spreadsheets/d/demo-capacity/edit",
+            "https://docs.google.com/presentation/d/demo-review/edit",
+            "https://www.notion.so/demo/decisions",
+            "https://www.figma.com/design/demo/calendar",
+            "https://github.com/example/florida/pull/42",
+            "https://linear.app/demo/issue/DEMO-21",
+            "https://notes.example.com/design-review",
+            "https://zoom.us/j/123456789",
+            "https://meet.google.com/alt-room-xyz",
+            "https://wiki.example.com/scheduler",
+        ]
         for appearance in ["light", "dark"] {
             let app = XCUIApplication()
             app.launchArguments = ["-demoData", "YES", "-uiAppearance", appearance, "-uiRecordResourceOpens", "YES"]
@@ -51,11 +64,24 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(document.waitForExistence(timeout: 5))
             let shelf = app.scrollViews["event-resource-shelf"]
             let runbook = app.buttons["event-resource-https://wiki.example.com/scheduler"]
-            let tiles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'event-resource-'"))
-            var shortcuts = Set(tiles.allElementsBoundByIndex.compactMap { $0.value as? String })
-            for _ in 0..<4 where !runbook.isHittable {
-                shelf.scroll(byDeltaX: 0, deltaY: -80)
-                shortcuts.formUnion(tiles.allElementsBoundByIndex.compactMap { $0.value as? String })
+            let unexpectedTiles = shelf.buttons.matching(NSPredicate(
+                format: "identifier BEGINSWITH %@ AND NOT (identifier IN %@)",
+                argumentArray: ["event-resource-", resourceURLs.map { "event-resource-\($0)" }]))
+            XCTAssertEqual(unexpectedTiles.count, 0)
+            var shortcuts = Set<String>()
+            for url in resourceURLs {
+                let tile = shelf.buttons["event-resource-\(url)"]
+                for _ in 0..<4 where !tile.isHittable {
+                    shelf.scroll(byDeltaX: 0, deltaY: -80)
+                    XCTAssertEqual(unexpectedTiles.count, 0)
+                }
+                XCTAssertTrue(tile.waitForExistence(timeout: 5), url)
+                XCTAssertTrue(tile.isHittable, url)
+                let shortcut = try XCTUnwrap(tile.value as? String, url)
+                XCTAssertFalse(shortcut.isEmpty, url)
+                XCTAssertTrue(shortcut.allSatisfy(\.isNumber), url)
+                XCTAssertTrue(shortcuts.insert(shortcut).inserted, url)
+                XCTAssertEqual(unexpectedTiles.count, 0)
             }
             XCTAssertTrue(runbook.isHittable)
             XCTAssertEqual(shortcuts.count, 11)
