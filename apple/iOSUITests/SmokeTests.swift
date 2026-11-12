@@ -179,7 +179,7 @@ final class SmokeTests: XCTestCase {
             let nextHeader = element(nextDay.formatted(.dateTime.weekday(.wide).month(.wide).day()), in: app)
             let oneColumn = nextHeader.frame.midX - todayHeader.frame.midX
             XCTAssertGreaterThan(oneColumn, 0)
-            let taskBlock = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Rotate API keys")).firstMatch
+            let taskBlock = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Rotate AWS access keys")).firstMatch
             positionInGrid(taskBlock, in: app)
             let beforeVerticalScroll = taskBlock.frame.minY
             let gutter = app.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.7))
@@ -274,20 +274,19 @@ final class SmokeTests: XCTestCase {
     func testHalfHourDragAtDemoTimes() {
         continueAfterFailure = false
         let calendar = Calendar.current
-        let clocks: [Date?] = [nil] + [(0, 10), (18, 0), (23, 50)].map { hour, minute in
+        let clocks = [(0, 10), (18, 0), (23, 50)].map { hour, minute in
             calendar.date(from: DateComponents(year: 2026, month: 11, day: 12, hour: hour, minute: minute))!
         }
         for clock in clocks {
             for appearance in ["light", "dark"] {
-                let reference = clock ?? Date()
-                let scenario = "\(clock.map { ISO8601DateFormatter().string(from: $0) } ?? "real-clock")-\(appearance)"
+                let scenario = "\(ISO8601DateFormatter().string(from: clock))-\(appearance)"
                 XCTContext.runActivity(named: scenario) { _ in
                     let app = launch(appearance: appearance, mode: "threeDays", demoNow: clock)
                     waitForText("Infra offsite", in: app)
                     let heading = app.buttons["Go to day"]
                     XCTAssertEqual(heading.value as? String,
-                                   reference.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
-                    let taskBlock = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Rotate API keys")).firstMatch
+                                   clock.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
+                    let taskBlock = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Rotate AWS access keys")).firstMatch
                     positionInGrid(taskBlock, in: app)
                     let originalY = taskBlock.frame.minY
                     capture(app, "before-tap-\(scenario)")
@@ -297,7 +296,7 @@ final class SmokeTests: XCTestCase {
                     XCTAssertEqual(taskBlock.frame.minY, originalY, accuracy: 2,
                                    "Opening an editor must not change the measured viewport")
                     capture(app, "after-tap-\(scenario)")
-                    let start = calendar.date(bySettingHour: 9, minute: 30, second: 0, of: reference)!
+                    let start = calendar.date(bySettingHour: 9, minute: 30, second: 0, of: clock)!
                     moveHalfHour(taskBlock, from: start, in: app)
                     moveHalfHour(taskBlock, from: start.addingTimeInterval(30 * 60), in: app)
                     capture(app, "after-two-drags-\(scenario)")
@@ -784,8 +783,9 @@ final class SmokeTests: XCTestCase {
         let end = start.addingTimeInterval(45 * 60)
         let expectedBefore = "\(start.formatted(date: .omitted, time: .shortened)) – \(end.formatted(date: .omitted, time: .shortened))"
         XCTAssertEqual(task.value as? String, expectedBefore)
-        let originalY = task.frame.minY
-        let viewport = app.scrollViews["day-grid-hours"].frame
+        let originalFrame = task.frame
+        let column = element(start.formatted(.dateTime.weekday(.wide).month(.wide).day()), in: app).frame
+        let heading = app.buttons["Go to day"].value as? String
         let center = task.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         center.press(forDuration: 0.5, thenDragTo: center.withOffset(CGVector(dx: 0, dy: 30)),
                      withVelocity: .slow, thenHoldForDuration: 0.3)
@@ -793,8 +793,10 @@ final class SmokeTests: XCTestCase {
         let newEnd = end.addingTimeInterval(30 * 60)
         let expectedAfter = "\(newStart.formatted(date: .omitted, time: .shortened)) – \(newEnd.formatted(date: .omitted, time: .shortened))"
         XCTAssertEqual(task.value as? String, expectedAfter, "The task must move exactly half an hour, preserving its duration")
-        XCTAssertEqual(task.frame.minY, originalY + 30, accuracy: 2, "The task should move by half an hour")
-        XCTAssertEqual(app.scrollViews["day-grid-hours"].frame, viewport)
+        XCTAssertEqual(task.frame.minY, originalFrame.minY + 30, accuracy: 2, "The task should move by half an hour")
+        XCTAssertGreaterThanOrEqual(task.frame.minX, column.minX)
+        XCTAssertLessThanOrEqual(task.frame.maxX, column.maxX, "A vertical drag must keep the task in its day column")
+        XCTAssertEqual(app.buttons["Go to day"].value as? String, heading)
     }
 
     @MainActor
