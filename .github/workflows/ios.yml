@@ -19,7 +19,7 @@ on:
         type: boolean
         default: false
       mac_test_selector:
-        description: Optional Mac test bundle, class or method for a focused UI-only run
+        description: Optional space-separated Mac test bundles, classes or methods for one focused UI-only job
         type: string
         default: ''
 
@@ -50,14 +50,20 @@ jobs:
         env:
           MAC_TEST_SELECTOR: ${{ inputs.mac_test_selector }}
         run: |
-          [[ "$MAC_TEST_SELECTOR" =~ ^Florida-macOS(KeyboardTests|UITests)(/[A-Za-z_][A-Za-z0-9_]*){0,2}$ ]] || exit 2
+          [[ "$MAC_TEST_SELECTOR" != *$'\n'* && "$MAC_TEST_SELECTOR" != *$'\r'* ]] || exit 2
+          read -r -a selectors <<< "$MAC_TEST_SELECTOR"
+          (( ${#selectors[@]} > 0 )) || exit 2
+          for selector in "${selectors[@]}"; do
+            [[ "$selector" =~ ^Florida-macOS(KeyboardTests|UITests)(/[A-Za-z_][A-Za-z0-9_]*){0,2}$ ]] || exit 2
+          done
       - run: brew install xcodegen
       - name: Build and run selected Mac tests
         env:
           MAC_TEST_SELECTOR: ${{ inputs.mac_test_selector }}
         run: |
           set -o pipefail
-          bash apple/scripts/check.sh macos "-only-testing:$MAC_TEST_SELECTOR" 2>&1 | tee apple/ui-test.log
+          read -r -a selectors <<< "$MAC_TEST_SELECTOR"
+          bash apple/scripts/check.sh macos "${selectors[@]/#/-only-testing:}" 2>&1 | tee apple/ui-test.log
       - name: Upload focused results and log
         if: always()
         uses: actions/upload-artifact@v4

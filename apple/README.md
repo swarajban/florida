@@ -117,8 +117,12 @@ gh workflow run ios.yml --ref <PR-branch> -f ui_only=true \
 ```
 
 The selector accepts a Mac test bundle, bundle/class, or bundle/class/method.
+Pass space-separated selectors in one quoted value to check several classes in the same job,
+for example `-f mac_test_selector='Florida-macOSUITests/MacInteractionStateTests Florida-macOSUITests/EditorRegressionTests'`.
 It runs one Mac job without retries or TestFlight uploads. An empty selector retains the
 full gate; each final PR head still needs one complete unfiltered run.
+The reusable full Mac UI job has a 60-minute limit, matching main's standalone Mac job;
+the iPhone shard limits are unchanged.
 
 This explicit dispatch uses the existing iOS workflow's `ui_only` mode: it never
 starts a release or reads release secrets. It runs against the branch head, so
