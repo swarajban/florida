@@ -207,9 +207,23 @@ to the current screen's visible area, including after a display change, so small
 keep the title bar and calendar controls on screen.
 
 One window: the calendar grid (day, 3-day, week, or month) with a task pane
-grouped by category, and a status bar with sync state. Every action has a key;
-press `?` for the full list (it is `Keymap.default` in FloridaCore). The main
-ones:
+grouped by due date by default, and a status bar with sync state. Every action has a key;
+press `?` for the full list (it is `Keymap.default` in FloridaCore).
+
+The task pane keeps suggestions and Inbox above **Overdue**, **Today**, **Tomorrow**,
+**This week**, **Next week**, **Later**, and **No due date**. Empty date sections are
+hidden. Sections use the settings time zone and the calendar's first weekday;
+Overdue includes any elapsed due time, even earlier today. Tasks sort by `dueAt`,
+then hard before soft deadlines, priority, title, and ID. There is no separate
+deadline timestamp. Future start dates do not hide open tasks. Each row retains
+its compact category dot/name on the existing metadata line, except when the
+category is already supplied by the section header or is Inbox. Metadata stays
+single-line, dropping context/schedule text or truncating when space is tight.
+Choose **Category** in the pane's grouping menu, use `g o`, or
+run **Group by due date / category** in the palette to toggle the remembered
+grouping. Keyboard selection and jump labels follow the visible order.
+
+The main keys:
 
 | Keys | Action |
 | --- | --- |
@@ -389,7 +403,15 @@ circle. The
 evening's suggestions follow the day's plan ("Evening, if you're up for it"),
 each with a "Do tonight" button that pins it; in the day grids they are dotted
 blocks.
-**Tasks**: sections per category, swipe to complete or delete, tap to edit.
+**Tasks**: the same due-date sections and row ordering as the Mac, with Inbox
+first and a compact category dot/name on the existing metadata line; swipe to
+complete or delete, tap to edit. Category grouping omits the redundant category
+tags, and Inbox rows show one only when the task has a real category. Metadata
+truncates lower-value context before the due phrase, which stays visible rather
+than collapsing to an icon, and never wraps it onto another line.
+The toolbar's **Tasks** title menu switches between **Due date** and **Category** and
+remembers the choice on this device. Both apps use the shared FloridaCore
+grouping function and Inbox predicate; grouping is local and needs no network.
 Quick add, both tabs' add-task buttons, and the widget shortcut open one focused
 text composer. It uses the same local parser as the Mac, previews the title and
 dates, and offers category matches for `#` hints. Ambiguous prefixes require a
@@ -437,8 +459,10 @@ app (`florida://agenda`, `florida://tasks`, `florida://tasks/new`):
   update at start/end boundaries, clear yesterday at midnight, and request a
   store refresh every 30 minutes. Medium/large layouts have a **+** shortcut to
   the same quick-add composer as the app; the small widget opens Agenda because it has one tap target.
-- **Tasks** (small, medium): open tasks in scheduler order with the open count
-  and each task's category color; late tasks in red.
+- **Tasks** (small, medium): Inbox first, then open tasks in the shared due-date
+  order, with the open count and each task's category color; late tasks in red.
+  Ordering happens before the widget's row limit and stays due-focused regardless
+  of the app's grouping choice. Agenda widgets keep their chronological order.
 
 ## Building and shipping from GitHub Actions (no Mac needed)
 

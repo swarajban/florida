@@ -2,7 +2,7 @@ import FloridaKit
 import SwiftUI
 import WidgetKit
 
-/// Open task count and the top few open tasks in the store's priority/due order.
+/// Open task count and the first Inbox tasks, followed by tasks in due-date order.
 struct TasksEntry: TimelineEntry {
     let date: Date
     let openCount: Int
@@ -46,7 +46,7 @@ struct TasksProvider: TimelineProvider {
     }
 
     static func entry(at date: Date) -> TasksEntry {
-        guard let loaded = WidgetStore.openTasks(limit: rowLimit) else {
+        guard let loaded = WidgetStore.openTasks(limit: rowLimit, at: date) else {
             return TasksEntry(date: date, openCount: 0, tasks: [], available: false)
         }
         return TasksEntry(date: date, openCount: loaded.count, tasks: loaded.tasks, available: true)
@@ -61,7 +61,7 @@ struct TasksWidget: Widget {
             TasksWidgetView(entry: entry)
         }
         .configurationDisplayName("Tasks")
-        .description("Your open tasks, most urgent first.")
+        .description("Your Inbox, then open tasks by due date.")
         .supportedFamilies([.systemSmall, .systemMedium])
     }
 }

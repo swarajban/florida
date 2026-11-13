@@ -69,6 +69,9 @@ extension AppModel {
     /// Keeps `clockNow` on the current minute and the agenda on the current day. Started once.
     func startClock() {
         restartAgendaObserver()
+        #if DEBUG
+        if DemoData.fixedNow != nil { return }
+        #endif
         clockTask = Task { [weak self] in
             while !Task.isCancelled {
                 let now = Date()

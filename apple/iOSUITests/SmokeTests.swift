@@ -519,9 +519,7 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(input.waitForNonExistence(timeout: 5))
             app.tabBars.buttons["Tasks"].tap()
             let filed = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Send security update"))
-            for _ in 0..<8 where !filed.firstMatch.isHittable || filed.firstMatch.frame.maxY > app.tabBars.firstMatch.frame.minY {
-                app.swipeUp()
-            }
+            positionInTaskList(filed.firstMatch, in: app)
             XCTAssertTrue(filed.firstMatch.waitForExistence(timeout: 5))
             XCTAssertEqual(filed.count, 1)
             filed.firstMatch.tap()
@@ -540,22 +538,25 @@ final class SmokeTests: XCTestCase {
             app.buttons["Add"].tap()
             XCTAssertTrue(app.navigationBars["New Task"].waitForNonExistence(timeout: 5))
             let unfiled = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Remember umbrella"))
-            for _ in 0..<8 where !unfiled.firstMatch.isHittable || unfiled.firstMatch.frame.minY < app.navigationBars.firstMatch.frame.maxY {
-                app.swipeDown()
-            }
+            positionInTaskList(unfiled.firstMatch, in: app, towardEnd: false)
             XCTAssertTrue(unfiled.firstMatch.waitForExistence(timeout: 5))
             XCTAssertEqual(unfiled.count, 1)
             unfiled.firstMatch.tap()
             XCTAssertTrue(app.buttons["task-category"].label.contains("Inbox"))
             app.buttons["task-category"].tap()
             XCTAssertTrue(app.buttons["Home"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["Home"].isHittable)
             app.buttons["Home"].tap()
-            app.buttons["Save"].tap()
+            wait(for: [expectation(for: NSPredicate(format: "label CONTAINS %@", "Home"),
+                                   evaluatedWith: app.buttons["task-category"])], timeout: 5)
+            XCTAssertTrue(app.buttons["Home"].waitForNonExistence(timeout: 5))
+            let save = app.navigationBars["Edit Task"].buttons["Save"]
+            XCTAssertTrue(save.isHittable)
+            save.tap()
+            XCTAssertTrue(app.navigationBars["Edit Task"].waitForNonExistence(timeout: 5))
             // A row partly behind the floating tab bar can report hittable, but its center
             // taps the bar instead. Bring the whole row into the visible list before opening it.
-            for _ in 0..<8 where !unfiled.firstMatch.isHittable || unfiled.firstMatch.frame.maxY > app.tabBars.firstMatch.frame.minY {
-                app.swipeUp()
-            }
+            positionInTaskList(unfiled.firstMatch, in: app)
             unfiled.firstMatch.tap()
             XCTAssertTrue(app.buttons["task-category"].waitForExistence(timeout: 5))
             XCTAssertTrue(app.buttons["task-category"].label.contains("Home"), "Filing moves the task out of Inbox")
@@ -743,8 +744,7 @@ final class SmokeTests: XCTestCase {
             let tasks = launch(appearance: appearance, tab: "tasks")
             waitForText("Renew VPN certificate", in: tasks)
             let row = tasks.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Fix flaky scheduler test")).firstMatch
-            for _ in 0..<4 where !row.isHittable { tasks.swipeUp() }
-            XCTAssertTrue(row.isHittable)
+            positionInTaskList(row, in: tasks)
             row.tap()
             XCTAssertTrue(tasks.buttons["Mark done"].waitForExistence(timeout: 20))
             // Mark done, then both dates, before any scrolling.
@@ -874,6 +874,31 @@ final class SmokeTests: XCTestCase {
     @MainActor
     private func tapSwitch(_ control: XCUIElement) {
         control.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+    }
+
+    @MainActor
+    private func positionInTaskList(_ task: XCUIElement, in app: XCUIApplication, towardEnd: Bool = true) {
+        let top = app.navigationBars.firstMatch.frame.maxY + 8
+        let bottom = app.tabBars.firstMatch.frame.minY - 8
+        let middle = app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: app.frame.midX, dy: (top + bottom) / 2))
+        for _ in 0..<20 {
+            var travel: CGFloat = towardEnd ? -160 : 160
+            if task.exists {
+                let frame = task.frame
+                if frame.height > 0 {
+                    if frame.minY >= top && frame.maxY <= bottom { break }
+                    let distance = frame.minY < top ? top - frame.minY : bottom - frame.maxY
+                    travel = distance > 0 ? min(160, max(32, distance)) : max(-160, min(-32, distance))
+                }
+            }
+            middle.press(forDuration: 0.05, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: travel)),
+                         withVelocity: .slow, thenHoldForDuration: 0.3)
+        }
+        XCTAssertTrue(task.exists)
+        XCTAssertGreaterThanOrEqual(task.frame.minY, top)
+        XCTAssertLessThanOrEqual(task.frame.maxY, bottom)
+        XCTAssertTrue(task.isHittable)
     }
 
     @MainActor

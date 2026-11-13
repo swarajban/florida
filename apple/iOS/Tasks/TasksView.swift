@@ -1,10 +1,6 @@
 import FloridaKit
 import SwiftUI
 
-/// The Tasks tab: quick-add entry on top, then Inbox (with its triage count and AI chips) and
-/// every other category, empty ones collapsed to their header. Swipe or long-press a row for its
-/// actions (`TaskActions`, all with Undo), tap to edit, pull to sync. The toolbar adds a task and
-/// opens Projects and Categories.
 struct TasksView: View {
     @Environment(AppModel.self) private var model
     @State private var editor: TaskEditorRequest?
@@ -12,9 +8,10 @@ struct TasksView: View {
     @State private var movingTask: TaskItem?
     @State private var doneForNowTask: TaskItem?
     @State private var path: [TasksRoute] = TasksRoute.launchPath
+    @State private var now = AppModel.currentTime
+    @AppStorage("taskListGrouping", store: .florida) private var grouping: TaskListGrouping = .dueDate
 
     var body: some View {
-        let now = Date()
         NavigationStack(path: $path) {
             List {
                 Section {
@@ -55,7 +52,9 @@ struct TasksView: View {
                     Section {
                         ForEach(section.tasks) { task in
                             TaskListRow(
-                                task: task, now: now,
+                                task: task, now: now, calendar: groupingCalendar,
+                                category: grouping == .dueDate && model.category(id: task.categoryId)?.isInbox == false
+                                    ? model.category(id: task.categoryId) : nil,
                                 targets: TaskActionTargets(doneForNow: $doneForNowTask, moving: $movingTask),
                                 onEdit: { editor = TaskEditorRequest(task: task, isNew: false) })
                         }
@@ -87,9 +86,11 @@ struct TasksView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .accessibilityIdentifier("tasks-list")
             .scrollContentBackground(.hidden)
             .background(FloridaStyle.paper)
             .navigationTitle("Tasks")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(FloridaStyle.paper, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -102,6 +103,25 @@ struct TasksView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("Florida")
                     .accessibilityHint("Shows today's agenda")
+                }
+                ToolbarItem(placement: .principal) {
+                    Menu {
+                        Picker("Group by", selection: $grouping) {
+                            ForEach(TaskListGrouping.allCases, id: \.rawValue) { option in
+                                Text(option.title)
+                                    .tag(option)
+                                    .accessibilityIdentifier("tasks-grouping-\(option.rawValue)")
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Tasks").font(.headline)
+                            Image(systemName: "line.3.horizontal.decrease").font(.caption)
+                        }
+                    }
+                    .accessibilityLabel("Task view options")
+                    .accessibilityValue("Group by \(grouping.title)")
+                    .accessibilityIdentifier("tasks-view-options")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -154,17 +174,31 @@ struct TasksView: View {
             .task(id: inboxKey) {
                 model.requestTriageSuggestions()
             }
+            .task {
+                while !Task.isCancelled {
+                    now = model.now
+                    try? await Task.sleep(for: .seconds(15))
+                }
+            }
             .toastOverlay()
         }
     }
 
     private var sections: [TaskSection] {
-        TaskSection.sections(categories: model.categories, tasks: model.listedOpenTasks)
+        grouping.sections(tasks: model.listedOpenTasks, categories: model.categories, now: now, calendar: groupingCalendar)
+    }
+
+    private var groupingCalendar: Calendar {
+        var calendar = model.calendar
+        if let identifier = model.userSettings?.timeZone, let timeZone = TimeZone(identifier: identifier) {
+            calendar.timeZone = timeZone
+        }
+        return calendar
     }
 
     /// Changes whenever an Inbox task appears or is renamed, which re-runs the triage request.
     private var inboxKey: [String] {
-        model.openTasks.filter { $0.categoryId == TaskCategory.inboxId }.map { "\($0.id)\n\($0.title)" }
+        TaskListGrouping.inboxTasks(in: model.openTasks).map { "\($0.id)\n\($0.title)" }
     }
 }
 

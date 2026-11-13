@@ -1,8 +1,6 @@
 import FloridaKit
 import SwiftUI
 
-/// A category's header in the Tasks list. Inbox reads as a to-do of its own ("3 to triage" in
-/// orange, a tray glyph); an empty category says so, since it has no rows under it.
 struct TaskSectionHeader: View {
     let section: TaskSection
 
@@ -18,9 +16,11 @@ struct TaskSectionHeader: View {
                     .foregroundStyle(section.tasks.isEmpty ? Color.secondary : Color.orange)
                     .textCase(nil)
             } else {
-                Circle()
-                    .fill(Color.category(section.category))
-                    .frame(width: 10, height: 10)
+                if let category = section.category {
+                    Circle()
+                        .fill(Color.category(category))
+                        .frame(width: 10, height: 10)
+                }
                 Text(section.title)
                 Spacer()
                 if section.tasks.isEmpty {
@@ -36,5 +36,6 @@ struct TaskSectionHeader: View {
         .textCase(nil)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
+        .accessibilityIdentifier("tasks-section-\(section.id)")
     }
 }

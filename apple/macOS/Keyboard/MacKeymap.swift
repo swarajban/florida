@@ -53,6 +53,7 @@ struct MacKeymap: Sendable {
         ("v", .joinMeeting),
         ("g r", .openEventResources),
         ("g s", .openTaskSource),
+        ("g o", .toggleTaskGrouping),
     ]
 
     static let `default`: MacKeymap = {

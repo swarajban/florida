@@ -30,7 +30,8 @@ extension AppModel {
              .doNow, .doneForNow, .repeatLast, .centerOnNow, .jumpToFirst, .jumpToLast,
              .editEvent, .respondYes, .respondMaybe, .respondNo,
              .showProjects, .showBrief, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind,
-             .jump, .joinMeeting, .openEventResources, .cycleEventDayBlocking, .shareAvailability, .openTaskSource:
+             .jump, .joinMeeting, .openEventResources, .cycleEventDayBlocking, .shareAvailability,
+             .openTaskSource, .toggleTaskGrouping:
             guard !isSheetOpen else { return }
             statusMessage = nil
             jump = nil
@@ -67,6 +68,9 @@ extension AppModel {
             case .cycleEventDayBlocking: cycleEventDayBlocking()
             case .shareAvailability: startAvailability()
             case .openTaskSource: openTaskSource()
+            case .toggleTaskGrouping:
+                taskListGrouping = taskListGrouping == .dueDate ? .category : .dueDate
+                statusMessage = "Grouped tasks by \(taskListGrouping.title.lowercased())"
             case .core: break
             }
         }

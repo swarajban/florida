@@ -1,35 +1,19 @@
 import FloridaKit
 import Foundation
 
-/// The open tasks of one category, in the task pane's display order.
-struct CategoryTaskGroup: Identifiable, Hashable {
-    let id: String
-    let name: String
-    /// Nil for tasks whose category is not in the store (yet).
-    let category: TaskCategory?
-    let tasks: [TaskItem]
-
-    var isInbox: Bool { category?.isInbox ?? false }
-}
-
 extension AppModel {
-    /// Every category in pane order, Inbox first, with its open tasks in `openTasks`' priority
-    /// order; empty categories are included (the pane shows them collapsed).
-    var taskGroups: [CategoryTaskGroup] {
-        var byCategory = Dictionary(grouping: openTasks, by: \.categoryId)
-        var groups: [CategoryTaskGroup] = []
-        for category in orderedCategories {
-            let tasks = byCategory.removeValue(forKey: category.id) ?? []
-            groups.append(CategoryTaskGroup(id: category.id, name: category.name, category: category, tasks: tasks))
-        }
-        let orphans = openTasks.filter { byCategory[$0.categoryId] != nil }
-        if !orphans.isEmpty {
-            groups.append(CategoryTaskGroup(id: "orphans", name: "Other", category: nil, tasks: orphans))
-        }
-        return groups
+    var taskGroups: [TaskListSection] {
+        taskListGrouping.sections(
+            tasks: openTasks, categories: categories, now: clockNow, calendar: taskListCalendar)
     }
 
-    /// `j` / `k` order in the task pane: today's suggestions, then every category's tasks.
+    var taskListCalendar: Calendar {
+        var result = calendar
+        if let zone = TimeZone(identifier: userSettings?.timeZone ?? "") { result.timeZone = zone }
+        return result
+    }
+
+    /// `j` / `k` order in the task pane: today's suggestions, then the displayed task sections.
     var orderedTaskItems: [ItemID] {
         paneSuggestions.flatMap { group in group.picks.map { ItemID.suggestion($0.id) } }
             + taskGroups.flatMap { group in group.tasks.map { ItemID.task($0.id) } }
@@ -63,7 +47,9 @@ extension AppModel {
     }
 
     func scheduleState(for task: TaskItem) -> TaskScheduleState {
-        TaskScheduleState(task: task, placements: placementsByTask[task.id] ?? [], unscheduled: unscheduledByTask[task.id])
+        TaskScheduleState(
+            task: task, placements: placementsByTask[task.id] ?? [],
+            unscheduled: unscheduledByTask[task.id], now: clockNow)
     }
 
     /// Moves the selection through the focused pane's items, clamped at both ends. With nothing

@@ -22,6 +22,7 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(input.waitForNonExistence(timeout: 5))
             let row = app.staticTexts["PR #123 in owner/repo"].firstMatch
             XCTAssertTrue(row.waitForExistence(timeout: 5))
+            XCTAssertTrue(row.isHittable)
             app.typeKey("g", modifierFlags: [])
             app.typeKey("s", modifierFlags: [])
             XCTAssertTrue(app.staticTexts["Opened source: https://github.com/owner/repo/pull/123"].waitForExistence(timeout: 5))

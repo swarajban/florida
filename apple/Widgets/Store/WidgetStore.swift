@@ -60,15 +60,21 @@ enum WidgetStore {
         }
     }
 
-    /// Open tasks in `openTasks()` order with their late flag, plus the total count.
-    static func openTasks(limit: Int) -> (count: Int, tasks: [WidgetTask])? {
+    static func openTasks(limit: Int, at date: Date) -> (count: Int, tasks: [WidgetTask])? {
         guard let database else { return nil }
         do {
-            let categories = try categoriesById(database)
+            let categories = try database.categories()
+            let categoriesById = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
             let tasks = try database.openTasks()
+            var calendar = Self.calendar
+            if let identifier = try database.userSettings()?.timeZone, let timeZone = TimeZone(identifier: identifier) {
+                calendar.timeZone = timeZone
+            }
+            let ordered = TaskListGrouping.dueDate.sections(
+                tasks: tasks, categories: categories, now: date, calendar: calendar).flatMap(\.tasks)
             let placements = try database.placementsByTask()
-            let rows = tasks.prefix(limit).map { task in
-                WidgetTask(task: task, placements: placements[task.id] ?? [], category: categories[task.categoryId])
+            let rows = ordered.prefix(limit).map { task in
+                WidgetTask(task: task, placements: placements[task.id] ?? [], category: categoriesById[task.categoryId])
             }
             return (tasks.count, rows)
         } catch {

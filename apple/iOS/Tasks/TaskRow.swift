@@ -9,6 +9,7 @@ struct TaskRow: View {
     let summary: TaskScheduleSummary
     let now: Date
     let calendar: Calendar
+    var category: TaskCategory? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -30,6 +31,7 @@ struct TaskRow: View {
                             .fontWeight(.semibold)
                             .foregroundStyle(task.priority.tint)
                             .accessibilityLabel("\(marker) priority")
+                            .layoutPriority(3)
                         Text("·")
                     }
                     Text(Formatting.duration(minutes: task.remainingMinutes))
@@ -38,13 +40,19 @@ struct TaskRow: View {
                         Label(
                             "\(task.deadlineType == .hard ? "Due" : "By") \(Formatting.due(dueAt, now: now, calendar: calendar))",
                             systemImage: task.deadlineType == .hard ? "calendar.badge.clock" : "calendar")
+                            .layoutPriority(2)
                     }
                     Text("·")
                     Label(task.context.displayName, systemImage: task.context.symbolName)
                         .accessibilityLabel("\(task.context.displayName) context")
+                        .layoutPriority(-1)
+                    if let category { TaskCategoryChip(category: category).layoutPriority(1) }
                 }
+                .labelStyle(.titleAndIcon)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
                 Label(summary.headline(now: now, calendar: calendar), systemImage: summary.symbolName)
                     .font(.caption)
                     .foregroundStyle(scheduleStyle)
