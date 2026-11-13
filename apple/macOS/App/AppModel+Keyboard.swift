@@ -21,7 +21,8 @@ extension AppModel {
         guard let chord = KeyChord(event: event) else { return false }
         let isCommandChord = chord.modifiers.contains(.command)
         let isEscape = chord == KeyChord("escape")
-        if event.isARepeat, chord == KeyChord("space"), !(event.window?.firstResponder is NSText) { return true }
+        let typing = isPaletteOpen || event.window?.firstResponder is NSTextView
+        if event.isARepeat, !typing, !ShortcutKeyRepeat.isNavigation(chord) { return true }
 
         if isAvailabilityZoneOpen {
             if isEscape { isAvailabilityZoneOpen = false }
@@ -93,18 +94,16 @@ extension AppModel {
             }
         }
 
-        let typing = isPaletteOpen || NSApplication.shared.keyWindow?.firstResponder is NSTextView
         if typing, !isCommandChord, !isEscape {
             if !matcher.pendingSequence.isEmpty {
-                matcher.reset()
-                pendingKeys = ""
+                resetKeySequence()
             }
             return false
         }
 
         switch matcher.feed(chord, at: Date()) {
         case .matched(let command):
-            pendingKeys = ""
+            resetKeySequence()
             if inEventPopover, !command.actsOnOpenEvent {
                 return false
             }
@@ -112,10 +111,27 @@ extension AppModel {
             return true
         case .pending:
             pendingKeys = MacKeymap.display(matcher.pendingSequence) + " …"
+            prefixTimeoutTask?.cancel()
+            let timeout = matcher.timeout
+            prefixTimeoutTask = Task { @MainActor [weak self] in
+                do {
+                    try await Task.sleep(for: .seconds(timeout))
+                } catch {
+                    return
+                }
+                self?.resetKeySequence()
+            }
             return true
         case .unmatched:
-            pendingKeys = ""
+            resetKeySequence()
             return false
         }
+    }
+
+    func resetKeySequence() {
+        prefixTimeoutTask?.cancel()
+        prefixTimeoutTask = nil
+        matcher.reset()
+        pendingKeys = ""
     }
 }

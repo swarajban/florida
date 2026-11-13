@@ -77,6 +77,40 @@ struct TaskEditorKeyboardTests {
         #expect(presses == [.init(key: .markDone)])
     }
 
+    @Test func handledShortcutStaysSuppressedAcrossWindowsButFreshTypingDoesNot() throws {
+        _ = NSApplication.shared
+        let first = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 160),
+                             styleMask: [.titled], backing: .buffered, defer: false)
+        let second = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 160),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        defer {
+            first.orderOut(nil)
+            second.orderOut(nil)
+        }
+        let state = ShortcutRepeatState()
+        let origin = TaskEditorKeyHostView()
+        origin.shortcutRepeats = state
+        let destination = TaskEditorKeyHostView()
+        destination.shortcutRepeats = state
+        first.contentView?.addSubview(origin)
+        second.contentView?.addSubview(destination)
+        let field = NSTextField(frame: NSRect(x: 20, y: 80, width: 300, height: 24))
+        field.stringValue = "Original title"
+        second.contentView?.addSubview(field)
+        origin.onPress = { _ in second.makeFirstResponder(field) }
+        #expect(first.makeFirstResponder(nil))
+        #expect(origin.handle(try event("t", code: 17, in: first)))
+        #expect(second.firstResponder is NSTextView)
+        #expect(destination.handle(try event("t", code: 17, in: second, repeats: true)))
+        #expect(field.stringValue == "Original title")
+        let release = try #require(NSEvent.keyEvent(with: .keyUp, location: .zero, modifierFlags: [],
+            timestamp: 2, windowNumber: second.windowNumber, context: nil, characters: "t",
+            charactersIgnoringModifiers: "t", isARepeat: false, keyCode: 17))
+        #expect(!destination.handle(release))
+        #expect(!destination.handle(try event("t", code: 17, in: second)))
+        #expect(!destination.handle(try event("t", code: 17, in: second, repeats: true)))
+    }
+
     @Test func selectorOriginRevealsAnOffscreenControlWithoutTakingFocus() throws {
         _ = NSApplication.shared
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 240),

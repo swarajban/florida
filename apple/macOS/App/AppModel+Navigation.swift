@@ -104,6 +104,8 @@ extension AppModel {
 
     /// Highlights a day without moving the view when it is already visible.
     func selectDay(_ day: Date) {
+        endJump()
+        resetKeySequence()
         selectedDay = calendar.startOfDay(for: day)
         if !visibleRange.contains(selectedDay) {
             anchorDate = selectedDay

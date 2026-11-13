@@ -39,6 +39,27 @@ import Testing
         }
     }
 
+    @Test func schedulingSummaryDistinguishesTripCheckoutFromManualOverrides() {
+        var event = event()
+        event.autoBlocksDay = true
+        event.blockingReason = "Your trip"
+        event.startAt = JSONCoding.parseInstant("2026-11-13T00:00:00Z")
+        event.endAt = JSONCoding.parseInstant("2026-11-16T00:00:00Z")
+        #expect(AllDayBlocking.schedulingSummary(for: event, calendarBlocksScheduling: true)
+                == "Blocks trip days; last day open")
+        event.blocksDay = true
+        #expect(AllDayBlocking.schedulingSummary(for: event, calendarBlocksScheduling: true) == "Blocks your day")
+        event.blocksDay = false
+        #expect(AllDayBlocking.schedulingSummary(for: event, calendarBlocksScheduling: true) == "Does not block scheduling")
+        event.blocksDay = nil
+        #expect(AllDayBlocking.schedulingSummary(for: event, calendarBlocksScheduling: false) == "Does not block scheduling")
+        event.endAt = JSONCoding.parseInstant("2026-11-14T00:00:00Z")
+        #expect(AllDayBlocking.schedulingSummary(for: event, calendarBlocksScheduling: true) == "Blocks your day")
+        event.blockingReason = "Holiday"
+        event.endAt = JSONCoding.parseInstant("2026-11-16T00:00:00Z")
+        #expect(AllDayBlocking.schedulingSummary(for: event, calendarBlocksScheduling: true) == "Blocks your day")
+    }
+
     func event() -> CalendarEvent {
         CalendarEvent(id: "e", calendarId: "cal", googleId: "g-e", summary: "Holiday", allDay: true, updatedAt: .distantPast)
     }

@@ -239,6 +239,25 @@ import Testing
             == Self.range("2026-03-08T08:00:00Z", "2026-03-09T07:00:00Z"))
     }
 
+    @Test func automaticTripCheckoutStaysAvailableUnlessManuallyBlocked() {
+        var event = Self.event()
+        event.allDay = true
+        event.autoBlocksDay = true
+        event.blockingReason = "Your trip"
+        event.startAt = Self.date("2026-11-13T00:00:00Z")
+        event.endAt = Self.date("2026-11-17T00:00:00Z")
+        let checkout = Self.range("2026-11-16T08:00:00Z", "2026-11-17T08:00:00Z")
+        for manual: Bool? in [nil, false, true] {
+            event.blocksDay = manual
+            let expected: AvailabilityRange? = manual == false ? nil
+                : Self.range("2026-11-13T08:00:00Z", manual == true
+                             ? "2026-11-17T08:00:00Z" : "2026-11-16T08:00:00Z")
+            #expect(Availability.blockingRange(event, timeZone: Self.pacific) == expected)
+            #expect(Self.free(checkout, events: [event], now: checkout.start)
+                == (manual == true ? [] : Self.free(checkout, now: checkout.start)))
+        }
+    }
+
     @Test func workingHoursMinusEventsSnapInwardWithoutOfferingPastOrOffscreenTime() {
         let visible = Self.range("2026-11-12T17:05:00Z", "2026-11-12T21:53:00Z")
         #expect(Self.free(visible, events: [Self.event()], now: Self.date("2026-11-12T17:16:00Z")) == [

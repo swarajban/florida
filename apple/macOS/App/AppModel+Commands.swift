@@ -19,6 +19,7 @@ extension AppModel {
 
     /// Runs a Mac command: shared commands go to `perform`, Mac-only ones are handled here.
     func run(_ command: MacCommand) {
+        resetKeySequence()
         if availabilityShare != nil {
             if command == .core(.cancel) { cancelAvailability() }
             return
@@ -79,6 +80,7 @@ extension AppModel {
     /// Runs one command. Synchronous: every state change lands before this returns, and anything
     /// that needs the network is started in the background.
     func perform(_ command: AppCommand) {
+        resetKeySequence()
         if availabilityShare != nil {
             if command == .cancel { cancelAvailability() }
             return
@@ -108,6 +110,7 @@ extension AppModel {
             if !isTasksPaneVisible, focus == .tasks {
                 focus = .calendar
             }
+            clearHiddenSelection()
         case .goToTasks:
             isTasksPaneVisible = true
             focus = .tasks
@@ -140,8 +143,7 @@ extension AppModel {
             cancelAvailability()
             return
         }
-        pendingKeys = ""
-        matcher.reset()
+        resetKeySequence()
         jump = nil
         if isPaletteOpen {
             closePalette()

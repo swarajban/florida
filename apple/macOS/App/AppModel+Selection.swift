@@ -48,7 +48,7 @@ extension AppModel {
 
     var selectedEvent: CalendarEvent? {
         guard case .event(let id)? = selection else { return nil }
-        return events.first { $0.id == id }
+        return events.first { $0.id == id } ?? blockingAllDayEvents.first { $0.id == id }
     }
 
     func scheduleState(for task: TaskItem) -> TaskScheduleState {
@@ -89,6 +89,7 @@ extension AppModel {
     /// ends jump mode.
     func select(_ item: ItemID?) {
         endJump()
+        resetKeySequence()
         selection = item
         if focus == .calendar, let item, let day = gridLayout.day(of: item) {
             selectedDay = day
@@ -99,6 +100,19 @@ extension AppModel {
         } else if let note = planNote(for: item) {
             statusMessage = note
         }
+    }
+
+    func clearHiddenSelection() {
+        guard let selection,
+              gridLayout.day(of: selection) == nil,
+              !isTasksPaneVisible || !orderedTaskItems.contains(selection)
+        else { return }
+        if case .event(let id) = selection,
+           let event = blockingAllDayEvents.first(where: { $0.id == id }),
+           AllDayBlocking.protectedDays(for: event, calendar: calendar)?.overlaps(visibleRange) == true {
+            return
+        }
+        self.selection = nil
     }
 
     /// What the status bar says about a calendar block the grid cannot spell out in a narrow

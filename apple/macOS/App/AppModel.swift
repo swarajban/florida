@@ -196,6 +196,8 @@ final class AppModel {
     #endif
 
     @ObservationIgnored var matcher = MacKeySequenceMatcher(keymap: .default)
+    @ObservationIgnored var prefixTimeoutTask: Task<Void, Never>?
+    @ObservationIgnored let shortcutRepeats = ShortcutRepeatState()
     @ObservationIgnored var changeStream: ChangeStream?
     @ObservationIgnored var backgroundTasks: [Task<Void, Never>] = []
     @ObservationIgnored private var observers: [Task<Void, Never>] = []
@@ -286,6 +288,8 @@ final class AppModel {
     /// Call after `viewMode` or `anchorDate` changed: widens the loaded range when the view left
     /// it and rebuilds the grid layout.
     func rangeDidChange() {
+        endJump()
+        resetKeySequence()
         let visible = visibleRange
         let covered = loadedRange.map { $0.lowerBound <= visible.lowerBound && visible.upperBound <= $0.upperBound } ?? false
         if !covered {
@@ -296,6 +300,7 @@ final class AppModel {
             restartEventsObserver()
         }
         rebuildLayout()
+        clearHiddenSelection()
     }
 
     /// Recomputes every frame the calendar draws. Cheap (a few hundred items), so it runs on every

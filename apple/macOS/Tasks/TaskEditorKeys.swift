@@ -41,6 +41,7 @@ final class TaskEditorKeyboard {
 /// again until the user has pressed or clicked something.
 struct TaskEditorKeyMonitor: NSViewRepresentable {
     let keyboard: TaskEditorKeyboard
+    let shortcutRepeats: ShortcutRepeatState
     let startsUnfocused: Bool
     let onPress: (TaskEditorKey.Press) -> Void
     var onPriority: ((Priority) -> Void)?
@@ -48,6 +49,7 @@ struct TaskEditorKeyMonitor: NSViewRepresentable {
     func makeNSView(context: Context) -> TaskEditorKeyHostView {
         let view = TaskEditorKeyHostView()
         view.keyboard = keyboard
+        view.shortcutRepeats = shortcutRepeats
         view.startsUnfocused = startsUnfocused
         view.onPress = onPress
         view.onPriority = onPriority
@@ -66,6 +68,7 @@ final class TaskEditorKeyHostView: NSView {
     var onPress: ((TaskEditorKey.Press) -> Void)?
     var onPriority: ((Priority) -> Void)?
     private var monitor: Any?
+    var shortcutRepeats = ShortcutRepeatState()
     private var focusObservation: NSKeyValueObservation?
     private let box = HostBox()
     /// The user has not pressed or clicked anything yet, so a text field that takes the keyboard
@@ -79,7 +82,7 @@ final class TaskEditorKeyHostView: NSView {
         guard let window else { return }
         box.view = self
         let box = box
-        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]) { event in
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .leftMouseDown, .rightMouseDown, .otherMouseDown]) { event in
             let handled = MainActor.assumeIsolated { box.view?.handle(event) ?? false }
             return handled ? nil : event
         }
@@ -113,6 +116,20 @@ final class TaskEditorKeyHostView: NSView {
 
     func handle(_ event: NSEvent) -> Bool {
         guard let window, event.window === window else { return false }
+        if event.type == .keyUp {
+            shortcutRepeats.gate.keyUp(keyCode: event.keyCode)
+            return false
+        }
+        if event.type == .keyDown,
+           shortcutRepeats.gate.keyDown(keyCode: event.keyCode, isRepeat: event.isARepeat) { return true }
+        let handled = route(event, in: window)
+        if handled, event.type == .keyDown {
+            shortcutRepeats.gate.didHandle(keyCode: event.keyCode)
+        }
+        return handled
+    }
+
+    private func route(_ event: NSEvent, in window: NSWindow) -> Bool {
         isUntouched = false
         guard !SelectorInput.isEditing(in: window) else { return false }
         guard event.type == .keyDown, let chord = KeyChord(event: event) else {

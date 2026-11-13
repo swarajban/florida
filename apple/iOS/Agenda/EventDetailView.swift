@@ -68,8 +68,7 @@ struct EventDetailView: View {
                                 identifier: "event-blocks-day-\(event.id)")
                         }
                         let calendarBlocks = model.calendarInfo(id: event.calendarId)?.blocksScheduling ?? true
-                        Text(AllDayBlocking.isEffective(event, calendarBlocksScheduling: calendarBlocks)
-                            ? "Blocks your day" : "Does not block scheduling")
+                        Text(AllDayBlocking.schedulingSummary(for: event, calendarBlocksScheduling: calendarBlocks))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .accessibilityIdentifier("event-blocks-day-effective-\(event.id)")

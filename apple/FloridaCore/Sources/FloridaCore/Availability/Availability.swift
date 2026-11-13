@@ -30,8 +30,8 @@ public enum Availability {
         guard event.allDay else { return AvailabilityRange(start: start, end: end) }
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
-        let days = AllDayDate.localDays(start: start, end: end, calendar: calendar)
-        guard days.lowerBound < days.upperBound else { return nil }
+        guard let days = AllDayBlocking.protectedDays(for: event, calendar: calendar),
+              days.lowerBound < days.upperBound else { return nil }
         return AvailabilityRange(start: days.lowerBound, end: days.upperBound)
     }
 

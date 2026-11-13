@@ -29,8 +29,7 @@ extension AppModel {
         closePalette()
         jump = nil
         eventDetailID = nil
-        matcher.reset()
-        pendingKeys = ""
+        resetKeySequence()
         var share = AvailabilityShareState()
         if viewMode == .month {
             share.previousViewMode = viewMode

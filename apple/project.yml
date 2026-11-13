@@ -195,6 +195,7 @@ targets:
     sources:
       - macOSTests
       - macOS/Tasks/TaskEditorKeys.swift
+      - macOS/Keyboard/ShortcutRepeatState.swift
       - macOS/Keyboard/KeyChord+NSEvent.swift
       - path: macOS/Forms
         optional: true

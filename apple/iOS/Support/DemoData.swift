@@ -283,6 +283,19 @@ enum DemoData {
             response.optionalPlacements = []
             response.unscheduled = []
         }
+        if UserDefaults.standard.bool(forKey: "uiInteractionTripDemo") {
+            response.events.append(CalendarEvent(
+                id: "interaction-trip", calendarId: "demo-cal-work", googleId: "interaction-trip",
+                summary: "Interaction trip", startAt: utcDay(-2), endAt: utcDay(1), allDay: true,
+                htmlLink: "https://example.com/interaction-trip", updatedAt: now,
+                autoBlocksDay: true, blockingReason: "Your trip"))
+        }
+        if UserDefaults.standard.bool(forKey: "uiInteractionManyResources"),
+           let index = response.events.firstIndex(where: { $0.id == "demo-event-design" }) {
+            response.events[index].description = (1...100).map {
+                "<a href=\"https://example.com/interaction-resource/\($0)\">Resource \($0)</a>"
+            }.joined(separator: "<br>")
+        }
         return response
     }
 

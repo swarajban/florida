@@ -29,6 +29,8 @@ time. Busy rules match the scheduler: live timed opaque events block, focus time
 location do not, and timed out-of-office blocks even when transparent. All-day events use
 the per-event override, then the stored automatic judgment, then the legacy OOO fallback
 to decide whether to block the routine's local day.
+Automatic multi-day trips leave their checkout day available here too; a manual **Blocks**
+override includes it. Event details name the open last day instead of saying the whole trip blocks.
 Pinned tasks and routine commitments block; flexible task placements do not. The small
 `Availability.eventBlocksTime` predicate is the alignment point for future busy-time changes.
 This is static text, not a reservation or a live booking link.
@@ -106,6 +108,21 @@ workflow, and unrelated PRs use no macOS runners.
 gh workflow run ios.yml --ref <PR-branch> -f ui_only=true
 gh run list --workflow ios.yml --branch <PR-branch> --event workflow_dispatch
 ```
+
+For a failing-test baseline or a focused Mac check, add the optional selector:
+
+```sh
+gh workflow run ios.yml --ref <PR-branch> -f ui_only=true \
+  -f mac_test_selector=Florida-macOSKeyboardTests
+```
+
+The selector accepts a Mac test bundle, bundle/class, or bundle/class/method.
+Pass space-separated selectors in one quoted value to check several classes in the same job,
+for example `-f mac_test_selector='Florida-macOSUITests/MacInteractionStateTests Florida-macOSUITests/EditorRegressionTests'`.
+It runs one Mac job without retries or TestFlight uploads. An empty selector retains the
+full gate; each final PR head still needs one complete unfiltered run.
+The reusable full Mac UI job has a 60-minute limit, matching main's standalone Mac job;
+the iPhone shard limits are unchanged.
 
 This explicit dispatch uses the existing iOS workflow's `ui_only` mode: it never
 starts a release or reads release secrets. It runs against the branch head, so
@@ -232,6 +249,11 @@ refreshes the row from the current task, and task date/time labels use the same
 settings time zone as the sections on both apps.
 Entering `f` or cancelling it with Esc leaves the selection unchanged. Only
 choosing a label selects and opens an item. Key autorepeat cannot choose a jump label.
+Holding a command key acts once, even when it opens an editor, selector or quick add;
+release and press again to act again. Navigation and ordinary text typing still repeat.
+The `g` and `r` sequence hints expire after one second and clear when an item is clicked.
+Header navigation ends jump mode. Hiding the task pane clears its selection when the
+selected item is not also shown on the calendar.
 
 The main keys:
 

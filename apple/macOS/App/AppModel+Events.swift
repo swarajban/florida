@@ -133,8 +133,7 @@ extension AppModel {
         }
         let resources = event.resources
         guard !resources.isEmpty else { return false }
-        matcher.reset()
-        pendingKeys = ""
+        resetKeySequence()
         var labels = eventResourceKeys ?? JumpLabels(items: resources.map(\.id), alphabet: Array("1234567890"))
         switch labels.type(chord.key) {
         case .selected(let id):
