@@ -79,7 +79,7 @@ extension CalendarInfo: @retroactive FetchableRecord, @retroactive PersistableRe
 /// (entity, entityId); later task edits merge their intent into the earlier write.
 public struct PendingWrite: Codable, Hashable, Sendable, FetchableRecord, MutablePersistableRecord {
     public enum Entity: String, Codable, Hashable, Sendable {
-        case task, category, schedule, event, project, dayOverride
+        case task, category, schedule, event, project, dayOverride, calendar
     }
 
     public enum Op: String, Codable, Hashable, Sendable {
@@ -117,9 +117,10 @@ public struct PendingWrite: Codable, Hashable, Sendable, FetchableRecord, Mutabl
     /// Queue order alone cannot promise that: saving a project again moves its write behind the
     /// task filed under it in between.
     var pushRank: Int {
+        if entity == .category, op == .delete { return 1 }
         guard op != .delete else { return 3 }
         switch entity {
-        case .schedule: return 0
+        case .schedule, .calendar: return 0
         case .category: return 1
         case .project: return 2
         case .task, .event, .dayOverride: return 3

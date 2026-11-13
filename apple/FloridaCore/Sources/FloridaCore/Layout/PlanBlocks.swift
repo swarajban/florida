@@ -119,7 +119,7 @@ public enum ParallelWork {
         var titles: [String: String] = [:]
         var spans: [Span] = []
         for placement in placements {
-            guard let lane = placement.lane, let task = tasksById[placement.taskId] else { continue }
+            guard let lane = placement.lane, let task = tasksById[placement.taskId], task.isOpen else { continue }
             titles[placement.id] = task.title
             spans.append(Span(id: placement.id, startAt: placement.startAt, endAt: placement.endAt, lane: lane))
         }

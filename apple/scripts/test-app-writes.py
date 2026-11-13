@@ -235,6 +235,7 @@ final class AppModel {
     var selectedSuggestion: Int? { nil }
     var placementsByTask: [String: [Placement]] = [:]
     var calendar = Calendar(identifier: .gregorian)
+    var taskListCalendar: Calendar { calendar }
     var ghosts: [String] = []
     var completionCount = 0
     var gridDrag: Int?
@@ -553,6 +554,8 @@ final class AppModel {
     var blooming: [String: BloomingTask] = [:]
     var completionCount = 0
     var calendar = Calendar(identifier: .gregorian)
+    var now = Date()
+    var taskListCalendar: Calendar { calendar }
     var today: Date { calendar.startOfDay(for: Date()) }
     var triageSuggestions: [String: Int] = [:]
     var ghostIds: Set<String> = ["ghost"]

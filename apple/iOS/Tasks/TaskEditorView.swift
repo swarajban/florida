@@ -121,6 +121,8 @@ struct TaskEditorView: View {
                         }
                     }
                 }
+                .environment(\.calendar, model.taskListCalendar)
+                .environment(\.timeZone, model.taskListCalendar.timeZone)
 
                 sourceSection
 
@@ -281,7 +283,7 @@ struct TaskEditorView: View {
                     draft.deadlineType = .soft
                     let dueAt = draft.dueAt ?? defaultDueDate
                     // The default day may be before a start already set.
-                    draft.dueAt = draft.startAt.map { TaskDay.due(dueAt, notBefore: $0, calendar: model.calendar) } ?? dueAt
+                    draft.dueAt = draft.startAt.map { TaskDay.due(dueAt, notBefore: $0, calendar: model.taskListCalendar) } ?? dueAt
                 } else {
                     draft.deadlineType = .none
                     draft.dueAt = nil
@@ -296,7 +298,7 @@ struct TaskEditorView: View {
         Binding(
             get: { draft.dueAt ?? defaultDueDate },
             set: { date in
-                let calendar = model.calendar
+                let calendar = model.taskListCalendar
                 let keepsClock = hasDueTime.wrappedValue || !TaskDay.dueHasTime(date, calendar: calendar)
                 draft.dueAt = keepsClock ? date : TaskDay.due(on: date, calendar: calendar)
             })
@@ -305,11 +307,11 @@ struct TaskEditorView: View {
     /// On when the due date carries a time; switching it off puts the date back on its whole day.
     private var hasDueTime: Binding<Bool> {
         Binding(
-            get: { dueTimeChoice ?? draft.dueAt.map { TaskDay.dueHasTime($0, calendar: model.calendar) } ?? false },
+            get: { dueTimeChoice ?? draft.dueAt.map { TaskDay.dueHasTime($0, calendar: model.taskListCalendar) } ?? false },
             set: { on in
                 dueTimeChoice = on
                 if !on, let dueAt = draft.dueAt {
-                    draft.dueAt = TaskDay.due(on: dueAt, calendar: model.calendar)
+                    draft.dueAt = TaskDay.due(on: dueAt, calendar: model.taskListCalendar)
                 }
             })
     }
@@ -319,7 +321,7 @@ struct TaskEditorView: View {
         Binding(
             get: { draft.startAt != nil },
             set: { on in
-                setStart(on ? (draft.startAt ?? TaskDay.notBefore(on: Date(), calendar: model.calendar)) : nil)
+                setStart(on ? (draft.startAt ?? TaskDay.notBefore(on: Date(), calendar: model.taskListCalendar)) : nil)
                 if !on {
                     startTimeChoice = nil
                 }
@@ -330,16 +332,16 @@ struct TaskEditorView: View {
     private var startAt: Binding<Date> {
         Binding(
             get: { draft.startAt ?? Date() },
-            set: { setStart(hasStartTime.wrappedValue ? $0 : TaskDay.notBefore(on: $0, calendar: model.calendar)) })
+            set: { setStart(hasStartTime.wrappedValue ? $0 : TaskDay.notBefore(on: $0, calendar: model.taskListCalendar)) })
     }
 
     private var hasStartTime: Binding<Bool> {
         Binding(
-            get: { startTimeChoice ?? draft.startAt.map { TaskDay.notBeforeHasTime($0, calendar: model.calendar) } ?? false },
+            get: { startTimeChoice ?? draft.startAt.map { TaskDay.notBeforeHasTime($0, calendar: model.taskListCalendar) } ?? false },
             set: { on in
                 startTimeChoice = on
                 if !on, let startAt = draft.startAt {
-                    setStart(TaskDay.notBefore(on: startAt, calendar: model.calendar))
+                    setStart(TaskDay.notBefore(on: startAt, calendar: model.taskListCalendar))
                 }
             })
     }
@@ -349,7 +351,7 @@ struct TaskEditorView: View {
     private func setStart(_ start: Date?) {
         draft.startAt = start
         if let start, let dueAt = draft.dueAt {
-            draft.dueAt = TaskDay.due(dueAt, notBefore: start, calendar: model.calendar)
+            draft.dueAt = TaskDay.due(dueAt, notBefore: start, calendar: model.taskListCalendar)
         }
     }
 
@@ -383,7 +385,7 @@ struct TaskEditorView: View {
     }
 
     private var defaultDueDate: Date {
-        TaskDay.defaultDue(now: Date(), calendar: model.calendar)
+        TaskDay.defaultDue(now: Date(), calendar: model.taskListCalendar)
     }
 
     /// The next whole hour from now.

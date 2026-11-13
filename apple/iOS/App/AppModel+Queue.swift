@@ -53,47 +53,11 @@ extension AppModel {
         }
     }
 
-    /// Retries the original task intent, never a full snapshot of the reconciled row. Other
-    /// entities retain their existing retry behavior.
+    /// Retries the original request, never a snapshot of the reconciled row.
     func retry(_ change: RejectedChange) {
         let ok = write { database in
-            switch (change.entity, change.op) {
-            case (.task, .put), (.task, .patch):
-                try database.requeue(PendingWrite(
-                    entity: .task, entityId: change.entityId, op: change.op, body: change.body, createdAt: change.at))
-            case (.task, .delete):
-                try database.deleteTask(id: change.entityId)
-            case (.category, .put), (.category, .patch):
-                guard let category = self.category(id: change.entityId) else { throw LocalWriteError("The category is gone.") }
-                try database.saveCategory(category)
-            case (.category, .delete):
-                try database.deleteCategory(id: change.entityId)
-            case (.schedule, .put), (.schedule, .patch):
-                guard let schedule = self.schedule(id: change.entityId) else { throw LocalWriteError("The schedule is gone.") }
-                try database.saveSchedule(schedule)
-            case (.schedule, .delete):
-                try database.deleteSchedule(id: change.entityId)
-            case (.event, .put), (.event, .patch):
-                guard let event = try database.event(id: change.entityId) else { throw LocalWriteError("The event is gone.") }
-                try database.saveEvent(event)
-            case (.event, .delete):
-                try database.deleteEvent(id: change.entityId)
-            case (.project, .put), (.project, .patch):
-                guard let project = try database.project(id: change.entityId), project.deletedAt == nil else {
-                    throw LocalWriteError("The project is gone.")
-                }
-                try database.saveProject(project)
-            case (.project, .delete):
-                try database.deleteProject(id: change.entityId)
-            case (.dayOverride, .put), (.dayOverride, .patch):
-                // The entity id is the date; the store kept the kind the user chose.
-                guard let day = try database.dayOverrides().first(where: { $0.date == change.entityId }) else {
-                    throw LocalWriteError("That day is back on its usual routine.")
-                }
-                try database.setDay(day.date, kind: day.kind, note: day.note)
-            case (.dayOverride, .delete):
-                try database.clearDay(change.entityId)
-            }
+            try database.requeue(PendingWrite(
+                entity: change.entity, entityId: change.entityId, op: change.op, body: change.body, createdAt: change.at))
         }
         if ok {
             dismissRejection(change)
@@ -123,6 +87,8 @@ extension AppModel {
         case .dayOverride:
             // The id is the date, "YYYY-MM-DD".
             return "Day \(id)"
+        case .calendar:
+            return calendars.first(where: { $0.id == id }).map { "Calendar “\($0.summary)”" } ?? "Calendar \(id.prefix(8))"
         }
     }
 }

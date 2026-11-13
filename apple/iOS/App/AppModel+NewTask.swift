@@ -15,7 +15,7 @@ extension AppModel {
             id: UUID().uuidString.lowercased(),
             categoryId: inbox?.id ?? categories.first?.id ?? TaskCategory.inboxId,
             title: "", durationMinutes: QuickAddTaskBuilder.defaultDurationMinutes,
-            priority: .medium, deadlineType: .soft, dueAt: TaskDay.defaultDue(now: now, calendar: calendar),
+            priority: .medium, deadlineType: .soft, dueAt: TaskDay.defaultDue(now: now, calendar: taskListCalendar),
             createdAt: now, updatedAt: now)
     }
 

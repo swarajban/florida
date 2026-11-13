@@ -42,7 +42,7 @@ struct CommandPaletteView: View {
             case .quickAdd:
                 QuickAddPreview(
                     draft: model.palette.draft, category: model.paletteCategory,
-                    unknownHint: model.paletteUnknownHint, calendar: model.calendar)
+                    unknownHint: model.paletteUnknownHint, calendar: model.taskListCalendar)
             case .command:
                 PaletteResultList(items: model.palette.commands, selectedIndex: model.palette.selectedIndex) { command in
                     HStack {

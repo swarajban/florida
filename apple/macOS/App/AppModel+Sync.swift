@@ -52,8 +52,7 @@ extension AppModel {
         }
     }
 
-    /// Flips a calendar locally right away, then tells the server; the server's reply (or the
-    /// next pull) is authoritative either way.
+    /// Flips and queues a calendar flag locally before asking for sync.
     func setCalendarSelected(id: String, selected: Bool) {
         guard let database else { return }
         do {
@@ -62,15 +61,7 @@ extension AppModel {
             statusMessage = "Could not update the calendar: \(error.localizedDescription)"
             return
         }
-        guard let client = syncClient else { return }
-        Task { [weak self] in
-            do {
-                try await client.setCalendarSelected(id: id, selected: selected)
-            } catch {
-                self?.lastSyncError = Self.describe(error)
-            }
-            await self?.runSync(client)
-        }
+        scheduleSync()
     }
 
     func setCalendarBlocksScheduling(id: String, blocksScheduling: Bool) {
@@ -81,15 +72,7 @@ extension AppModel {
             statusMessage = "Could not update the calendar: \(error.localizedDescription)"
             return
         }
-        guard let client = syncClient else { return }
-        Task { [weak self] in
-            do {
-                try await client.setCalendarBlocksScheduling(id: id, blocksScheduling: blocksScheduling)
-            } catch {
-                self?.lastSyncError = Self.describe(error)
-            }
-            await self?.runSync(client)
-        }
+        scheduleSync()
     }
 
     private func runSync(_ client: SyncClient) async {

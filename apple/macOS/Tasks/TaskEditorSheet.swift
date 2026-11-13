@@ -44,11 +44,10 @@ struct TaskEditorSheet: View {
         case title, notes, duration, sourceURL, sourceTitle
     }
 
-    init(task: TaskItem, isNew: Bool) {
-        let calendar = Calendar.autoupdatingCurrent
+    init(task: TaskItem, isNew: Bool, calendar: Calendar) {
         let today = calendar.startOfDay(for: Date())
         let defaultDue = TaskDay.defaultDue(now: Date(), calendar: calendar)
-        let nextHour = calendar.date(bySetting: .minute, value: 0, of: Date().addingTimeInterval(3600)) ?? Date()
+        let nextHour = Calendar.autoupdatingCurrent.date(bySetting: .minute, value: 0, of: Date().addingTimeInterval(3600)) ?? Date()
         _draft = State(initialValue: task)
         _hasDue = State(initialValue: task.dueAt != nil)
         _dueAt = State(initialValue: task.dueAt ?? defaultDue)
@@ -117,16 +116,18 @@ struct TaskEditorSheet: View {
                 Section("Dates") {
                     MacDateField("Start", date: $startAt, isOn: $hasStart, hasTime: startHasTime,
                                  key: TaskEditorKey.start.keycap, isPresented: showing(.start), identifier: "task-start",
-                                 onDismiss: leaveField, dayOnly: { TaskDay.notBefore(on: $0, calendar: model.calendar) })
+                                 onDismiss: leaveField, dayOnly: { TaskDay.notBefore(on: $0, calendar: model.taskListCalendar) })
                     MacDateField("Due", date: $dueAt, isOn: $hasDue, hasTime: dueHasTime,
                                  key: TaskEditorKey.due.keycap, isPresented: showing(.due), identifier: "task-due",
-                                 onDismiss: leaveField, dayOnly: { TaskDay.due(on: $0, calendar: model.calendar) })
+                                 onDismiss: leaveField, dayOnly: { TaskDay.due(on: $0, calendar: model.taskListCalendar) })
                     MacChoiceField("Deadline", selection: deadline,
                                    options: [DeadlineType.soft, .hard].map { MacChoice($0, $0.displayName) },
                                    key: TaskEditorKey.deadline.keycap, isPresented: showing(.deadline),
                                    identifier: "task-deadline", onDismiss: leaveField)
                     .disabled(!hasDue)
                 }
+                .environment(\.calendar, model.taskListCalendar)
+                .environment(\.timeZone, model.taskListCalendar.timeZone)
                 Section {
                     MacChoiceField("Category", selection: $draft.categoryId,
                                    options: model.orderedCategories.map { MacChoice($0.id, $0.name) },
@@ -298,7 +299,7 @@ struct TaskEditorSheet: View {
     /// when either date is switched on; a due date typed in earlier than the start is left alone.
     private func keepDueAfterStart() {
         guard hasStart, hasDue else { return }
-        dueAt = TaskDay.due(dueAt, notBefore: startAt, calendar: model.calendar)
+        dueAt = TaskDay.due(dueAt, notBefore: startAt, calendar: model.taskListCalendar)
     }
 
     private var notes: Binding<String> {
@@ -327,22 +328,22 @@ struct TaskEditorSheet: View {
     /// the whole-day clock the date already has; switching off puts the date back on its whole day.
     private var dueHasTime: Binding<Bool> {
         Binding(
-            get: { dueTimeChoice ?? TaskDay.dueHasTime(dueAt, calendar: model.calendar) },
+            get: { dueTimeChoice ?? TaskDay.dueHasTime(dueAt, calendar: model.taskListCalendar) },
             set: { on in
                 dueTimeChoice = on
                 if !on {
-                    dueAt = TaskDay.due(on: dueAt, calendar: model.calendar)
+                    dueAt = TaskDay.due(on: dueAt, calendar: model.taskListCalendar)
                 }
             })
     }
 
     private var startHasTime: Binding<Bool> {
         Binding(
-            get: { startTimeChoice ?? TaskDay.notBeforeHasTime(startAt, calendar: model.calendar) },
+            get: { startTimeChoice ?? TaskDay.notBeforeHasTime(startAt, calendar: model.taskListCalendar) },
             set: { on in
                 startTimeChoice = on
                 if !on {
-                    startAt = TaskDay.notBefore(on: startAt, calendar: model.calendar)
+                    startAt = TaskDay.notBefore(on: startAt, calendar: model.taskListCalendar)
                 }
             })
     }

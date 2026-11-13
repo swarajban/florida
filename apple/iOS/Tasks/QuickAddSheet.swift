@@ -29,7 +29,7 @@ struct QuickAddSheet: View {
     }
 
     private var draft: QuickAddDraft {
-        var draft = QuickAddParser.parse(model.quickAddText, now: Date(), calendar: model.calendar)
+        var draft = QuickAddParser.parse(model.quickAddText, now: Date(), calendar: model.taskListCalendar)
         if draft.source?.url == model.quickAddRemovedSourceURL {
             draft.source = nil
         }
@@ -170,7 +170,7 @@ struct QuickAddSheet: View {
                 error = nil
                 parsing?.cancel()
                 parsing = nil
-                let parsedSource = QuickAddParser.parse(model.quickAddText, now: Date(), calendar: model.calendar).source
+                let parsedSource = QuickAddParser.parse(model.quickAddText, now: Date(), calendar: model.taskListCalendar).source
                 if parsedSource?.url != model.quickAddRemovedSourceURL {
                     model.quickAddRemovedSourceURL = nil
                 }
@@ -391,7 +391,7 @@ struct QuickAddSheet: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("quick-add-source")
             }
-            let chips = QuickAddChip.chips(for: draft, categories: model.categories, calendar: model.calendar)
+            let chips = QuickAddChip.chips(for: draft, categories: model.categories, calendar: model.taskListCalendar)
                 .filter { $0.id != "category" }
             if !chips.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -591,7 +591,7 @@ struct QuickAddSheet: View {
         Button {
             guard parsing == nil else { return }
             let text = model.quickAddText
-            let parsedSource = QuickAddParser.parse(text, now: Date(), calendar: model.calendar).source
+            let parsedSource = QuickAddParser.parse(text, now: Date(), calendar: model.taskListCalendar).source
             let source = draft.source
             let sourceFreeText = QuickAddParser.removingSource(from: text)
             let aiText = draft.title == parsedSource?.title ? "\(draft.title)\n\(sourceFreeText)" : sourceFreeText
