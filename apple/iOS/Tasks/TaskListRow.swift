@@ -10,6 +10,8 @@ struct TaskListRow: View {
     @Environment(AppModel.self) private var model
     let task: TaskItem
     let now: Date
+    let calendar: Calendar
+    let category: TaskCategory?
     let targets: TaskActionTargets
     let onEdit: () -> Void
 
@@ -17,7 +19,7 @@ struct TaskListRow: View {
         let isBlooming = model.blooming[task.id] != nil
         HStack(alignment: .center, spacing: 8) {
             Button(action: onEdit) {
-                TaskRow(task: task, summary: summary, now: now, calendar: model.calendar)
+                TaskRow(task: task, summary: summary, now: now, calendar: calendar, category: category)
                     .strikethrough(isBlooming)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
@@ -25,6 +27,7 @@ struct TaskListRow: View {
             .buttonStyle(.borderless)
             .tint(.primary)
             .accessibilityHint("Edits the task")
+            .accessibilityIdentifier("tasks-row-\(task.id)")
             if let source = task.source {
                 TaskSourceButton(source: source, identifier: "task-source-open-\(task.id)", compact: true)
             }

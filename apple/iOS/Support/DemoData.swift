@@ -78,7 +78,7 @@ enum DemoData {
         let sinceSunday = calendar.component(.weekday, from: today) - 1
         let work = "demo-cal-work", ooo = "demo-cal-ooo", personal = "demo-cal-personal", birthdays = "demo-cal-birthdays"
 
-        return SyncResponse(
+        var response = SyncResponse(
             cursor: now.ISO8601Format(),
             settings: UserSettings(id: "default", timeZone: zone, updatedAt: now),
             routineBlocks: [
@@ -243,6 +243,53 @@ enum DemoData {
                         """,
                     createdAt: now, updatedAt: now),
             ])
+        if UserDefaults.standard.bool(forKey: "uiTaskGroupingDemo") {
+            response = taskGroupingResponse(response, now: fixedNow ?? now)
+        }
+        return response
+    }
+
+    private static func taskGroupingResponse(_ original: SyncResponse, now: Date) -> SyncResponse {
+        var response = original
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .gmt
+        let today = calendar.startOfDay(for: now)
+        func at(_ day: Int, _ hour: Int) -> Date {
+            let date = calendar.date(byAdding: .day, value: day, to: today)!
+            return calendar.date(bySettingHour: hour, minute: 0, second: 0, of: date)!
+        }
+        func task(_ id: String, _ title: String, category: String, due: Date? = nil,
+                  hard: Bool = false, priority: Priority = .medium) -> TaskItem {
+            TaskItem(
+                id: id, categoryId: category, title: title, durationMinutes: 30, priority: priority,
+                deadlineType: due == nil ? .none : (hard ? .hard : .soft), dueAt: due,
+                createdAt: now.addingTimeInterval(-86_400), updatedAt: now)
+        }
+        let engineering = "demo-eng", infosec = "demo-infosec", finance = "demo-finance"
+        var todaySoft = task("group-today-soft", "Group today soft", category: engineering, due: at(0, 14), priority: .asap)
+        todaySoft.source = TaskSource(url: "https://example.com/grouping", title: "Grouping reference", kind: .web)
+        var noDue = task("group-no-due", "Group no due task", category: engineering)
+        noDue.startAt = at(30, 9)
+        var completed = task("group-completed", "Group completed task", category: engineering, due: at(0, 14))
+        completed.completedAt = now.addingTimeInterval(-60)
+        completed.completedMinutes = completed.durationMinutes
+        response.tasks = [
+            task("group-inbox", "Group inbox task", category: TaskCategory.inboxId),
+            task("group-overdue", "Group overdue task", category: finance, due: at(-1, 9), priority: .low),
+            task("group-today-early", "Group today early", category: finance, due: at(0, 13), priority: .low),
+            task("group-today-hard", "Group today hard", category: infosec, due: at(0, 14), hard: true),
+            todaySoft,
+            task("group-tomorrow", "Group tomorrow task", category: engineering, due: at(1, 13)),
+            task("group-this-week", "Group this week task", category: engineering, due: at(2, 13)),
+            task("group-next-week", "Group next week task", category: finance, due: at(7, 13)),
+            task("group-later", "Group later task", category: infosec, due: at(21, 13)),
+            noDue, completed,
+        ]
+        response.settings = UserSettings(id: "default", timeZone: "UTC", updatedAt: now)
+        response.placements = []
+        response.optionalPlacements = []
+        response.unscheduled = []
+        return response
     }
 
     #if os(iOS)

@@ -3,8 +3,8 @@ import FloridaKit
 import SwiftUI
 
 /// The right-hand task list: today's suggestions for optional routine blocks on top ("Evening, if
-/// you're up for it"), then Inbox (with its triage count) and each category's open tasks; empty
-/// categories stay as one collapsed line. Keeps the selected row scrolled into view as `j` / `k`
+/// you're up for it"), then Inbox and open tasks grouped by due date or category. Keeps the
+/// selected row scrolled into view as `j` / `k`
 /// move it, and tells the model which rows are on screen, for jump mode.
 struct TaskPaneView: View {
     @Environment(AppModel.self) private var model
@@ -31,6 +31,22 @@ struct TaskPaneView: View {
                 Text("\(model.openTasks.count)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Menu {
+                    Picker("Group tasks", selection: Binding(
+                        get: { model.taskListGrouping }, set: { model.taskListGrouping = $0 })) {
+                        ForEach(TaskListGrouping.allCases, id: \.self) { grouping in
+                            Text(grouping.title).tag(grouping)
+                        }
+                    }
+                } label: {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Group by due date / category (g o)")
+                .accessibilityLabel("Group tasks")
+                .accessibilityValue(model.taskListGrouping.title)
+                .accessibilityIdentifier("task-grouping-menu")
                 Button {
                     model.perform(.newTask)
                 } label: {
@@ -47,7 +63,7 @@ struct TaskPaneView: View {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                         ForEach(model.paneSuggestions) { group in
                             Section {
-                                ForEach(group.picks) { pick in
+                                ForEach(group.picks, id: \.paneItemID) { pick in
                                     suggestionRow(pick)
                                 }
                                 Text("Suggestions only: none of this is on the plan.")
@@ -65,7 +81,7 @@ struct TaskPaneView: View {
                                 TaskGroupHeader(group: group)
                             } else {
                                 Section {
-                                    ForEach(group.tasks) { task in
+                                    ForEach(group.tasks, id: \.paneItemID) { task in
                                         row(task, in: group)
                                     }
                                 } header: {
@@ -82,13 +98,20 @@ struct TaskPaneView: View {
                     .padding(.bottom, 8)
                     .animation(.easeOut(duration: 0.15), value: model.openTasks.map(\.id))
                 }
+                .accessibilityIdentifier("task-pane-scroll")
                 .onChange(of: model.selection) { _, selection in
                     let clicked = clickedItem
                     clickedItem = nil
                     guard selection != clicked else { return }
-                    if let selection, selection.isTask || selection.isSuggestion {
-                        proxy.scrollTo(selection)
+                    if let selection, selection.isTask || selection.isSuggestion,
+                       model.focus == .tasks || model.gridLayout.day(of: selection) == nil {
+                        if !model.paneItemsOnScreen.contains(selection) {
+                            proxy.scrollTo(selection, anchor: .center)
+                        }
                     }
+                }
+                .onChange(of: model.taskListGrouping) {
+                    if let selection = model.selection { proxy.scrollTo(selection, anchor: .center) }
                 }
             }
         }
@@ -106,7 +129,6 @@ struct TaskPaneView: View {
         ) {
             model.take(pick)
         }
-        .id(item)
         // Its label sits in the middle of the row, whose height varies: the whole row has to show.
         .tracksJumpVisibility(of: item, labelStrip: nil, in: model)
         .contextMenu {
@@ -119,22 +141,22 @@ struct TaskPaneView: View {
         }
     }
 
-    private func row(_ task: TaskItem, in group: CategoryTaskGroup) -> some View {
+    private func row(_ task: TaskItem, in group: TaskListSection) -> some View {
         let item = ItemID.task(task.id)
         let suggestion = group.isInbox ? model.suggestedCategory(for: task) : nil
-        let tint = group.category?.tint ?? .defaultCategory
+        let category = model.categoriesById[task.categoryId]
+        let tint = category?.tint ?? .defaultCategory
         return TaskRowView(
             task: task, state: model.scheduleState(for: task),
-            tint: tint,
+            tint: tint, category: model.taskListGrouping == .dueDate && category?.isInbox == false ? category : nil,
             isSelected: model.selection == item, isFocused: model.focus == .tasks,
             isUntriaged: group.isInbox, suggestion: suggestion,
             jumpLabel: model.jumpLabel(for: item),
-            calendar: model.calendar,
+            calendar: model.taskListCalendar, now: model.clockNow,
             onComplete: { model.complete(task) }
         ) {
             if let suggestion { model.move(task, to: suggestion) }
         }
-        .id(item)
         .tracksJumpVisibility(of: item, labelStrip: TaskRowView.jumpLabelStrip, in: model)
         .transition(model.completingTaskIds.contains(task.id) ? .bloomFold(tint) : .opacity)
         .contextMenu {
@@ -151,6 +173,14 @@ struct TaskPaneView: View {
         model.select(item, in: .tasks)
         if isDouble || opensTaskOnSingleClick { model.editSelection() }
     }
+}
+
+private extension TaskItem {
+    var paneItemID: ItemID { .task(id) }
+}
+
+private extension OptionalPicks.Pick {
+    var paneItemID: ItemID { .suggestion(id) }
 }
 
 private extension View {
@@ -177,10 +207,10 @@ private extension View {
     }
 }
 
-/// A category's header: color, name and count. Inbox reads "3 to triage"; an empty category is
+/// A section's header: title and count. Inbox reads "3 to triage"; an empty category is
 /// a dimmed collapsed line.
 struct TaskGroupHeader: View {
-    let group: CategoryTaskGroup
+    let group: TaskListSection
 
     var body: some View {
         let isEmpty = group.tasks.isEmpty
@@ -189,12 +219,16 @@ struct TaskGroupHeader: View {
                 Image(systemName: "tray")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            } else {
+            } else if let category = group.category {
                 Circle()
-                    .fill(group.category?.tint ?? .defaultCategory)
+                    .fill(category.tint)
                     .frame(width: 8, height: 8)
+            } else {
+                Image(systemName: "calendar")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            Text(group.name)
+            Text(group.title)
                 .font(.subheadline.weight(isEmpty ? .regular : .semibold))
             if isEmpty {
                 Image(systemName: "chevron.right")
@@ -216,5 +250,8 @@ struct TaskGroupHeader: View {
         .padding(.horizontal, 12)
         .padding(.vertical, isEmpty ? 6 : 9)
         .background(FloridaStyle.panel)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(group.title)
+        .accessibilityIdentifier("task-section-\(group.id)")
     }
 }

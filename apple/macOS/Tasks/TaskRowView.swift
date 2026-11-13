@@ -9,6 +9,7 @@ struct TaskRowView: View {
     let task: TaskItem
     let state: TaskScheduleState
     let tint: Color
+    let category: TaskCategory?
     let isSelected: Bool
     let isFocused: Bool
     /// In Inbox: drawn with a hollow, dashed edge until it is moved to a category.
@@ -18,6 +19,7 @@ struct TaskRowView: View {
     /// Jump mode's label for this task, shown in place of the done circle.
     let jumpLabel: String?
     let calendar: Calendar
+    let now: Date
     let onComplete: () -> Void
     let onAcceptSuggestion: () -> Void
     @State private var isOverDone = false
@@ -54,40 +56,11 @@ struct TaskRowView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(task.title)
                     .lineLimit(2)
-                HStack(spacing: 8) {
-                    if let marker = task.priority.rowMarker {
-                        Text(marker)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(task.priority.tint)
-                            .accessibilityLabel("\(marker) priority")
-                    }
-                    Text(DateText.duration(minutes: task.durationMinutes))
-                    // The pane is narrow: the symbol alone, named on hover and to VoiceOver.
-                    Image(systemName: task.context.symbolName)
-                        .help("\(task.context.displayName) context")
-                        .accessibilityLabel("\(task.context.displayName) context")
-                    if let source = task.source {
-                        Image(systemName: source.symbolName)
-                            .help("Source: \(source.title) (g s)")
-                            .accessibilityLabel("Source: \(source.title)")
-                            .accessibilityIdentifier("task-source-\(task.id)")
-                    }
-                    if let dueAt = task.dueAt {
-                        Label(
-                            DateText.due(dueAt, calendar: calendar),
-                            systemImage: task.deadlineType == .hard ? "calendar.badge.clock" : "calendar")
-                            .foregroundStyle(state.isOverdue ? Color.red : Color.secondary)
-                    }
-                    Text(state.label(calendar: calendar))
-                        .foregroundStyle(scheduleColor)
-                    if state.isPinned {
-                        Image(systemName: "pin.fill")
-                    }
+                ViewThatFits(in: .horizontal) {
+                    metadata(compact: false).fixedSize(horizontal: true, vertical: false)
+                    metadata(compact: true)
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                if let problem = state.problem(calendar: calendar) {
+                if let problem = state.problem(calendar: calendar, now: now) {
                     Text(problem)
                         .font(.caption)
                         .foregroundStyle(state.isOverdue ? Color.red : Color.orange)
@@ -139,6 +112,46 @@ struct TaskRowView: View {
         .accessibilityLabel(isSelected ? "Selected task, \(task.title)" : "Task, \(task.title)")
         .accessibilityIdentifier("task-row-\(task.id)")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func metadata(compact: Bool) -> some View {
+        HStack(spacing: 8) {
+            if let marker = task.priority.rowMarker {
+                Text(marker)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(task.priority.tint)
+                    .accessibilityLabel("\(marker) priority")
+            }
+            Text(DateText.duration(minutes: task.durationMinutes))
+            if !compact {
+                Image(systemName: task.context.symbolName)
+                    .help("\(task.context.displayName) context")
+                    .accessibilityLabel("\(task.context.displayName) context")
+            }
+            if let source = task.source {
+                Image(systemName: source.symbolName)
+                    .help("Source: \(source.title) (g s)")
+                    .accessibilityLabel("Source: \(source.title)")
+                    .accessibilityIdentifier("task-source-\(task.id)")
+            }
+            if let dueAt = task.dueAt {
+                Label(
+                    DateText.due(dueAt, calendar: calendar, now: now),
+                    systemImage: task.deadlineType == .hard ? "calendar.badge.clock" : "calendar")
+                    .foregroundStyle(state.isOverdue ? Color.red : Color.secondary)
+                    .layoutPriority(1)
+            }
+            if !compact {
+                Text(state.label(calendar: calendar, now: now)).foregroundStyle(scheduleColor)
+            }
+            if state.isPinned { Image(systemName: "pin.fill") }
+            if let category { TaskCategoryChip(category: category) }
+        }
+        .labelStyle(.titleAndIcon)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .truncationMode(.tail)
     }
 
     private var scheduleColor: Color {

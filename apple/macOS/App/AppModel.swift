@@ -11,6 +11,10 @@ import Observation
 /// handling live in the `AppModel+*.swift` extensions.
 @Observable @MainActor
 final class AppModel {
+    private static var taskListDefaults: UserDefaults {
+        UserDefaults(suiteName: Florida.appGroup) ?? .standard
+    }
+
     // MARK: Dependencies
 
     private(set) var database: AppDatabase?
@@ -79,6 +83,13 @@ final class AppModel {
     var selection: ItemID?
     var focus: Panel = .calendar
     var isTasksPaneVisible = true
+    var taskListGrouping = TaskListGrouping(
+        rawValue: AppModel.taskListDefaults.string(forKey: "taskListGrouping") ?? "") ?? .dueDate {
+        didSet {
+            Self.taskListDefaults.set(taskListGrouping.rawValue, forKey: "taskListGrouping")
+            endJump()
+        }
+    }
     /// Frames for the visible days; rebuilt when data or the range changes and only read by the views.
     private(set) var gridLayout = GridLayout()
     /// Events are observed for this range: the visible range plus four weeks on each side.
@@ -213,7 +224,11 @@ final class AppModel {
         if UserDefaults.standard.bool(forKey: "demoData") {
             do {
                 let database = try AppDatabase.inMemory()
-                try database.apply(DemoData.syncResponse(now: Date(), calendar: calendar))
+                let now = DemoData.fixedNow ?? Date()
+                clockNow = now
+                anchorDate = calendar.startOfDay(for: now)
+                selectedDay = anchorDate
+                try database.apply(DemoData.syncResponse(now: now, calendar: calendar))
                 self.database = database
                 try installEditorDiagnosticsIfNeeded()
                 config = ServerConfig(token: "demo")
