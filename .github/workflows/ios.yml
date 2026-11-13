@@ -39,8 +39,8 @@ jobs:
     name: iPhone UI suite
     if: inputs.ui_only != true
     runs-on: macos-26
-    # Cold simulator boot plus the full light/dark capture suite can exceed 30 minutes.
-    timeout-minutes: 45
+    # The unsharded main suite includes simulator boot, all appearances and one retry.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v5
 

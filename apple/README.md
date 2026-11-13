@@ -120,11 +120,23 @@ release, even if dispatched on main.
 
 The on-demand run uses the same cached build recipe as the compile gate, builds both
 schemes once and runs Darwin package tests, then uploads the compiled products.
-Three independent jobs use `test-without-building`: the full Mac suite, iPhone
-capture/plan tests, and all remaining iPhone tests plus widget tests. The capture
-shard selects three long tests; the other excludes only those three, so new
-tests automatically join the gate. Each shard is serial to avoid desktop and
-simulator interaction races; failure in one does not cancel the others.
+Four independent jobs use `test-without-building`: the full Mac suite, iPhone
+capture/plan/resource tests, event capture/calendar tests, and the remaining
+iPhone tests (including the drag matrix) plus widget tests. The event shard
+selects the whole `EventQuickAddTests` class
+and three calendar/recurrence smoke tests. The remaining shard excludes exactly
+the two explicit selections, so each existing test belongs to one shard and new tests
+still join the gate. Each shard is serial to avoid desktop and simulator
+interaction races; failure in one does not cancel the others.
+
+The three iPhone partitions target roughly 20–25 minutes each with current test
+timings, including cold simulator startup; the resource test moves out of the
+remaining shard to make room for the drag matrix. On-demand jobs have a 45-minute hard
+budget for retries and result upload, not a target runtime. Main's unsharded
+iPhone and Mac UI jobs have 75- and 60-minute budgets respectively; their upload
+jobs remain independent. A dispatch uses its branch's workflow definitions:
+incorporate these changes before requesting UI checks on an older branch;
+already-started runs keep their original partitions and limits.
 
 PR and release UI tests get at most one native XCTest retry of failed tests
 only, without weakening assertions. First failures remain in the raw log and
