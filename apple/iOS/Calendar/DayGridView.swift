@@ -57,7 +57,7 @@ struct DayGridView: View {
     /// Where the grid opens before its height is known: the current hour, a little above the
     /// middle, at the default hour height. The first layout pass corrects it (`scrollToStart`).
     static var initialY: CGFloat {
-        let components = Calendar.autoupdatingCurrent.dateComponents([.hour, .minute], from: Date())
+        let components = Calendar.autoupdatingCurrent.dateComponents([.hour, .minute], from: AppModel.currentTime)
         let minute = (components.hour ?? 8) * 60 + (components.minute ?? 0)
         return max(0, CGFloat(TimeGrid(hourHeight: 60, slotMinutes: slotMinutes).y(forMinute: minute)) - 200)
     }
@@ -213,6 +213,7 @@ struct DayGridView: View {
     @ViewBuilder
     private func gridContent(geometry: DayGridGeometry, days: [Date]) -> some View {
         TimelineView(.everyMinute) { timeline in
+            let now = model.now
             VStack(spacing: 0) {
                 // One day is already named by the heading and week strip above; only the columns
                 // of a three-day grid need labelling.
@@ -224,13 +225,14 @@ struct DayGridView: View {
                 }
                 if layout.allDayRowCount > 0 {
                     DayGridAllDayStrip(
-                        layout: layout, geometry: geometry, now: timeline.date,
+                        layout: layout, geometry: geometry, now: now,
                         pinnedGutterX: pinnedGutterX, onSelect: onSelectEvent)
                     Divider()
                 }
                 ScrollView(.vertical) {
-                    timedGrid(geometry: geometry, days: days, now: timeline.date)
+                    timedGrid(geometry: geometry, days: days, now: now)
                 }
+                .accessibilityIdentifier("day-grid-hours")
                 .scrollPosition($position)
                 .scrollDisabled(drag != nil)
                 .onScrollGeometryChange(for: ScrollSnapshot.self) { scroll in
@@ -376,7 +378,7 @@ struct DayGridView: View {
         let visibleDays = AppModel.gridDays(from: model.selectedDay, dayCount: dayCount, calendar: model.calendar)
         let minute: Int
         if visibleDays.contains(model.today) {
-            let components = model.calendar.dateComponents([.hour, .minute], from: Date())
+            let components = model.calendar.dateComponents([.hour, .minute], from: model.now)
             minute = (components.hour ?? 0) * 60 + (components.minute ?? 0)
         } else {
             minute = 8 * 60

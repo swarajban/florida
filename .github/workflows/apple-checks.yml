@@ -74,7 +74,7 @@ jobs:
     needs: apple
     if: inputs.run_ui
     runs-on: macos-26
-    timeout-minutes: 30
+    timeout-minutes: ${{ matrix.suite == 'ios-other' && 45 || 30 }}
     strategy:
       fail-fast: false
       matrix:

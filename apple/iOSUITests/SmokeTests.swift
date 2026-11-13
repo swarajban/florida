@@ -167,9 +167,10 @@ final class SmokeTests: XCTestCase {
     func testThreeDayNavigation() {
         continueAfterFailure = false
         let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
+        let demoNow = calendar.date(from: DateComponents(year: 2026, month: 11, day: 12, hour: 10))!
+        let today = calendar.startOfDay(for: demoNow)
         for appearance in ["light", "dark"] {
-            let app = launch(appearance: appearance, mode: "threeDays")
+            let app = launch(appearance: appearance, mode: "threeDays", demoNow: demoNow)
             waitForText("Infra offsite", in: app)
             capture(app, "three-day-start-\(appearance)")
             let heading = app.buttons["Go to day"]
@@ -180,14 +181,14 @@ final class SmokeTests: XCTestCase {
             let nextHeader = element(nextDay.formatted(.dateTime.weekday(.wide).month(.wide).day()), in: app)
             let oneColumn = nextHeader.frame.midX - todayHeader.frame.midX
             XCTAssertGreaterThan(oneColumn, 0)
-            let postmortem = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Draft incident postmortem")).firstMatch
-            XCTAssertTrue(postmortem.isHittable)
-            let beforeVerticalScroll = postmortem.frame.minY
+            let taskBlock = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Rotate AWS access keys")).firstMatch
+            positionInGrid(taskBlock, in: app)
+            let beforeVerticalScroll = taskBlock.frame.minY
             let gutter = app.coordinate(withNormalizedOffset: CGVector(dx: 0.06, dy: 0.7))
             gutter.press(forDuration: 0.05, thenDragTo: gutter.withOffset(CGVector(dx: 0, dy: -80)),
                          withVelocity: .slow, thenHoldForDuration: 0.3)
-            XCTAssertLessThan(postmortem.frame.minY, beforeVerticalScroll - 50)
-            let originalY = postmortem.frame.minY
+            XCTAssertLessThan(taskBlock.frame.minY, beforeVerticalScroll - 50)
+            let originalY = taskBlock.frame.minY
             right.press(forDuration: 0.05, thenDragTo: right.withOffset(CGVector(dx: -oneColumn, dy: 0)),
                         withVelocity: XCUIGestureVelocity(rawValue: 80), thenHoldForDuration: 1)
             // Yesterday's block is behind the fixed gutter, not an invisible tap target there.
@@ -219,16 +220,16 @@ final class SmokeTests: XCTestCase {
                 XCTAssertTrue(heading.waitForExistence(timeout: 5))
                 XCTAssertEqual(heading.value as? String, expected, "The calendar must follow the distance dragged")
             }
-            XCTAssertEqual(postmortem.frame.minY, originalY, accuracy: 2, "Horizontal movement must retain the hour position")
-            postmortem.tap()
+            XCTAssertEqual(taskBlock.frame.minY, originalY, accuracy: 2, "Horizontal movement must retain the hour position")
+            capture(app, "three-day-before-tap-\(appearance)")
+            taskBlock.tap()
             XCTAssertTrue(app.buttons["Mark done"].waitForExistence(timeout: 5))
             app.buttons["Cancel"].tap()
-            let oldTime = postmortem.value as? String
-            let blockCenter = postmortem.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            blockCenter.press(forDuration: 0.5, thenDragTo: blockCenter.withOffset(CGVector(dx: 0, dy: 30)),
-                              withVelocity: .slow, thenHoldForDuration: 0.3)
-            XCTAssertNotEqual(postmortem.value as? String, oldTime, "Holding still must move the task rather than scroll")
-            XCTAssertEqual(postmortem.frame.minY, originalY + 30, accuracy: 15, "The task should move by half an hour")
+            XCTAssertEqual(taskBlock.frame.minY, originalY, accuracy: 2, "Opening an editor must not change the measured viewport")
+            capture(app, "three-day-after-tap-\(appearance)")
+            let start = calendar.date(bySettingHour: 9, minute: 30, second: 0, of: today)!
+            moveHalfHour(taskBlock, from: start, in: app)
+            capture(app, "three-day-after-drag-\(appearance)")
             // Native inertia can carry a flick farther than the same slow drag.
             right.press(forDuration: 0.05, thenDragTo: left, withVelocity: .fast, thenHoldForDuration: 0)
             let fartherDays = (3...7).map { offset in
@@ -243,7 +244,7 @@ final class SmokeTests: XCTestCase {
             XCTAssertEqual(heading.value as? String, coastedDay)
             app.buttons["Today"].tap()
             XCTAssertEqual(heading.value as? String, today.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
-            XCTAssertTrue(postmortem.isHittable)
+            XCTAssertTrue(taskBlock.isHittable)
             // Three column labels replace the seven-day strip, rather than sitting below it.
             XCTAssertFalse(app.buttons[today.formatted(.dateTime.weekday(.wide).month(.wide).day())].exists)
             capture(app, "three-day-return-\(appearance)")
@@ -259,7 +260,7 @@ final class SmokeTests: XCTestCase {
             distantChoice.tap()
             XCTAssertEqual(heading.value as? String, distantDay.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
             app.buttons["Today"].tap()
-            XCTAssertTrue(postmortem.isHittable)
+            XCTAssertTrue(taskBlock.isHittable)
             // The single-day control still pages by one day, then re-enters the carousel there.
             app.segmentedControls["agenda-mode"].buttons["Day"].tap()
             right.press(forDuration: 0.05, thenDragTo: left, withVelocity: .slow, thenHoldForDuration: 0.3)
@@ -268,8 +269,44 @@ final class SmokeTests: XCTestCase {
             app.segmentedControls["agenda-mode"].buttons["3 Days"].tap()
             XCTAssertTrue(app.buttons["Architecture sync"].exists)
             app.buttons["Today"].tap()
-            XCTAssertTrue(postmortem.isHittable)
+            XCTAssertTrue(taskBlock.isHittable)
             app.terminate()
+        }
+    }
+
+    @MainActor
+    func testHalfHourDragAtDemoTimes() {
+        continueAfterFailure = false
+        let calendar = Calendar.current
+        let clocks = [(0, 10), (18, 0), (23, 50)].map { hour, minute in
+            calendar.date(from: DateComponents(year: 2026, month: 11, day: 12, hour: hour, minute: minute))!
+        }
+        for clock in clocks {
+            for appearance in ["light", "dark"] {
+                let scenario = "\(ISO8601DateFormatter().string(from: clock))-\(appearance)"
+                XCTContext.runActivity(named: scenario) { _ in
+                    let app = launch(appearance: appearance, mode: "threeDays", demoNow: clock)
+                    waitForText("Infra offsite", in: app)
+                    let heading = app.buttons["Go to day"]
+                    XCTAssertEqual(heading.value as? String,
+                                   clock.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
+                    let taskBlock = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Rotate AWS access keys")).firstMatch
+                    positionInGrid(taskBlock, in: app)
+                    let originalY = taskBlock.frame.minY
+                    capture(app, "before-tap-\(scenario)")
+                    taskBlock.tap()
+                    XCTAssertTrue(app.buttons["Mark done"].waitForExistence(timeout: 5))
+                    app.buttons["Cancel"].tap()
+                    XCTAssertEqual(taskBlock.frame.minY, originalY, accuracy: 2,
+                                   "Opening an editor must not change the measured viewport")
+                    capture(app, "after-tap-\(scenario)")
+                    let start = calendar.date(bySettingHour: 9, minute: 30, second: 0, of: clock)!
+                    moveHalfHour(taskBlock, from: start, in: app)
+                    moveHalfHour(taskBlock, from: start.addingTimeInterval(30 * 60), in: app)
+                    capture(app, "after-two-drags-\(scenario)")
+                    app.terminate()
+                }
+            }
         }
     }
 
@@ -317,7 +354,10 @@ final class SmokeTests: XCTestCase {
             capture(app, "event-recurring-\(appearance)")
             app.navigationBars["New Event"].buttons["Add"].tap()
             XCTAssertTrue(app.navigationBars["New Event"].waitForNonExistence(timeout: 5))
+            let planning = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Weekly planning")).firstMatch
+            for _ in 0..<8 where !planning.exists { app.swipeUp() }
             waitForText("Weekly planning", in: app)
+            capture(app, "event-recurring-saved-\(appearance)")
             app.terminate()
         }
     }
@@ -727,9 +767,56 @@ final class SmokeTests: XCTestCase {
     }
 
     @MainActor
+    private func positionInGrid(_ task: XCUIElement, in app: XCUIApplication) {
+        XCTAssertTrue(task.waitForExistence(timeout: 10))
+        let hours = app.scrollViews["day-grid-hours"]
+        XCTAssertTrue(hours.waitForExistence(timeout: 5))
+        let viewport = hours.frame.intersection(app.frame)
+        let targetY = viewport.midY
+        let gutter = app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: 26, dy: viewport.midY))
+        for _ in 0..<8 {
+            let distance = targetY - task.frame.minY
+            if abs(distance) < 20 { break }
+            let travel = min(max(distance, -viewport.height * 0.6), viewport.height * 0.6)
+            gutter.press(forDuration: 0.05, thenDragTo: gutter.withOffset(CGVector(dx: 0, dy: travel)),
+                         withVelocity: XCUIGestureVelocity(rawValue: 80), thenHoldForDuration: 0.5)
+        }
+        XCTAssertGreaterThan(task.frame.minY, viewport.minY + 110)
+        XCTAssertLessThan(task.frame.maxY, viewport.maxY - 80)
+        XCTAssertTrue(task.isHittable)
+    }
+
+    @MainActor
+    private func moveHalfHour(_ task: XCUIElement, from start: Date, in app: XCUIApplication) {
+        let end = start.addingTimeInterval(45 * 60)
+        let expectedBefore = "\(start.formatted(date: .omitted, time: .shortened)) – \(end.formatted(date: .omitted, time: .shortened))"
+        XCTAssertEqual(task.value as? String, expectedBefore)
+        let originalFrame = task.frame
+        let dayHeader = element(start.formatted(.dateTime.weekday(.wide).month(.wide).day()), in: app).frame
+        let nextDay = Calendar.current.date(byAdding: .day, value: 1, to: start)!
+        let nextHeader = element(nextDay.formatted(.dateTime.weekday(.wide).month(.wide).day()), in: app).frame
+        let columnWidth = nextHeader.midX - dayHeader.midX
+        let heading = app.buttons["Go to day"].value as? String
+        let center = task.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        center.press(forDuration: 0.5, thenDragTo: center.withOffset(CGVector(dx: 0, dy: 30)),
+                     withVelocity: .slow, thenHoldForDuration: 0.3)
+        let newStart = start.addingTimeInterval(30 * 60)
+        let newEnd = end.addingTimeInterval(30 * 60)
+        let expectedAfter = "\(newStart.formatted(date: .omitted, time: .shortened)) – \(newEnd.formatted(date: .omitted, time: .shortened))"
+        XCTAssertEqual(task.value as? String, expectedAfter, "The task must move exactly half an hour, preserving its duration")
+        XCTAssertEqual(task.frame.minY, originalFrame.minY + 30, accuracy: 2, "The task should move by half an hour")
+        XCTAssertGreaterThan(columnWidth, 0)
+        XCTAssertGreaterThanOrEqual(task.frame.minX, dayHeader.midX - columnWidth / 2)
+        XCTAssertLessThanOrEqual(task.frame.maxX, dayHeader.midX + columnWidth / 2,
+                                 "A vertical drag must keep the task in its day column")
+        XCTAssertEqual(app.buttons["Go to day"].value as? String, heading)
+    }
+
+    @MainActor
     private func launch(
         appearance: String = "light", tab: String = "agenda", sheet: String? = nil, mode: String = "list", largeText: Bool = false,
-        recordResourceOpens: Bool = false
+        recordResourceOpens: Bool = false, demoNow: Date? = nil
     ) -> XCUIApplication {
         let app = XCUIApplication()
         // The agenda mode is always passed: the app remembers the last one in the App Group
@@ -737,6 +824,7 @@ final class SmokeTests: XCTestCase {
         app.launchArguments = ["-demoData", "YES", "-uiTab", tab, "-uiAppearance", appearance, "-uiAgendaMode", mode]
         if let sheet { app.launchArguments += ["-uiSheet", sheet] }
         if recordResourceOpens { app.launchArguments += ["-uiRecordResourceOpens", "YES"] }
+        if let demoNow { app.launchArguments += ["-demoNow", ISO8601DateFormatter().string(from: demoNow)] }
         app.launchArguments += [
             "-UIPreferredContentSizeCategoryName",
             largeText ? "UICTContentSizeCategoryXXXL" : "UICTContentSizeCategoryL",
