@@ -73,13 +73,18 @@ import Darwin
         config.allowsUnsafeTransactions = true
         let other = try DatabaseQueue(path: file, configuration: config)
         try await other.writeWithoutTransaction { try $0.execute(sql: "BEGIN IMMEDIATE") }
-        let release = Task.detached {
-            try await Task.sleep(for: .milliseconds(150))
-            try await other.writeWithoutTransaction { try $0.execute(sql: "COMMIT") }
+        let release = AsyncThrowingStream<Void, Error> { continuation in
+            DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(150)) {
+                do {
+                    try other.writeWithoutTransaction { try $0.execute(sql: "COMMIT") }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
         }
-        defer { release.cancel() }
         try host.saveTask(Fixtures.task(id: "after-lock"))
-        try await release.value
+        for try await _ in release { }
         #expect(try host.task(id: "after-lock") != nil)
         #expect(try await host.writer.writeWithoutTransaction { try Int.fetchOne($0, sql: "PRAGMA busy_timeout") } == 5_000)
     }
@@ -166,14 +171,20 @@ import Darwin
         #expect(throws: AppDatabase.SharedStoreError.self) {
             try AppDatabase.openExisting(path: file, access: .readOnly, requireSync: false)
         }
-        let release = Task.detached {
-            try await Task.sleep(for: .milliseconds(150))
-            try await migrating.writeWithoutTransaction { try $0.execute(sql: "ROLLBACK") }
+        let release = AsyncThrowingStream<Void, Error> { continuation in
+            DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(150)) {
+                do {
+                    try migrating.writeWithoutTransaction { try $0.execute(sql: "ROLLBACK") }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
         }
         #expect(throws: AppDatabase.SharedStoreError.self) {
             try AppDatabase.openExisting(path: file, access: .readWrite, requireSync: false)
         }
-        try await release.value
+        for try await _ in release { }
         #expect(try await migrating.read { try AppDatabase.migrator.appliedIdentifiers($0) } == ["v1"])
         #expect(try await migrating.read { try !$0.tableExists("unfinishedMigration") })
     }

@@ -72,6 +72,16 @@ struct WidgetIntegrityTests {
         #expect(WidgetFormatting.dayLabel(instant("2026-11-02T18:00:00Z"), now: instant("2026-11-02T08:00:00Z"), calendar: calendar) == "Today")
     }
 
+    @Test func nextMidnightAfterASkippedMidnightUsesStartOfNextDay() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/Havana")!
+        let snapshot = WidgetTaskTimeline(tasks: [], categories: [], placements: [:], calendar: calendar)
+        let now = instant("2026-03-08T17:00:00Z")
+        let midnight = instant("2026-03-09T04:00:00Z")
+        #expect(snapshot.dates(at: now).last == midnight)
+        #expect(WidgetTaskTimeline.reloadDate(at: instant("2026-03-09T03:50:00Z"), from: snapshot) == midnight)
+    }
+
     @Test func distantDatesAreFormattedInSettingsZone() {
         let now = instant("2026-10-01T12:00:00Z")
         let date = instant("2026-11-17T07:00:00Z")

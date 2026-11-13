@@ -10,17 +10,22 @@ struct WidgetTaskTimeline {
     static func reloadDate(at now: Date, from loaded: WidgetTaskTimeline?) -> Date {
         let regular = now.addingTimeInterval(30 * 60)
         guard let calendar = loaded?.calendar else { return regular }
-        let midnight = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now))!
+        let midnight = nextMidnight(after: now, calendar: calendar)
         return min(regular, midnight)
     }
 
     func dates(at now: Date) -> [Date] {
-        let midnight = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now))!
+        let midnight = Self.nextMidnight(after: now, calendar: calendar)
         var dates: Set<Date> = [now, midnight]
         for task in tasks where task.deadlineType != .none {
             if let due = task.dueAt, due > now, due < midnight { dates.insert(due) }
         }
         return dates.sorted()
+    }
+
+    private static func nextMidnight(after date: Date, calendar: Calendar) -> Date {
+        let next = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: date))!
+        return calendar.startOfDay(for: next)
     }
 
     func rows(limit: Int, at date: Date) -> [WidgetTask] {
