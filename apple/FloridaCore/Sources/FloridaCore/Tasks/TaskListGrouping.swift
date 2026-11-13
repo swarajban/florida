@@ -69,8 +69,9 @@ public enum TaskListGrouping: String, CaseIterable, Sendable {
             let nextWeek = calendar.dateInterval(of: .weekOfYear, for: now)!.end
             let weekAfterNext = calendar.date(byAdding: .weekOfYear, value: 1, to: nextWeek)!
             let byDueDate = Dictionary(grouping: remaining) { task -> DueSection in
-                guard let due = task.dueAt else { return .noDueDate }
-                if due < now { return .overdue }
+                let timing = TaskTiming(task: task, now: now)
+                guard let due = timing.dueAt else { return .noDueDate }
+                if timing.isOverdue { return .overdue }
                 if due < tomorrow { return .today }
                 if due < dayAfterTomorrow { return .tomorrow }
                 if due < nextWeek { return .thisWeek }

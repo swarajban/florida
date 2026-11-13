@@ -31,8 +31,11 @@ enum Formatting {
     }
 
     /// "9:00 AM" in the user's locale.
-    static func time(_ date: Date) -> String {
-        date.formatted(date: .omitted, time: .shortened)
+    static func time(_ date: Date, calendar: Calendar = .autoupdatingCurrent) -> String {
+        var style = Date.FormatStyle(date: .omitted, time: .shortened)
+        style.calendar = calendar
+        style.timeZone = calendar.timeZone
+        return date.formatted(style)
     }
 
     /// "9:00 AM – 10:30 AM".
@@ -50,18 +53,19 @@ enum Formatting {
         case 0: return "Today"
         case 1: return "Tomorrow"
         case -1: return "Yesterday"
-        case 2...6: return date.formatted(.dateTime.weekday(.wide))
         default:
-            if calendar.component(.year, from: date) == calendar.component(.year, from: now) {
-                return date.formatted(.dateTime.month(.abbreviated).day())
-            }
-            return date.formatted(.dateTime.month(.abbreviated).day().year())
+            let sameYear = calendar.component(.year, from: date) == calendar.component(.year, from: now)
+            var style: Date.FormatStyle = (2...6).contains(distance) ? .dateTime.weekday(.wide)
+                : sameYear ? .dateTime.month(.abbreviated).day() : .dateTime.month(.abbreviated).day().year()
+            style.calendar = calendar
+            style.timeZone = calendar.timeZone
+            return date.formatted(style)
         }
     }
 
     /// "Today 3:00 PM", "Fri 9:00 AM", "Nov 20 5:00 PM".
     static func dayAndTime(_ date: Date, now: Date, calendar: Calendar) -> String {
-        "\(dayLabel(date, now: now, calendar: calendar)) \(time(date))"
+        "\(dayLabel(date, now: now, calendar: calendar)) \(time(date, calendar: calendar))"
     }
 
     /// A task's due date: the day alone ("Fri"), or with its time ("Fri 3:00 PM") when the user

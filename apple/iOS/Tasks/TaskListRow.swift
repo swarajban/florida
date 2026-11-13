@@ -8,19 +8,26 @@ import SwiftUI
 /// so a tap on one never fires the other.
 struct TaskListRow: View {
     @Environment(AppModel.self) private var model
-    let task: TaskItem
+    let taskID: String
     let now: Date
     let calendar: Calendar
-    let category: TaskCategory?
+    let showsCategory: Bool
     let targets: TaskActionTargets
-    let onEdit: () -> Void
+    let onEdit: (TaskItem) -> Void
 
     var body: some View {
+        if let task = model.blooming[taskID]?.task ?? model.task(id: taskID) {
+            content(task)
+        }
+    }
+
+    private func content(_ task: TaskItem) -> some View {
         let isBlooming = model.blooming[task.id] != nil
-        HStack(alignment: .center, spacing: 8) {
-            Button(action: onEdit) {
-                TaskRow(task: task, summary: summary, now: now, calendar: calendar,
-                        category: category, showsSourceMark: false)
+        let category = model.category(id: task.categoryId)
+        return HStack(alignment: .center, spacing: 8) {
+            Button { onEdit(task) } label: {
+                TaskRow(task: task, summary: summary(for: task), now: now, calendar: calendar,
+                        category: showsCategory && category?.isInbox == false ? category : nil, showsSourceMark: false)
                     .strikethrough(isBlooming)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
@@ -47,10 +54,10 @@ struct TaskListRow: View {
         .listRowBackground(BloomBackground(
             color: Color.category(model.category(id: task.categoryId)), active: isBlooming,
             tint: task.categoryId == TaskCategory.inboxId ? Color.orange.opacity(0.07) : nil))
-        .taskActions(task, targets: targets, onEdit: onEdit)
+        .taskActions(task, targets: targets, onEdit: { onEdit(task) })
     }
 
-    private var summary: TaskScheduleSummary {
+    private func summary(for task: TaskItem) -> TaskScheduleSummary {
         TaskScheduleSummary(
             task: task, placements: model.placementsByTask[task.id] ?? [],
             unscheduled: model.unscheduledByTask[task.id], now: now)

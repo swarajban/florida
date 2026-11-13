@@ -82,7 +82,7 @@ struct TaskPaneView: View {
                             } else {
                                 Section {
                                     ForEach(group.tasks, id: \.paneItemID) { task in
-                                        row(task, in: group)
+                                        TaskPaneRow(taskID: task.id, isInbox: group.isInbox, onClick: handleRowClick)
                                     }
                                 } header: {
                                     TaskGroupHeader(group: group)
@@ -141,16 +141,36 @@ struct TaskPaneView: View {
         }
     }
 
-    private func row(_ task: TaskItem, in group: TaskListSection) -> some View {
+    private func handleRowClick(_ item: ItemID, isDouble: Bool) {
+        clickedItem = model.selection == item ? nil : item
+        model.mainWindow?.makeFirstResponder(nil)
+        model.select(item, in: .tasks)
+        if isDouble || opensTaskOnSingleClick { model.editSelection() }
+    }
+}
+
+private struct TaskPaneRow: View {
+    @Environment(AppModel.self) private var model
+    let taskID: String
+    let isInbox: Bool
+    let onClick: @MainActor (ItemID, Bool) -> Void
+
+    var body: some View {
+        if let task = model.tasksById[taskID], task.isOpen {
+            content(task)
+        }
+    }
+
+    private func content(_ task: TaskItem) -> some View {
         let item = ItemID.task(task.id)
-        let suggestion = group.isInbox ? model.suggestedCategory(for: task) : nil
+        let suggestion = isInbox ? model.suggestedCategory(for: task) : nil
         let category = model.categoriesById[task.categoryId]
         let tint = category?.tint ?? .defaultCategory
         return TaskRowView(
             task: task, state: model.scheduleState(for: task),
             tint: tint, category: model.taskListGrouping == .dueDate && category?.isInbox == false ? category : nil,
             isSelected: model.selection == item, isFocused: model.focus == .tasks,
-            isUntriaged: group.isInbox, suggestion: suggestion,
+            isUntriaged: isInbox, suggestion: suggestion,
             jumpLabel: model.jumpLabel(for: item),
             calendar: model.taskListCalendar, now: model.clockNow,
             onComplete: { model.complete(task) }
@@ -163,15 +183,8 @@ struct TaskPaneView: View {
             TaskActionsMenu(task: task)
         }
         .onClick { isDouble in
-            handleRowClick(item, isDouble: isDouble)
+            onClick(item, isDouble)
         }
-    }
-
-    private func handleRowClick(_ item: ItemID, isDouble: Bool) {
-        clickedItem = model.selection == item ? nil : item
-        model.mainWindow?.makeFirstResponder(nil)
-        model.select(item, in: .tasks)
-        if isDouble || opensTaskOnSingleClick { model.editSelection() }
     }
 }
 

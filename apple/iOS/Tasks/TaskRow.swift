@@ -57,7 +57,7 @@ struct TaskRow: View {
                 Text("·")
             }
             Text(Formatting.duration(minutes: task.remainingMinutes))
-            if let dueAt = task.dueAt {
+            if let dueAt = summary.timing.dueAt {
                 Text("·")
                 Label(
                     "\(task.deadlineType == .hard ? "Due" : "By") \(Formatting.due(dueAt, now: now, calendar: calendar))",

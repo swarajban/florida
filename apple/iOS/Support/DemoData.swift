@@ -257,6 +257,32 @@ enum DemoData {
         if UserDefaults.standard.bool(forKey: "uiTaskGroupingDemo") {
             response = taskGroupingResponse(response, now: fixedNow ?? now)
         }
+        if UserDefaults.standard.bool(forKey: "uiTaskDateDemo") {
+            let parse = ISO8601DateFormatter()
+            let past = UserDefaults.standard.bool(forKey: "uiTaskDatePast")
+            let late = UserDefaults.standard.bool(forKey: "uiTaskDateLate")
+            response.tasks = [TaskItem(
+                id: "date-updated", categoryId: "demo-finance", title: "Updated account task",
+                durationMinutes: 30, priority: .medium, deadlineType: .soft,
+                dueAt: parse.date(from: past ? "2026-11-12T07:59:59Z"
+                                  : late ? "2026-11-17T19:00:00Z" : "2026-11-18T07:59:59Z"),
+                startAt: parse.date(from: "2026-11-17T08:00:00Z"), createdAt: now, updatedAt: now)]
+            response.settings = UserSettings(id: "default", timeZone: "America/Los_Angeles", updatedAt: now)
+            response.placements = [Placement(
+                id: "date-placement", taskId: "date-updated",
+                startAt: parse.date(from: "2026-11-17T20:00:00Z")!,
+                endAt: parse.date(from: "2026-11-17T20:30:00Z")!, pinned: false, computedAt: now)]
+            if UserDefaults.standard.bool(forKey: "uiTaskDateNoPlacement") { response.placements = [] }
+            if UserDefaults.standard.bool(forKey: "uiTaskDateSelectionDemo") {
+                var other = response.tasks[0]
+                other.id = "date-other"
+                other.title = "Other account task"
+                other.dueAt = parse.date(from: "2026-11-21T07:59:59Z")
+                response.tasks.append(other)
+            }
+            response.optionalPlacements = []
+            response.unscheduled = []
+        }
         return response
     }
 

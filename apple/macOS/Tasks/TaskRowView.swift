@@ -136,15 +136,19 @@ struct TaskRowView: View {
                     .accessibilityLabel("Source: \(source.title)")
                     .accessibilityIdentifier("task-source-\(task.id)")
             }
-            if let dueAt = task.dueAt {
-                Label(
-                    DateText.due(dueAt, calendar: calendar, now: now),
-                    systemImage: task.deadlineType == .hard ? "calendar.badge.clock" : "calendar")
-                    .foregroundStyle(state.isOverdue ? Color.red : Color.secondary)
-                    .layoutPriority(1)
+            if let dueAt = state.timing.dueAt {
+                Label {
+                    Text(DateText.due(dueAt, calendar: calendar, now: now))
+                        .accessibilityIdentifier("task-due-label-\(task.id)")
+                } icon: {
+                    Image(systemName: task.deadlineType == .hard ? "calendar.badge.clock" : "calendar")
+                }
+                .foregroundStyle(state.isOverdue ? Color.red : Color.secondary)
+                .layoutPriority(1)
             }
             if showsSchedule {
                 Text(state.label(calendar: calendar, now: now)).foregroundStyle(scheduleColor)
+                    .accessibilityIdentifier("task-schedule-label-\(task.id)")
             }
             if state.isPinned { Image(systemName: "pin.fill") }
             if let category { TaskCategoryChip(category: category) }

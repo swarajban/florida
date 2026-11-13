@@ -225,6 +225,14 @@ Choose **Category** in the pane's grouping menu, use `g o`, or
 run **Group by due date / category** in the palette to toggle the remembered
 grouping. Keyboard selection and jump labels follow the visible order.
 
+Sections, due labels and overdue warnings use the saved task's due instant, not
+an open editor draft or its placement. **Overdue** means that instant has passed;
+**Late** means a placement ends after a still-future due date. A save or sync
+refreshes the row from the current task, and task date/time labels use the same
+settings time zone as the sections on both apps.
+Entering `f` or cancelling it with Esc leaves the selection unchanged. Only
+choosing a label selects and opens an item. Key autorepeat cannot choose a jump label.
+
 The main keys:
 
 | Keys | Action |
