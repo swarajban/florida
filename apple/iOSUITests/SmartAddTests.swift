@@ -306,7 +306,11 @@ final class SmartAddTests: XCTestCase {
         file: StaticString = #filePath, line: UInt = #line
     ) {
         let keyboard = app.keyboards.firstMatch
+        let keyboardIntroduction = app.buttons["Continue"]
+        if keyboardIntroduction.exists { keyboardIntroduction.tap() }
         XCTAssertTrue(keyboard.exists, file: file, line: line)
+        XCTAssertTrue(keyboard.keys["space"].isHittable, file: file, line: line)
+        XCTAssertFalse(keyboardIntroduction.exists, file: file, line: line)
         XCTAssertTrue(input.isHittable, file: file, line: line)
         XCTAssertGreaterThanOrEqual(input.frame.minY, app.navigationBars["New Task"].frame.maxY, file: file, line: line)
         XCTAssertLessThanOrEqual(input.frame.maxY, list.frame.minY, file: file, line: line)
@@ -356,8 +360,11 @@ final class SmartAddTests: XCTestCase {
             input.typeText("x")
             XCTAssertTrue(clear.waitForExistence(timeout: 5))
         }
+        if app.buttons["Continue"].exists { app.buttons["Continue"].tap() }
         XCTAssertEqual(input.value as? String, "x")
         clear.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.keys["space"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.keyboards.firstMatch.keys["space"].isHittable)
         return input
     }
 
