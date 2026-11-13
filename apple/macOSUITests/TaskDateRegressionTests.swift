@@ -234,7 +234,7 @@ final class TaskDateRegressionTests: XCTestCase {
     @MainActor
     private func assertSelectedOnly(_ id: String?, in app: XCUIApplication) {
         for (taskID, title) in [("date-updated", "Updated account task"), ("date-other", "Other account task")] {
-            let label = taskID == id ? "Selected task, \(title)" : "Task, \(title)"
+            let label = taskID == id ? "Selected task, \(title), Categorized" : "Task, \(title), Categorized"
             wait(for: [expectation(for: NSPredicate(format: "label == %@", label),
                                   evaluatedWith: row(taskID, in: app))], timeout: 5)
         }

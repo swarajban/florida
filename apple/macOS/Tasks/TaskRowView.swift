@@ -166,23 +166,21 @@ struct TaskRowView: View {
                     switch listDate {
                     case .due(let date):
                         Label {
-                            HStack(spacing: 3) {
-                                Text(task.deadlineType == .hard ? "Due" : "By")
-                                Text(DateText.due(date, calendar: calendar, now: now))
-                                    .accessibilityIdentifier("task-due-label-\(task.id)")
-                            }
+                            Text(DateText.due(date, calendar: calendar, now: now))
+                                .accessibilityIdentifier("task-due-label-\(task.id)")
                         } icon: {
                             Image(systemName: task.deadlineType == .hard ? "calendar.badge.clock" : "calendar")
                         }
                         .foregroundStyle(state.isOverdue ? Color.red : Color.secondary)
                     case .pinned(let date):
                         Label("Pinned \(DateText.dayAndTime(date, calendar: calendar, now: now))", systemImage: "pin.fill")
+                            .accessibilityIdentifier("task-list-date-\(task.id)")
                     case .start(let date):
                         Label("Start \(DateText.notBefore(date, calendar: calendar, now: now))", systemImage: "arrow.right.to.line")
+                            .accessibilityIdentifier("task-list-date-\(task.id)")
                     }
                 }
                 .layoutPriority(1)
-                .accessibilityIdentifier("task-list-date-\(task.id)")
             }
             if showsSchedule || task.someday {
                 Text(state.label(calendar: calendar, now: now))
