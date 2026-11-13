@@ -20,11 +20,13 @@ public struct QuickAddDraft: Hashable, Sendable {
     public var context: TaskContext?
     /// Text after the first ` // ` or ` -- ` separator, untouched by the token grammar.
     public var notes: String?
+    public var source: TaskSource?
 
     public init(
         title: String = "", durationMinutes: Int? = nil, priority: Priority? = nil,
         deadlineType: DeadlineType? = nil, dueAt: Date? = nil, startAt: Date? = nil,
-        pinnedStart: Date? = nil, categoryHint: String? = nil, context: TaskContext? = nil, notes: String? = nil
+        pinnedStart: Date? = nil, categoryHint: String? = nil, context: TaskContext? = nil, notes: String? = nil,
+        source: TaskSource? = nil
     ) {
         self.title = title
         self.durationMinutes = durationMinutes
@@ -36,6 +38,7 @@ public struct QuickAddDraft: Hashable, Sendable {
         self.categoryHint = categoryHint
         self.context = context
         self.notes = notes
+        self.source = source
     }
 }
 
@@ -69,16 +72,35 @@ public struct QuickAddDraft: Hashable, Sendable {
 ///   time has already passed.
 /// - Notes: everything after the first ` // ` or ` -- `.
 public enum QuickAddParser {
+    public static func removingSource(from text: String) -> String {
+        let body = QuickAddScanner.splitNotes(text).body
+        guard let token = body.split(whereSeparator: \.isWhitespace).first(where: { TaskSource.from(url: String($0)) != nil })
+        else { return text }
+        var result = text
+        result.removeSubrange(token.startIndex..<token.endIndex)
+        return result
+    }
+
     public static func parse(_ text: String, now: Date, calendar: Calendar) -> QuickAddDraft {
         let (body, notes) = QuickAddScanner.splitNotes(text)
-        let tokens = body.split(whereSeparator: \.isWhitespace).map(String.init)
+        var tokens = body.split(whereSeparator: \.isWhitespace).map(String.init)
+        var source: TaskSource?
+        if let index = tokens.firstIndex(where: { TaskSource.from(url: $0) != nil }) {
+            source = TaskSource.from(url: tokens.remove(at: index))
+        }
         let scanner = QuickAddScanner(tokens: tokens, now: now, calendar: calendar)
-        var draft = QuickAddDraft(notes: notes)
+        var draft = QuickAddDraft(notes: notes, source: source)
         var title: [String] = []
         var i = 0
 
         while i < tokens.count {
             let word = scanner.words[i]
+
+            if TaskSource.from(url: tokens[i]) != nil {
+                title.append(tokens[i])
+                i += 1
+                continue
+            }
 
             if draft.categoryHint == nil, let slug = QuickAddScanner.categorySlug(tokens[i]) {
                 draft.categoryHint = slug
@@ -153,6 +175,7 @@ public enum QuickAddParser {
         }
 
         draft.title = QuickAddScanner.joinTitle(title)
+        if draft.title.isEmpty, let source { draft.title = source.title }
         return draft
     }
 }
@@ -280,7 +303,12 @@ struct QuickAddScanner {
 
     static func joinTitle(_ tokens: [String]) -> String {
         let trim = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "-–—:;,./|~"))
-        return tokens.joined(separator: " ").trimmingCharacters(in: trim)
+        let joined = tokens.joined(separator: " ")
+        if let last = tokens.last, TaskSource.from(url: last) != nil,
+           let start = joined.rangeOfCharacter(from: trim.inverted)?.lowerBound {
+            return String(joined[start...])
+        }
+        return joined.trimmingCharacters(in: trim)
     }
 
     // MARK: - Duration

@@ -225,6 +225,7 @@ ones:
 | `⇧E`, `r y` / `r m` / `r n`, `v` | edit the selected event, RSVP yes / maybe / no, join its video call |
 | `g r` | open the selected event's resources in a searchable picker; arrows select, Return opens |
 | `g p`, `g b`, `y` | projects, today's brief and the weekly review, "Why here?" for the selected task |
+| `g s` | open the selected task's source (also “Open task source” in the palette) |
 | `o`, `⇧⌘C`, `⌘R`, `esc` | open in Google Calendar, copy link, sync now, cancel |
 
 Quick add parses natural language locally (`QuickAddParser`): "infosec review
@@ -254,6 +255,17 @@ you type until **Reset corrections**. **Details** (`⌘E`) opens the full event 
 with the preview’s fields and recurrence prefilled. No guests are parsed or added,
 so creating an event this way cannot send invitations. Typing and saving use no AI
 or network request; ordinary background sync sends the queued write later.
+
+Paste or type a source URL into quick add on either platform to keep it with the
+task, separate from its title. GitHub PRs/issues and Linear issues get a readable
+title immediately, without a network request; other links use the host and path.
+The source chip's × removes the link before saving. The first URL before the
+notes separator is the source; later URLs and URLs in notes stay as text.
+Supported links are HTTP, HTTPS and `mailto:`. Tasks with a source show a small
+mark in their row. On iPhone, use the task's Open source action without opening
+the editor; both editors let you change the source URL/title or remove it.
+Source changes save locally and sync like other task edits. Deploy the matching
+server migration before distributing these clients so the server retains sources.
 
 An opened task or event shows the key for each control beside it. The task
 editor opens with no field focused, so its keys (`TaskEditorKey` in

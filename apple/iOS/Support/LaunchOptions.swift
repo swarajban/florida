@@ -5,6 +5,14 @@ import Foundation
 /// All are read from the argument domain of `UserDefaults` and only in Debug builds; a Release
 /// build ignores them.
 enum LaunchOptions {
+    static var recordSourceOpens: Bool {
+        #if DEBUG
+        return demoData && UserDefaults.standard.bool(forKey: "uiRecordSourceOpens")
+        #else
+        return false
+        #endif
+    }
+
     /// Use a fresh in-memory store seeded with `DemoData` instead of the shared store, and skip
     /// the server setup prompts.
     static var demoData: Bool {

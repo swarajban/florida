@@ -1,7 +1,9 @@
 import type { Hono } from 'hono'
+import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { createApp } from '../src/app.js'
 import type { Db } from '../src/db/client.js'
+import { taskRecurrences } from '../src/db/schema.js'
 import { nextOccurrence, occurrenceDates, shiftRecurrenceInstant } from '../src/recurrence.js'
 import type { RecurrenceRule } from '../src/recurrence.js'
 import { runScheduling } from '../src/scheduling.js'
@@ -94,6 +96,47 @@ async function get(id: string): Promise<WireTask> {
 }
 
 describe('recurring tasks through the API and real scheduler', () => {
+  it('copies sources to occurrences, preserves older edits, and propagates source edits and clearing', async () => {
+    const source = { url: 'https://linear.app/acme/issue/ENG-12/fix', title: 'Linear ENG-12', kind: 'linear' as const }
+    const first = await put('source-series', { ...base, source, recurrence: MONTHLY })
+    const initial = await series(first.recurrenceSeriesId)
+    expect(initial).toHaveLength(5)
+    expect(initial.map((task) => task.source)).toEqual(Array.from({ length: 5 }, () => source))
+    const { source: omitted, ...oldClient } = first
+    await put(first.id, { ...oldClient, title: 'Older client edit' })
+    expect((await series(first.recurrenceSeriesId)).every((task) => task.source?.url === source.url)).toBe(true)
+    const replacement = { url: 'https://github.com/acme/app/issues/42', title: 'Issue #42 in acme/app', kind: 'github' as const }
+    const current = await get(initial[1]!.id)
+    await put(current.id, { ...current, source: replacement })
+    const changed = await series(first.recurrenceSeriesId)
+    expect(changed[0]?.source).toEqual(source)
+    expect(changed.slice(1).every((task) => task.source?.url === replacement.url)).toBe(true)
+    const cleared = await get(initial[2]!.id)
+    await put(cleared.id, { ...cleared, source: null })
+    const after = await series(first.recurrenceSeriesId)
+    expect(after[1]?.source).toEqual(replacement)
+    expect(after.slice(2).every((task) => task.source === null)).toBe(true)
+    clock = new Date('2028-06-01T16:00:00Z')
+    await runScheduling(db, config, clock)
+    const expanded = (await series(first.recurrenceSeriesId)).filter((task) => task.recurrenceDate! >= '2028-06-01')
+    expect(expanded.length).toBeGreaterThan(0)
+    expect(expanded.every((task) => task.source === null)).toBe(true)
+    expect((await request(`/api/tasks/${first.id}`, 'DELETE')).status).toBe(200)
+  })
+
+  it('materializes older recurrence templates that have no source field as null', async () => {
+    const first = await put('legacy-source-series', { ...base, recurrence: MONTHLY })
+    const [stored] = await db.select().from(taskRecurrences).where(eq(taskRecurrences.id, first.recurrenceSeriesId!))
+    const { source, ...legacy } = stored!.template
+    await db.update(taskRecurrences).set({ template: legacy }).where(eq(taskRecurrences.id, first.recurrenceSeriesId!))
+    clock = new Date('2028-06-01T16:00:00Z')
+    await runScheduling(db, config, clock)
+    const expanded = (await series(first.recurrenceSeriesId)).filter((task) => task.recurrenceDate! >= '2028-06-01')
+    expect(expanded.length).toBeGreaterThan(0)
+    expect(expanded.every((task) => task.source === null)).toBe(true)
+    expect((await request(`/api/tasks/${first.id}`, 'DELETE')).status).toBe(200)
+  })
+
   it('materializes independent month-end occurrences, exposes them through sync, and never schedules before their release', async () => {
     const first = await put('monthly', { ...base, recurrence: MONTHLY })
     const occurrences = await series(first.recurrenceSeriesId)
@@ -139,6 +182,26 @@ describe('recurring tasks through the API and real scheduler', () => {
     const first = await put('retry-series', body)
     const before = await series(first.recurrenceSeriesId)
     const retry = await put('retry-series', body)
+    expect({ ...retry, updatedAt: first.updatedAt }).toEqual(first)
+    const after = await series(first.recurrenceSeriesId)
+    expect(after.filter((task) => task.id !== first.id)).toEqual(before.filter((task) => task.id !== first.id))
+  })
+
+  it('retries a legacy recurring creation with an explicit date and a missing source template field', async () => {
+    const body = {
+      ...base,
+      dueAt: '2028-01-31T23:00:00.000Z',
+      deadlineType: 'soft' as const,
+      recurrence: { ...MONTHLY, dayOfMonth: 15 },
+    }
+    const first = await put('legacy-explicit-retry', body)
+    expect(first.recurrenceDate).toBe('2028-02-15')
+    expect(first.dueAt).toBe('2028-02-15T23:00:00.000Z')
+    const [stored] = await db.select().from(taskRecurrences).where(eq(taskRecurrences.id, first.recurrenceSeriesId!))
+    const { source, ...legacy } = stored!.template
+    await db.update(taskRecurrences).set({ template: legacy }).where(eq(taskRecurrences.id, first.recurrenceSeriesId!))
+    const before = await series(first.recurrenceSeriesId)
+    const retry = await put(first.id, body)
     expect({ ...retry, updatedAt: first.updatedAt }).toEqual(first)
     const after = await series(first.recurrenceSeriesId)
     expect(after.filter((task) => task.id !== first.id)).toEqual(before.filter((task) => task.id !== first.id))

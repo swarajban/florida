@@ -31,7 +31,7 @@ enum QuickAddTaskBuilder {
     /// A new task from the draft: 30 minutes, medium priority and the computer context unless the
     /// text said otherwise, a deadline only when a date was parsed, a client-generated lowercase UUID.
     static func makeTask(from draft: QuickAddDraft, category: TaskCategory, now: Date) -> TaskItem {
-        TaskItem(
+        var task = TaskItem(
             id: UUID().uuidString.lowercased(),
             categoryId: category.id,
             title: draft.title,
@@ -45,6 +45,8 @@ enum QuickAddTaskBuilder {
             pinnedStart: draft.pinnedStart,
             createdAt: now,
             updatedAt: now)
+        task.source = draft.source
+        return task
     }
 
     static func normalize(_ name: String) -> String {

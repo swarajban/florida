@@ -63,9 +63,17 @@ extension AppModel {
 
     /// ⌘↩ in quick add: hands the text to the full editor, which sends it to the AI parser.
     func parsePaletteWithAI() {
-        let text = palette.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let source = palette.draft.source
+        let parsed = QuickAddParser.parse(palette.text, now: Date(), calendar: calendar)
+        var text = QuickAddParser.removingSource(from: palette.text)
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty {
+            text = palette.draft.title
+        } else if let parsedSource = parsed.source, parsed.title == parsedSource.title {
+            text = "\(parsed.title) \(text)"
+        }
         closePalette()
-        openNewTaskEditor(aiText: text.isEmpty ? nil : text)
+        openNewTaskEditor(aiText: text.isEmpty ? nil : text, source: source)
     }
 
     /// Return in the palette: create the task, run the highlighted command, or reveal the result.

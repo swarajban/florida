@@ -74,6 +74,9 @@ struct OptionalPickRow: View {
             .buttonStyle(.borderless)
             .tint(.primary)
             .accessibilityHint("Edits the task")
+            if let source = pick.task.source {
+                TaskSourceButton(source: source, identifier: "optional-source-open-\(pick.task.id)", compact: true)
+            }
             Button(takeTitle, action: onTake)
                 .buttonStyle(.bordered)
                 .controlSize(.small)

@@ -30,7 +30,7 @@ extension AppModel {
              .doNow, .doneForNow, .repeatLast, .centerOnNow, .jumpToFirst, .jumpToLast,
              .editEvent, .respondYes, .respondMaybe, .respondNo,
              .showProjects, .showBrief, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind,
-             .jump, .joinMeeting, .openEventResources, .cycleEventDayBlocking, .shareAvailability:
+             .jump, .joinMeeting, .openEventResources, .cycleEventDayBlocking, .shareAvailability, .openTaskSource:
             guard !isSheetOpen else { return }
             statusMessage = nil
             jump = nil
@@ -66,6 +66,7 @@ extension AppModel {
             case .openEventResources: openEventResources()
             case .cycleEventDayBlocking: cycleEventDayBlocking()
             case .shareAvailability: startAvailability()
+            case .openTaskSource: openTaskSource()
             case .core: break
             }
         }
@@ -204,6 +205,18 @@ extension AppModel {
         openInGoogle(event)
     }
 
+    func openTaskSource() {
+        guard let task = selectedTask else {
+            statusMessage = "Select a task first"
+            return
+        }
+        guard let url = task.source?.openURL else {
+            statusMessage = "This task has no source link"
+            return
+        }
+        open(url: url)
+    }
+
     func openInGoogle(_ event: CalendarEvent) {
         guard let link = event.htmlLink, let url = URL(string: link) else {
             statusMessage = "This event has no Google Calendar link"
@@ -235,6 +248,12 @@ extension AppModel {
     }
 
     func open(url: URL) {
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "demoData"), UserDefaults.standard.bool(forKey: "uiRecordSourceOpens") {
+            statusMessage = "Opened source: \(url.absoluteString)"
+            return
+        }
+        #endif
         NSWorkspace.shared.open(url)
     }
 }

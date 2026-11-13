@@ -45,6 +45,7 @@ struct RootView: View {
         .sheet(isPresented: Bindable(model).showingQuickAdd) {
             QuickAddSheet()
         }
+        .modifier(SourceOpenTestHarness())
     }
 }
 

@@ -66,6 +66,12 @@ struct TaskRowView: View {
                     Image(systemName: task.context.symbolName)
                         .help("\(task.context.displayName) context")
                         .accessibilityLabel("\(task.context.displayName) context")
+                    if let source = task.source {
+                        Image(systemName: source.symbolName)
+                            .help("Source: \(source.title) (g s)")
+                            .accessibilityLabel("Source: \(source.title)")
+                            .accessibilityIdentifier("task-source-\(task.id)")
+                    }
                     if let dueAt = task.dueAt {
                         Label(
                             DateText.due(dueAt, calendar: calendar),

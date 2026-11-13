@@ -4,6 +4,115 @@ import UIKit
 /// Wait for real content before capturing; a fixed launch delay can silently save a blank screen.
 final class SmokeTests: XCTestCase {
     @MainActor
+    func testTaskSourceCaptureAndRemoval() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = launch(appearance: appearance, tab: "tasks")
+            waitForText("Renew VPN certificate", in: app)
+            app.buttons["New task"].tap()
+            let input = app.textViews["quick-add-input"]
+            XCTAssertTrue(input.waitForExistence(timeout: 5))
+            input.typeText("https://github.com/example/florida/pull/123")
+            XCTAssertEqual(app.staticTexts["quick-add-title"].label, "PR #123 in example/florida")
+            XCTAssertTrue(app.buttons["quick-add-remove-source"].exists)
+            capture(app, "capture-source-\(appearance)")
+            app.buttons["Details"].tap()
+            let url = app.textFields["task-source-url"]
+            XCTAssertTrue(url.waitForExistence(timeout: 5))
+            XCTAssertEqual(url.value as? String, "https://github.com/example/florida/pull/123")
+            app.buttons["task-editor-cancel"].tap()
+            XCTAssertTrue(input.waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["quick-add-remove-source"].exists)
+            app.buttons["quick-add-remove-source"].tap()
+            input.tap()
+            input.typeText(" tomorrow")
+            XCTAssertFalse(app.buttons["quick-add-remove-source"].exists)
+            app.buttons["Cancel"].tap()
+            app.buttons["New task"].tap()
+            XCTAssertTrue(input.waitForExistence(timeout: 5))
+            XCTAssertFalse(app.buttons["quick-add-remove-source"].exists, "Removing a source survives edits and cancellation")
+            app.buttons["Details"].tap()
+            XCTAssertTrue(app.buttons["task-source-add"].waitForExistence(timeout: 5))
+            XCTAssertFalse(url.exists)
+            app.buttons["task-editor-cancel"].tap()
+            XCTAssertTrue(input.waitForExistence(timeout: 5))
+            app.buttons["quick-add-save"].tap()
+            XCTAssertTrue(input.waitForNonExistence(timeout: 5))
+            let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "PR #123 in example/florida")).firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 5))
+            XCTAssertFalse(element(startingWith: "task-source-open-", in: app).exists)
+            row.tap()
+            XCTAssertTrue(app.buttons["task-source-add"].waitForExistence(timeout: 5))
+            XCTAssertFalse(url.exists, "The removed source must not be saved")
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testTaskSourceEditAndOpen() {
+        continueAfterFailure = false
+        let app = launch(tab: "tasks", recordSourceOpens: true)
+        waitForText("Renew VPN certificate", in: app)
+        app.buttons["New task"].tap()
+        let input = app.textViews["quick-add-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        input.typeText("Review source https://github.com/example/florida/pull/456")
+        app.buttons["Details"].tap()
+        let url = app.textFields["task-source-url"]
+        XCTAssertTrue(url.waitForExistence(timeout: 5))
+        XCTAssertEqual(url.value as? String, "https://github.com/example/florida/pull/456")
+        app.buttons["Add"].tap()
+        XCTAssertTrue(input.waitForNonExistence(timeout: 5))
+        let sourceButton = element(startingWith: "task-source-open-", in: app)
+        XCTAssertTrue(sourceButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(sourceButton.label.contains("PR #456"))
+        sourceButton.tap()
+        let opened = app.staticTexts["source-opened-url"]
+        XCTAssertTrue(opened.waitForExistence(timeout: 5))
+        XCTAssertEqual(opened.label, "https://github.com/example/florida/pull/456")
+        XCTAssertFalse(app.navigationBars["Edit Task"].exists, "Opening the source must not also open the editor")
+
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Review source")).firstMatch
+        row.tap()
+        XCTAssertTrue(url.waitForExistence(timeout: 5))
+        for _ in 0..<3 where !url.isHittable { app.swipeUp() }
+        replaceText(in: url, with: "javascript:alert(1)", in: app)
+        XCTAssertFalse(app.buttons["Save"].isEnabled)
+        XCTAssertTrue(app.staticTexts["task-source-error"].exists)
+        replaceText(in: url, with: "mailto:review@example.com", in: app)
+        replaceText(in: app.textFields["task-source-title"], with: "Release discussion", in: app)
+        XCTAssertTrue(app.buttons["Save"].isEnabled)
+        capture(app, "task-source-editor")
+        app.buttons["Save"].tap()
+        XCTAssertTrue(app.navigationBars["Edit Task"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(sourceButton.waitForExistence(timeout: 5))
+        XCTAssertEqual(sourceButton.label, "Open source: Release discussion")
+        sourceButton.tap()
+        XCTAssertEqual(opened.label, "mailto:review@example.com")
+        XCTAssertFalse(app.navigationBars["Edit Task"].exists)
+        row.tap()
+        XCTAssertTrue(url.waitForExistence(timeout: 5))
+        XCTAssertEqual(url.value as? String, "mailto:review@example.com")
+        XCTAssertEqual(app.textFields["task-source-title"].value as? String, "Release discussion")
+        let remove = app.buttons["task-source-remove"]
+        for _ in 0..<3 where !remove.isHittable { app.swipeUp() }
+        remove.tap()
+        app.buttons["task-editor-cancel"].tap()
+        XCTAssertTrue(sourceButton.waitForExistence(timeout: 5), "Cancel must discard source edits")
+        row.tap()
+        XCTAssertTrue(url.waitForExistence(timeout: 5))
+        for _ in 0..<3 where !remove.isHittable { app.swipeUp() }
+        remove.tap()
+        app.buttons["Save"].tap()
+        XCTAssertTrue(app.navigationBars["Edit Task"].waitForNonExistence(timeout: 5))
+        XCTAssertFalse(sourceButton.exists, "Removing a source must persist after Save")
+        row.tap()
+        XCTAssertTrue(app.buttons["task-source-add"].waitForExistence(timeout: 5))
+        XCTAssertFalse(url.exists)
+        app.terminate()
+    }
+
+    @MainActor
     func testEventResourcesInBothAppearances() {
         continueAfterFailure = false
         let expected = [
@@ -695,6 +804,7 @@ final class SmokeTests: XCTestCase {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
     }
 
+    @MainActor
     private func element(startingWith prefix: String, in app: XCUIApplication) -> XCUIElement {
         app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", prefix)).firstMatch
     }
@@ -816,7 +926,7 @@ final class SmokeTests: XCTestCase {
     @MainActor
     private func launch(
         appearance: String = "light", tab: String = "agenda", sheet: String? = nil, mode: String = "list", largeText: Bool = false,
-        recordResourceOpens: Bool = false, demoNow: Date? = nil
+        recordResourceOpens: Bool = false, recordSourceOpens: Bool = false, demoNow: Date? = nil
     ) -> XCUIApplication {
         let app = XCUIApplication()
         // The agenda mode is always passed: the app remembers the last one in the App Group
@@ -825,12 +935,23 @@ final class SmokeTests: XCTestCase {
         if let sheet { app.launchArguments += ["-uiSheet", sheet] }
         if recordResourceOpens { app.launchArguments += ["-uiRecordResourceOpens", "YES"] }
         if let demoNow { app.launchArguments += ["-demoNow", ISO8601DateFormatter().string(from: demoNow)] }
+        if recordSourceOpens { app.launchArguments += ["-uiRecordSourceOpens", "YES"] }
         app.launchArguments += [
             "-UIPreferredContentSizeCategoryName",
             largeText ? "UICTContentSizeCategoryXXXL" : "UICTContentSizeCategoryL",
         ]
         app.launch()
         return app
+    }
+
+    @MainActor
+    private func replaceText(in field: XCUIElement, with text: String, in app: XCUIApplication) {
+        field.tap()
+        field.press(forDuration: 1)
+        let selectAll = app.menuItems["Select All"]
+        XCTAssertTrue(selectAll.waitForExistence(timeout: 5))
+        selectAll.tap()
+        field.typeText(text)
     }
 
     @MainActor

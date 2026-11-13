@@ -13,9 +13,17 @@ struct TaskRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(task.title)
-                    .font(.body)
-                    .foregroundStyle(.primary)
+                HStack(spacing: 5) {
+                    Text(task.title)
+                        .font(.body)
+                        .foregroundStyle(.primary)
+                    if let source = task.source {
+                        Image(systemName: source.symbolName)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("Has source: \(source.title)")
+                    }
+                }
                 HStack(spacing: 6) {
                     if let marker = task.priority.rowMarker {
                         Text(marker)

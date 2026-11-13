@@ -42,6 +42,26 @@ struct QuickAddPreview: View {
                             in: RoundedRectangle(cornerRadius: 4))
                 }
             }
+            if let source = draft.source {
+                HStack(spacing: 6) {
+                    Label(source.title, systemImage: source.symbolName)
+                        .lineLimit(1)
+                    Button {
+                        model.palette.removeSource()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Remove source")
+                    .accessibilityIdentifier("quick-add-remove-source")
+                }
+                .font(.caption)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(FloridaStyle.ink.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("quick-add-source")
+            }
             if let unknownHint {
                 Button {
                     model.createCategoryFromHint()

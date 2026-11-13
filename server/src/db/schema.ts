@@ -2,6 +2,7 @@ import type { Attention, DayCapacity, DayKind, DeadlineType, MissedCommitment, P
 import { sql } from 'drizzle-orm'
 import { boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core'
 import type { RecurrenceRule, RecurringTaskTemplate } from '../recurrence.js'
+import type { TaskSource } from '../task-source.js'
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' })
 
@@ -132,6 +133,7 @@ export const tasks = pgTable(
       .references(() => categories.id),
     title: text('title').notNull(),
     notes: text('notes'),
+    source: jsonb('source').$type<TaskSource>(),
     durationMinutes: integer('duration_minutes').notNull(),
     minChunkMinutes: integer('min_chunk_minutes'),
     priority: text('priority').$type<Priority>().notNull(),

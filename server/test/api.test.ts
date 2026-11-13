@@ -12,6 +12,7 @@ import { GoogleApiError, GoogleGoneError, GoogleTokenError, mapEvent } from '../
 import type { GoogleEvent, GoogleEventAttendee } from '../src/google/client.js'
 import { runScheduling } from '../src/scheduling.js'
 import { seed } from '../src/seed.js'
+import type { TaskSource } from '../src/task-source.js'
 import { createTestDb } from './db.js'
 import { FakeSync, testConfig as config } from './fixtures.js'
 
@@ -1838,5 +1839,48 @@ describe('day overrides', () => {
       expect(o.blockId).toBe('gym')
       expect(new Date(o.endAt).getTime() - new Date(o.startAt).getTime()).toBe(75 * 60_000)
     }
+  })
+})
+
+describe('task sources', () => {
+  it('accepts URL-only sources, derives kind, preserves older writes, and syncs updates and clearing', async () => {
+    const id = 'source-api'
+    const url = 'https://github.com/acme/app/pull/123'
+    const source = { url, title: 'PR #123 in acme/app', kind: 'github' }
+    const read = async (res: Response) => {
+      expect(res.status).toBe(200)
+      return ((await res.json()) as { task: { source: TaskSource | null } }).task.source
+    }
+    expect(await read(await api(`/api/tasks/${id}`, { method: 'PUT', json: { ...taskBody, source: { url, kind: 'web' } } }))).toEqual(source)
+    expect(await (await api(`/api/tasks/${id}`)).json()).toMatchObject({ source })
+    const initial = await (await api('/api/sync')).json() as { cursor: string; tasks: { id: string; source: TaskSource | null }[] }
+    expect(initial.tasks.find((task) => task.id === id)?.source).toEqual(source)
+    expect(await read(await api(`/api/tasks/${id}`, { method: 'PUT', json: { ...taskBody, title: 'Old client edit' } }))).toEqual(source)
+    expect(await read(await api(`/api/tasks/${id}`, { method: 'PATCH', json: { notes: 'Still linked' } }))).toEqual(source)
+    const replacement = { url: 'https://linear.app/acme/issue/ENG-42/fix', title: 'Fix login', kind: 'linear' }
+    expect(await read(await api(`/api/tasks/${id}`, { method: 'PATCH', json: { source: { ...replacement, kind: 'email' } } }))).toEqual(replacement)
+    const changed = await (await api(`/api/sync?since=${encodeURIComponent(initial.cursor)}`)).json() as { cursor: string; tasks: { id: string; source: TaskSource | null }[] }
+    expect(changed.tasks.find((task) => task.id === id)?.source).toEqual(replacement)
+    expect(await read(await api(`/api/tasks/${id}`, { method: 'PATCH', json: { source: null } }))).toBeNull()
+    const cleared = await (await api(`/api/sync?since=${encodeURIComponent(changed.cursor)}`)).json() as { tasks: { id: string; source: TaskSource | null }[] }
+    expect(cleared.tasks.find((task) => task.id === id)?.source).toBeNull()
+    expect(await read(await api(`/api/tasks/${id}`, { method: 'PUT', json: { ...taskBody, source: { url: 'mailto:person@example.com' } } }))).toEqual({ url: 'mailto:person@example.com', title: 'person@example.com', kind: 'email' })
+    expect(await read(await api(`/api/tasks/${id}`, { method: 'PUT', json: { ...taskBody, source: null } }))).toBeNull()
+    expect((await api(`/api/tasks/${id}`, { method: 'DELETE' })).status).toBe(200)
+  })
+
+  it('rejects unsafe sources on both create and update without changing the stored source', async () => {
+    const id = 'source-unsafe'
+    expect((await api(`/api/tasks/${id}`, { method: 'PUT', json: taskBody })).status).toBe(200)
+    for (const url of ['javascript:alert(1)', 'file:///private', 'data:text/html,hello', '//example.com']) {
+      for (const method of ['PUT', 'PATCH']) {
+        const res = await api(`/api/tasks/${method === 'PUT' ? 'source-rejected' : id}`, { method, json: { ...taskBody, source: { url } } })
+        expect(res.status).toBe(400)
+        expect(await res.json()).toMatchObject({ issues: [expect.objectContaining({ path: ['source', 'url'] })] })
+      }
+    }
+    expect(await (await api(`/api/tasks/${id}`)).json()).toMatchObject({ source: null })
+    expect((await api('/api/tasks/source-rejected')).status).toBe(404)
+    expect((await api(`/api/tasks/${id}`, { method: 'DELETE' })).status).toBe(200)
   })
 })

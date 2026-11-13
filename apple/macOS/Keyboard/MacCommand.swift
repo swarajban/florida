@@ -45,13 +45,14 @@ enum MacCommand: Hashable, Sendable {
     case openEventResources
     case cycleEventDayBlocking
     case shareAvailability
+    case openTaskSource
 
     /// Grouping in the help overlay, reusing the shared sections.
     var section: AppCommand.Section {
         switch self {
         case .core(let command): command.section
         case .undo, .move, .acceptSuggestion, .newTaskEditor, .doNow, .doneForNow, .repeatLast,
-             .editEvent, .respondYes, .respondMaybe, .respondNo, .joinMeeting, .openEventResources, .cycleEventDayBlocking:
+             .editEvent, .respondYes, .respondMaybe, .respondNo, .joinMeeting, .openEventResources, .cycleEventDayBlocking, .openTaskSource:
             .editing
         case .newCategory, .showRoutine, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind, .shareAvailability: .actions
         case .centerOnNow, .jumpToFirst, .jumpToLast, .jump: .navigation
@@ -91,6 +92,7 @@ enum MacCommand: Hashable, Sendable {
         case .openEventResources: "Open event resources"
         case .cycleEventDayBlocking: "Cycle day blocking"
         case .shareAvailability: "Share availability"
+        case .openTaskSource: "Open task source"
         }
     }
 
@@ -109,7 +111,7 @@ enum MacCommand: Hashable, Sendable {
     /// Every command in palette and help order: the shared commands first, then the Mac ones.
     static let all: [MacCommand] = AppCommand.allCases.map(MacCommand.core) + [
         .newTaskEditor, .doNow, .doneForNow, .repeatLast, .undo, .move, .acceptSuggestion,
-        .editEvent, .respondYes, .respondMaybe, .respondNo, .joinMeeting, .openEventResources, .cycleEventDayBlocking,
+        .editEvent, .respondYes, .respondMaybe, .respondNo, .joinMeeting, .openEventResources, .cycleEventDayBlocking, .openTaskSource,
         .newCategory, .showRoutine, .centerOnNow, .jumpToFirst, .jumpToLast, .jump,
         .showProjects, .showBrief, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind,
         .shareAvailability,

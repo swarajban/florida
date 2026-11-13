@@ -131,6 +131,16 @@ One-time setup:
 
 All `/api/*` routes need `Authorization: Bearer <API_TOKEN>`.
 
+Tasks optionally carry `source: {url, title, kind}` (or `null`). REST `PUT`/`PATCH` and MCP
+`create_task`/`update_task` accept a URL alone, for example
+`"source": {"url": "https://github.com/owner/repo/pull/123"}`. The server derives the kind
+(`email`, `slack`, `github`, `linear`, or `web`) from the URL even when the caller supplies one.
+It derives a short title synchronously without fetching the link, unless a nonempty title is
+supplied. URLs must use `http`, `https`, or `mailto`, without credentials or control characters;
+URL and supplied-title limits are 4096 and 200 characters. Reads and sync return the full source.
+Omitting `source` on an edit preserves it for older clients; `null` clears it. Recurring tasks
+copy the source to their occurrences, and source edits apply to this and future unfinished tasks.
+
 ```sh
 export PUBLIC_URL=https://florida-swaraj.fly.dev API_TOKEN=...
 

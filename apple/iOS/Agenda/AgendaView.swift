@@ -509,14 +509,20 @@ struct AgendaView: View {
         let category = model.category(id: block.task.categoryId)
         let isBlooming = model.blooming[block.task.id] != nil
         let row = VStack(alignment: .leading, spacing: 0) {
-            Button {
-                editingTask = block.task
-            } label: {
-                BlockRow(block: block, category: category, now: now, showsProgress: showsProgress && isToday)
-                    .strikethrough(isBlooming || block.task.completedAt != nil)
-                    .foregroundStyle(.primary)
+            HStack(spacing: 8) {
+                Button {
+                    editingTask = block.task
+                } label: {
+                    BlockRow(block: block, category: category, now: now, showsProgress: showsProgress && isToday)
+                        .strikethrough(isBlooming || block.task.completedAt != nil)
+                        .foregroundStyle(.primary)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityHint("Edits the task")
+                if let source = block.task.source {
+                    TaskSourceButton(source: source, identifier: "agenda-source-open-\(block.placement.id)", compact: true)
+                }
             }
-            .accessibilityHint("Edits the task")
             if let beside {
                 AlongsideCaption(
                     id: block.placement.id, titles: beside, inset: BlockRow.titleInset,
