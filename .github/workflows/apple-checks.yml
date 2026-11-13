@@ -74,11 +74,11 @@ jobs:
     needs: apple
     if: inputs.run_ui
     runs-on: macos-26
-    timeout-minutes: ${{ matrix.suite == 'ios-other' && 45 || 30 }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        suite: [macos, ios-capture, ios-other]
+        suite: [macos, ios-capture, ios-events, ios-other]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
@@ -96,10 +96,23 @@ jobs:
           RETRY_FAILED_TESTS: '1'
         run: |
           set -o pipefail
+          capture=(
+            Florida-iOSUITests/SmokeTests/testUnifiedTaskCapture
+            Florida-iOSUITests/SmokeTests/testCapturePasteAndDeletedCategory
+            Florida-iOSUITests/SmokeTests/testPlanScreensInBothAppearances
+            Florida-iOSUITests/SmokeTests/testEventResourcesInBothAppearances
+          )
+          events=(
+            Florida-iOSUITests/EventQuickAddTests
+            Florida-iOSUITests/SmokeTests/testTaskShortcutAndRecurringEvent
+            Florida-iOSUITests/SmokeTests/testEventDayBlockingOverrides
+            Florida-iOSUITests/SmokeTests/testCalendarVisibilityAndBlockingAreIndependent
+          )
           case '${{ matrix.suite }}' in
             macos) args=(macos) ;;
-            ios-capture) args=(ios -only-testing:Florida-iOSUITests/SmokeTests/testUnifiedTaskCapture -only-testing:Florida-iOSUITests/SmokeTests/testCapturePasteAndDeletedCategory -only-testing:Florida-iOSUITests/SmokeTests/testPlanScreensInBothAppearances) ;;
-            ios-other) args=(ios -skip-testing:Florida-iOSUITests/SmokeTests/testUnifiedTaskCapture -skip-testing:Florida-iOSUITests/SmokeTests/testCapturePasteAndDeletedCategory -skip-testing:Florida-iOSUITests/SmokeTests/testPlanScreensInBothAppearances) ;;
+            ios-capture) args=(ios "${capture[@]/#/-only-testing:}") ;;
+            ios-events) args=(ios "${events[@]/#/-only-testing:}") ;;
+            ios-other) args=(ios "${capture[@]/#/-skip-testing:}" "${events[@]/#/-skip-testing:}") ;;
           esac
           bash apple/scripts/check.sh "${args[@]}" | tee apple/ui-test.log | xcbeautify --renderer github-actions
       - name: Report retried failures
