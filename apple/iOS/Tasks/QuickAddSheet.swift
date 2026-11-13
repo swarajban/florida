@@ -735,6 +735,7 @@ private final class QuickAddTextView: UITextView {
     private let reportsCaretGeometry = LaunchOptions.demoData && ProcessInfo.processInfo.arguments.contains("-uiCaptureGeometry")
     private var caretViewportSize = CGSize.zero
     private var escapeProbe = (count: 0, choices: 0, focused: false)
+    private var pressProbe = (count: 0, code: 0)
     var activeChoiceCount = 0
     private var hasSuggestions: Bool { activeChoiceCount > 0 }
     var onComplete: (() -> Void)?
@@ -744,7 +745,7 @@ private final class QuickAddTextView: UITextView {
     override var accessibilityLabel: String? {
         get {
             guard reportsCaretGeometry else { return super.accessibilityLabel }
-            let keys = "escape=\(escapeProbe.count),before=\(escapeProbe.choices),focused=\(escapeProbe.focused),now=\(activeChoiceCount),marked=\(markedTextRange != nil),first=\(isFirstResponder)"
+            let keys = "escape=\(escapeProbe.count),before=\(escapeProbe.choices),focused=\(escapeProbe.focused),now=\(activeChoiceCount),marked=\(markedTextRange != nil),first=\(isFirstResponder),presses=\(pressProbe.count),code=\(pressProbe.code)"
             guard isFirstResponder, let selectedTextRange, let window else { return "Quick add|\(keys)" }
             let caret = convert(caretRect(for: selectedTextRange.end), to: window)
             return "Quick add|\(caret.minX)|\(caret.minY)|\(caret.width)|\(caret.height)|\(keys)"
@@ -768,9 +769,6 @@ private final class QuickAddTextView: UITextView {
         var commands = (super.keyCommands ?? []).filter {
             !$0.modifierFlags.isEmpty || !handledInputs.contains($0.input ?? "")
         }
-        let escape = UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: #selector(dismissQuickAddSuggestions))
-        escape.wantsPriorityOverSystemBehavior = true
-        commands.insert(escape, at: 0)
         if hasSuggestions {
             for (input, action) in [
                 (UIKeyCommand.inputUpArrow, #selector(previousSuggestion)),
@@ -785,9 +783,23 @@ private final class QuickAddTextView: UITextView {
         return commands
     }
 
-    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        if action == #selector(dismissQuickAddSuggestions) { return markedTextRange == nil }
-        return super.canPerformAction(action, withSender: sender)
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if reportsCaretGeometry {
+            pressProbe = (pressProbe.count + presses.count, presses.first?.key?.keyCode.rawValue ?? 0)
+        }
+        guard markedTextRange == nil else {
+            super.pressesBegan(presses, with: event)
+            return
+        }
+        let unhandled = presses.filter {
+            guard let key = $0.key else { return true }
+            return key.keyCode != .keyboardEscape || !key.modifierFlags.subtracting([.alphaShift, .numericPad]).isEmpty
+        }
+        if unhandled.count != presses.count {
+            if reportsCaretGeometry { escapeProbe = (escapeProbe.count + 1, activeChoiceCount, isFirstResponder) }
+            onDismissSuggestions?()
+        }
+        if !unhandled.isEmpty { super.pressesBegan(unhandled, with: event) }
     }
 
     @objc private func previousSuggestion() {
@@ -801,10 +813,5 @@ private final class QuickAddTextView: UITextView {
     @objc private func completeSuggestion() {
         guard markedTextRange == nil else { return }
         onComplete?()
-    }
-    @objc private func dismissQuickAddSuggestions() {
-        if reportsCaretGeometry { escapeProbe = (escapeProbe.count + 1, activeChoiceCount, isFirstResponder) }
-        guard markedTextRange == nil else { return }
-        onDismissSuggestions?()
     }
 }
