@@ -18,10 +18,6 @@ on:
         description: Run both PR UI suites only (never upload)
         type: boolean
         default: false
-      escape_probe_only:
-        description: Run the single isolated Escape diagnostic only (never upload)
-        type: boolean
-        default: false
 
 concurrency:
   group: ${{ inputs.ui_only && format('apple-ui-{0}', github.ref) || format('ios-run-{0}', github.run_id) }}
@@ -29,24 +25,19 @@ concurrency:
 
 jobs:
   policy:
-    if: inputs.ui_only != true && inputs.escape_probe_only != true
+    if: inputs.ui_only != true
     uses: ./.github/workflows/apple-release-policy.yml
 
   ui:
     name: On-demand Apple UI
-    if: github.event_name == 'workflow_dispatch' && inputs.ui_only && inputs.escape_probe_only != true
+    if: github.event_name == 'workflow_dispatch' && inputs.ui_only
     uses: ./.github/workflows/apple-checks.yml
     with:
       run_ui: true
 
-  escape-probe:
-    name: Isolated Escape diagnostic
-    if: github.event_name == 'workflow_dispatch' && inputs.ui_only && inputs.escape_probe_only
-    uses: ./.github/workflows/escape-probe.yml
-
   build:
     name: iPhone UI suite
-    if: inputs.ui_only != true && inputs.escape_probe_only != true
+    if: inputs.ui_only != true
     runs-on: macos-26
     # The unsharded main suite includes simulator boot, all appearances and one retry.
     timeout-minutes: 75
@@ -149,13 +140,13 @@ jobs:
   testflight:
     name: Upload to TestFlight
     needs: policy
-    if: needs.policy.outputs.ui_gate != 'true' && inputs.escape_probe_only != true && (inputs.ui_only != true && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')))
+    if: needs.policy.outputs.ui_gate != 'true' && (inputs.ui_only != true && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')))
     uses: ./.github/workflows/ios-upload.yml
     secrets: inherit
 
   gated-testflight:
     name: Upload to TestFlight (UI gate enabled)
     needs: [policy, build]
-    if: needs.policy.outputs.ui_gate == 'true' && inputs.escape_probe_only != true && (inputs.ui_only != true && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')))
+    if: needs.policy.outputs.ui_gate == 'true' && (inputs.ui_only != true && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')))
     uses: ./.github/workflows/ios-upload.yml
     secrets: inherit
