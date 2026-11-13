@@ -60,6 +60,9 @@ final class TaskGroupingTests: XCTestCase {
                     XCTAssertLessThanOrEqual(row(item.0, in: app).frame.height, 56, "Metadata must not add a line")
                 }
                 if item.0 == "group-today-soft" {
+                    XCTAssertEqual(app.scrollViews["task-pane-scroll"].frame.width, 320, accuracy: 1)
+                    XCTAssertFalse(row(item.0, in: app).descendants(matching: .any)
+                        .matching(identifier: "task-context-group-today-soft").firstMatch.exists)
                     let due = row(item.0, in: app).staticTexts
                         .matching(NSPredicate(format: "value MATCHES %@", ".*[0-9]{1,2}:[0-9]{2}.*")).firstMatch
                     XCTAssertTrue(due.exists, "The due phrase must remain visible, not collapse to an icon")

@@ -27,6 +27,9 @@ final class TaskGroupingTests: XCTestCase {
             let source = app.buttons["task-source-open-group-today-soft"]
             XCTAssertTrue(source.waitForExistence(timeout: 5))
             XCTAssertTrue(source.isHittable)
+            XCTAssertEqual(app.buttons.matching(identifier: "task-source-open-group-today-soft").count, 1)
+            XCTAssertFalse(element("task-source-mark-group-today-soft", in: app).exists)
+            XCTAssertFalse(element("task-context-group-today-soft", in: app).exists)
             source.tap()
             let opened = app.staticTexts["source-opened-url"]
             XCTAssertTrue(opened.waitForExistence(timeout: 5))
@@ -137,6 +140,8 @@ final class TaskGroupingTests: XCTestCase {
                     }
                     XCTAssertLessThanOrEqual(button.frame.height, 104, "Metadata must not add a line: \(id)")
                     if id == "group-today-soft" {
+                        XCTAssertFalse(element("task-source-mark-group-today-soft", in: app).exists)
+                        XCTAssertFalse(element("task-context-group-today-soft", in: app).exists)
                         let due = button.staticTexts
                             .matching(NSPredicate(format: "label MATCHES %@", "By Today .*[0-9]{1,2}:[0-9]{2}.*")).firstMatch
                         XCTAssertTrue(due.exists, "The due phrase must remain visible, not collapse to an icon")

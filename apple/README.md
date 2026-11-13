@@ -407,8 +407,10 @@ blocks.
 first and a compact category dot/name on the existing metadata line; swipe to
 complete or delete, tap to edit. Category grouping omits the redundant category
 tags, and Inbox rows show one only when the task has a real category. Metadata
-truncates lower-value context before the due phrase, which stays visible rather
-than collapsing to an icon, and never wraps it onto another line.
+drops the entire context item when space is tight, before truncating the due
+phrase, which stays visible rather than collapsing to an icon and never wraps
+onto another line. A task with a source has one independent trailing source
+button in Tasks, without a duplicate title mark.
 The toolbar's **Tasks** title menu switches between **Due date** and **Category** and
 remembers the choice on this device. Both apps use the shared FloridaCore
 grouping function and Inbox predicate; grouping is local and needs no network.
