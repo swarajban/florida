@@ -117,8 +117,13 @@ extension AppModel {
     /// The moment a task is done: a soft system sound, a trackpad tap, and the row's bloom.
     func completionFeedback(for task: TaskItem) {
         if JoyPreferences.isOn(.completionSound) {
-            Self.completionSound?.stop()
-            Self.completionSound?.play()
+            if let sound = Self.completionSound {
+                sound.stop()
+                #if DEBUG
+                editorDiagnostics?.sounds += 1
+                #endif
+                sound.play()
+            }
             NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
         }
         guard JoyPreferences.isOn(.completionBloom) else { return }

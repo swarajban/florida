@@ -267,6 +267,8 @@ highlighted. Escape cancels without changing the value and leaves no field
 focused, so the next editor key works. `⇧P` opens the selector too instead of
 stepping; `⌘1`–`⌘4` still set priority directly. `z` does nothing in the editor.
 New tasks also open unfocused; `t` focuses Title and `n` Notes.
+Field keys scroll their controls into view before opening or focusing them, so
+lower fields remain reachable when the editor fits a smaller window.
 
 Date selectors preview words such as `tomorrow`, `fri`, `nov 20`, `in 2 weeks`
 and `next mon 3pm` as you type; `none` clears an optional date. Arrows move the
@@ -292,6 +294,12 @@ the series takes the new time of day and every instance keeps its day
 (`moveEventSeries` in FloridaKit shifts the stored instances at once and queues
 one write with `scope: "series"`, which the server needs to move the series on
 Google). Tasks do not drag, because the scheduler places them.
+
+Space in an unfocused task editor commits any edits and completion as one local
+write and one undo step; completion feedback plays only after that write succeeds.
+Holding Space cannot complete the next task as the sheet closes. While editing
+text, ordinary keys, arrow keys and repeated spaces stay with the text field;
+store updates and reattaching the sheet's keyboard monitor do not reset its caret.
 
 Event details show a compact resource shelf under Join, including when opened
 through a jump label. Links are extracted locally from the description and

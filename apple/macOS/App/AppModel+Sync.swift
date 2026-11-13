@@ -43,6 +43,9 @@ extension AppModel {
 
     /// Starts a push-then-pull in the background. Overlapping calls queue on the client actor.
     func scheduleSync() {
+        #if DEBUG
+        refreshEditorDiagnostics()
+        #endif
         guard let client = syncClient else { return }
         Task { [weak self] in
             await self?.runSync(client)

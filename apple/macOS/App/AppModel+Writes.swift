@@ -76,24 +76,34 @@ extension AppModel {
 
     /// Marks `task` done, with the sound and bloom, an undo entry and the "Done" ghost; when it
     /// was the selection, the selection moves to its neighbor. Also the editor's Mark done.
-    func complete(_ task: TaskItem) {
-        guard let database else { return }
+    @discardableResult
+    func complete(_ task: TaskItem, savingEdits: Bool = false) -> Bool {
+        guard let database else { return false }
         let item = item(for: task)
         let next = neighbor(of: item)
-        completionFeedback(for: task)
         do {
+            guard let stored = try database.task(id: task.id), stored.isOpen else { return false }
             try recordingUndo("Completed \(Self.quoted(task.title))", taskId: task.id) {
-                try database.completeTask(id: task.id)
+                if savingEdits {
+                    var completed = task
+                    completed.completedAt = Date()
+                    completed.completedMinutes = completed.durationMinutes
+                    try database.saveTask(completed)
+                } else {
+                    try database.completeTask(id: task.id)
+                }
             }
         } catch {
             statusMessage = "Could not complete: \(error.localizedDescription)"
-            return
+            return false
         }
+        completionFeedback(for: task)
         if selection == item {
             selection = next
         }
         showGhost("Done · z to undo")
         scheduleSync()
+        return true
     }
 
     /// `p` fixes the task at its first scheduled start, or a suggestion where it is drawn (which

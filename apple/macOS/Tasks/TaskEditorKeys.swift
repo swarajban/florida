@@ -11,6 +11,7 @@ import SwiftUI
 @MainActor
 final class TaskEditorKeyboard {
     fileprivate(set) weak var window: NSWindow?
+    fileprivate var hasInitializedFocus = false
 
     /// Takes the keyboard out of every field, so the next key acts.
     func dropFocus() {
@@ -78,11 +79,12 @@ final class TaskEditorKeyHostView: NSView {
         guard let window else { return }
         box.view = self
         let box = box
-        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown]) { event in
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]) { event in
             let handled = MainActor.assumeIsolated { box.view?.handle(event) ?? false }
             return handled ? nil : event
         }
-        guard startsUnfocused else { return }
+        guard let keyboard, startsUnfocused, !keyboard.hasInitializedFocus else { return }
+        keyboard.hasInitializedFocus = true
         isUntouched = true
         focusObservation = window.observe(\.firstResponder) { _, _ in
             // AppKit changes the first responder on the main thread.
@@ -109,8 +111,9 @@ final class TaskEditorKeyHostView: NSView {
         }
     }
 
-    private func handle(_ event: NSEvent) -> Bool {
+    func handle(_ event: NSEvent) -> Bool {
         guard let window, event.window === window else { return false }
+        isUntouched = false
         guard !SelectorInput.isEditing(in: window) else { return false }
         guard event.type == .keyDown, let chord = KeyChord(event: event) else {
             // A click, or a key that is no chord: the user has taken over.
@@ -118,6 +121,7 @@ final class TaskEditorKeyHostView: NSView {
             return false
         }
         let focus = TaskEditorKeyboard.focus(in: window)
+        if event.isARepeat, chord == KeyChord("space"), focus != .text { return true }
         if chord.modifiers == [.command], let number = Int(chord.key), (1...4).contains(number) {
             let priorities: [Priority] = [.asap, .high, .medium, .low]
             isUntouched = false
