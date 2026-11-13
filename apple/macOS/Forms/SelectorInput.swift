@@ -54,6 +54,12 @@ struct SelectorWindowGuard: NSViewRepresentable {
 @MainActor
 final class SelectorOrigin {
     weak var window: NSWindow?
+    weak var view: NSView?
+
+    func reveal() {
+        guard let view else { return }
+        _ = view.scrollToVisible(view.bounds)
+    }
 }
 
 struct SelectorOriginView: NSViewRepresentable {
@@ -74,6 +80,7 @@ final class SelectorOriginHost: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         origin?.window = window
+        origin?.view = window == nil ? nil : self
     }
 }
 

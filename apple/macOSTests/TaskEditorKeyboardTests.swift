@@ -77,6 +77,38 @@ struct TaskEditorKeyboardTests {
         #expect(presses == [.init(key: .markDone)])
     }
 
+    @Test func selectorOriginRevealsAnOffscreenControlWithoutTakingFocus() throws {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 240),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        defer { window.orderOut(nil) }
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
+        let document = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 900))
+        let origin = SelectorOrigin()
+        let control = SelectorOriginHost(frame: NSRect(x: 20, y: 700, width: 100, height: 24))
+        control.origin = origin
+        document.addSubview(control)
+        scroll.documentView = document
+        let field = NSTextField(frame: NSRect(x: 20, y: 208, width: 260, height: 24))
+        field.stringValue = "alpha bravo charlie"
+        let content = try #require(window.contentView)
+        content.addSubview(scroll)
+        content.addSubview(field)
+        window.makeKeyAndOrderFront(nil)
+        #expect(window.makeFirstResponder(field))
+        let editor = try #require(field.currentEditor() as? NSTextView)
+        editor.setSelectedRange(NSRange(location: 6, length: 0))
+        scroll.contentView.scroll(to: .zero)
+        scroll.reflectScrolledClipView(scroll.contentView)
+        #expect(origin.view === control)
+        #expect(!control.visibleRect.contains(control.bounds))
+        origin.reveal()
+        #expect(control.visibleRect.contains(control.bounds))
+        #expect(scroll.contentView.bounds.minY > 0)
+        #expect(window.firstResponder === editor)
+        #expect(editor.selectedRange() == NSRange(location: 6, length: 0))
+    }
+
     private func event(_ characters: String, code: UInt16, in window: NSWindow, repeats: Bool = false) throws -> NSEvent {
         try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 1,
             windowNumber: window.windowNumber, context: nil, characters: characters,

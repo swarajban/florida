@@ -75,99 +75,82 @@ struct TaskEditorSheet: View {
                 .help("Completes the task and closes the editor")
                 .padding([.horizontal, .top], 20)
             }
-            ScrollViewReader { proxy in
-                Form {
-                    if isNew {
-                        AIParseSection(apply: apply)
-                    }
-                    Section(isNew ? "New task" : "Task") {
-                        TextField(text: $draft.title) {
-                            keyLabel("Title", .title)
-                        }
-                        .focused($focus, equals: .title)
-                        .id(TaskEditorKey.title)
-                        TextField(text: notes, axis: .vertical) {
-                            keyLabel("Notes", .notes)
-                        }
-                        .focused($focus, equals: .notes)
-                        .lineLimit(3...8)
-                        .id(TaskEditorKey.notes)
-                    }
-                    Section("Dates") {
-                        MacDateField("Start", date: $startAt, isOn: $hasStart, hasTime: startHasTime,
-                                     key: TaskEditorKey.start.keycap, isPresented: showing(.start), identifier: "task-start",
-                                     onDismiss: leaveField, dayOnly: { TaskDay.notBefore(on: $0, calendar: model.calendar) })
-                        .id(TaskEditorKey.start)
-                        MacDateField("Due", date: $dueAt, isOn: $hasDue, hasTime: dueHasTime,
-                                     key: TaskEditorKey.due.keycap, isPresented: showing(.due), identifier: "task-due",
-                                     onDismiss: leaveField, dayOnly: { TaskDay.due(on: $0, calendar: model.calendar) })
-                        .id(TaskEditorKey.due)
-                        MacChoiceField("Deadline", selection: deadline,
-                                       options: [DeadlineType.soft, .hard].map { MacChoice($0, $0.displayName) },
-                                       key: TaskEditorKey.deadline.keycap, isPresented: showing(.deadline),
-                                       identifier: "task-deadline", onDismiss: leaveField)
-                        .disabled(!hasDue)
-                        .id(TaskEditorKey.deadline)
-                    }
-                    Section {
-                        MacChoiceField("Category", selection: $draft.categoryId,
-                                       options: model.orderedCategories.map { MacChoice($0.id, $0.name) },
-                                       key: TaskEditorKey.category.keycap, isPresented: showing(.category),
-                                       identifier: "task-category", preservesOrder: true, onDismiss: leaveField,
-                                       create: { model.createCategory(name: $0)?.id })
-                        .id(TaskEditorKey.category)
-                        LabeledContent {
-                            HStack {
-                                TextField("Minutes", value: $draft.durationMinutes, format: .number)
-                                    .labelsHidden()
-                                    .frame(width: 60)
-                                    .multilineTextAlignment(.trailing)
-                                    .focused($focus, equals: .duration)
-                                Stepper("Minutes", value: $draft.durationMinutes, in: 5...960, step: 5)
-                                    .labelsHidden()
-                                Text(DateText.duration(minutes: draft.durationMinutes))
-                                    .foregroundStyle(.secondary)
-                            }
-                        } label: {
-                            keyLabel("Duration", .duration)
-                        }
-                        .id(TaskEditorKey.duration)
-                        MacChoiceField("Priority", selection: $draft.priority,
-                                       options: Priority.allCases.map { MacChoice($0, $0.displayName) },
-                                       key: TaskEditorKey.priority.keycap, isPresented: showing(.priority),
-                                       identifier: "task-priority", onDismiss: leaveField)
-                        .id(TaskEditorKey.priority)
-                        MacChoiceField("Context", selection: $draft.context,
-                                       options: TaskContext.allCases.map { MacChoice($0, $0.displayName) },
-                                       key: TaskEditorKey.context.keycap, isPresented: showing(.context),
-                                       identifier: "task-context", onDismiss: leaveField)
-                        .id(TaskEditorKey.context)
-                        MacChoiceField("Project", selection: $draft.projectId, options: projectChoices,
-                                       key: TaskEditorKey.project.keycap, isPresented: showing(.project),
-                                       identifier: "task-project", onDismiss: leaveField)
-                        .id(TaskEditorKey.project)
-                        MacChoiceField("Attention", selection: $draft.attention,
-                                       options: [MacChoice(TaskAttention?.none, defaultAttentionLabel)]
-                                           + TaskAttention.allCases.map { MacChoice(TaskAttention?.some($0), $0.displayName) },
-                                       key: TaskEditorKey.attention.keycap, isPresented: showing(.attention),
-                                       identifier: "task-attention", onDismiss: leaveField)
-                        .help("Work that can run in parallel shares an hour with up to two other such tasks.")
-                        .id(TaskEditorKey.attention)
-                        MacDateField("Pinned start", date: $pinnedStart, isOn: $hasPinnedStart, hasTime: .constant(true),
-                                     key: TaskEditorKey.pinnedStart.keycap, isPresented: showing(.pinnedStart),
-                                     identifier: "task-pinned-start", onDismiss: leaveField, requiresTime: true)
-                        .id(TaskEditorKey.pinnedStart)
-                    }
-                    TaskRecurrenceSection(
-                        recurrence: $draft.recurrence,
-                        anchorDate: hasDue ? dueAt : (hasStart ? startAt : nil),
-                        defaultTimeZone: recurrenceTimeZone, wasRecurring: original.recurrence != nil)
+            Form {
+                if isNew {
+                    AIParseSection(apply: apply)
                 }
-                .formStyle(.grouped)
-                .background(TaskEditorKeyMonitor(
-                    keyboard: keyboard, startsUnfocused: true,
-                    onPress: { handle($0, scroll: proxy) }, onPriority: { draft.priority = $0 }))
+                Section(isNew ? "New task" : "Task") {
+                    TextField(text: $draft.title) {
+                        keyLabel("Title", .title)
+                    }
+                    .focused($focus, equals: .title)
+                    TextField(text: notes, axis: .vertical) {
+                        keyLabel("Notes", .notes)
+                    }
+                    .focused($focus, equals: .notes)
+                    .lineLimit(3...8)
+                }
+                Section("Dates") {
+                    MacDateField("Start", date: $startAt, isOn: $hasStart, hasTime: startHasTime,
+                                 key: TaskEditorKey.start.keycap, isPresented: showing(.start), identifier: "task-start",
+                                 onDismiss: leaveField, dayOnly: { TaskDay.notBefore(on: $0, calendar: model.calendar) })
+                    MacDateField("Due", date: $dueAt, isOn: $hasDue, hasTime: dueHasTime,
+                                 key: TaskEditorKey.due.keycap, isPresented: showing(.due), identifier: "task-due",
+                                 onDismiss: leaveField, dayOnly: { TaskDay.due(on: $0, calendar: model.calendar) })
+                    MacChoiceField("Deadline", selection: deadline,
+                                   options: [DeadlineType.soft, .hard].map { MacChoice($0, $0.displayName) },
+                                   key: TaskEditorKey.deadline.keycap, isPresented: showing(.deadline),
+                                   identifier: "task-deadline", onDismiss: leaveField)
+                    .disabled(!hasDue)
+                }
+                Section {
+                    MacChoiceField("Category", selection: $draft.categoryId,
+                                   options: model.orderedCategories.map { MacChoice($0.id, $0.name) },
+                                   key: TaskEditorKey.category.keycap, isPresented: showing(.category),
+                                   identifier: "task-category", preservesOrder: true, onDismiss: leaveField,
+                                   create: { model.createCategory(name: $0)?.id })
+                    LabeledContent {
+                        HStack {
+                            TextField("Minutes", value: $draft.durationMinutes, format: .number)
+                                .labelsHidden()
+                                .frame(width: 60)
+                                .multilineTextAlignment(.trailing)
+                                .focused($focus, equals: .duration)
+                            Stepper("Minutes", value: $draft.durationMinutes, in: 5...960, step: 5)
+                                .labelsHidden()
+                            Text(DateText.duration(minutes: draft.durationMinutes))
+                                .foregroundStyle(.secondary)
+                        }
+                    } label: {
+                        keyLabel("Duration", .duration)
+                    }
+                    MacChoiceField("Priority", selection: $draft.priority,
+                                   options: Priority.allCases.map { MacChoice($0, $0.displayName) },
+                                   key: TaskEditorKey.priority.keycap, isPresented: showing(.priority),
+                                   identifier: "task-priority", onDismiss: leaveField)
+                    MacChoiceField("Context", selection: $draft.context,
+                                   options: TaskContext.allCases.map { MacChoice($0, $0.displayName) },
+                                   key: TaskEditorKey.context.keycap, isPresented: showing(.context),
+                                   identifier: "task-context", onDismiss: leaveField)
+                    MacChoiceField("Project", selection: $draft.projectId, options: projectChoices,
+                                   key: TaskEditorKey.project.keycap, isPresented: showing(.project),
+                                   identifier: "task-project", onDismiss: leaveField)
+                    MacChoiceField("Attention", selection: $draft.attention,
+                                   options: [MacChoice(TaskAttention?.none, defaultAttentionLabel)]
+                                       + TaskAttention.allCases.map { MacChoice(TaskAttention?.some($0), $0.displayName) },
+                                   key: TaskEditorKey.attention.keycap, isPresented: showing(.attention),
+                                   identifier: "task-attention", onDismiss: leaveField)
+                    .help("Work that can run in parallel shares an hour with up to two other such tasks.")
+                    MacDateField("Pinned start", date: $pinnedStart, isOn: $hasPinnedStart, hasTime: .constant(true),
+                                 key: TaskEditorKey.pinnedStart.keycap, isPresented: showing(.pinnedStart),
+                                 identifier: "task-pinned-start", onDismiss: leaveField, requiresTime: true)
+                }
+                TaskRecurrenceSection(
+                    recurrence: $draft.recurrence,
+                    anchorDate: hasDue ? dueAt : (hasStart ? startAt : nil),
+                    defaultTimeZone: recurrenceTimeZone, wasRecurring: original.recurrence != nil)
             }
+            .formStyle(.grouped)
             Divider()
             HStack {
                 Button {
@@ -195,6 +178,8 @@ struct TaskEditorSheet: View {
             .padding()
         }
         .frame(width: 560, height: min(720, model.mainWindow?.contentLayoutRect.height ?? 720))
+        .background(TaskEditorKeyMonitor(keyboard: keyboard, startsUnfocused: true, onPress: handle,
+                                         onPriority: { draft.priority = $0 }))
         .onChange(of: startAt) { keepDueAfterStart() }
         .onChange(of: hasStart) { keepDueAfterStart() }
         .onChange(of: hasDue) { keepDueAfterStart() }
@@ -208,8 +193,7 @@ struct TaskEditorSheet: View {
     }
 
     /// One of the editor's keys. Text keys focus their fields; choice and date keys open selectors.
-    private func handle(_ press: TaskEditorKey.Press, scroll: ScrollViewProxy) {
-        if press.key != .markDone { scroll.scrollTo(press.key, anchor: .center) }
+    private func handle(_ press: TaskEditorKey.Press) {
         switch press.key {
         case .markDone:
             if !isNew, original.isOpen {

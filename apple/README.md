@@ -267,7 +267,7 @@ highlighted. Escape cancels without changing the value and leaves no field
 focused, so the next editor key works. `⇧P` opens the selector too instead of
 stepping; `⌘1`–`⌘4` still set priority directly. `z` does nothing in the editor.
 New tasks also open unfocused; `t` focuses Title and `n` Notes.
-Field keys scroll their controls into view before opening or focusing them, so
+Selector keys reveal their controls before opening them, so
 lower fields remain reachable when the editor fits a smaller window.
 
 Date selectors preview words such as `tomorrow`, `fri`, `nov 20`, `in 2 weeks`
