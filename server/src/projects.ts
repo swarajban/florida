@@ -1,5 +1,6 @@
 import { and, eq, isNull, sql } from 'drizzle-orm'
 import { z } from 'zod'
+import { writeTimestamp } from './db/sync-clock.js'
 import type { Db } from './db/client.js'
 import { categoryExists } from './db/queries.js'
 import { dayOverrides, projectPlacements, projects, taskRecurrences, tasks } from './db/schema.js'
@@ -52,7 +53,7 @@ export async function upsertProject(db: Db, id: string, body: ProjectBody, now: 
     parallel: body.parallel ?? current?.parallel ?? false,
     weeklyMinutes: body.weeklyMinutes ?? null,
     sortOrder: body.sortOrder ?? current?.sortOrder ?? 0,
-    updatedAt: now,
+    updatedAt: writeTimestamp,
     deletedAt: null,
   }
   const [project] = await db
@@ -106,12 +107,12 @@ export async function softDeleteProject(db: Db, id: string, now: Date = new Date
     await lockTaskRecurrences(tx)
     const deleted = await tx
       .update(projects)
-      .set({ deletedAt: now, updatedAt: now })
+      .set({ deletedAt: now, updatedAt: writeTimestamp })
       .where(eq(projects.id, id))
       .returning({ id: projects.id })
     if (deleted.length === 0) throw notFound(`project ${id}`)
     await tx.delete(projectPlacements).where(eq(projectPlacements.projectId, id))
-    await tx.update(tasks).set({ projectId: null, updatedAt: now }).where(eq(tasks.projectId, id))
+    await tx.update(tasks).set({ projectId: null, updatedAt: writeTimestamp }).where(eq(tasks.projectId, id))
     const series = await tx
       .select()
       .from(taskRecurrences)
@@ -119,7 +120,7 @@ export async function softDeleteProject(db: Db, id: string, now: Date = new Date
     for (const row of series) {
       await tx
         .update(taskRecurrences)
-        .set({ template: { ...row.template, projectId: null }, updatedAt: now })
+        .set({ template: { ...row.template, projectId: null }, updatedAt: writeTimestamp })
         .where(eq(taskRecurrences.id, row.id))
     }
   })
@@ -137,7 +138,7 @@ export type DayOverrideBody = z.infer<typeof dayOverrideBody>
 /** Sets what one date is, replacing an earlier override of it. `date` is "YYYY-MM-DD". */
 export async function setDayOverride(db: Db, date: string, body: DayOverrideBody, now: Date = new Date()): Promise<DayOverrideRow> {
   const key = calendarDate.parse(date)
-  const fields = { kind: body.kind, note: body.note ?? null, updatedAt: now, deletedAt: null }
+  const fields = { kind: body.kind, note: body.note ?? null, updatedAt: writeTimestamp, deletedAt: null }
   const [row] = await db
     .insert(dayOverrides)
     .values({ date: key, ...fields })
@@ -151,7 +152,7 @@ export async function setDayOverride(db: Db, date: string, body: DayOverrideBody
 export async function clearDayOverride(db: Db, date: string, now: Date = new Date()): Promise<void> {
   const deleted = await db
     .update(dayOverrides)
-    .set({ deletedAt: now, updatedAt: now })
+    .set({ deletedAt: now, updatedAt: writeTimestamp })
     .where(eq(dayOverrides.date, date))
     .returning({ date: dayOverrides.date })
   if (deleted.length === 0) throw notFound(`day override ${date}`)

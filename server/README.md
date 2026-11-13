@@ -23,6 +23,36 @@ pnpm --filter @florida/server dev
 After editing `src/db/schema.ts`, run `pnpm --filter @florida/server db:generate` and commit the
 new file under `server/drizzle/`.
 
+## Incremental sync timestamps
+
+`updated_at` is a database write-time value, not the time an HTTP request, Google fetch, seed,
+or batch began. Use `writeTimestamp` from `src/db/sync-clock.ts` at every persistence boundary,
+including recurrence/series loops and data migrations. Keep semantic dates such as completion
+and deletion dates separate. A migration that restamps existing rows should also preserve
+monotonicity with `greatest(writeTimestamp, updated_at + interval '1 millisecond')`.
+
+Write-time stamping alone cannot protect an uncommitted transaction. `/api/sync` first obtains
+an autocommit cursor bounded by the cursor statement's start and every other open client
+transaction's start in this database, minus one millisecond. This keeps a later pull eligible
+to receive rows that commit after the current pull. Do not move the cursor query into a
+long-lived transaction, use a statement-end clock for its upper bound, or precompute write
+timestamps before awaiting work. Long read transactions can conservatively repeat rows.
+This contract requires `track_activities=on` and visibility of all writing transactions;
+the current deployment uses one database role for its application writers. New writer roles
+must provide equivalent activity visibility before they are used.
+
+Startup repairs the known v14 judgment cohort (live, judged all-day rows stamped at or before
+`2026-11-13T13:32:03.087Z`) through an idempotent timestamp-only update. It doesn't reset client
+cursors or alter judgments, manual overrides, calendar flags, or task sources. Clients already
+past v14's startup stamp receive those rows on their next incremental pull. Older clients
+still need a native build that understands the automatic judgment fields to display them.
+
+PGlite cannot exercise multi-connection commit races. The `Sync concurrency` workflow runs
+`test/sync-concurrency.test.ts` against isolated Postgres. To run it locally, set
+`TEST_DATABASE_URL` to a disposable local Postgres database and run
+`pnpm --filter @florida/server exec vitest run test/sync-concurrency.test.ts`. The suite creates
+and drops uniquely named databases and refuses non-local hosts; never use production credentials.
+
 ## Setup
 
 ### 1. Neon

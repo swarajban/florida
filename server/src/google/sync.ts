@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import { and, eq, inArray, isNull, or } from 'drizzle-orm'
+import { writeTimestamp } from '../db/sync-clock.js'
 import type { Config } from '../config.js'
 import { decrypt, encrypt } from '../crypto.js'
 import type { Db } from '../db/client.js'
@@ -89,7 +90,7 @@ export class GoogleSync implements CalendarSyncService {
     const tokens = await refreshAccessToken(this.oauth, refreshToken)
     await this.db
       .update(googleAccounts)
-      .set({ accessToken: tokens.accessToken, accessTokenExpiresAt: tokens.expiresAt, updatedAt: new Date() })
+      .set({ accessToken: tokens.accessToken, accessTokenExpiresAt: tokens.expiresAt, updatedAt: writeTimestamp })
       .where(eq(googleAccounts.id, account.id))
     return tokens.accessToken
   }
@@ -115,7 +116,7 @@ export class GoogleSync implements CalendarSyncService {
       refreshTokenEnc: encrypt(tokens.refreshToken, this.config.TOKEN_ENCRYPTION_KEY),
       accessToken: tokens.accessToken,
       accessTokenExpiresAt: tokens.expiresAt,
-      updatedAt: now,
+      updatedAt: writeTimestamp,
     }
     const [account] = await this.db
       .insert(googleAccounts)
@@ -130,7 +131,7 @@ export class GoogleSync implements CalendarSyncService {
         summary: entry.summary ?? entry.id,
         color: entry.backgroundColor ?? null,
         accessRole: entry.accessRole,
-        updatedAt: now,
+        updatedAt: writeTimestamp,
       }
       await this.db
         .insert(calendars)
@@ -178,9 +179,9 @@ export class GoogleSync implements CalendarSyncService {
       const now = new Date()
       await this.db
         .update(events)
-        .set({ deletedAt: now, updatedAt: now })
+        .set({ deletedAt: now, updatedAt: writeTimestamp })
         .where(and(eq(events.calendarId, calendar.id), isNull(events.deletedAt)))
-      await this.db.update(calendars).set({ syncToken: null, updatedAt: now }).where(eq(calendars.id, calendar.id))
+      await this.db.update(calendars).set({ syncToken: null, updatedAt: writeTimestamp }).where(eq(calendars.id, calendar.id))
       await this.sync(calendar, token, null)
     }
   }
@@ -203,7 +204,7 @@ export class GoogleSync implements CalendarSyncService {
       learned ||= names.learned
       for (const item of page.items) {
         seen.add(item.id)
-        const row = judgedGoogleEvent(calendar, item, profiles, new Date())
+        const row = { ...judgedGoogleEvent(calendar, item, profiles, new Date()), updatedAt: writeTimestamp }
         await this.db
           .insert(events)
           .values({ id: randomUUID(), ...row })
@@ -222,14 +223,14 @@ export class GoogleSync implements CalendarSyncService {
       const stale = live.filter((e) => !seen.has(e.googleId)).map((e) => e.id)
       if (stale.length > 0) {
         const now = new Date()
-        await this.db.update(events).set({ deletedAt: now, updatedAt: now }).where(inArray(events.id, stale))
+        await this.db.update(events).set({ deletedAt: now, updatedAt: writeTimestamp }).where(inArray(events.id, stale))
       }
     }
 
     const completedAt = new Date()
     await this.db
       .update(calendars)
-      .set({ syncToken: nextSyncToken ?? syncToken, lastSyncedAt: completedAt, updatedAt: completedAt })
+      .set({ syncToken: nextSyncToken ?? syncToken, lastSyncedAt: completedAt, updatedAt: writeTimestamp })
       .where(eq(calendars.id, calendar.id))
     const latest = await learnAccountProfiles(this.db, [], new Date())
     if (learned || latest.profiles.some((p) => p.displayName !== profiles.find((cached) => cached.id === p.id)?.displayName)) {
@@ -267,7 +268,7 @@ export class GoogleSync implements CalendarSyncService {
         channelResourceId: watch.resourceId,
         channelToken,
         channelExpiresAt: watch.expiration,
-        updatedAt: new Date(),
+        updatedAt: writeTimestamp,
       })
       .where(eq(calendars.id, calendar.id))
   }

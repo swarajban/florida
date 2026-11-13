@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { and, eq, gt, gte, isNull, ne, sql } from 'drizzle-orm'
+import { writeTimestamp } from './db/sync-clock.js'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import type { Db } from './db/client.js'
@@ -163,7 +164,7 @@ async function writeTask(db: Db, id: string, body: TaskBody, now: Date): Promise
       recurrenceRevision = randomUUID()
       const template = seriesTemplate(fields, recurrence.startDate)
       if (template.deadlineType === 'none') template.deadlineType = 'soft'
-      await db.insert(taskRecurrences).values({ id: recurrenceSeriesId, revision: recurrenceRevision, rule: recurrence, template, fromDate: first, updatedAt: now })
+      await db.insert(taskRecurrences).values({ id: recurrenceSeriesId, revision: recurrenceRevision, rule: recurrence, template, fromDate: first, updatedAt: writeTimestamp })
       fields = { ...fields, ...occurrenceFields(template, recurrence, first) }
     } else if (current !== undefined && recurrenceDate !== null && series !== undefined) {
       if (fields.deadlineType === 'none') fields.deadlineType = 'soft'
@@ -182,7 +183,7 @@ async function writeTask(db: Db, id: string, body: TaskBody, now: Date): Promise
         recurrenceRevision = randomUUID()
         // Replacing an earlier segment must also regenerate its intervening future dates.
         // Materialization separately clamps this boundary to today, so history is not backfilled.
-        await db.update(taskRecurrences).set({ rule: recurrence, template, fromDate: recurrenceDate, revision: recurrenceRevision, updatedAt: now }).where(eq(taskRecurrences.id, recurrenceSeriesId))
+        await db.update(taskRecurrences).set({ rule: recurrence, template, fromDate: recurrenceDate, revision: recurrenceRevision, updatedAt: writeTimestamp }).where(eq(taskRecurrences.id, recurrenceSeriesId))
         const future = await db.select().from(tasks).where(and(
           eq(tasks.recurrenceSeriesId, recurrenceSeriesId), gt(tasks.recurrenceDate, recurrenceDate),
           isNull(tasks.completedAt), isNull(tasks.deletedAt),
@@ -191,9 +192,9 @@ async function writeTask(db: Db, id: string, body: TaskBody, now: Date): Promise
           const date = occurrence.recurrenceDate
           if (date === null) continue
           if (nextOccurrence(recurrence, date) !== date) {
-            await db.update(tasks).set({ deletedAt: now, updatedAt: now, recurrenceRevision }).where(eq(tasks.id, occurrence.id))
+            await db.update(tasks).set({ deletedAt: now, updatedAt: writeTimestamp, recurrenceRevision }).where(eq(tasks.id, occurrence.id))
           } else {
-            await db.update(tasks).set({ ...occurrenceFields(template, recurrence, date), recurrence, recurrenceRevision, updatedAt: now }).where(eq(tasks.id, occurrence.id))
+            await db.update(tasks).set({ ...occurrenceFields(template, recurrence, date), recurrence, recurrenceRevision, updatedAt: writeTimestamp }).where(eq(tasks.id, occurrence.id))
           }
         }
       }
@@ -201,8 +202,8 @@ async function writeTask(db: Db, id: string, body: TaskBody, now: Date): Promise
   }
   const [task] = await db
     .insert(tasks)
-    .values({ id, ...fields, recurrence, recurrenceSeriesId, recurrenceDate, recurrenceRevision })
-    .onConflictDoUpdate({ target: tasks.id, set: { ...fields, recurrence, recurrenceSeriesId, recurrenceDate, recurrenceRevision } })
+    .values({ id, ...fields, recurrence, recurrenceSeriesId, recurrenceDate, recurrenceRevision, updatedAt: writeTimestamp })
+    .onConflictDoUpdate({ target: tasks.id, set: { ...fields, recurrence, recurrenceSeriesId, recurrenceDate, recurrenceRevision, updatedAt: writeTimestamp } })
     .returning()
   if (task === undefined) throw new Error(`upsert of task ${id} returned no row`)
   return task
@@ -266,7 +267,7 @@ export async function completeTask(db: Db, id: string, now: Date = new Date()): 
     if (current.completedAt !== null) return current
     const [task] = await tx
       .update(tasks)
-      .set({ completedAt: now, completedMinutes: current.durationMinutes, updatedAt: now })
+      .set({ completedAt: now, completedMinutes: current.durationMinutes, updatedAt: writeTimestamp })
       .where(eq(tasks.id, id))
       .returning()
     if (task === undefined) throw notFound(`task ${id}`)
@@ -281,7 +282,7 @@ export async function softDeleteTask(db: Db, id: string, now: Date = new Date())
     const [task] = await tx.select().from(tasks).where(eq(tasks.id, id))
     if (task === undefined) throw notFound(`task ${id}`)
     const revision = await stopRecurrence(tx, task, now)
-    await tx.update(tasks).set({ deletedAt: now, updatedAt: now, recurrenceRevision: revision ?? task.recurrenceRevision }).where(eq(tasks.id, id))
+    await tx.update(tasks).set({ deletedAt: now, updatedAt: writeTimestamp, recurrenceRevision: revision ?? task.recurrenceRevision }).where(eq(tasks.id, id))
   })
 }
 
@@ -289,15 +290,15 @@ export async function softDeleteTask(db: Db, id: string, now: Date = new Date())
 async function stopRecurrence(db: Db, task: TaskRow, now: Date): Promise<string | null> {
   if (task.recurrenceSeriesId === null || task.recurrenceDate === null) return null
   const revision = randomUUID()
-  const [stopped] = await db.update(taskRecurrences).set({ deletedAt: now, updatedAt: now, revision }).where(and(
+  const [stopped] = await db.update(taskRecurrences).set({ deletedAt: now, updatedAt: writeTimestamp, revision }).where(and(
     eq(taskRecurrences.id, task.recurrenceSeriesId), isNull(taskRecurrences.deletedAt),
   )).returning()
   if (stopped === undefined) return null
-  await db.update(tasks).set({ deletedAt: now, updatedAt: now, recurrenceRevision: revision }).where(and(
+  await db.update(tasks).set({ deletedAt: now, updatedAt: writeTimestamp, recurrenceRevision: revision }).where(and(
     eq(tasks.recurrenceSeriesId, task.recurrenceSeriesId), gt(tasks.recurrenceDate, task.recurrenceDate),
     isNull(tasks.completedAt), isNull(tasks.deletedAt),
   ))
-  await db.update(tasks).set({ recurrence: null, recurrenceSeriesId: null, recurrenceDate: null, recurrenceRevision: revision, updatedAt: now }).where(and(
+  await db.update(tasks).set({ recurrence: null, recurrenceSeriesId: null, recurrenceDate: null, recurrenceRevision: revision, updatedAt: writeTimestamp }).where(and(
     eq(tasks.recurrenceSeriesId, task.recurrenceSeriesId), ne(tasks.id, task.id),
     isNull(tasks.completedAt), isNull(tasks.deletedAt),
   ))
@@ -330,9 +331,9 @@ export async function materializeRecurringTasks(db: Db, now: Date, horizonDays: 
         deletedAt: null,
       }
       if (current === undefined) inserts.push({ id: randomUUID(), ...fields })
-      else await db.update(tasks).set(fields).where(eq(tasks.id, current.id))
+      else await db.update(tasks).set({ ...fields, updatedAt: writeTimestamp }).where(eq(tasks.id, current.id))
     }
-    if (inserts.length > 0) await db.insert(tasks).values(inserts).onConflictDoNothing()
+    if (inserts.length > 0) await db.insert(tasks).values(inserts.map((row) => ({ ...row, updatedAt: writeTimestamp }))).onConflictDoNothing()
   }
 }
 
@@ -343,6 +344,6 @@ export async function moveRecurringTaskCategory(db: Db, from: string, to: string
     isNull(taskRecurrences.deletedAt), eq(sql`${taskRecurrences.template}->>'categoryId'`, from),
   ))
   for (const row of rows) {
-    await db.update(taskRecurrences).set({ template: { ...row.template, categoryId: to }, updatedAt: now }).where(eq(taskRecurrences.id, row.id))
+    await db.update(taskRecurrences).set({ template: { ...row.template, categoryId: to }, updatedAt: writeTimestamp }).where(eq(taskRecurrences.id, row.id))
   }
 }

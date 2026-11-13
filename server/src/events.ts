@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { dayNumber, localDate, localParts, zonedToUtc } from '@florida/scheduler'
 import { and, eq, inArray, isNull, ne } from 'drizzle-orm'
+import { writeTimestamp } from './db/sync-clock.js'
 import { z } from 'zod'
 import type { Db } from './db/client.js'
 import { calendars, events } from './db/schema.js'
@@ -63,7 +64,7 @@ export async function setEventBlocksDay(db: Db, id: string, blocksDay: boolean |
     const [calendar] = await tx.select().from(calendars).where(eq(calendars.id, current.calendarId))
     if (calendar === undefined) throw notFound(`calendar ${current.calendarId}`)
     const { profiles } = await learnAccountProfiles(tx, [], now)
-    const [event] = await tx.update(events).set({ blocksDay, ...automaticDayFields(current, calendar, profiles), updatedAt: now }).where(eq(events.id, id)).returning()
+    const [event] = await tx.update(events).set({ blocksDay, ...automaticDayFields(current, calendar, profiles), updatedAt: writeTimestamp }).where(eq(events.id, id)).returning()
     if (event === undefined) throw notFound(`event ${id}`)
     return event
   })
@@ -133,7 +134,7 @@ async function createEvent(db: Db, sync: CalendarSyncService, id: string, body: 
   // The instances endpoint does not promise an order, including across page boundaries.
   const { profiles, learned } = await learnAccountProfiles(db, instances, now)
   if (learned) await refreshAllDayJudgments(db, now)
-  const occurrences = instances.map((instance) => judgedGoogleEvent(calendar, instance, profiles, now))
+  const occurrences = instances.map((instance) => ({ ...judgedGoogleEvent(calendar, instance, profiles, now), updatedAt: writeTimestamp }))
     .sort((a, b) => (a.startAt?.getTime() ?? Infinity) - (b.startAt?.getTime() ?? Infinity))
   const row = occurrences[0]
   if (row === undefined) throw new Error('Google returned no occurrences for the new event')
@@ -186,7 +187,7 @@ async function updateEvent(
     // The apps move every instance of a series before they push. When the move did not go through,
     // whatever the reason, the rows are stamped so the next `/api/sync` hands them the stored times.
     if (seriesId !== null && !moved) {
-      await db.update(events).set({ updatedAt: now }).where(liveSeries(current.calendarId, seriesId))
+      await db.update(events).set({ updatedAt: writeTimestamp }).where(liveSeries(current.calendarId, seriesId))
     }
   }
 }
@@ -237,7 +238,8 @@ async function updateInstance(
   const [row] = await db
     .update(events)
     .set({
-      ...(updated === undefined ? { updatedAt: now, ...automaticDayFields(current, calendar, profiles) } : judgedGoogleEvent(calendar, updated, profiles, now)),
+      ...(updated === undefined ? automaticDayFields(current, calendar, profiles) : judgedGoogleEvent(calendar, updated, profiles, now)),
+      updatedAt: writeTimestamp,
       ...(body.blocksDay === undefined ? {} : { blocksDay: body.blocksDay }),
     })
     .where(eq(events.id, current.id))
@@ -359,7 +361,7 @@ async function storeSeries(
   if (learned) await refreshAllDayJudgments(db, now)
   return db.transaction(async (tx) => {
     for (const instance of instances) {
-      const row = judgedGoogleEvent(calendar, instance, profiles, now)
+      const row = { ...judgedGoogleEvent(calendar, instance, profiles, now), updatedAt: writeTimestamp }
       if (instance !== renamed) {
         await tx
           .insert(events)
@@ -372,7 +374,7 @@ async function storeSeries(
       // stays dead. Deleting it would leave its event on a device that has not synced since.
       const [other] = await tx
         .update(events)
-        .set({ googleId: `${current.googleId}:${current.id}`, deletedAt: now, updatedAt: now })
+        .set({ googleId: `${current.googleId}:${current.id}`, deletedAt: now, updatedAt: writeTimestamp })
         .where(and(eq(events.calendarId, calendar.id), eq(events.googleId, instance.id), ne(events.id, current.id)))
         .returning({ id: events.id })
       await tx.update(events).set(row).where(eq(events.id, current.id))
@@ -380,7 +382,7 @@ async function storeSeries(
     }
     const stale = live.filter((e) => !listed.has(e.googleId) && !(renamed !== undefined && e.id === current.id)).map((e) => e.id)
     if (stale.length > 0) {
-      await tx.update(events).set({ deletedAt: now, updatedAt: now }).where(inArray(events.id, stale))
+      await tx.update(events).set({ deletedAt: now, updatedAt: writeTimestamp }).where(inArray(events.id, stale))
     }
     const [stored] = await tx.select().from(events).where(eq(events.id, current.id)).limit(1)
     if (stored === undefined) throw notFound(`event ${current.id}`)
@@ -407,7 +409,7 @@ export async function softDeleteEvent(db: Db, sync: CalendarSyncService, id: str
 }
 
 async function tombstoneEvent(db: Db, id: string, now: Date): Promise<EventRow> {
-  const [row] = await db.update(events).set({ deletedAt: now, updatedAt: now }).where(eq(events.id, id)).returning()
+  const [row] = await db.update(events).set({ deletedAt: now, updatedAt: writeTimestamp }).where(eq(events.id, id)).returning()
   if (row === undefined) throw notFound(`event ${id}`)
   return row
 }
