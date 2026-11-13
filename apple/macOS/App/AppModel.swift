@@ -107,6 +107,8 @@ final class AppModel {
     var recurringTaskToDelete: TaskItem?
     /// Text the new-task editor should send to the AI parser when it opens (quick add's ⌘↩).
     var editorAIText: String?
+    var editorQuickAddDraft: QuickAddDraft?
+    var editorQuickAddCategoryId: String?
     /// The event whose detail popover is open.
     var eventDetailID: String? {
         didSet {

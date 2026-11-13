@@ -78,7 +78,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [macos, ios-capture, ios-events, ios-other]
+        suite: [macos, ios-capture, ios-events, ios-other, ios-compact]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
@@ -113,6 +113,17 @@ jobs:
             ios-capture) args=(ios "${capture[@]/#/-only-testing:}") ;;
             ios-events) args=(ios "${events[@]/#/-only-testing:}") ;;
             ios-other) args=(ios "${capture[@]/#/-skip-testing:}" "${events[@]/#/-skip-testing:}") ;;
+            ios-compact)
+              runtime=$(xcrun simctl list runtimes -j | python3 -c '
+          import json, sys
+          runtimes = [r for r in json.load(sys.stdin)["runtimes"] if r.get("isAvailable") and ".iOS-" in r["identifier"]]
+          print(max(runtimes, key=lambda r: tuple(map(int, r["version"].split("."))))["identifier"])
+          ')
+              UDID=$(xcrun simctl create 'Florida compact capture' com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation "$runtime")
+              export UDID
+              echo "Compact capture on iPhone SE (3rd generation), 375 × 667 points: $UDID"
+              args=(ios -only-testing:Florida-iOSUITests/SmartAddTests/testFourSuggestionRowsRemainVisible)
+              ;;
           esac
           bash apple/scripts/check.sh "${args[@]}" | tee apple/ui-test.log | xcbeautify --renderer github-actions
       - name: Report retried failures

@@ -53,6 +53,27 @@ extension AppModel {
         }
 
         if isPaletteOpen {
+            if let editor = NSApplication.shared.keyWindow?.firstResponder as? NSTextView, editor.hasMarkedText() {
+                return false
+            }
+            if let editor = NSApplication.shared.keyWindow?.firstResponder as? NSTextView, editor.selectedRange().length > 0 {
+                palette.suggestions = []
+            }
+            if !palette.suggestions.isEmpty {
+                if chord == KeyChord("escape") {
+                    dismissPaletteSuggestions()
+                    return true
+                }
+                if chord == KeyChord("tab") || chord == KeyChord("return") {
+                    completePaletteSuggestion()
+                    return true
+                }
+                if chord == KeyChord("up") || chord == KeyChord("down") {
+                    let delta = chord == KeyChord("up") ? -1 : 1
+                    palette.suggestionIndex = (palette.suggestionIndex + delta + palette.suggestions.count) % palette.suggestions.count
+                    return true
+                }
+            }
             if chord == KeyChord("up") {
                 palette.moveSelection(by: -1)
                 return true

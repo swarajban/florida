@@ -22,7 +22,7 @@ struct QuickAddPreview: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if draft.title.isEmpty {
-                Text("Type a title; add 2h, !high, #category, @errand, by fri, at 3pm, after mon, // notes")
+                Text("Type a title, then add details with the symbols below")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -30,16 +30,11 @@ struct QuickAddPreview: View {
                     .font(.headline)
                     .lineLimit(2)
             }
-            HStack(spacing: 6) {
-                ForEach(chips) { chip in
-                    Label(chip.text, systemImage: chip.symbol)
-                        .font(.caption)
-                        .foregroundStyle(chip.isDefault ? Color.secondary : Color.primary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(
-                            chip.isDefault ? FloridaStyle.panel : FloridaStyle.ink.opacity(0.08),
-                            in: RoundedRectangle(cornerRadius: 4))
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) { previewChips }
+                    .fixedSize(horizontal: true, vertical: false)
+                LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)], alignment: .leading, spacing: 6) {
+                    previewChips
                 }
             }
             if let source = draft.source {
@@ -62,7 +57,31 @@ struct QuickAddPreview: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("quick-add-source")
             }
-            if let unknownHint {
+            Text("^due · !priority · #category · @context · *repeat · =estimate · ~start · //notes")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("smart-add-symbol-guide")
+            DisclosureGroup("Smart Add examples and priority levels") {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("^due: ^fri, ^nov 20, ^none (no due date)")
+                    Text("!priority: !1 ASAP · !2 high · !3 medium · !4 low")
+                    Text("#category: #work-engineering")
+                    Text("@context: @computer, @errand, @home, @office — not a location")
+                    Text("*repeat: *weekly, *every 2 weeks, *mon wed")
+                    Text("=estimate: =45m, =2h")
+                    Text("~start: ~tomorrow, ~nov 20")
+                    Text("//notes: everything after // stays in the notes")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            if model.palette.completedCategoryId != nil, category == nil {
+                Text("The chosen category was deleted. Edit its #category or choose a current suggestion.")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .accessibilityIdentifier("smart-add-deleted-category")
+            } else if let unknownHint {
                 Button {
                     model.createCategoryFromHint()
                 } label: {
@@ -95,6 +114,20 @@ struct QuickAddPreview: View {
         .padding(14)
     }
 
+    private var previewChips: some View {
+        ForEach(chips) { chip in
+            Label(chip.text, systemImage: chip.symbol)
+                .font(.caption)
+                .foregroundStyle(chip.isDefault ? Color.secondary : Color.primary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    chip.isDefault ? FloridaStyle.panel : FloridaStyle.ink.opacity(0.08),
+                    in: RoundedRectangle(cornerRadius: 4))
+                .accessibilityIdentifier("smart-add-preview-\(chip.id)")
+        }
+    }
+
     private var chips: [Chip] {
         var chips: [Chip] = []
         chips.append(Chip(
@@ -114,11 +147,16 @@ struct QuickAddPreview: View {
         if let context = draft.context {
             chips.append(Chip(id: "context", symbol: context.symbolName, text: context.displayName, isDefault: false))
         }
-        if let dueAt = draft.dueAt {
+        if draft.dueDateNotNeeded {
+            chips.append(Chip(id: "due", symbol: "calendar.badge.minus", text: "No due date", isDefault: false))
+        } else if let dueAt = draft.dueAt {
             let kind = draft.deadlineType == .hard ? "Due" : "By"
             chips.append(Chip(
                 id: "due", symbol: draft.deadlineType == .hard ? "calendar.badge.clock" : "calendar",
                 text: "\(kind) \(DateText.due(dueAt, calendar: calendar))", isDefault: false))
+        }
+        if let recurrence = draft.recurrence {
+            chips.append(Chip(id: "recurrence", symbol: "repeat", text: recurrence.summary, isDefault: false))
         }
         if let startAt = draft.startAt {
             chips.append(Chip(

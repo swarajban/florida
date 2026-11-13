@@ -162,31 +162,42 @@ extension AppModel {
     /// ⇧N / `>New task`: the full editor on a new task with quick add's defaults (Inbox, 30m,
     /// medium priority) plus a soft due date on the default day, since nearly every task gets one
     /// (the editor's Due box removes it). `aiText` is parsed by the AI as the editor opens.
-    func openNewTaskEditor(aiText: String? = nil, source: TaskSource? = nil) {
+    func openNewTaskEditor(aiText: String? = nil, source: TaskSource? = nil, quickAdd: QuickAddDraft? = nil, categoryId: String? = nil) {
         guard let category = inboxCategory else {
             statusMessage = "No categories yet — sync with the server first"
             return
         }
         let now = Date()
         editorAIText = aiText
-        editorTask = TaskItem(
+        editorQuickAddDraft = quickAdd
+        editorQuickAddCategoryId = categoryId
+        var task = TaskItem(
             id: UUID().uuidString.lowercased(), categoryId: category.id, title: "",
             durationMinutes: Self.defaultDurationMinutes, priority: .medium, deadlineType: .soft,
             dueAt: TaskDay.defaultDue(now: now, calendar: calendar), createdAt: now, updatedAt: now)
-        editorTask?.source = source
+        task.source = source
+        if let quickAdd {
+            task.title = quickAdd.title
+            task = quickAdd.applyingExplicitFields(to: task, categoryId: categoryId)
+        }
+        editorTask = task
     }
 
     /// Creates a task from quick-add text. Returns false (with a status message) when nothing
     /// could be created: no title, or no category in the store yet.
     @discardableResult
-    func createTask(from draft: QuickAddDraft) -> Bool {
+    func createTask(from draft: QuickAddDraft, categoryId: String? = nil) -> Bool {
         let title = draft.title.trimmingCharacters(in: .whitespaces)
         guard !title.isEmpty else {
             statusMessage = "Type a title for the task"
             return false
         }
         // An unknown #hint lands in Inbox; the preview says so and offers ⇥ to create it first.
-        guard let category = matchCategory(hint: draft.categoryHint) ?? inboxCategory else {
+        if let categoryId, categoriesById[categoryId] == nil {
+            statusMessage = "The chosen category was deleted. Choose a current category."
+            return false
+        }
+        guard let category = QuickAddCompletion.category(explicitID: categoryId, hint: draft.categoryHint, categories: categories) else {
             statusMessage = "No categories yet — sync with the server first"
             return false
         }
@@ -204,8 +215,12 @@ extension AppModel {
             context: draft.context ?? .computer,
             pinnedStart: draft.pinnedStart,
             createdAt: now,
-            updatedAt: now)
+            updatedAt: now,
+            recurrence: draft.recurrence)
         task.source = draft.source
+        if task.recurrence != nil {
+            task.prepareToEnableRecurrence()
+        }
         guard save(task, undoLabel: "Added \(Self.quoted(task.title))") else { return false }
         selection = .task(task.id)
         showGhost("Added to \(category.name)")

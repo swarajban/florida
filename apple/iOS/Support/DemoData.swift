@@ -15,6 +15,9 @@ enum DemoData {
     }()
 
     static func syncResponse(now: Date, calendar: Calendar) -> SyncResponse {
+        if UserDefaults.standard.bool(forKey: "demoUnsynced") {
+            return SyncResponse(cursor: now.ISO8601Format())
+        }
         let today = calendar.startOfDay(for: now)
         let evening = "demo-routine-evening"
         func at(_ dayOffset: Int, _ hour: Int, _ minute: Int = 0) -> Date {
