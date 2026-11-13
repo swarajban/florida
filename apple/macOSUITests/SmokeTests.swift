@@ -779,7 +779,9 @@ final class SmokeTests: XCTestCase {
             input.typeText("Smart no deadline ^no")
             XCTAssertTrue(app.buttons["smart-add-suggestion-^none"].waitForExistence(timeout: 5))
             app.typeKey(.tab, modifierFlags: [])
-            XCTAssertTrue(app.staticTexts["No due date"].waitForExistence(timeout: 5))
+            let noDuePreview = app.descendants(matching: .any)["smart-add-preview-due"]
+            XCTAssertTrue(noDuePreview.waitForExistence(timeout: 5))
+            XCTAssertEqual(noDuePreview.label, "No due date")
             app.typeKey(.return, modifierFlags: [])
             XCTAssertTrue(input.waitForNonExistence(timeout: 5))
             openTaskRow("Smart no deadline", in: app)

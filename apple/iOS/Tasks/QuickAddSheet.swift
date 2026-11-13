@@ -392,6 +392,7 @@ struct QuickAddSheet: View {
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
                                 .background(FloridaStyle.panel, in: Capsule())
+                                .accessibilityIdentifier("quick-add-chip-\(chip.id)")
                         }
                     }
                 }

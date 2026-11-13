@@ -240,7 +240,9 @@ final class SmartAddTests: XCTestCase {
         app.buttons["quick-add-symbol-^"].tap()
         input.typeText("none")
         app.typeKey(.tab, modifierFlags: [])
-        XCTAssertTrue(app.staticTexts["No due date"].exists)
+        let noDueChip = app.descendants(matching: .any)["quick-add-chip-no-due-date"]
+        XCTAssertTrue(noDueChip.exists)
+        XCTAssertEqual(noDueChip.label, "No due date")
         XCTAssertEqual(app.staticTexts["quick-add-title"].label, "Plan suffix")
         app.buttons["Cancel"].tap()
         app.buttons["New task"].tap()
