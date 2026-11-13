@@ -88,10 +88,12 @@ struct TaskEditorSheet: View {
                         keyLabel("Title", .title)
                     }
                     .focused($focus, equals: .title)
+                    .accessibilityIdentifier("task-title")
                     TextField(text: notes, axis: .vertical) {
                         keyLabel("Notes", .notes)
                     }
                     .focused($focus, equals: .notes)
+                    .accessibilityIdentifier("task-notes")
                     .lineLimit(3...8)
                 }
                 Section("Dates") {
@@ -120,6 +122,7 @@ struct TaskEditorSheet: View {
                                 .frame(width: 60)
                                 .multilineTextAlignment(.trailing)
                                 .focused($focus, equals: .duration)
+                                .accessibilityIdentifier("task-duration")
                             Stepper("Minutes", value: $draft.durationMinutes, in: 5...960, step: 5)
                                 .labelsHidden()
                             Text(DateText.duration(minutes: draft.durationMinutes))
@@ -353,15 +356,21 @@ struct TaskEditorSheet: View {
         if let id = parsed.categoryId, model.categoriesById[id] != nil {
             draft.categoryId = id
         }
-        hasDue = parsed.dueAt != nil
-        dueAt = parsed.dueAt ?? dueAt
-        hasStart = parsed.startAt != nil
-        startAt = parsed.startAt ?? startAt
+        draft.dueAt = parsed.dueAt
+        draft.startAt = parsed.startAt
+        draft.pinnedStart = parsed.pinnedStart
+        if let local = model.editorQuickAddDraft {
+            draft = local.applyingExplicitFields(to: draft, categoryId: model.editorQuickAddCategoryId)
+        }
+        hasDue = draft.dueAt != nil
+        dueAt = draft.dueAt ?? dueAt
+        hasStart = draft.startAt != nil
+        startAt = draft.startAt ?? startAt
         // The parsed dates say whether they carry a time.
         dueTimeChoice = nil
         startTimeChoice = nil
-        hasPinnedStart = parsed.pinnedStart != nil
-        pinnedStart = parsed.pinnedStart ?? pinnedStart
+        hasPinnedStart = draft.pinnedStart != nil
+        pinnedStart = draft.pinnedStart ?? pinnedStart
         focus = .title
     }
 

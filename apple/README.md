@@ -120,9 +120,10 @@ release, even if dispatched on main.
 
 The on-demand run uses the same cached build recipe as the compile gate, builds both
 schemes once and runs Darwin package tests, then uploads the compiled products.
-Four independent jobs use `test-without-building`: the full Mac suite, iPhone
+Five independent jobs use `test-without-building`: the full Mac suite, iPhone
 capture/plan/resource tests, event capture/calendar tests, and the remaining
-iPhone tests (including the drag matrix) plus widget tests. The event shard
+iPhone tests (including the drag matrix) plus widget tests, and a focused
+capture-layout check on an iPhone SE (3rd generation, 375 × 667 points). The event shard
 selects the whole `EventQuickAddTests` class
 and three calendar/recurrence smoke tests. The remaining shard excludes exactly
 the two explicit selections, so each existing test belongs to one shard and new tests
@@ -246,6 +247,46 @@ Quick add parses natural language locally (`QuickAddParser`): "infosec review
 2h by fri high #work" sets duration, due date, priority, and category; the
 palette shows the parsed chips before you press return. Double-clicking an
 empty slot opens quick add prefilled with that time as a pinned start.
+
+### Smart Add shortcuts (Mac and iPhone)
+
+Natural-language forms still work. For explicit fields, combine these shortcuts
+in one line, for example `Write update #work ^fri !2 =45m ~tomorrow // Ask Jane`:
+
+| Symbol | Florida field | Examples |
+| --- | --- | --- |
+| `^` | Due date, using the existing date/time grammar | `^fri`, `^nov 20`, `^none` |
+| `!` | Priority: 1 ASAP, 2 high, 3 medium, 4 low | `!1`, `!high`, `!4` |
+| `#` | Category, not a tag or list | `#work`, `#personal-finances` |
+| `@` | Context, not a location | `@computer`, `@errand`, `@home`, `@office` |
+| `*` | Repeating task | `*weekly`, `*every 2 weeks`, `*mon wed` |
+| `=` | Duration estimate | `=45m`, `=2h` |
+| `~` | Earliest start date | `~tomorrow`, `~nov 20` |
+| `//` | Notes: everything after this stays literal | `// Bring the draft #and links` |
+
+Typing a symbol opens local suggestions at the Mac caret or above the iPhone
+keyboard. Keep typing to filter; use arrows to select, Tab or Return to complete,
+and Esc to dismiss. Return completes a visible suggestion before it saves a task.
+The iPhone keyboard also has a row of symbol buttons. Categories follow the same
+Inbox → Work → Personal → no-area ordering as the rest of the app. No lookup or
+save waits for a network request; the parsed chips preview the fields.
+
+The input stays pinned above suggestions, showing at least the current caret
+line even in a long draft. The list uses the remaining height: up to four rows
+at default text size, fewer when needed on a small phone, with its own scrolling.
+**Details** (sliders) and **Add task** (+) sit in the navigation bar.
+The small **?** beside the symbols opens the full shortcut table;
+help text does not take space away from suggestions while typing.
+
+Symbols must start a whitespace-separated token; symbols inside words and URLs
+are not shortcut syntax. The first supported URL remains the task's source link;
+later URLs stay literal. Only the first `#category` is syntax; later hashtags remain in the
+title. Existing `2h`, `by fri`, `p1`, `after mon`, pinned times, `~2h` estimates,
+and ` -- ` notes retain their meanings. `^none` explicitly clears a due date in
+the draft; persistent Inbox date-triage decisions are a separate change.
+
+Inspired by Remember The Milk's [Smart Add guide](https://www.rememberthemilk.com/help/answer/basics-smartadd-howdoiuse)
+and [one-line examples](https://www.rememberthemilk.com/help/answer/basics-smartadd-whatis).
 
 **New event** (`⇧C`, the app menu, the palette, or an empty slot’s context menu)
 opens a local sentence composer, separate from task capture. Try “Lunch with Dana

@@ -21,12 +21,15 @@ public struct QuickAddDraft: Hashable, Sendable {
     /// Text after the first ` // ` or ` -- ` separator, untouched by the token grammar.
     public var notes: String?
     public var source: TaskSource?
+    public var dueDateNotNeeded: Bool
+    public var recurrence: TaskRecurrence?
 
     public init(
         title: String = "", durationMinutes: Int? = nil, priority: Priority? = nil,
         deadlineType: DeadlineType? = nil, dueAt: Date? = nil, startAt: Date? = nil,
         pinnedStart: Date? = nil, categoryHint: String? = nil, context: TaskContext? = nil, notes: String? = nil,
-        source: TaskSource? = nil
+        source: TaskSource? = nil,
+        dueDateNotNeeded: Bool = false, recurrence: TaskRecurrence? = nil
     ) {
         self.title = title
         self.durationMinutes = durationMinutes
@@ -39,6 +42,8 @@ public struct QuickAddDraft: Hashable, Sendable {
         self.context = context
         self.notes = notes
         self.source = source
+        self.dueDateNotNeeded = dueDateNotNeeded
+        self.recurrence = recurrence
     }
 }
 
@@ -102,6 +107,42 @@ public enum QuickAddParser {
                 continue
             }
 
+            if let symbol = word.first, "^*=~".contains(symbol),
+               let clause = scanner.symbolClause(at: i) {
+                var accepted = false
+                switch clause.value {
+                case .due(let moment):
+                    if draft.dueAt == nil, !draft.dueDateNotNeeded {
+                        draft.dueAt = scanner.resolve(moment, defaultClock: .endOfWorkday)
+                        draft.deadlineType = .soft
+                        accepted = true
+                    }
+                case .noDue:
+                    if draft.dueAt == nil, !draft.dueDateNotNeeded {
+                        draft.dueDateNotNeeded = true
+                        accepted = true
+                    }
+                case .start(let moment):
+                    if draft.startAt == nil {
+                        draft.startAt = scanner.resolve(moment, defaultClock: .startOfDay)
+                        accepted = true
+                    }
+                case .duration(let minutes):
+                    if draft.durationMinutes == nil {
+                        draft.durationMinutes = minutes
+                        accepted = true
+                    }
+                case .recurrence(let recurrence):
+                    if draft.recurrence == nil {
+                        draft.recurrence = recurrence
+                        accepted = true
+                    }
+                }
+                if !accepted { title.append(contentsOf: tokens[i..<(i + clause.consumed)]) }
+                i += clause.consumed
+                continue
+            }
+
             if draft.categoryHint == nil, let slug = QuickAddScanner.categorySlug(tokens[i]) {
                 draft.categoryHint = slug
                 i += 1
@@ -125,7 +166,7 @@ public enum QuickAddParser {
                     continue
                 }
             }
-            if let deadline = QuickAddScanner.dueKeywords[word], draft.dueAt == nil,
+            if let deadline = QuickAddScanner.dueKeywords[word], draft.dueAt == nil, !draft.dueDateNotNeeded,
                let moment = scanner.parseMoment(at: i + 1, bareHourFirst: false) {
                 draft.dueAt = scanner.resolve(moment, defaultClock: .endOfWorkday)
                 draft.deadlineType = deadline
@@ -151,7 +192,7 @@ public enum QuickAddParser {
                         i += moment.consumed
                         continue
                     }
-                } else if draft.dueAt == nil {
+                } else if draft.dueAt == nil, !draft.dueDateNotNeeded {
                     draft.dueAt = scanner.resolve(moment, defaultClock: .endOfWorkday)
                     draft.deadlineType = .soft
                     i += moment.consumed
@@ -176,6 +217,10 @@ public enum QuickAddParser {
 
         draft.title = QuickAddScanner.joinTitle(title)
         if draft.title.isEmpty, let source { draft.title = source.title }
+        if var recurrence = draft.recurrence {
+            recurrence.startDate = recurrence.dateString(for: draft.dueAt ?? draft.startAt ?? draft.pinnedStart ?? now)
+            draft.recurrence = recurrence
+        }
         return draft
     }
 }
@@ -233,10 +278,10 @@ struct QuickAddScanner {
     // MARK: - Vocabulary
 
     static let explicitPriorities: [String: Priority] = [
-        "!asap": .asap, "!urgent": .asap, "p1": .asap,
-        "!high": .high, "!h": .high, "p2": .high,
-        "!med": .medium, "!medium": .medium, "!m": .medium, "p3": .medium,
-        "!low": .low, "!l": .low, "p4": .low,
+        "!asap": .asap, "!urgent": .asap, "!1": .asap, "p1": .asap,
+        "!high": .high, "!h": .high, "!2": .high, "p2": .high,
+        "!med": .medium, "!medium": .medium, "!m": .medium, "!3": .medium, "p3": .medium,
+        "!low": .low, "!l": .low, "!4": .low, "p4": .low,
     ]
 
     /// `@errand` and friends: one token per `TaskContext`, spelled like its raw value.
@@ -275,8 +320,9 @@ struct QuickAddScanner {
 
     /// Splits at the first standalone `//` or `--` token. Notes keep their original text, trimmed.
     static func splitNotes(_ text: String) -> (body: Substring, notes: String?) {
-        for token in text.split(whereSeparator: \.isWhitespace) where token == "//" || token == "--" {
-            let notes = text[token.endIndex...].trimmingCharacters(in: .whitespacesAndNewlines)
+        for token in text.split(whereSeparator: \.isWhitespace) where token.hasPrefix("//") || token == "--" {
+            let start = token.hasPrefix("//") ? text.index(token.startIndex, offsetBy: 2) : token.endIndex
+            let notes = text[start...].trimmingCharacters(in: .whitespacesAndNewlines)
             return (text[..<token.startIndex], notes.isEmpty ? nil : notes)
         }
         return (text[...], nil)
@@ -303,12 +349,17 @@ struct QuickAddScanner {
 
     static func joinTitle(_ tokens: [String]) -> String {
         let trim = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "-–—:;,./|~"))
-        let joined = tokens.joined(separator: " ")
-        if let last = tokens.last, TaskSource.from(url: last) != nil,
-           let start = joined.rangeOfCharacter(from: trim.inverted)?.lowerBound {
-            return String(joined[start...])
+        var leadingTrim = trim
+        var trailingTrim = trim
+        if tokens.first?.unicodeScalars.contains(where: CharacterSet.alphanumerics.contains) == true {
+            leadingTrim.remove(charactersIn: "/~")
         }
-        return joined.trimmingCharacters(in: trim)
+        if tokens.last?.unicodeScalars.contains(where: CharacterSet.alphanumerics.contains) == true {
+            trailingTrim.remove(charactersIn: "/~")
+        }
+        let title = String(tokens.joined(separator: " ").drop { $0.unicodeScalars.allSatisfy(leadingTrim.contains) })
+        if let last = tokens.last, TaskSource.from(url: last) != nil || last.contains("://") { return title }
+        return title.trimmingCharacters(in: trailingTrim)
     }
 
     // MARK: - Duration
@@ -323,6 +374,7 @@ struct QuickAddScanner {
             minutes += tail.minutes
             consumed += tail.consumed
         }
+        guard minutes.isFinite, minutes.rounded() < Double(Int.max) else { return nil }
         let rounded = Int(minutes.rounded())
         return rounded > 0 ? (rounded, consumed) : nil
     }

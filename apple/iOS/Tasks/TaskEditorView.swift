@@ -102,6 +102,7 @@ struct TaskEditorView: View {
                         .focused($titleFocused)
                     TextField("Notes", text: notes, axis: .vertical)
                         .lineLimit(2...6)
+                        .accessibilityIdentifier("task-notes")
                 } footer: {
                     if let saveError {
                         Label(saveError, systemImage: "exclamationmark.triangle.fill")

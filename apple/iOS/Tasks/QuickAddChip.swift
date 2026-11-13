@@ -46,6 +46,12 @@ struct QuickAddChip: Identifiable, Hashable {
                 id: "pinned", symbol: "pin.fill",
                 text: "Pinned \(Formatting.dayAndTime(pinnedStart, now: now, calendar: calendar))"))
         }
+        if let recurrence = draft.recurrence {
+            chips.append(QuickAddChip(id: "recurrence", symbol: "repeat", text: recurrence.summary))
+        }
+        if draft.dueDateNotNeeded {
+            chips.append(QuickAddChip(id: "no-due-date", symbol: "calendar.badge.checkmark", text: "No due date"))
+        }
         return chips
     }
 }

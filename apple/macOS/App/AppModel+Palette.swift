@@ -30,9 +30,50 @@ extension AppModel {
         palette = PaletteState()
     }
 
+    func updatePaletteSuggestions(caretUTF16: Int, selectionLength: Int) {
+        palette.caretUTF16 = caretUTF16
+        guard palette.mode == .quickAdd, selectionLength == 0 else {
+            palette.suggestions = []
+            return
+        }
+        guard palette.dismissedSuggestionText != palette.text || palette.dismissedSuggestionCaret != caretUTF16 else {
+            return
+        }
+        let suggestions = QuickAddCompletion.suggestions(in: palette.text, caretUTF16: caretUTF16, categories: orderedCategories)
+        if suggestions.map(\.id) != palette.suggestions.map(\.id) {
+            palette.suggestionIndex = 0
+        }
+        palette.suggestions = suggestions
+    }
+
+    func dismissPaletteSuggestions() {
+        palette.dismissedSuggestionText = palette.text
+        palette.dismissedSuggestionCaret = palette.caretUTF16
+        palette.suggestions = []
+    }
+
+    func completePaletteSuggestion() {
+        guard palette.suggestions.indices.contains(palette.suggestionIndex) else { return }
+        let suggestion = palette.suggestions[palette.suggestionIndex]
+        guard let result = QuickAddCompletion.complete(suggestion, in: palette.text) else { return }
+        palette.caretUTF16 = result.caretUTF16
+        palette.caretRevision += 1
+        palette.text = result.text
+        paletteTextDidChange()
+        if let categoryId = suggestion.categoryId {
+            palette.completedCategoryId = categoryId
+            palette.completedCategoryHint = palette.draft.categoryHint
+        }
+        dismissPaletteSuggestions()
+    }
+
     /// Re-parses the quick-add draft, re-filters commands, or re-runs the search.
     func paletteTextDidChange() {
         palette.textDidChange(now: Date(), calendar: calendar)
+        if palette.completedCategoryHint != palette.draft.categoryHint {
+            palette.completedCategoryId = nil
+            palette.completedCategoryHint = nil
+        }
         switch palette.mode {
         case .search:
             palette.searchResults = searchItems(palette.query)
@@ -50,11 +91,13 @@ extension AppModel {
 
     /// The category a quick-add draft would land in, for the chips: its `#hint`'s, else Inbox.
     var paletteCategory: TaskCategory? {
-        matchCategory(hint: palette.draft.categoryHint) ?? inboxCategory
+        QuickAddCompletion.category(
+            explicitID: palette.completedCategoryId, hint: palette.draft.categoryHint, categories: categories)
     }
 
     /// The draft's `#hint` when no category matches it, so the preview can offer to create it.
     var paletteUnknownHint: String? {
+        if let id = palette.completedCategoryId, categoriesById[id] != nil { return nil }
         guard let hint = palette.draft.categoryHint, matchCategory(hint: hint) == nil,
               !Self.normalizedCategoryName(hint).isEmpty
         else { return nil }
@@ -63,7 +106,7 @@ extension AppModel {
 
     /// ⌘↩ in quick add: hands the text to the full editor, which sends it to the AI parser.
     func parsePaletteWithAI() {
-        let source = palette.draft.source
+        let draft = palette.draft
         let parsed = QuickAddParser.parse(palette.text, now: Date(), calendar: calendar)
         var text = QuickAddParser.removingSource(from: palette.text)
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -72,15 +115,21 @@ extension AppModel {
         } else if let parsedSource = parsed.source, parsed.title == parsedSource.title {
             text = "\(parsed.title) \(text)"
         }
+        let categoryId = palette.completedCategoryId
+            ?? (draft.categoryHint == nil ? nil : matchCategory(hint: draft.categoryHint)?.id)
+        if let id = palette.completedCategoryId, categoriesById[id] == nil {
+            statusMessage = "The chosen category was deleted. Choose a current category."
+            return
+        }
         closePalette()
-        openNewTaskEditor(aiText: text.isEmpty ? nil : text, source: source)
+        openNewTaskEditor(aiText: text.isEmpty ? nil : text, source: draft.source, quickAdd: draft, categoryId: categoryId)
     }
 
     /// Return in the palette: create the task, run the highlighted command, or reveal the result.
     func submitPalette() {
         switch palette.mode {
         case .quickAdd:
-            if createTask(from: palette.draft) {
+            if createTask(from: palette.draft, categoryId: palette.completedCategoryId) {
                 closePalette()
             }
         case .command:

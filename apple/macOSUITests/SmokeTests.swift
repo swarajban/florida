@@ -634,6 +634,195 @@ final class SmokeTests: XCTestCase {
     }
 
     @MainActor
+    func testSelectorUpdatesAfterRefocusingTheSameField() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-demoData", "YES"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 15))
+        try typeJumpLabel(of: "demo-task-vpn", in: app)
+        app.buttons["task-due"].click()
+        let search = app.textFields["task-due-search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.typeText("invalid first")
+        let preview = app.staticTexts["task-due-preview"]
+        let invalid = "Try ‘tomorrow’, ‘nov 20’ or ‘next mon 3pm’"
+        waitForValue(invalid, of: preview)
+        app.typeKey(.tab, modifierFlags: [])
+        app.typeKey(.rightArrow, modifierFlags: [])
+        waitForValue("", of: search)
+        search.click()
+        search.typeText("invalid after refocus")
+        waitForValue("invalid after refocus", of: search)
+        waitForValue(invalid, of: preview)
+    }
+
+    @MainActor
+    func testSmartAddSuggestionsInBothAppearances() throws {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-demoData", "YES", "-uiAppearance", appearance]
+            app.launch()
+            defer { app.terminate() }
+            let window = app.windows.firstMatch
+            XCTAssertTrue(window.waitForExistence(timeout: 15))
+            XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 10))
+            app.typeKey("c", modifierFlags: [])
+            let input = app.textFields["palette-input"]
+            XCTAssertTrue(input.waitForExistence(timeout: 5))
+            input.typeText("Review #")
+            let engineering = app.buttons["smart-add-suggestion-#demo-eng"]
+            let infosec = app.buttons["smart-add-suggestion-#demo-infosec"]
+            XCTAssertTrue(engineering.waitForExistence(timeout: 5))
+            let visibleChoices = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "smart-add-suggestion-#"))
+                .allElementsBoundByIndex.filter {
+                    $0.isHittable && $0.frame.minY >= input.frame.maxY
+                        && $0.frame.maxY <= window.frame.maxY
+                }
+            XCTAssertGreaterThanOrEqual(visibleChoices.count, 4)
+            capture(window, "smart-add-four-category-rows-\(appearance)")
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(engineering.waitForNonExistence(timeout: 5))
+            XCTAssertTrue(input.exists)
+            input.typeText("wo")
+            XCTAssertTrue(engineering.waitForExistence(timeout: 5))
+            XCTAssertTrue(infosec.exists)
+            XCTAssertFalse(app.buttons["smart-add-suggestion-#demo-home"].exists)
+            app.typeKey(.downArrow, modifierFlags: [])
+            waitForValue("Highlighted", of: infosec)
+            app.typeKey(.upArrow, modifierFlags: [])
+            waitForValue("Highlighted", of: engineering)
+            app.typeKey(.downArrow, modifierFlags: [])
+            app.typeKey(.tab, modifierFlags: [])
+            waitForValue("Review #Work-Infosec ", of: input)
+            XCTAssertTrue(engineering.waitForNonExistence(timeout: 5))
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(input.waitForNonExistence(timeout: 5))
+
+            app.typeKey("c", modifierFlags: [])
+            XCTAssertTrue(input.waitForExistence(timeout: 5))
+            input.typeText("Keep #wo tail")
+            XCTAssertFalse(engineering.exists)
+            app.typeKey(.leftArrow, modifierFlags: .command)
+            for _ in 0..<8 { app.typeKey(.rightArrow, modifierFlags: []) }
+            XCTAssertTrue(engineering.waitForExistence(timeout: 5))
+            app.typeKey(.leftArrow, modifierFlags: .shift)
+            XCTAssertTrue(engineering.waitForNonExistence(timeout: 5))
+            app.typeKey(.rightArrow, modifierFlags: .shift)
+            XCTAssertTrue(engineering.waitForExistence(timeout: 5))
+            XCTAssertGreaterThan(engineering.frame.minX, input.frame.minX + 20)
+            XCTAssertLessThan(engineering.frame.minY, input.frame.maxY + 20)
+            capture(window, "smart-add-suggestions-\(appearance)")
+            app.typeKey(.tab, modifierFlags: [])
+            waitForValue("Keep #Work-Engineering tail", of: input)
+            input.typeText("new ")
+            waitForValue("Keep #Work-Engineering new tail", of: input)
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(input.waitForNonExistence(timeout: 5))
+
+            app.typeKey("c", modifierFlags: [])
+            XCTAssertTrue(input.waitForExistence(timeout: 5))
+            input.typeText("Keep ^tomorrow tail")
+            app.typeKey(.leftArrow, modifierFlags: .command)
+            for _ in 0..<14 { app.typeKey(.rightArrow, modifierFlags: []) }
+            XCTAssertTrue(app.buttons["smart-add-suggestion-^tomorrow"].waitForExistence(timeout: 5))
+            XCTAssertFalse(app.buttons["smart-add-suggestion-^today"].exists)
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(input.exists)
+            input.typeText("new ")
+            waitForValue("Keep ^tomorrow new tail", of: input)
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(input.waitForNonExistence(timeout: 5))
+
+            app.typeKey("c", modifierFlags: [])
+            XCTAssertTrue(input.waitForExistence(timeout: 5))
+            input.typeText("Smart recurring review #work-inf")
+            XCTAssertTrue(infosec.waitForExistence(timeout: 5))
+            app.typeKey(.tab, modifierFlags: [])
+            input.typeText("^tom")
+            XCTAssertTrue(app.buttons["smart-add-suggestion-^tomorrow"].waitForExistence(timeout: 5))
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(input.exists)
+            input.typeText("!hi")
+            XCTAssertTrue(app.buttons["smart-add-suggestion-!2"].waitForExistence(timeout: 5))
+            app.typeKey(.tab, modifierFlags: [])
+            input.typeText("@err")
+            XCTAssertTrue(app.buttons["smart-add-suggestion-@errand"].waitForExistence(timeout: 5))
+            app.typeKey(.tab, modifierFlags: [])
+            input.typeText("*week")
+            XCTAssertTrue(app.buttons["smart-add-suggestion-*weekly"].waitForExistence(timeout: 5))
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(app.descendants(matching: .any)["smart-add-preview-recurrence"].waitForExistence(timeout: 5))
+            input.typeText("=45m ~today // Bring report")
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(input.waitForNonExistence(timeout: 5))
+            openTaskRow("Smart recurring review", in: app)
+            XCTAssertTrue(app.buttons["task-category"].waitForExistence(timeout: 5))
+            waitForValue("Work Infosec", of: app.buttons["task-category"])
+            waitForValue("High", of: app.buttons["task-priority"])
+            waitForValue("Errand", of: app.buttons["task-context"])
+            waitForValue("45", of: app.textFields["task-duration"])
+            waitForValue("Bring report", of: app.descendants(matching: .any)["task-notes"])
+            let repeatField = app.buttons["task-repeat"]
+            for _ in 0..<6 where !repeatField.exists {
+                app.sheets.scrollViews.firstMatch.scroll(byDeltaX: 0, deltaY: -180)
+            }
+            XCTAssertTrue(repeatField.waitForExistence(timeout: 5))
+            waitForValue("Weekly", of: repeatField)
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(app.buttons["task-category"].waitForNonExistence(timeout: 5))
+
+            app.typeKey("c", modifierFlags: [])
+            XCTAssertTrue(input.waitForExistence(timeout: 5))
+            input.typeText("Smart no deadline ^no")
+            XCTAssertTrue(app.buttons["smart-add-suggestion-^none"].waitForExistence(timeout: 5))
+            app.typeKey(.tab, modifierFlags: [])
+            XCTAssertTrue(app.staticTexts["No due date"].waitForExistence(timeout: 5))
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(input.waitForNonExistence(timeout: 5))
+            openTaskRow("Smart no deadline", in: app)
+            XCTAssertTrue(app.buttons["task-due"].waitForExistence(timeout: 5))
+            waitForValue("No date", of: app.buttons["task-due"])
+            app.typeKey(.escape, modifierFlags: [])
+        }
+    }
+
+    @MainActor
+    func testSmartAddAIHandoffKeepsLocalFields() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-demoData", "YES", "-uiAppearance", "light"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 15))
+        app.typeKey("c", modifierFlags: [])
+        let input = app.textFields["palette-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        input.typeText("AI review #home ^none ")
+        app.typeKey(.return, modifierFlags: .command)
+        XCTAssertTrue(app.textFields["task-title"].waitForExistence(timeout: 5))
+        waitForValue("AI review", of: app.textFields["task-title"])
+        waitForValue("Home", of: app.buttons["task-category"])
+        waitForValue("No date", of: app.buttons["task-due"])
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(app.textFields["task-title"].waitForNonExistence(timeout: 5))
+        app.typeKey("c", modifierFlags: [])
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        input.typeText("AI recurring review #home *weekly ")
+        app.typeKey(.return, modifierFlags: .command)
+        XCTAssertTrue(app.textFields["task-title"].waitForExistence(timeout: 5))
+        waitForValue("AI recurring review", of: app.textFields["task-title"])
+        let repeatField = app.buttons["task-repeat"]
+        for _ in 0..<6 where !repeatField.exists {
+            app.sheets.scrollViews.firstMatch.scroll(byDeltaX: 0, deltaY: -180)
+        }
+        XCTAssertTrue(repeatField.waitForExistence(timeout: 5))
+        waitForValue("Weekly", of: repeatField)
+    }
+
+    @MainActor
     func testCalendarAndQuickAddInBothAppearances() throws {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {
@@ -1257,6 +1446,27 @@ final class SmokeTests: XCTestCase {
     }
 
     /// Presses `f`, then types the label on the task's row in the pane.
+    @MainActor
+    private func openTaskRow(_ title: String, in app: XCUIApplication) {
+        let pane = app.scrollViews["task-pane-scroll"]
+        XCTAssertTrue(pane.waitForExistence(timeout: 5))
+        let row = pane.staticTexts[title].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        var delta: CGFloat = 180
+        for _ in 0..<8 {
+            if row.exists {
+                let frame = row.frame
+                if row.isHittable, frame.minY >= pane.frame.minY + 34, frame.maxY <= pane.frame.maxY { break }
+                delta = frame.minY < pane.frame.minY + 34 ? 180 : -180
+            }
+            pane.scroll(byDeltaX: 0, deltaY: delta)
+        }
+        XCTAssertTrue(row.isHittable)
+        XCTAssertGreaterThanOrEqual(row.frame.minY, pane.frame.minY + 34)
+        XCTAssertLessThanOrEqual(row.frame.maxY, pane.frame.maxY)
+        row.click()
+    }
+
     @MainActor
     private func typeJumpLabel(of id: String, in app: XCUIApplication, whileLabelled: () -> Void = {}) throws {
         app.typeKey("f", modifierFlags: [])
