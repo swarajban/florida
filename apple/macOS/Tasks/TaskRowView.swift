@@ -57,8 +57,9 @@ struct TaskRowView: View {
                 Text(task.title)
                     .lineLimit(2)
                 ViewThatFits(in: .horizontal) {
-                    metadata(compact: false).fixedSize(horizontal: true, vertical: false)
-                    metadata(compact: true)
+                    metadata(showsContext: true, showsSchedule: true).fixedSize(horizontal: true, vertical: false)
+                    metadata(showsContext: false, showsSchedule: true).fixedSize(horizontal: true, vertical: false)
+                    metadata(showsContext: false, showsSchedule: false)
                 }
                 if let problem = state.problem(calendar: calendar, now: now) {
                     Text(problem)
@@ -114,7 +115,7 @@ struct TaskRowView: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    private func metadata(compact: Bool) -> some View {
+    private func metadata(showsContext: Bool, showsSchedule: Bool) -> some View {
         HStack(spacing: 8) {
             if let marker = task.priority.rowMarker {
                 Text(marker)
@@ -123,10 +124,11 @@ struct TaskRowView: View {
                     .accessibilityLabel("\(marker) priority")
             }
             Text(DateText.duration(minutes: task.durationMinutes))
-            if !compact {
+            if showsContext {
                 Image(systemName: task.context.symbolName)
                     .help("\(task.context.displayName) context")
                     .accessibilityLabel("\(task.context.displayName) context")
+                    .accessibilityIdentifier("task-context-\(task.id)")
             }
             if let source = task.source {
                 Image(systemName: source.symbolName)
@@ -141,7 +143,7 @@ struct TaskRowView: View {
                     .foregroundStyle(state.isOverdue ? Color.red : Color.secondary)
                     .layoutPriority(1)
             }
-            if !compact {
+            if showsSchedule {
                 Text(state.label(calendar: calendar, now: now)).foregroundStyle(scheduleColor)
             }
             if state.isPinned { Image(systemName: "pin.fill") }

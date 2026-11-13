@@ -19,7 +19,8 @@ struct TaskListRow: View {
         let isBlooming = model.blooming[task.id] != nil
         HStack(alignment: .center, spacing: 8) {
             Button(action: onEdit) {
-                TaskRow(task: task, summary: summary, now: now, calendar: calendar, category: category)
+                TaskRow(task: task, summary: summary, now: now, calendar: calendar,
+                        category: category, showsSourceMark: false)
                     .strikethrough(isBlooming)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
