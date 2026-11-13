@@ -4,6 +4,40 @@ import Testing
 @testable import FloridaKit
 
 @Suite struct BlockingDaysStoreTests {
+    @Test func realStaysLeaveMondayOpenAndManualOverridesUpdateLocally() async throws {
+        let db = try AppDatabase.inMemory()
+        var calendar = Fixtures.utc
+        calendar.timeZone = try #require(TimeZone(identifier: "America/Los_Angeles"))
+        var marshall = Fixtures.event(id: "marshall", start: "2026-11-13T00:00:00Z", end: "2026-11-17T00:00:00Z", allDay: true)
+        marshall.autoBlocksDay = true
+        marshall.blockingReason = "Your trip"
+        var tomales = marshall
+        tomales.id = "tomales"
+        tomales.googleId = "tomales"
+        tomales.endAt = Fixtures.instant("2026-11-16T00:00:00Z")
+        try db.apply(SyncResponse(cursor: "c", events: [marshall, tomales], calendars: [Fixtures.calendar(selected: false)]))
+        let first = Fixtures.instant("2026-11-13T08:00:00Z")
+        for offset in 0...2 {
+            let day = DateNavigation.shift(first, by: offset, calendar: calendar)
+            let agenda = try db.agenda(for: day, calendar: calendar)
+            #expect(agenda.events.isEmpty)
+            #expect(Set(agenda.blockingAllDayEvents.map(\.id)) == (offset == 2 ? ["marshall"] : ["marshall", "tomales"]))
+        }
+        let monday = Fixtures.instant("2026-11-16T08:00:00Z")
+        let range = monday..<Fixtures.instant("2026-11-17T08:00:00Z")
+        var observation = db.observeBlockingAllDayEvents(in: range, calendar: calendar).makeAsyncIterator()
+        #expect(try await observation.next() == [])
+        #expect(try db.agenda(for: monday, calendar: calendar).blockingAllDayEvents.isEmpty)
+        try db.setEventBlocksDay(id: "marshall", blocksDay: true)
+        #expect(try await observation.next()?.map(\.id) == ["marshall"])
+        try db.setEventBlocksDay(id: "marshall", blocksDay: false)
+        #expect(try await observation.next() == [])
+        #expect(try db.agenda(for: first, calendar: calendar).blockingAllDayEvents.map(\.id) == ["tomales"])
+        try db.setEventBlocksDay(id: "marshall", blocksDay: nil)
+        #expect(try await observation.next() == [])
+        #expect(try db.agenda(for: monday, calendar: calendar).blockingAllDayEvents.isEmpty)
+    }
+
     func holiday(_ id: String = "holiday") -> CalendarEvent {
         var event = Fixtures.event(id: id, start: "2026-11-01T00:00:00Z", end: "2026-11-03T00:00:00Z", allDay: true)
         event.autoBlocksDay = true

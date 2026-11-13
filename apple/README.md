@@ -430,6 +430,15 @@ instead of being squeezed into one row. Manual overrides are labelled separately
 including for OOO. Settings leaves extra bottom scroll space so its final calendar
 controls can be brought fully above the floating tab bar.
 Before a server judgment exists, Automatic falls back to blocking OOO only.
+Automatic **Your trip** events spanning two or more dates leave their last covered
+date open; a one-day trip still blocks that day. The reason reads
+**Your trip · last day open**. A manual **Blocks** override restores every date of
+the original event; **Does not block** removes all protection. Holidays and time
+off are unchanged. FloridaCore derives both the protected range and explanation
+from the stored judgment and UTC-midnight event dates, and FloridaKit uses that
+same range for hidden-calendar queries and observations. The ordinary calendar
+event keeps its original dates. Updated apps are required for the new markers;
+older versions still display the complete original range.
 The choice applies to this occurrence only, even on a read-only Google calendar,
 and is saved locally and queued for Florida sync without editing Google. On Mac,
 `r b` cycles the three choices in the popover or on the selected all-day event;

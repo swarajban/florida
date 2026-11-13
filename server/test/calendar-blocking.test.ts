@@ -37,6 +37,35 @@ describe('calendar blocking migration', () => {
 })
 
 describe('named calendar constraints', () => {
+  it('uses the shortened trip interval and reason for Why here and unscheduled facts', async () => {
+    const { db, close } = await createTestDb()
+    try {
+      await seed(db)
+      await db.insert(googleAccounts).values({ id: 'account', email: 'me@example.com', label: 'me', refreshTokenEnc: 'unused' })
+      await db.insert(calendars).values({ id: 'cal', accountId: 'account', googleId: 'cal', summary: 'Personal', accessRole: 'owner' })
+      await db.insert(events).values({ id: 'stay', calendarId: 'cal', googleId: 'stay', summary: 'Stay at Marshall',
+        status: 'confirmed', allDay: true, autoBlocksDay: true, blockingReason: 'Your trip', transparency: 'transparent',
+        startAt: new Date('2026-11-13T00:00:00Z'), endAt: new Date('2026-11-17T00:00:00Z') })
+      await db.insert(tasks).values([
+        { id: 'task', categoryId: 'inbox', title: 'Submit report', durationMinutes: 60, priority: 'medium',
+          deadlineType: 'hard', dueAt: new Date('2026-11-16T08:00:00Z') },
+        { id: 'later', categoryId: 'inbox', title: 'Next report', durationMinutes: 60, priority: 'medium', deadlineType: 'none' },
+      ])
+      const now = new Date('2026-11-13T16:00:00Z')
+      await runScheduling(db, testConfig, now)
+      const expected = { count: 1, first: [{ title: 'Stay at Marshall', start: 'Fri 2026-11-13 00:00',
+        end: 'Mon 2026-11-16 00:00', blockingReason: 'Your trip · last day open' }] }
+      expect(await explainFacts(db, 'task', now)).toMatchObject({ planned: [], calendarBusyTime: expected,
+        unscheduled: { reason: 'no_fit_before_hard_deadline' } })
+      expect(await dailyFacts(db, now)).toMatchObject({ unscheduled: [{ title: 'Submit report', calendarBusyTime: expected }] })
+      expect(await explainFacts(db, 'later', now)).toMatchObject({
+        planned: [{ start: 'Mon 2026-11-16 09:00' }], calendarBusyTime: expected,
+      })
+    } finally {
+      await close()
+    }
+  })
+
   it('uses the scheduler override resolver for customized routines', async () => {
     const { db, close } = await createTestDb()
     try {
