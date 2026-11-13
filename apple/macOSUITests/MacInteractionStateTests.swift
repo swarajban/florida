@@ -59,9 +59,14 @@ final class MacInteractionStateTests: XCTestCase {
         let app = launch("dark", extra: ["-uiInteractionManyResources", "YES"])
         defer { app.terminate() }
         openDesignReview(in: app)
-        hold("1", in: app)
-        XCTAssertTrue(app.buttons["Edit…"].exists)
+        let button = app.buttons["inject-held-1"]
+        XCTAssertTrue(button.waitForExistence(timeout: 5))
+        button.click()
+        let finished = app.staticTexts["held-key-finished-1"]
+        _ = finished.waitForExistence(timeout: 5)
         XCTAssertFalse(openedResource(in: app).exists)
+        XCTAssertTrue(finished.exists)
+        XCTAssertTrue(app.buttons["Edit…"].exists)
         app.typeKey("1", modifierFlags: [])
         XCTAssertTrue(openedResource(in: app).waitForExistence(timeout: 5))
     }
@@ -159,7 +164,7 @@ final class MacInteractionStateTests: XCTestCase {
         defer { app.terminate() }
         let title = app.staticTexts["Interaction trip"].firstMatch
         XCTAssertTrue(title.waitForExistence(timeout: 5))
-        title.click()
+        title.doubleClick()
         let reason = app.staticTexts["event-blocking-reason-interaction-trip"]
         XCTAssertTrue(reason.waitForExistence(timeout: 5))
         XCTAssertTrue((reason.value as? String)?.contains("last day open") == true)
