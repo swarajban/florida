@@ -1586,7 +1586,7 @@ final class SmokeTests: XCTestCase {
     private func typeJumpLabel(of id: String, in app: XCUIApplication, whileLabelled: () -> Void = {}) throws {
         let pane = app.scrollViews["task-pane-scroll"]
         XCTAssertTrue(pane.waitForExistence(timeout: 5))
-        revealTaskRow(pane.descendants(matching: .any)["task-row-\(id)"], in: pane)
+        revealTaskRow(pane.buttons["task-done-\(id)"], in: pane)
         app.typeKey("f", modifierFlags: [])
         let label = app.staticTexts["task-jump-\(id)"]
         XCTAssertTrue(label.waitForExistence(timeout: 5))
