@@ -11,11 +11,11 @@ extension AppModel {
     /// Upserts a task locally, remembers the fields it changes for `z`, and syncs in the
     /// background. `undoLabel` is past tense ("Edited “X”"); returns false when the store refused.
     @discardableResult
-    func save(_ task: TaskItem, original: TaskItem? = nil, somedayIntent: Bool? = nil, undoLabel: String? = nil) -> Bool {
+    func save(_ task: TaskItem, original: TaskItem? = nil, somedayIntent: Bool? = nil, dateEdits: Set<TaskDateField> = [], undoLabel: String? = nil) -> Bool {
         guard let database else { return false }
         do {
             try recordingUndo(undoLabel ?? "Edited \(Self.quoted(task.title))", taskId: task.id) {
-                try database.saveTask(task, original: original, somedayIntent: somedayIntent)
+                try database.saveTask(task, original: original, somedayIntent: somedayIntent, dateEdits: dateEdits)
             }
         } catch {
             statusMessage = "Could not save: \(error.localizedDescription)"
@@ -76,7 +76,7 @@ extension AppModel {
     /// Marks `task` done, with the sound and bloom, an undo entry and the "Done" ghost; when it
     /// was the selection, the selection moves to its neighbor. Also the editor's Mark done.
     @discardableResult
-    func complete(_ task: TaskItem, savingEdits: Bool = false, original: TaskItem? = nil, somedayIntent: Bool? = nil) -> Bool {
+    func complete(_ task: TaskItem, savingEdits: Bool = false, original: TaskItem? = nil, somedayIntent: Bool? = nil, dateEdits: Set<TaskDateField> = []) -> Bool {
         guard let database else { return false }
         let item = item(for: task)
         let next = neighbor(of: item)
@@ -87,7 +87,7 @@ extension AppModel {
                     var completed = task
                     completed.completedAt = Date()
                     completed.completedMinutes = completed.durationMinutes
-                    return try database.saveTask(completed, original: original ?? stored, somedayIntent: somedayIntent)
+                    return try database.saveTask(completed, original: original ?? stored, somedayIntent: somedayIntent, dateEdits: dateEdits)
                 } else {
                     return try database.completeTask(id: task.id)
                 }
@@ -124,13 +124,13 @@ extension AppModel {
             }
             task.pinnedStart = start
             task.someday = false
-            if save(task, original: original, somedayIntent: false, undoLabel: "Pinned \(Self.quoted(task.title))") {
+            if save(task, original: original, somedayIntent: false, dateEdits: [.pin], undoLabel: "Pinned \(Self.quoted(task.title))") {
                 showGhost("Pinned to \(DateText.dayAndTime(start, calendar: calendar))")
             }
         } else {
             task.pinnedStart = nil
             task.someday = false
-            if save(task, original: original, somedayIntent: false, undoLabel: "Unpinned \(Self.quoted(task.title))") {
+            if save(task, original: original, somedayIntent: false, dateEdits: [.pin], undoLabel: "Unpinned \(Self.quoted(task.title))") {
                 showGhost("Unpinned")
             }
         }
@@ -147,7 +147,7 @@ extension AppModel {
         task.startAt = tomorrow
         task.someday = false
         task.pinnedStart = nil
-        if save(task, original: original, somedayIntent: false, undoLabel: "Pushed \(Self.quoted(task.title)) to tomorrow") {
+        if save(task, original: original, somedayIntent: false, dateEdits: [.start, .pin], undoLabel: "Pushed \(Self.quoted(task.title)) to tomorrow") {
             showGhost("Pushed to \(tomorrow.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))")
         }
     }

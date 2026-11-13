@@ -68,7 +68,7 @@ extension AppModel {
         updated.pinnedStart = calendar.dateInterval(of: .minute, for: start)?.start ?? start
         updated.someday = false
         var mutation: AppDatabase.TaskMutation?
-        guard write({ mutation = try $0.saveTask(updated, original: previous, somedayIntent: false) }),
+        guard write({ mutation = try $0.saveTask(updated, original: previous, somedayIntent: false, dateEdits: [.pin]) }),
               let mutation, let before = mutation.before else { return }
         refreshTaskDateState(mutation.after)
         showToast(Toast(

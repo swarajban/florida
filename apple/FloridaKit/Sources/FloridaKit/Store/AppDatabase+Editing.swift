@@ -22,7 +22,8 @@ extension AppDatabase {
 
     @discardableResult
     public func saveTask(
-        _ draft: TaskItem, original: TaskItem?, somedayIntent: Bool? = nil, now: Date = Date()
+        _ draft: TaskItem, original: TaskItem?, somedayIntent: Bool? = nil,
+        dateEdits: Set<TaskDateField> = [], now: Date = Date()
     ) throws -> TaskMutation {
         try writer.write { db in
             let before = try TaskItem.fetchOne(db, id: draft.id)
@@ -73,6 +74,12 @@ extension AppDatabase {
             apply(\.completedMinutes)
             applyDate(\.completedAt)
             apply(\.recurrence)
+            if dateEdits.contains(.due) {
+                live.dueAt = draft.dueAt
+                live.deadlineType = draft.deadlineType
+            }
+            if dateEdits.contains(.start) { live.startAt = draft.startAt }
+            if dateEdits.contains(.pin) { live.pinnedStart = draft.pinnedStart }
             if let somedayIntent { live.someday = somedayIntent }
             if somedayIntent == true {
                 live.dueAt = nil

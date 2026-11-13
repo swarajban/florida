@@ -19,6 +19,7 @@ struct TaskEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft: TaskItem
     @State private var somedayIntent: Bool? = nil
+    @State private var dateEdits: Set<TaskDateField> = []
     @State private var confirmingDelete = false
     @State private var saveError: String?
     @State private var sourceURL: String
@@ -133,6 +134,7 @@ struct TaskEditorView: View {
                         Picker("Deadline", selection: Binding(
                             get: { draft.deadlineType },
                             set: {
+                                dateEdits.insert(.due)
                                 somedayIntent = false
                                 draft.someday = false
                                 draft.deadlineType = $0
@@ -302,6 +304,7 @@ struct TaskEditorView: View {
         Binding(
             get: { draft.deadlineType != .none },
             set: { on in
+                dateEdits.insert(.due)
                 somedayIntent = false
                 if on {
                     draft.someday = false
@@ -324,6 +327,7 @@ struct TaskEditorView: View {
         Binding(
             get: { draft.dueAt ?? defaultDueDate },
             set: { date in
+                dateEdits.insert(.due)
                 somedayIntent = false
                 draft.someday = false
                 let calendar = model.calendar
@@ -339,6 +343,7 @@ struct TaskEditorView: View {
                 somedayIntent = on
                 draft.someday = on
                 if on {
+                    dateEdits.formUnion([.due, .pin])
                     draft.dueAt = nil
                     draft.pinnedStart = nil
                     draft.deadlineType = .none
@@ -352,6 +357,7 @@ struct TaskEditorView: View {
         Binding(
             get: { dueTimeChoice ?? draft.dueAt.map { TaskDay.dueHasTime($0, calendar: model.calendar) } ?? false },
             set: { on in
+                dateEdits.insert(.due)
                 somedayIntent = false
                 draft.someday = false
                 dueTimeChoice = on
@@ -384,6 +390,7 @@ struct TaskEditorView: View {
         Binding(
             get: { startTimeChoice ?? draft.startAt.map { TaskDay.notBeforeHasTime($0, calendar: model.calendar) } ?? false },
             set: { on in
+                dateEdits.insert(.start)
                 somedayIntent = false
                 draft.someday = false
                 startTimeChoice = on
@@ -396,11 +403,16 @@ struct TaskEditorView: View {
     /// Every change to the start date goes through here: a start that reaches or passes the due
     /// date moves the due date to the day after it, in the row right below.
     private func setStart(_ start: Date?) {
+        dateEdits.insert(.start)
         somedayIntent = false
         draft.someday = false
         draft.startAt = start
         if let start, let dueAt = draft.dueAt {
-            draft.dueAt = TaskDay.due(dueAt, notBefore: start, calendar: model.calendar)
+            let adjustedDue = TaskDay.due(dueAt, notBefore: start, calendar: model.calendar)
+            if adjustedDue != dueAt {
+                dateEdits.insert(.due)
+            }
+            draft.dueAt = adjustedDue
         }
     }
 
@@ -408,6 +420,7 @@ struct TaskEditorView: View {
         Binding(
             get: { draft.pinnedStart != nil },
             set: { on in
+                dateEdits.insert(.pin)
                 somedayIntent = false
                 draft.someday = false
                 draft.pinnedStart = on ? (draft.pinnedStart ?? nextHour) : nil
@@ -418,6 +431,7 @@ struct TaskEditorView: View {
         Binding(
             get: { draft.pinnedStart ?? nextHour },
             set: {
+                dateEdits.insert(.pin)
                 somedayIntent = false
                 draft.pinnedStart = $0
                 draft.someday = false
@@ -461,7 +475,7 @@ struct TaskEditorView: View {
         if task.title.isEmpty {
             task.title = original.title
         }
-        guard model.complete(task, original: original, somedayIntent: somedayIntent) else {
+        guard model.complete(task, original: original, somedayIntent: somedayIntent, dateEdits: dateEdits) else {
             saveError = "This task could not be completed. It may have been deleted or completed elsewhere."
             return
         }
@@ -492,7 +506,7 @@ struct TaskEditorView: View {
     private func save() {
         guard recurrenceValidationMessage == nil, sourceValidationMessage == nil else { return }
         do {
-            try model.save(preparedTask, original: isNew ? nil : original, somedayIntent: somedayIntent)
+            try model.save(preparedTask, original: isNew ? nil : original, somedayIntent: somedayIntent, dateEdits: dateEdits)
             dismiss()
         } catch {
             saveError = error.localizedDescription

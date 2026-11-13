@@ -62,9 +62,11 @@ extension AppModel {
         return task
     }
 
-    func save(_ task: TaskItem, original: TaskItem? = nil, somedayIntent: Bool? = nil) throws {
+    func save(
+        _ task: TaskItem, original: TaskItem? = nil, somedayIntent: Bool? = nil, dateEdits: Set<TaskDateField> = []
+    ) throws {
         var mutation: AppDatabase.TaskMutation?
-        try perform { mutation = try $0.saveTask(task, original: original, somedayIntent: somedayIntent) }
+        try perform { mutation = try $0.saveTask(task, original: original, somedayIntent: somedayIntent, dateEdits: dateEdits) }
         if let mutation {
             refreshTaskDateState(mutation.after)
         }

@@ -40,7 +40,7 @@ extension AppModel {
         task.someday = false
         task.startAt = nil
         lastAction = .doNow
-        if save(task, original: original, somedayIntent: false, undoLabel: "Pinned \(Self.quoted(task.title)) to now") {
+        if save(task, original: original, somedayIntent: false, dateEdits: [.pin], undoLabel: "Pinned \(Self.quoted(task.title)) to now") {
             showGhost("Pinned to \(DateText.dayAndTime(now, calendar: calendar))")
         }
     }

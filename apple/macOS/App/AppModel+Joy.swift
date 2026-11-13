@@ -109,7 +109,7 @@ extension AppModel {
         pinned.someday = false
         pinned.startAt = nil
         let when = DateText.dayAndTime(start, calendar: calendar)
-        if save(pinned, original: task, somedayIntent: false, undoLabel: "Pinned \(Self.quoted(task.title)) to \(when)") {
+        if save(pinned, original: task, somedayIntent: false, dateEdits: [.pin], undoLabel: "Pinned \(Self.quoted(task.title)) to \(when)") {
             selection = .task(task.id)
             showGhost("Pinned to \(when)")
         }

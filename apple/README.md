@@ -341,6 +341,8 @@ date** or **Someday** buttons; the toast offers Undo. Both editors put a
 Turning it on clears the due date and pin but keeps an existing start date.
 Setting a due date, start date, or pin turns it off. Removing the last date
 without choosing Someday needs triage again.
+Selecting the same date again is still an explicit decision. Editor saves keep
+newer synced values for fields you did not touch.
 
 Ordinary Inbox tasks still schedule as before. Someday tasks do not: they have
 no planned blocks, evening suggestions, project-task time accounting, or

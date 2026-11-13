@@ -21,6 +21,7 @@ struct TaskEditorSheet: View {
     @Environment(AppModel.self) private var model
     @State private var draft: TaskItem
     @State private var somedayIntent: Bool? = nil
+    @State private var dateEdits: Set<TaskDateField> = []
     @State private var hasDue: Bool
     @State private var dueAt: Date
     @State private var hasStart: Bool
@@ -92,7 +93,7 @@ struct TaskEditorSheet: View {
                         var task = preparedTask
                         task.completedAt = nil
                         task.completedMinutes = 0
-                        guard model.save(task, original: original, somedayIntent: somedayIntent, undoLabel: "Reopened \(AppModel.quoted(task.title))") else {
+                        guard model.save(task, original: original, somedayIntent: somedayIntent, dateEdits: dateEdits, undoLabel: "Reopened \(AppModel.quoted(task.title))") else {
                             saveError = model.statusMessage ?? "The task could not be reopened."
                             return
                         }
@@ -116,12 +117,12 @@ struct TaskEditorSheet: View {
                     .lineLimit(3...8)
                 }
                 Section("Dates") {
-                    MacDateField("Start", date: dateSelection($startAt), isOn: dateEnabled($hasStart), hasTime: startHasTime,
+                    MacDateField("Start", date: dateSelection($startAt, field: .start), isOn: dateEnabled($hasStart, field: .start), hasTime: startHasTime,
                                  key: TaskEditorKey.start.keycap, isPresented: showing(.start), identifier: "task-start",
                                  onDismiss: leaveField, dayOnly: { TaskDay.notBefore(on: $0, calendar: model.calendar) })
                     LabeledContent {
                         HStack {
-                            MacDateField("Due", date: dateSelection($dueAt), isOn: dateEnabled($hasDue), hasTime: dueHasTime,
+                            MacDateField("Due", date: dateSelection($dueAt, field: .due), isOn: dateEnabled($hasDue, field: .due), hasTime: dueHasTime,
                                          isPresented: showing(.due), identifier: "task-due", showsLabel: false,
                                          onDismiss: leaveField, dayOnly: { TaskDay.due(on: $0, calendar: model.calendar) })
                             VStack(alignment: .leading, spacing: 2) {
@@ -187,7 +188,7 @@ struct TaskEditorSheet: View {
                                    key: TaskEditorKey.attention.keycap, isPresented: showing(.attention),
                                    identifier: "task-attention", onDismiss: leaveField)
                     .help("Work that can run in parallel shares an hour with up to two other such tasks.")
-                    MacDateField("Pinned start", date: dateSelection($pinnedStart), isOn: dateEnabled($hasPinnedStart), hasTime: .constant(true),
+                    MacDateField("Pinned start", date: dateSelection($pinnedStart, field: .pin), isOn: dateEnabled($hasPinnedStart, field: .pin), hasTime: .constant(true),
                                  key: TaskEditorKey.pinnedStart.keycap, isPresented: showing(.pinnedStart),
                                  identifier: "task-pinned-start", onDismiss: leaveField, requiresTime: true)
                 }
@@ -319,7 +320,11 @@ struct TaskEditorSheet: View {
     /// when either date is switched on; a due date typed in earlier than the start is left alone.
     private func keepDueAfterStart() {
         guard hasStart, hasDue else { return }
-        dueAt = TaskDay.due(dueAt, notBefore: startAt, calendar: model.calendar)
+        let adjusted = TaskDay.due(dueAt, notBefore: startAt, calendar: model.calendar)
+        if adjusted != dueAt {
+            dateEdits.insert(.due)
+        }
+        dueAt = adjusted
     }
 
     private var notes: Binding<String> {
@@ -342,6 +347,7 @@ struct TaskEditorSheet: View {
         Binding(
             get: { draft.deadlineType == .hard ? .hard : .soft },
             set: {
+                dateEdits.insert(.due)
                 somedayIntent = false
                 draft.someday = false
                 draft.deadlineType = $0
@@ -354,6 +360,7 @@ struct TaskEditorSheet: View {
         Binding(
             get: { dueTimeChoice ?? TaskDay.dueHasTime(dueAt, calendar: model.calendar) },
             set: { on in
+                dateEdits.insert(.due)
                 somedayIntent = false
                 draft.someday = false
                 dueTimeChoice = on
@@ -367,6 +374,7 @@ struct TaskEditorSheet: View {
         Binding(
             get: { startTimeChoice ?? TaskDay.notBeforeHasTime(startAt, calendar: model.calendar) },
             set: { on in
+                dateEdits.insert(.start)
                 somedayIntent = false
                 draft.someday = false
                 startTimeChoice = on
@@ -419,6 +427,8 @@ struct TaskEditorSheet: View {
         if let local = model.editorQuickAddDraft {
             draft = local.applyingExplicitFields(to: draft, categoryId: model.editorQuickAddCategoryId)
         }
+        somedayIntent = nil
+        dateEdits = []
         hasDue = draft.dueAt != nil
         dueAt = draft.dueAt ?? dueAt
         hasStart = draft.startAt != nil
@@ -438,6 +448,7 @@ struct TaskEditorSheet: View {
                 somedayIntent = on
                 draft.someday = on
                 if on {
+                    dateEdits.formUnion([.due, .pin])
                     hasDue = false
                     hasPinnedStart = false
                     draft.deadlineType = .none
@@ -445,16 +456,18 @@ struct TaskEditorSheet: View {
             })
     }
 
-    private func dateSelection(_ date: Binding<Date>) -> Binding<Date> {
+    private func dateSelection(_ date: Binding<Date>, field: TaskDateField) -> Binding<Date> {
         Binding(get: { date.wrappedValue }, set: {
+            dateEdits.insert(field)
             somedayIntent = false
             draft.someday = false
             date.wrappedValue = $0
         })
     }
 
-    private func dateEnabled(_ enabled: Binding<Bool>) -> Binding<Bool> {
+    private func dateEnabled(_ enabled: Binding<Bool>, field: TaskDateField) -> Binding<Bool> {
         Binding(get: { enabled.wrappedValue }, set: {
+            dateEdits.insert(field)
             somedayIntent = false
             draft.someday = false
             enabled.wrappedValue = $0
@@ -466,7 +479,7 @@ struct TaskEditorSheet: View {
         let due: Date? = hasDue ? dueAt : nil
         let start: Date? = hasStart ? startAt : nil
         let pinned: Date? = hasPinnedStart ? pinnedStart : nil
-        return somedayIntent != nil || draft != original || due != original.dueAt || start != original.startAt
+        return somedayIntent != nil || !dateEdits.isEmpty || draft != original || due != original.dueAt || start != original.startAt
             || pinned != original.pinnedStart || editedSource != original.source
     }
 
@@ -508,7 +521,7 @@ struct TaskEditorSheet: View {
                 task.title = original.title
             }
         }
-        guard model.complete(task, savingEdits: hasEdits, original: original, somedayIntent: somedayIntent) else {
+        guard model.complete(task, savingEdits: hasEdits, original: original, somedayIntent: somedayIntent, dateEdits: dateEdits) else {
             saveError = model.statusMessage ?? "This task is no longer open. Nothing was saved."
             return
         }
@@ -536,7 +549,7 @@ struct TaskEditorSheet: View {
         }
         let task = preparedTask
         let label = isNew ? "Added \(AppModel.quoted(task.title))" : "Edited \(AppModel.quoted(task.title))"
-        guard model.save(task, original: isNew ? nil : original, somedayIntent: somedayIntent, undoLabel: label) else {
+        guard model.save(task, original: isNew ? nil : original, somedayIntent: somedayIntent, dateEdits: dateEdits, undoLabel: label) else {
             saveError = model.statusMessage ?? "The task could not be saved."
             return
         }
