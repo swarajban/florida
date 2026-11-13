@@ -50,13 +50,17 @@ struct WidgetIntegrityTests {
         let before = instant("2026-11-02T07:50:00Z")
         let snapshot = WidgetTaskTimeline(tasks: [due], categories: [], placements: [:], calendar: calendar)
         #expect(try #require(snapshot.rows(limit: 5, at: before).first).late == false)
+        #expect(!TaskTiming(task: due, now: due.dueAt!).isOverdue)
         #expect(try #require(snapshot.rows(limit: 5, at: due.dueAt!).first).late)
         due.deadlineType = .none
         #expect(!WidgetTask(task: due, placements: [], category: nil, at: instant("2027-01-01T00:00:00Z")).late)
         let placement = Placement(id: "piece", taskId: due.id, startAt: before,
                                   endAt: instant("2026-11-02T08:00:00Z"), pinned: false, computedAt: before)
+        #expect(!WidgetTask(task: due, placements: [placement], category: nil, at: before).late)
         due.deadlineType = .hard
         #expect(WidgetTask(task: due, placements: [placement], category: nil, at: before).late)
+        due.completedAt = before
+        #expect(!WidgetTask(task: due, placements: [placement], category: nil, at: due.dueAt!).late)
     }
 
     @Test func timelineIncludesDueTransitionsAndSettingsZoneMidnight() {

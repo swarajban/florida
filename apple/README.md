@@ -784,8 +784,12 @@ use that mode, so a schema without its first successful sync is unavailable,
 not an empty agenda. The share extension can use `.readWrite` and
 `requireSync: false` to capture offline into an already initialized schema even
 before its first server sync. Keep that connection only for the capture. A
-normal `saveTask` writes the task and pending write atomically; the extension
-must not split those operations or send a network request. Concurrent writers
+capture calls `saveTask(draft, original: nil)`, which returns a `TaskMutation`
+and writes the task and pending write atomically. Use a fresh task ID and retain
+the returned `after` row rather than assuming the draft's destination survived
+validation. Existing-task editing passes its editor-open `original` snapshot;
+the extension must not use the legacy snapshot-only overload for edits, split
+the row/outbox writes, or send a network request. Concurrent writers
 serialize through SQLite with a five-second writer busy timeout. GRDB's pool
 readers retain their own ten-second busy timeout. Surface a bounded busy error
 as retryable; do not spin, silently discard the capture, or run migrations.

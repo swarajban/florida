@@ -60,7 +60,7 @@ import Darwin
         try host.apply(SyncResponse(cursor: "ready"))
         let widget = try widgetOpen(file)
         #expect(try widget.cursor() == "ready")
-        #expect(throws: (any Error).self) { try widget.saveTask(Fixtures.task(id: "forbidden")) }
+        #expect(throws: (any Error).self) { try widget.saveTask(Fixtures.task(id: "forbidden"), original: nil) }
         #expect(try host.openTasks().isEmpty)
         #expect(try widget.writer.read { try Int.fetchOne($0, sql: "PRAGMA busy_timeout") } == 5_000)
     }
@@ -83,7 +83,7 @@ import Darwin
                 }
             }
         }
-        try host.saveTask(Fixtures.task(id: "after-lock"))
+        try host.saveTask(Fixtures.task(id: "after-lock"), original: nil)
         for try await _ in release { }
         #expect(try host.task(id: "after-lock") != nil)
         #expect(try await host.writer.writeWithoutTransaction { try Int.fetchOne($0, sql: "PRAGMA busy_timeout") } == 5_000)
@@ -94,14 +94,14 @@ import Darwin
         defer { try? FileManager.default.removeItem(atPath: URL(fileURLWithPath: file).deletingLastPathComponent().path) }
         let host = try AppDatabase(path: file)
         let other = try AppDatabase(path: file)
-        await confirmation("host observes another connection's committed row") { received in
+        try await confirmation("host observes another connection's committed row") { received in
             let token = ValueObservation.tracking { try TaskItem.fetchCount($0) }
                 .start(in: host.writer, scheduling: .async(onQueue: .global()), onError: { _ in }, onChange: { count in
                     if count == 1 { received() }
                 })
-            try? await Task.sleep(for: .milliseconds(100))
-            try? other.saveTask(Fixtures.task(id: "external"))
-            try? await Task.sleep(for: .milliseconds(400))
+            try await Task.sleep(for: .milliseconds(100))
+            try other.saveTask(Fixtures.task(id: "external"), original: nil)
+            try await Task.sleep(for: .milliseconds(400))
             withExtendedLifetime(token) {}
         }
     }
@@ -149,7 +149,9 @@ import Darwin
             for index in 0..<20 {
                 group.addTask {
                     let writer = index.isMultiple(of: 2) ? host : other
-                    try writer.saveTask(Fixtures.task(id: "concurrent-\(index)"))
+                    let mutation = try writer.saveTask(Fixtures.task(id: "concurrent-\(index)"), original: nil)
+                    #expect(mutation.before == nil)
+                    #expect(mutation.after.id == "concurrent-\(index)")
                 }
             }
             try await group.waitForAll()
@@ -222,7 +224,7 @@ import Darwin
         let token = NotificationCenter.default.addObserver(forName: Notification.Name(name), object: nil, queue: nil) { _ in counter.increment() }
         defer { NotificationCenter.default.removeObserver(token) }
         #endif
-        try other.saveTask(Fixtures.task(id: "committed"))
+        try other.saveTask(Fixtures.task(id: "committed"), original: nil)
         try await Task.sleep(for: .milliseconds(200))
         #expect(counter.value == 1)
 
@@ -245,7 +247,7 @@ import Darwin
     @Test func externalWriterProcessFixture() throws {
         guard let file = ProcessInfo.processInfo.environment["FLORIDA_TEST_SHARED_STORE"] else { return }
         let writer = try AppDatabase.openExisting(path: file, access: .readWrite, requireSync: false)
-        try writer.saveTask(Fixtures.task(id: "separate-process"))
+        try writer.saveTask(Fixtures.task(id: "separate-process"), original: nil)
     }
 
     @Test func activeRefreshObservesAnActualSecondProcess() async throws {

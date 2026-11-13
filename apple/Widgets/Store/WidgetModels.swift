@@ -85,8 +85,9 @@ struct WidgetTask: Hashable, Sendable, Identifiable {
         priority = task.priority
         deadlineType = task.deadlineType
         dueAt = task.dueAt
-        if task.deadlineType != .none, let dueAt = task.dueAt {
-            late = dueAt <= date || placements.contains { $0.endAt > dueAt }
+        if task.isOpen, task.deadlineType != .none, let dueAt = task.dueAt {
+            let timing = TaskTiming(task: task, placements: placements, now: date)
+            late = timing.isOverdue || timing.lateEnd != nil || dueAt == date
         } else {
             late = false
         }
