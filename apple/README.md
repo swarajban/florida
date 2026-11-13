@@ -378,7 +378,9 @@ text, ordinary keys, arrow keys and repeated spaces stay with the text field;
 store updates and reattaching the sheet's keyboard monitor do not reset its caret.
 
 Task, event and project editors save only fields changed since opening, against the
-current local row. A deletion or completion elsewhere is refused in the editor;
+current local row. Whitespace cleaning and defaults apply only to edited or new
+inputs, so untouched imported values are preserved. A deletion or completion elsewhere
+is refused in the editor;
 deleted task destinations fall back to Inbox/no project. Completed tasks have a
 Reopen action. New repeat rules follow subsequent Due/Start changes until Starts
 is explicitly edited. Reducing a task's duration to or below work already logged completes it.

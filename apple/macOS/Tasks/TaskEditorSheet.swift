@@ -355,7 +355,10 @@ struct TaskEditorSheet: View {
     }
 
     private var editedSource: TaskSource? {
-        TaskSource.from(url: sourceURL, title: sourceTitle)
+        if !isNew, sourceURL == (original.source?.url ?? ""), sourceTitle == (original.source?.title ?? "") {
+            return original.source
+        }
+        return TaskSource.from(url: sourceURL, title: sourceTitle)
     }
 
     private var sourceValidationMessage: String? {
@@ -406,15 +409,21 @@ struct TaskEditorSheet: View {
     private var preparedTask: TaskItem {
         var task = draft
         task.source = editedSource
-        task.title = task.title.trimmingCharacters(in: .whitespaces)
-        task.durationMinutes = max(1, task.durationMinutes)
+        if isNew || task.title != original.title {
+            task.title = task.title.trimmingCharacters(in: .whitespaces)
+        }
+        if isNew || task.durationMinutes != original.durationMinutes {
+            task.durationMinutes = max(1, task.durationMinutes)
+        }
         task.dueAt = hasDue ? dueAt : nil
         task.startAt = hasStart ? startAt : nil
         task.pinnedStart = hasPinnedStart ? pinnedStart : nil
-        if task.dueAt == nil {
-            task.deadlineType = .none
-        } else if task.deadlineType == .none {
-            task.deadlineType = .soft
+        if isNew || task.dueAt != original.dueAt || task.deadlineType != original.deadlineType {
+            if task.dueAt == nil {
+                task.deadlineType = .none
+            } else if task.deadlineType == .none {
+                task.deadlineType = .soft
+            }
         }
         if original.recurrence == nil && task.recurrence != nil {
             task.prepareToEnableRecurrence()

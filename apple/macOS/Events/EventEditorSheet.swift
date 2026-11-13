@@ -257,9 +257,15 @@ struct EventEditorSheet: View {
     private func save() {
         guard canSave else { return }
         var event = draft
-        event.summary = Self.cleaned(draft.summary)
-        event.location = Self.cleaned(draft.location)
-        event.description = Self.cleaned(draft.description)
+        if isNew || draft.summary != original.summary {
+            event.summary = Self.cleaned(draft.summary)
+        }
+        if isNew || draft.location != original.location {
+            event.location = Self.cleaned(draft.location)
+        }
+        if isNew || draft.description != original.description {
+            event.description = Self.cleaned(draft.description)
+        }
         event.allDay = draft.allDay
         event.startAt = draft.startAt
         event.endAt = draft.endAt

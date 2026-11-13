@@ -20,9 +20,24 @@ def source(path):
 
 
 def method(text, name):
-    start = text.index(f'    func {name}(')
+    start = text.index(f'func {name}(')
+    start = text.rfind('\n', 0, start) + 1
     end = text.index('\n    }', start) + len('\n    }')
     return text[start:end]
+
+
+def computed(text, name):
+    start = text.index(f'    private var {name}:')
+    return text[start:text.index('\n    }', start) + len('\n    }')]
+
+
+def event_editor(path, name):
+    text = source(path)
+    start = text.index('        var event = draft', text.index('    private func save()'))
+    preparation = text[start:text.index('        guard model.save(event:', start)]
+    return ('struct ' + name + ' {\n    var draft: CalendarEvent\n    var original: CalendarEvent\n'
+            + '    var isNew = false\n    func prepared() -> CalendarEvent {\n'
+            + preparation + '        return event\n    }\n' + method(text, 'cleaned') + '\n}\n')
 
 
 undo = source('apple/macOS/App/AppModel+Undo.swift')
@@ -35,6 +50,7 @@ methods += '\n' + method(source('apple/macOS/App/AppModel+Events.swift'), 'save'
 methods += '\n' + method(source('apple/macOS/App/AppModel+Events.swift'), 'move')
 methods += '\n' + method(source('apple/macOS/App/AppModel+Events.swift'), 'moveSeries')
 methods += '\n' + method(source('apple/macOS/App/AppModel+Plan.swift'), 'save')
+methods += '\n' + method(source('apple/macOS/App/AppModel+Plan.swift'), 'trimmedOrNil')
 methods += '\n' + '\n'.join(method(source('apple/macOS/App/AppModel+Events.swift'), name)
                              for name in ['setBlocksDay', 'delete', 'storedVersion'])
 methods += '\n' + method(source('apple/macOS/App/AppModel+Plan.swift'), 'delete')
@@ -45,15 +61,16 @@ if 'var liveSelectedTask:' in selection:
     methods += '\n' + selection[start:selection.index('\n    }', start) + len('\n    }')]
 
 editor = source('apple/macOS/Tasks/TaskEditorSheet.swift')
-start = editor.index('    private var preparedTask:')
-prepared = editor[start:editor.index('\n    }', start) + len('\n    }')]
+prepared = computed(editor, 'preparedTask')
 recurrence = source('apple/Design/TaskRecurrenceSection.swift')
 anchor_update = method(recurrence.replace('private func ', 'func '), 'updateAnchor') if 'func updateAnchor(' in recurrence else ''
 editor_harness = r'''
 struct TaskEditorSheet {
     var draft: TaskItem
     var original: TaskItem
-    var editedSource: TaskSource? { draft.source }
+    var isNew = false
+    var sourceURL = ""
+    var sourceTitle = ""
     var hasDue = true
     var dueAt: Date
     var hasStart = false
@@ -61,13 +78,24 @@ struct TaskEditorSheet {
     var hasPinnedStart = false
     var pinnedStart: Date
     func saved() -> TaskItem { preparedTask }
-'''+ prepared + '\n}\n' + r'''
+'''+ computed(editor, 'editedSource') + '\n' + prepared + '\n}\n' + r'''
 final class TaskRecurrenceSection {
     var recurrence: TaskRecurrence?
     var wasRecurring = false
     var startDateEdited = false
     func changedAnchor(_ date: Date) {
 ''' + ('        updateAnchor(date)' if anchor_update else '') + '\n    }\n' + anchor_update + '\n}\n'
+ios_editor = source('apple/iOS/Tasks/TaskEditorView.swift')
+completion_start = ios_editor.index('        var task = preparedTask', ios_editor.index('    private func completeFromEditor()'))
+completion_preparation = ios_editor[completion_start:ios_editor.index('        guard model.complete(', completion_start)]
+editor_harness += ('struct TaskEditorView {\n    var draft: TaskItem\n    var original: TaskItem\n'
+                   + '    var isNew = false\n    var sourceURL = ""\n    var sourceTitle = ""\n'
+                   + '    func saved() -> TaskItem { preparedTask }\n'
+                   + '    func completed() -> TaskItem {\n' + completion_preparation + '        return task\n    }\n'
+                   + computed(ios_editor, 'trimmedTitle') + '\n' + computed(ios_editor, 'validatedSource')
+                   + '\n' + computed(ios_editor, 'preparedTask') + '\n}\n')
+editor_harness += event_editor('apple/macOS/Events/EventEditorSheet.swift', 'EventEditorSheet')
+editor_harness += event_editor('apple/iOS/Events/EventEditorView.swift', 'EventEditorView')
 
 harness = r'''
 import FloridaKit
@@ -84,6 +112,7 @@ final class AppDatabase {
     var beforeComplete: (() -> Void)?
     var beforeSave: (() -> Void)?
     var events: [String: CalendarEvent] = [:]
+    var projectDraft: Project?
     var eventInterleave: (() -> Void)?
     func task(id: String) throws -> TaskItem? { tasks[id] }
     func saveTask(_ task: TaskItem) throws {
@@ -151,10 +180,12 @@ final class AppDatabase {
         if event.startAt != original.startAt { live.startAt = event.startAt }
         if event.endAt != original.endAt { live.endAt = event.endAt }
         if event.summary != original.summary { live.summary = event.summary }
+        if event.location != original.location { live.location = event.location }
+        if event.description != original.description { live.description = event.description }
         events[event.id] = live
     }
-    func saveProject(_ project: Project) throws {}
-    func saveProject(_ project: Project, original: Project?) throws {}
+    func saveProject(_ project: Project) throws { projectDraft = project }
+    func saveProject(_ project: Project, original: Project?) throws { projectDraft = project }
     func saveCategory(_ category: TaskCategory) throws {}
     func deleteCategory(id: String) throws {}
     func deleteProject(id: String) throws {}
@@ -212,7 +243,6 @@ final class AppModel {
     func requireEditable(_ event: CalendarEvent) -> Bool { true }
     func didRemove(_ event: CalendarEvent, selecting next: Item?) {}
     static func title(of event: CalendarEvent) -> String { event.summary ?? "Event" }
-    static func trimmedOrNil(_ text: String?) -> String? { text }
     func take(_ pick: Int) {}
     func neighbor(of item: Item) -> Item? { nil }
     func item(for task: TaskItem) -> Item { .task(task.id) }
@@ -392,6 +422,109 @@ section.recurrence!.startDate = section.recurrence!.dateString(for: explicitDate
 section.changedAnchor(newDate)
 editor.draft.recurrence = section.recurrence
 check(editor.saved().dueAt == explicitDate, "explicit recurrence Starts remains authoritative")
+var rawProject = project
+rawProject.name = "Original project "
+rawProject.notes = "Original notes "
+rawProject.nextStep = "Original step "
+rawProject.weeklyMinutes = 0
+var projectDraft = rawProject
+projectDraft.parallel = true
+let projectSave = AppModel()
+_ = projectSave.save(project: projectDraft, original: rawProject)
+let submittedProject = projectSave.database!.projectDraft!
+check(submittedProject.name == rawProject.name && submittedProject.notes == rawProject.notes
+      && submittedProject.nextStep == rawProject.nextStep,
+      "Mac project caller preserves untouched raw text before store diff")
+check(submittedProject.weeklyMinutes == 0, "Mac project caller preserves untouched zero weekly minutes")
+projectDraft.name = " Changed name "
+projectDraft.notes = " \n "
+projectDraft.nextStep = " Changed step "
+_ = projectSave.save(project: projectDraft, original: rawProject)
+check(projectSave.database!.projectDraft?.name == "Changed name"
+      && projectSave.database!.projectDraft?.notes == nil
+      && projectSave.database!.projectDraft?.nextStep == "Changed step",
+      "Mac project caller still normalizes changed text and explicit clears")
+_ = projectSave.save(project: rawProject)
+check(projectSave.database!.projectDraft?.name == "Original project"
+      && projectSave.database!.projectDraft?.weeklyMinutes == nil,
+      "Mac new project caller still normalizes text and weekly minutes")
+var rawEvent = event
+rawEvent.summary = "Original summary "
+rawEvent.location = "Original room "
+rawEvent.description = "Original description "
+var liveEvent = rawEvent
+liveEvent.location = "Remote room"
+liveEvent.description = "Remote description"
+var eventDraft = rawEvent
+eventDraft.summary = " Changed summary "
+let eventPreparers: [(String, (CalendarEvent, CalendarEvent, Bool) -> CalendarEvent)] = [
+    ("Mac", { EventEditorSheet(draft: $0, original: $1, isNew: $2).prepared() }),
+    ("iPhone", { EventEditorView(draft: $0, original: $1, isNew: $2).prepared() }),
+]
+for (platform, prepare) in eventPreparers {
+    let model = AppModel()
+    model.database!.events[event.id] = liveEvent
+    _ = model.save(event: prepare(eventDraft, rawEvent, false), original: rawEvent)
+    check(model.database!.events[event.id]?.location == liveEvent.location
+          && model.database!.events[event.id]?.description == liveEvent.description,
+          "\(platform) event caller preserves remote changes to untouched whitespace-bearing fields")
+    var clear = eventDraft
+    clear.location = " \n "
+    let submitted = prepare(clear, rawEvent, false)
+    check(submitted.summary == "Changed summary" && submitted.location == nil,
+          "\(platform) event caller still normalizes changed text and explicit clears")
+    let new = prepare(rawEvent, rawEvent, true)
+    check(new.summary == "Original summary" && new.location == "Original room"
+          && new.description == "Original description",
+          "\(platform) new event caller still normalizes all text")
+}
+var rawTask = initial
+rawTask.title = "Original title "
+rawTask.source = TaskSource(url: "https://example.com/old", title: "Original source ", kind: .web)
+rawTask.dueAt = oldDate
+rawTask.deadlineType = .none
+var taskDraft = rawTask
+taskDraft.priority = .high
+let taskPreparers: [(String, (TaskItem, TaskItem, String, String, Bool) -> TaskItem)] = [
+    ("Mac", { draft, original, url, title, isNew in
+        TaskEditorSheet(draft: draft, original: original, isNew: isNew, sourceURL: url, sourceTitle: title,
+                        hasDue: draft.dueAt != nil, dueAt: draft.dueAt ?? oldDate,
+                        hasStart: draft.startAt != nil, startAt: draft.startAt ?? oldDate,
+                        hasPinnedStart: draft.pinnedStart != nil, pinnedStart: draft.pinnedStart ?? oldDate).saved()
+    }),
+    ("iPhone", { TaskEditorView(draft: $0, original: $1, isNew: $4, sourceURL: $2, sourceTitle: $3).saved() }),
+]
+for (platform, prepare) in taskPreparers {
+    let submitted = prepare(taskDraft, rawTask, rawTask.source!.url, rawTask.source!.title, false)
+    check(submitted.title == rawTask.title && submitted.source == rawTask.source,
+          "\(platform) task caller preserves untouched title and raw source metadata")
+    check(submitted.dueAt == rawTask.dueAt && submitted.deadlineType == rawTask.deadlineType,
+          "\(platform) task caller preserves untouched none-deadline with persisted due date")
+    var live = rawTask
+    live.title = "Remote title"
+    live.source = TaskSource(url: "https://example.com/remote", title: "Remote source", kind: .web)
+    live.dueAt = newDate
+    live.deadlineType = .hard
+    let database = AppDatabase()
+    database.tasks[live.id] = live
+    try database.saveTask(submitted, original: rawTask)
+    check(database.tasks[live.id]?.title == live.title && database.tasks[live.id]?.source == live.source
+          && database.tasks[live.id]?.dueAt == live.dueAt && database.tasks[live.id]?.deadlineType == live.deadlineType,
+          "\(platform) task caller does not turn normalization into remote field clobbers")
+    var changed = taskDraft
+    changed.title = " Changed title "
+    changed.deadlineType = .soft
+    let edited = prepare(changed, rawTask, "", "", false)
+    check(edited.title == "Changed title" && edited.source == nil && edited.deadlineType == .soft,
+          "\(platform) task caller still normalizes changed title and source clear")
+    let new = prepare(rawTask, rawTask, rawTask.source!.url, rawTask.source!.title, true)
+    check(new.title == "Original title" && new.source?.title == "Original source",
+          "\(platform) new task caller still normalizes title and source")
+}
+let completingDraft = TaskEditorView(draft: taskDraft, original: rawTask,
+                                     sourceURL: rawTask.source!.url, sourceTitle: rawTask.source!.title)
+check(completingDraft.completed().title == rawTask.title,
+      "iPhone editor completion preserves an untouched whitespace-bearing title")
 exit(failed == 0 ? 0 : 1)
 '''
 uses_mutations = 'AppDatabase.TaskMutation' in undo
@@ -403,6 +536,7 @@ tests = tests.replace('__INTERLEAVED_RESULT__',
                       'return AppDatabase.TaskMutation(before: before, after: interleaved.database!.tasks[initial.id]!)' if uses_mutations else '')
 
 ios_model = r'''
+struct LocalWriteError: Error { init(_ message: String) {} }
 struct Animation {
     static func easeInOut(duration: Double) -> Animation { Animation() }
 }
@@ -429,6 +563,7 @@ final class AppModel {
     func showToast(_ toast: Toast) { toasts.append(toast) }
     func storedVersion(of task: TaskItem) -> TaskItem { database!.tasks[task.id] ?? task }
     func recordGhosts(for task: TaskItem, includeUpcoming: Bool) -> [String] { [] }
+    func perform(_ change: (AppDatabase) throws -> Void) throws { try change(database!) }
     func write(_ change: (AppDatabase) throws -> Void) -> Bool {
         do { try change(database!); return true } catch { return false }
     }
@@ -489,6 +624,29 @@ for (name, action) in actions {
     check(model.database!.tasks[initial.id]?.notes == "Concurrent remote notes",
           "iPhone \(name) preserves a sync update before the write transaction")
 }
+let projectModel = AppModel()
+let rawProject = Project(id: "project", name: "Original project ", notes: "Original notes ",
+                         nextStep: "Original step ", weeklyMinutes: 0, createdAt: Date(), updatedAt: Date())
+var projectDraft = rawProject
+projectDraft.parallel = true
+try projectModel.saveProject(projectDraft, original: rawProject)
+let submitted = projectModel.database!.projectDraft!
+check(submitted.name == rawProject.name && submitted.notes == rawProject.notes
+      && submitted.nextStep == rawProject.nextStep,
+      "iPhone project caller preserves untouched raw text before store diff")
+check(submitted.weeklyMinutes == 0, "iPhone project caller preserves untouched zero weekly minutes")
+projectDraft.name = " Changed name "
+projectDraft.notes = " \n "
+projectDraft.nextStep = " Changed step "
+try projectModel.saveProject(projectDraft, original: rawProject)
+check(projectModel.database!.projectDraft?.name == "Changed name"
+      && projectModel.database!.projectDraft?.notes == nil
+      && projectModel.database!.projectDraft?.nextStep == "Changed step",
+      "iPhone project caller still normalizes changed text and explicit clears")
+try projectModel.saveProject(rawProject)
+check(projectModel.database!.projectDraft?.name == "Original project"
+      && projectModel.database!.projectDraft?.weeklyMinutes == nil,
+      "iPhone new project caller still normalizes text and weekly minutes")
 exit(failed == 0 ? 0 : 1)
 '''
 
@@ -511,6 +669,8 @@ with tempfile.TemporaryDirectory(prefix='florida-app-writes-') as directory:
                    + '\nextension AppModel {\n' + method(source('apple/iOS/App/AppModel+Actions.swift'), 'pushToTomorrow') + '\n}\n'
                    + '\nextension AppModel {\n' + method(source('apple/iOS/App/AppModel+Joy.swift'), 'pin') + '\n}\n'
                    + '\nextension AppModel {\n' + method(source('apple/iOS/App/AppModel+Categories.swift'), 'move') + '\n}\n'
+                   + '\nextension AppModel {\n' + method(source('apple/iOS/App/AppModel+Plan.swift'), 'saveProject')
+                   + '\n' + method(source('apple/iOS/App/AppModel+Plan.swift'), 'trimmedOrNil') + '\n}\n'
                    + ios_tests)
     subprocess.run([swiftc, '-I', directory, '-L', directory, '-lFloridaKit', str(ios), '-o', str(work / 'ios-tests')], check=True)
     ios_result = subprocess.run([str(work / 'ios-tests')], env={**os.environ, 'LD_LIBRARY_PATH': directory})

@@ -254,7 +254,10 @@ struct TaskEditorView: View {
     }
 
     private var validatedSource: TaskSource? {
-        TaskSource.from(url: sourceURL, title: sourceTitle)
+        if !isNew, sourceURL == (original.source?.url ?? ""), sourceTitle == (original.source?.title ?? "") {
+            return original.source
+        }
+        return TaskSource.from(url: sourceURL, title: sourceTitle)
     }
 
     private var sourceValidationMessage: String? {
@@ -396,8 +399,8 @@ struct TaskEditorView: View {
     private func completeFromEditor() {
         guard recurrenceValidationMessage == nil, sourceValidationMessage == nil else { return }
         var task = preparedTask
-        if task != original {
-            task.title = trimmedTitle.isEmpty ? original.title : trimmedTitle
+        if task.title.isEmpty {
+            task.title = original.title
         }
         guard model.complete(task, original: original) else {
             saveError = "This task could not be completed. It may have been deleted or completed elsewhere."
@@ -408,9 +411,12 @@ struct TaskEditorView: View {
 
     private var preparedTask: TaskItem {
         var task = draft
-        task.title = trimmedTitle
+        if isNew || task.title != original.title {
+            task.title = trimmedTitle
+        }
         task.source = validatedSource
-        if task.deadlineType == .none && task.recurrence == nil {
+        if isNew || task.deadlineType != original.deadlineType || task.dueAt != original.dueAt,
+           task.deadlineType == .none && task.recurrence == nil {
             task.dueAt = nil
         }
         if original.recurrence == nil && task.recurrence != nil {

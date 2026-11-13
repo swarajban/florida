@@ -46,14 +46,21 @@ extension AppModel {
     func save(project: Project, original: Project? = nil) -> Bool {
         guard let database else { return false }
         var project = project
-        project.name = project.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if original == nil || project.name != original?.name {
+            project.name = project.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         guard !project.name.isEmpty else {
             statusMessage = "Give the project a name"
             return false
         }
-        project.nextStep = Self.trimmedOrNil(project.nextStep)
-        project.notes = Self.trimmedOrNil(project.notes)
-        if let minutes = project.weeklyMinutes, minutes <= 0 {
+        if original == nil || project.nextStep != original?.nextStep {
+            project.nextStep = Self.trimmedOrNil(project.nextStep)
+        }
+        if original == nil || project.notes != original?.notes {
+            project.notes = Self.trimmedOrNil(project.notes)
+        }
+        if original == nil || project.weeklyMinutes != original?.weeklyMinutes,
+           let minutes = project.weeklyMinutes, minutes <= 0 {
             project.weeklyMinutes = nil
         }
         do {
