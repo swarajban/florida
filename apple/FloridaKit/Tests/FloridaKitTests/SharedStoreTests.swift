@@ -3,7 +3,7 @@ import GRDB
 import Testing
 @testable import FloridaKit
 #if canImport(Darwin)
-import Darwin
+import notify
 #endif
 
 @Suite struct SharedStoreTests {

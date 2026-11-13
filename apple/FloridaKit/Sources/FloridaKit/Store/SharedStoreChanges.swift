@@ -1,7 +1,7 @@
 import Foundation
 import GRDB
 #if canImport(Darwin)
-import Darwin
+import notify
 #endif
 
 final class SharedStoreChanges: @unchecked Sendable {
