@@ -18,6 +18,9 @@ private struct PlanSheets: ViewModifier {
             .sheet(item: $model.explanation) { _ in
                 ExplanationSheet()
             }
+            .sheet(isPresented: $model.isAvailabilityZoneOpen) {
+                AvailabilityZoneSheet()
+            }
     }
 }
 
@@ -165,13 +168,19 @@ struct RootView: View {
                 HStack(spacing: 0) {
                     VStack(spacing: 0) {
                         CalendarHeaderBar()
+                            .disabled(model.availabilityShare != nil)
                         Divider()
                         CalendarContainerView()
                     }
                     if model.isTasksPaneVisible {
                         Divider()
                         TaskPaneView()
+                            .disabled(model.availabilityShare != nil)
                     }
+                }
+                if model.availabilityShare != nil {
+                    Divider()
+                    AvailabilityShareBar()
                 }
                 Divider()
                 StatusBarView()

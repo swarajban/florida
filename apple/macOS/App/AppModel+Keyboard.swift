@@ -22,6 +22,14 @@ extension AppModel {
         let isCommandChord = chord.modifiers.contains(.command)
         let isEscape = chord == KeyChord("escape")
 
+        if isAvailabilityZoneOpen {
+            if isEscape { isAvailabilityZoneOpen = false }
+            return isEscape
+        }
+        if availabilityShare != nil, !isAvailabilityZoneOpen {
+            return handleAvailabilityKey(chord)
+        }
+
         if isSheetOpen {
             guard isEscape else { return false }
             cancel()

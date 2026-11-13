@@ -13,8 +13,9 @@ struct FloridaMacApp: App {
             RootView()
                 .environment(appDelegate.model)
                 .preferredColorScheme(FloridaStyle.captureColorScheme)
+                .background(MainWindowBoundsView().allowsHitTesting(false))
         }
-        .defaultSize(width: 1240, height: 820)
+        .defaultSize(width: MainWindowBoundsView.defaultContentSize.width, height: MainWindowBoundsView.defaultContentSize.height)
         .commands {
             AppCommands(model: appDelegate.model)
         }

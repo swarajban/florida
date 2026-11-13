@@ -46,6 +46,7 @@ struct DayHeaderView: View {
                 .padding(.vertical, 6)
                 .contentShape(Rectangle())
                 .onClick { isDouble in
+                    guard model.availabilityShare == nil else { return }
                     if isDouble {
                         model.goTo(day: day)
                         model.setViewMode(.day)
@@ -54,19 +55,23 @@ struct DayHeaderView: View {
                     }
                 }
                 .contextMenu {
-                    ForEach(DayKind.allCases, id: \.self) { choice in
-                        Button {
-                            model.setDay(day, kind: choice)
-                        } label: {
-                            Label(choice.label, systemImage: choice.symbolName)
+                    if model.availabilityShare == nil {
+                        ForEach(DayKind.allCases, id: \.self) { choice in
+                            Button {
+                                model.setDay(day, kind: choice)
+                            } label: {
+                                Label(choice.label, systemImage: choice.symbolName)
+                            }
+                            .disabled(choice == kind)
+                            .accessibilityIdentifier("day-header-set-\(choice.rawValue)")
                         }
-                        .disabled(choice == kind)
+                        Divider()
+                        Button("Follow the Routine") {
+                            model.clearDayOverride(on: day)
+                        }
+                        .disabled(!isOverridden)
+                        .accessibilityIdentifier("day-header-follow-routine")
                     }
-                    Divider()
-                    Button("Follow the Routine") {
-                        model.clearDayOverride(on: day)
-                    }
-                    .disabled(!isOverridden)
                 }
             }
         }
