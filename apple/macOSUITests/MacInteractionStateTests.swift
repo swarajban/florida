@@ -56,7 +56,7 @@ final class MacInteractionStateTests: XCTestCase {
     @MainActor
     func testHeldResourcePrefixDoesNotChooseALink() {
         continueAfterFailure = false
-        let app = launch("dark")
+        let app = launch("dark", extra: ["-uiInteractionManyResources", "YES"])
         defer { app.terminate() }
         openDesignReview(in: app)
         hold("1", in: app)

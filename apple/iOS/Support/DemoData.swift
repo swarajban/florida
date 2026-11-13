@@ -290,6 +290,12 @@ enum DemoData {
                 htmlLink: "https://example.com/interaction-trip", updatedAt: now,
                 autoBlocksDay: true, blockingReason: "Your trip"))
         }
+        if UserDefaults.standard.bool(forKey: "uiInteractionManyResources"),
+           let index = response.events.firstIndex(where: { $0.id == "demo-event-design" }) {
+            response.events[index].description = (1...100).map {
+                "<a href=\"https://example.com/interaction-resource/\($0)\">Resource \($0)</a>"
+            }.joined(separator: "<br>")
+        }
         return response
     }
 
