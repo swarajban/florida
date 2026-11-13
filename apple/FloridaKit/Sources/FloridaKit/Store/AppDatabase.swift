@@ -4,22 +4,74 @@ import GRDB
 /// The local SQLite store shared by the apps and the widgets. Holds a mirror of the server's
 /// tables plus the queue of local writes waiting to be pushed.
 public final class AppDatabase: Sendable {
-    /// `DatabasePool` for on-disk stores, `DatabaseQueue` for in-memory ones.
     public let writer: any DatabaseWriter
+    private let sharedChanges: SharedStoreChanges?
 
     /// Opens (or creates) the store at `path`, creating parent directories, in WAL mode, migrated.
     public init(path: String) throws {
         let directory = URL(fileURLWithPath: path).deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Self.protectSharedFiles(at: path)
         // DatabasePool switches the file to WAL mode when it opens it.
-        let pool = try DatabasePool(path: path)
+        let pool = try DatabasePool(path: path, configuration: Self.sharedConfiguration())
         try Self.migrator.migrate(pool)
+        try Self.protectSharedFiles(at: path)
         writer = pool
+        sharedChanges = SharedStoreChanges(writer: pool, path: path)
     }
 
     init(writer: any DatabaseWriter) throws {
         try Self.migrator.migrate(writer)
         self.writer = writer
+        sharedChanges = nil
+    }
+
+    private init(existingWriter: any DatabaseWriter, path: String, readOnly: Bool) {
+        writer = existingWriter
+        sharedChanges = readOnly ? nil : SharedStoreChanges(writer: existingWriter, path: path)
+    }
+
+    public enum ExistingStoreAccess: Sendable {
+        case readOnly, readWrite
+    }
+
+    public enum SharedStoreError: LocalizedError {
+        case missing, incompatibleSchema, notSynced
+
+        public var errorDescription: String? {
+            switch self {
+            case .missing: "No shared database. Open Florida first."
+            case .incompatibleSchema: "Open Florida to update the shared database."
+            case .notSynced: "Open Florida to sync."
+            }
+        }
+    }
+
+    public static func openExisting(
+        path: String, access: ExistingStoreAccess = .readOnly, requireSync: Bool = true
+    ) throws -> AppDatabase {
+        guard FileManager.default.fileExists(atPath: path) else { throw SharedStoreError.missing }
+        let readOnly = access == .readOnly
+        var configuration = sharedConfiguration()
+        configuration.readonly = readOnly
+        let queue = try DatabaseQueue(path: path, configuration: configuration)
+        let validate: (Database) throws -> Void = { db in
+            guard try migrator.appliedIdentifiers(db) == Set(migrator.migrations) else {
+                throw SharedStoreError.incompatibleSchema
+            }
+            if requireSync, try cursor(db) == nil { throw SharedStoreError.notSynced }
+        }
+        if readOnly {
+            try queue.read(validate)
+        } else {
+            try queue.write(validate)
+            try protectSharedFiles(at: path)
+        }
+        return AppDatabase(existingWriter: queue, path: path, readOnly: readOnly)
+    }
+
+    public func refreshExternalChanges() {
+        sharedChanges?.refresh()
     }
 
     /// A fresh, migrated, private in-memory store; for tests and previews.

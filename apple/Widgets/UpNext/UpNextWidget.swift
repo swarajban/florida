@@ -30,6 +30,7 @@ struct UpNextWidgetView: View {
         }
         .widgetURL(WidgetLinks.agenda)
         .containerBackground(.fill.tertiary, for: .widget)
+        .privacySensitive()
     }
 
     private var accessory: some View {

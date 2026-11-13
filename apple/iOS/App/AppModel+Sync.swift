@@ -17,6 +17,7 @@ extension AppModel {
         stopMidnightWatcher()
         sceneIsActive = phase == .active
         guard sceneIsActive else { return }
+        database?.refreshExternalChanges()
         anchorToTodayIfDayChanged()
         startMidnightWatcher()
         requestSync()

@@ -53,22 +53,6 @@ enum WidgetSettings {
     }
 }
 
-enum WidgetFormatting {
-    /// "Today", "Tomorrow", a weekday name within the coming week, otherwise "Nov 20".
-    static func dayLabel(_ date: Date, now: Date, calendar: Calendar) -> String {
-        let day = calendar.startOfDay(for: date)
-        let today = calendar.startOfDay(for: now)
-        let distance = calendar.dateComponents([.day], from: today, to: day).day ?? 0
-        switch distance {
-        case 0: return "Today"
-        case 1: return "Tomorrow"
-        case -1: return "Yesterday"
-        case 2...6: return date.formatted(.dateTime.weekday(.abbreviated))
-        default: return date.formatted(.dateTime.month(.abbreviated).day())
-        }
-    }
-}
-
 /// What a widget shows when there is nothing to list. When the store could not be read it also
 /// names the reason in small print, so "no data" and "cannot read" look different on the Home Screen.
 struct WidgetPlaceholder: View {

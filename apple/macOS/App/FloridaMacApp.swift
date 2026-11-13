@@ -51,6 +51,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.start()
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        model.database?.refreshExternalChanges()
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
     }
