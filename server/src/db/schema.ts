@@ -139,6 +139,7 @@ export const tasks = pgTable(
     priority: text('priority').$type<Priority>().notNull(),
     deadlineType: text('deadline_type').$type<DeadlineType>().notNull(),
     dueAt: ts('due_at'),
+    someday: boolean('someday').notNull().default(false),
     startAt: ts('start_at'),
     scheduleId: text('schedule_id').references(() => schedules.id),
     context: text('context').$type<TaskContext>().notNull().default('computer'),

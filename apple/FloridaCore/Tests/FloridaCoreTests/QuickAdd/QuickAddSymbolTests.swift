@@ -46,23 +46,24 @@ import Testing
         }
     }
 
-    @Test func noDueIsAnExplicitFirstWinsDecision() {
+    @Test func somedayOverridesEarlierDatesAndLaterDatesResumeScheduling() {
         let draft = parse("Work ^NONE #work")
-        #expect(draft.dueDateNotNeeded)
+        #expect(draft.someday)
         #expect(draft.title == "Work")
         #expect(draft.dueAt == nil)
         #expect(draft.deadlineType == nil)
-        #expect(parse("Work ^ none").dueDateNotNeeded)
-        #expect(!QuickAddDraft().dueDateNotNeeded)
+        #expect(parse("Work ^ none").someday)
+        #expect(!QuickAddDraft().someday)
         #expect(QuickAddDraft().recurrence == nil)
-        #expect(parse("Work ^none ^fri").title == "Work ^fri")
-        #expect(parse("Work ^none by fri").title == "Work by fri")
-        #expect(parse("Work ^none tomorrow").title == "Work tomorrow")
+        #expect(parse("Work ^none ^fri").title == "Work")
+        #expect(parse("Work ^none by fri").title == "Work")
+        #expect(parse("Work ^none tomorrow").title == "Work")
         #expect(parse("Work ^none ^none").title == "Work ^none")
-        #expect(!parse("Work ^fri ^none").dueDateNotNeeded)
-        #expect(parse("Work ^fri ^none").title == "Work ^none")
-        #expect(!parse("Work due fri ^none").dueDateNotNeeded)
+        #expect(parse("Work ^fri ^none").someday)
+        #expect(parse("Work ^fri ^none").title == "Work")
+        #expect(parse("Work due fri ^none").someday)
         #expect(parse("Work ^none at 3pm").pinnedStart != nil)
+        #expect(!parse("Work ^none at 3pm").someday)
     }
 
     @Test func numericPrioritiesAndNames() {
@@ -161,7 +162,7 @@ import Testing
         #expect(draft.startAt == PacificTestCalendar.date(2026, 11, 13))
         #expect(draft.recurrence?.weekdays == [1, 3])
         #expect(draft.recurrence?.startDate == "2026-11-13")
-        #expect(!draft.dueDateNotNeeded)
+        #expect(!draft.someday)
         #expect(draft.notes == "https://example.com/#x ^none !1 *daily =2h")
         #expect(parse("Write #work #q4").title == "Write #q4")
         #expect(parse("Write //").title == "Write")
@@ -172,7 +173,7 @@ import Testing
         for text in ["Email person@home.com", "Read C# and a^fri b!1 c*weekly d=45m e~tomorrow f//notes", "Read #work#q4", "Read @office.example", "Read a~", "Read path/to/", "~literal"] {
             #expect(parse(text) == QuickAddDraft(title: text))
         }
-        for url in ["https://example.com/^fri?x=!1&y=*weekly#work", "https://example.com//notes", "https://example.com/", "https://example.com/?q=1;"] {
+        for url in ["https://example.com/^fri?x=!1&y=*weekly#work", "https://example.com//notes", "https://example.com/", "https://example.com/?q=1;", "mailto:jane@example.com?subject=Plan;", "mailto:jane@example.com?subject=Plan."] {
             #expect(parse("Read " + url) == QuickAddDraft(title: "Read", source: TaskSource.from(url: url)))
             let sourceURL = "https://source.example/task"
             #expect(parse(sourceURL + " Read " + url) == QuickAddDraft(title: "Read " + url, source: TaskSource.from(url: sourceURL)))
@@ -186,7 +187,7 @@ import Testing
         #expect(draft.title == "Review")
         #expect(draft.categoryHint == "work")
         #expect(draft.dueAt != nil)
-        #expect(!draft.dueDateNotNeeded)
+        #expect(!draft.someday)
         #expect(draft.priority == .high)
         #expect(draft.recurrence?.frequency == .week)
         #expect(draft.durationMinutes == 45)
@@ -201,7 +202,7 @@ import Testing
             #expect(draft.categoryHint == "work")
             #expect(draft.notes == "Check the draft ^none !1 *weekly =2h ~tomorrow #personal @home")
             #expect(draft.dueAt == nil)
-            #expect(!draft.dueDateNotNeeded)
+            #expect(!draft.someday)
             #expect(draft.priority == nil)
             #expect(draft.recurrence == nil)
             #expect(draft.durationMinutes == nil)

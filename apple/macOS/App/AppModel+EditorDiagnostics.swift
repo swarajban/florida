@@ -68,10 +68,18 @@ extension AppModel {
     func applyEditorTestSyncIfNeeded() {
         let dateSync = UserDefaults.standard.bool(forKey: "uiTaskDateSyncDuringTyping")
         guard editorDiagnostics != nil, editorDiagnostics?.syncApplied == false,
-              UserDefaults.standard.bool(forKey: "uiEditorSyncDuringTyping") || dateSync, let database
+              UserDefaults.standard.bool(forKey: "uiEditorSyncDuringTyping")
+                || dateSync
+                || UserDefaults.standard.bool(forKey: "uiEditorDeleteDuringTyping")
+                || UserDefaults.standard.bool(forKey: "uiEditorCompleteDuringTyping"), let database
         else { return }
         do {
             guard var task = try database.task(id: dateSync ? "date-updated" : "demo-task-vpn") else { return }
+            if UserDefaults.standard.bool(forKey: "uiEditorAcknowledgePending") {
+                for write in try database.pendingWrites() where write.entity == .task && write.entityId == task.id {
+                    if let seq = write.seq { try database.removePendingWrite(seq: seq) }
+                }
+            }
             let now = Date()
             if dateSync {
                 task.dueAt = ISO8601DateFormatter().date(from: "2026-11-18T07:59:59Z")
@@ -79,6 +87,13 @@ extension AppModel {
                 task.title = "Remote sync VPN title"
             }
             task.updatedAt = now
+            if UserDefaults.standard.bool(forKey: "uiEditorDeleteDuringTyping") {
+                task.deletedAt = now
+            }
+            if UserDefaults.standard.bool(forKey: "uiEditorCompleteDuringTyping") {
+                task.completedAt = now
+                task.completedMinutes = task.durationMinutes
+            }
             var response = DemoData.syncResponse(now: now, calendar: calendar)
             response.cursor = ISO8601DateFormatter().string(from: now.addingTimeInterval(1))
             response.tasks = [task]

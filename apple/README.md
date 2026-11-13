@@ -138,19 +138,23 @@ release, even if dispatched on main.
 
 The on-demand run uses the same cached build recipe as the compile gate, builds both
 schemes once and runs Darwin package tests, then uploads the compiled products.
-Five independent jobs use `test-without-building`: the full Mac suite, iPhone
-capture/plan/resource tests, event capture/calendar tests, and the remaining
-iPhone tests (including the drag matrix) plus widget tests, and a focused
+Eight independent jobs use `test-without-building`: the Mac suite plus a separate
+Mac Inbox/Someday shard, iPhone capture/plan/resource and task-grouping tests, event capture/calendar
+tests, a separate Smart Add shard, the remaining iPhone tests (including the drag matrix) plus unit/widget tests,
+a separate iPhone Inbox/Someday shard, and a focused
 capture-layout check on an iPhone SE (3rd generation, 375 × 667 points). The event shard
 selects the whole `EventQuickAddTests` class
 and three calendar/recurrence smoke tests. The remaining shard excludes exactly
-the two explicit selections, so each existing test belongs to one shard and new tests
+the explicit capture, event, Smart Add and triage selections. The Mac remainder excludes its
+triage selection too, so each existing test belongs to one shard and new tests
 still join the gate. Each shard is serial to avoid desktop and simulator
 interaction races; failure in one does not cancel the others.
 
-The three iPhone partitions target roughly 20–25 minutes each with current test
-timings, including cold simulator startup; the resource test moves out of the
-remaining shard to make room for the drag matrix. On-demand jobs have a 45-minute hard
+The Smart Add shard keeps its seven methods out of the remainder, which exceeded
+the 45-minute execution limit in the first Someday gate and could not finish uploading
+its results. The two task-grouping methods join the roughly 20-minute capture shard
+after the reduced remainder also exhausted its budget with its final method unfinished.
+Unit/widget tests remain in the remainder. On-demand jobs have a 45-minute hard
 budget for retries and result upload, not a target runtime. Main's unsharded
 iPhone and Mac UI jobs have 75- and 60-minute budgets respectively; their upload
 jobs remain independent. A dispatch uses its branch's workflow definitions:
@@ -232,7 +236,8 @@ press `?` for the full list (it is `Keymap.default` in FloridaCore).
 The task pane keeps suggestions and Inbox above **Overdue**, **Today**, **Tomorrow**,
 **This week**, **Next week**, **Later**, and **No due date**. Empty date sections are
 hidden. Sections use the settings time zone and the calendar's first weekday;
-Overdue includes any elapsed due time, even earlier today. Tasks sort by `dueAt`,
+Overdue includes only an elapsed due time, even earlier today; past start/pin dates belong in Today.
+Tasks sort by the selected due/pin/start list date,
 then hard before soft deadlines, priority, title, and ID. There is no separate
 deadline timestamp. Future start dates do not hide open tasks. Each row retains
 its compact category dot/name on the existing metadata line, except when the
@@ -286,7 +291,7 @@ in one line, for example `Write update #work ^fri !2 =45m ~tomorrow // Ask Jane`
 
 | Symbol | Florida field | Examples |
 | --- | --- | --- |
-| `^` | Due date, using the existing date/time grammar | `^fri`, `^nov 20`, `^none` |
+| `^` | Due date, or Someday to keep a task off the plan | `^fri`, `^nov 20`, `^someday`, `^none` |
 | `!` | Priority: 1 ASAP, 2 high, 3 medium, 4 low | `!1`, `!high`, `!4` |
 | `#` | Category, not a tag or list | `#work`, `#personal-finances` |
 | `@` | Context, not a location | `@computer`, `@errand`, `@home`, `@office` |
@@ -313,11 +318,49 @@ Symbols must start a whitespace-separated token; symbols inside words and URLs
 are not shortcut syntax. The first supported URL remains the task's source link;
 later URLs stay literal. Only the first `#category` is syntax; later hashtags remain in the
 title. Existing `2h`, `by fri`, `p1`, `after mon`, pinned times, `~2h` estimates,
-and ` -- ` notes retain their meanings. `^none` explicitly clears a due date in
-the draft; persistent Inbox date-triage decisions are a separate change.
+and ` -- ` notes retain their meanings. `someday`, `^someday`, or `^none` turns
+on Someday: no due date and no scheduling until that choice is turned off.
 
 Inspired by Remember The Milk's [Smart Add guide](https://www.rememberthemilk.com/help/answer/basics-smartadd-howdoiuse)
 and [one-line examples](https://www.rememberthemilk.com/help/answer/basics-smartadd-whatis).
+
+### Inbox means needs triage
+
+A task stays in Inbox until it has both a category and a date decision: a due
+date (soft or hard deadline), a start date, a pinned slot, or **Someday**. `Write update #work` keeps its
+Work category but appears only in Inbox until you make that date decision. The
+Inbox row shows the category it will file under. A task with no category stays
+in Inbox even after a date decision; the permanent Inbox category still stores
+these unfiled tasks. Completed and deleted tasks are not in the open list.
+
+On Mac, select a task and press **b** for **Set due date…** or **i** (indefinite)
+for **Someday**; both are in the palette and row actions, and **z** undoes the decision.
+On iPhone, use the Inbox row's **Set due
+date** or **Someday** buttons; the toast offers Undo. Both editors put a
+**Someday** toggle beside the dates with a short “No due date” caption.
+Turning it on clears the due date and pin but keeps an existing start date.
+Setting a due date, start date, or pin turns it off. Removing the last date
+without choosing Someday needs triage again.
+
+Ordinary Inbox tasks still schedule as before. Someday tasks do not: they have
+no planned blocks, evening suggestions, project-task time accounting, or
+unscheduled/late warnings, and briefs do not count them as problems. Their rows
+say Someday, and date-grouped lists reserve the existing last section, **Someday**,
+for tasks with that choice on. Other tasks use their due date, otherwise their
+pinned time, otherwise their start date for sectioning; the existing row metadata
+names which date is shown. A start or pin without a due date is not Someday.
+Undecided tasks belong in Inbox; if an unexpected undated non-Someday task remains
+outside it, keep it visible in a fallback **No due date** section. Turning
+Someday off or setting a date makes them eligible again at the next scheduler
+run, with the local change visible immediately. Existing categorized tasks with
+no due date, start date, or pin are marked Someday during migration so rollout
+does not refill Inbox; this also removes those tasks from the plan. Tasks
+already in the Inbox category stay there.
+An existing recurring series stays active when any of its generated occurrences
+has a due date, start date, or pin, even if its original template had no explicit
+dates. Genuinely undated series become Someday; individual undated task rows
+still follow the backfill rule.
+Deploy the server migration before distributing clients that write the field.
 
 **New event** (`⇧C`, the app menu, the palette, or an empty slot’s context menu)
 opens a local sentence composer, separate from task capture. Try “Lunch with Dana
@@ -542,8 +585,9 @@ grouping function and Inbox predicate; grouping is local and needs no network.
 Quick add, both tabs' add-task buttons, and the widget shortcut open one focused
 text composer. It uses the same local parser as the Mac, previews the title and
 dates, and offers category matches for `#` hints. Ambiguous prefixes require a
-choice. Categorized tasks skip Inbox; unfiled tasks stay there until you choose
-a category or accept a suggested one. Closing capture keeps its draft for the
+choice. Categorized tasks skip Inbox with a due date, start date, pinned slot,
+or Someday; unfiled tasks also need a category or an accepted suggestion.
+Closing capture keeps its draft for the
 current app session; saving locally clears it. **Details** opens the full editor
 with the parsed fields; **Parse with AI** remains optional and requires review.
 New tasks default to 30 minutes with no deadline unless one is typed. The editor
@@ -588,6 +632,8 @@ app (`florida://agenda`, `florida://tasks`, `florida://tasks/new`):
   the same quick-add composer as the app; the small widget opens Agenda because it has one tap target.
 - **Tasks** (small, medium): Inbox first, then open tasks in the shared due-date
   order, with the open count and each task's category color; late tasks in red.
+  Someday tasks are excluded from both the count and rows. Displayed start/pin dates
+  are explicitly labelled **Start**/**Pinned**, rather than implying a due date.
   Ordering happens before the widget's row limit and stays due-focused regardless
   of the app's grouping choice. Agenda widgets keep their chronological order.
 

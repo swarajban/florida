@@ -52,8 +52,8 @@ struct TasksView: View {
                     Section {
                         ForEach(section.tasks) { task in
                             TaskListRow(
-                                taskID: task.id, now: now, calendar: groupingCalendar,
-                                showsCategory: grouping == .dueDate,
+                                taskID: task.id, now: now, sectionTitle: section.title, calendar: groupingCalendar,
+                                showsCategory: grouping == .dueDate || section.isInbox,
                                 targets: TaskActionTargets(doneForNow: $doneForNowTask, moving: $movingTask),
                                 onEdit: { editor = TaskEditorRequest(task: $0, isNew: false) })
                         }
@@ -61,7 +61,7 @@ struct TasksView: View {
                         TaskSectionHeader(section: section)
                     } footer: {
                         if section.isInbox, !section.tasks.isEmpty {
-                            Text("Choose a category to move a task out of Inbox. A category with a ? is a suggestion—tap to accept.")
+                            Text("Choose a category, then a due date, start date, pinned time or Someday. A category with a ? is a suggestion—tap to accept.")
                             if let reason = model.triageUnavailable {
                                 Text(reason)
                             }
@@ -81,7 +81,7 @@ struct TasksView: View {
                         Label("Categories", systemImage: "folder")
                     }
                 } footer: {
-                    Text("Add a category for each project or area. Typing #Infosec in quick add files the task there, or offers to create it.")
+                    Text("Add a category for each project or area. Typing #Infosec in quick add chooses that category, or offers to create it. Tasks stay in Inbox until a category and a due date, start date, pinned time or Someday are set.")
                 }
             }
             .listStyle(.insetGrouped)

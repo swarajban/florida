@@ -13,7 +13,7 @@ extension AppModel {
     /// ghost ids, which Undo takes back.
     @discardableResult
     func recordGhosts(for task: TaskItem, includeUpcoming: Bool = true, now: Date = Date()) -> [String] {
-        guard JoySetting.ghosts.isOn else { return [] }
+        guard JoySetting.ghosts.isOn, !task.someday else { return [] }
         let todayRange = today..<(calendar.date(byAdding: .day, value: 1, to: today) ?? today.addingTimeInterval(86_400))
         let blocks = (placementsByTask[task.id] ?? [])
             .filter { todayRange.contains($0.startAt) }
@@ -41,7 +41,8 @@ extension AppModel {
     var visibleGhosts: [GhostBlock] {
         guard JoySetting.ghosts.isOn, selectedDay == today else { return [] }
         let live = Set(agenda?.placements.map(\.placement.id) ?? [])
-        return ghostBlocks.filter { !live.contains($0.id) }
+        let somedayIDs = somedayTaskIDs
+        return ghostBlocks.filter { !live.contains($0.id) && !somedayIDs.contains($0.taskId) }
     }
 
     /// Called when the local day changes: yesterday's ghosts go.
@@ -55,7 +56,7 @@ extension AppModel {
     /// already pinned, or not allowed to start by `start`, are left out.
     func tasksFitting(minutes: Int, at start: Date) -> [TaskItem] {
         Array(openTasks.lazy.filter { task in
-            task.pinnedStart == nil && task.remainingMinutes > 0 && task.remainingMinutes <= minutes
+            !task.someday && task.pinnedStart == nil && task.remainingMinutes > 0 && task.remainingMinutes <= minutes
                 && (task.startAt.map { $0 <= start } ?? true) && self.blooming[task.id] == nil
         }.prefix(3))
     }
@@ -65,9 +66,11 @@ extension AppModel {
         let previous = storedVersion(of: task)
         var updated = previous
         updated.pinnedStart = calendar.dateInterval(of: .minute, for: start)?.start ?? start
+        updated.someday = false
         var mutation: AppDatabase.TaskMutation?
-        guard write({ mutation = try $0.saveTask(updated, original: previous) }),
+        guard write({ mutation = try $0.saveTask(updated, original: previous, somedayIntent: false) }),
               let mutation, let before = mutation.before else { return }
+        refreshTaskDateState(mutation.after)
         showToast(Toast(
             message: "Pinned “\(task.title)” at \(Formatting.time(updated.pinnedStart ?? start))",
             systemImage: "pin.fill", style: .info, undo: TaskUndo(from: before, to: mutation.after)))
@@ -79,7 +82,7 @@ extension AppModel {
     /// up for it"), without tasks that are finishing or already taken.
     func optionalPicks(on day: Date, now: Date = Date()) -> [OptionalPicks] {
         guard !optionalPlacements.isEmpty else { return [] }
-        let open = openTasks.filter { blooming[$0.id] == nil }
+        let open = openTasks.filter { !$0.someday && blooming[$0.id] == nil }
         return OptionalPicks.on(
             day: day, placements: optionalPlacements,
             tasksById: Dictionary(open.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }),

@@ -252,6 +252,7 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
     public var priority: Priority
     public var deadlineType: DeadlineType
     public var dueAt: Date?
+    public var someday: Bool
     public var startAt: Date?
     /// Overrides the category's schedule when set.
     public var scheduleId: String?
@@ -282,7 +283,7 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
         pinnedStart: Date? = nil, completedMinutes: Int = 0, completedAt: Date? = nil, createdAt: Date,
         updatedAt: Date, deletedAt: Date? = nil, recurrence: TaskRecurrence? = nil,
         recurrenceSeriesId: String? = nil, recurrenceDate: String? = nil, recurrenceRevision: String? = nil,
-        projectId: String? = nil, attention: TaskAttention? = nil, source: TaskSource? = nil
+        projectId: String? = nil, attention: TaskAttention? = nil, source: TaskSource? = nil, someday: Bool = false
     ) {
         self.id = id
         self.categoryId = categoryId
@@ -294,6 +295,7 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
         self.priority = priority
         self.deadlineType = deadlineType
         self.dueAt = dueAt
+        self.someday = someday
         self.startAt = startAt
         self.scheduleId = scheduleId
         self.context = context
@@ -325,6 +327,7 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
         priority = try c.decode(Priority.self, forKey: .priority)
         deadlineType = try c.decode(DeadlineType.self, forKey: .deadlineType)
         dueAt = try c.decodeIfPresent(Date.self, forKey: .dueAt)
+        someday = try c.decodeIfPresent(Bool.self, forKey: .someday) ?? false
         startAt = try c.decodeIfPresent(Date.self, forKey: .startAt)
         scheduleId = try c.decodeIfPresent(String.self, forKey: .scheduleId)
         context = try c.decodeIfPresent(TaskContext.self, forKey: .context) ?? .computer
@@ -343,6 +346,9 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
     }
 
     public var isOpen: Bool { deletedAt == nil && completedAt == nil }
+    public var needsTriage: Bool {
+        categoryId == TaskCategory.inboxId || (dueAt == nil && startAt == nil && pinnedStart == nil && !someday)
+    }
     public var remainingMinutes: Int { max(0, durationMinutes - completedMinutes) }
 
     /// The attention the scheduler plans the task with: its own, or else its project's default.
@@ -1164,6 +1170,7 @@ public struct TaskWrite: Codable, Hashable, Sendable {
     public var priority: Priority
     public var deadlineType: DeadlineType
     public var dueAt: Date?
+    public var someday: Bool?
     public var startAt: Date?
     public var scheduleId: String?
     public var context: TaskContext
@@ -1188,6 +1195,7 @@ public struct TaskWrite: Codable, Hashable, Sendable {
         priority = task.priority
         deadlineType = task.deadlineType
         dueAt = task.dueAt
+        someday = task.someday
         startAt = task.startAt
         scheduleId = task.scheduleId
         context = task.context
@@ -1211,6 +1219,7 @@ public struct TaskWrite: Codable, Hashable, Sendable {
         try container.encode(priority, forKey: .priority)
         try container.encode(deadlineType, forKey: .deadlineType)
         try container.encodeIfPresent(dueAt, forKey: .dueAt)
+        try container.encodeIfPresent(someday, forKey: .someday)
         try container.encodeIfPresent(startAt, forKey: .startAt)
         try container.encodeIfPresent(scheduleId, forKey: .scheduleId)
         try container.encode(context, forKey: .context)

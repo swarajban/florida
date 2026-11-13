@@ -12,7 +12,7 @@ extension AppModel {
     /// Completes the task: one `.success` haptic, the row blooms in its category color for
     /// ~150 ms while it folds away, then Undo (which saves the version from before).
     @discardableResult
-    func complete(_ task: TaskItem, original: TaskItem? = nil) -> Bool {
+    func complete(_ task: TaskItem, original: TaskItem? = nil, somedayIntent: Bool? = nil) -> Bool {
         let index = openTasks.firstIndex { $0.id == task.id }
         let now = Date()
         var mutation: AppDatabase.TaskMutation?
@@ -21,7 +21,7 @@ extension AppModel {
                 var draft = task
                 draft.completedAt = now
                 draft.completedMinutes = draft.durationMinutes
-                mutation = try database.saveTask(draft, original: original, now: now)
+                mutation = try database.saveTask(draft, original: original, somedayIntent: somedayIntent, now: now)
             } else {
                 mutation = try database.completeTask(id: task.id, at: now)
             }
@@ -77,9 +77,11 @@ extension AppModel {
         var updated = previous
         updated.startAt = calendar.date(byAdding: .day, value: 1, to: today)
         updated.pinnedStart = nil
+        updated.someday = false
         var mutation: AppDatabase.TaskMutation?
-        guard write({ mutation = try $0.saveTask(updated, original: previous) }),
+        guard write({ mutation = try $0.saveTask(updated, original: previous, somedayIntent: false) }),
               let mutation, let before = mutation.before else { return }
+        refreshTaskDateState(mutation.after)
         showToast(Toast(
             message: "Pushed “\(task.title)” to tomorrow", systemImage: "arrow.turn.down.right", style: .info,
             undo: TaskUndo(from: before, to: mutation.after)))

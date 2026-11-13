@@ -15,7 +15,9 @@ final class SmokeTests: XCTestCase {
             let input = app.textFields.firstMatch
             XCTAssertTrue(input.waitForExistence(timeout: 5))
             input.typeText("https://github.com/owner/repo/pull/123")
-            XCTAssertTrue(app.staticTexts["PR #123 in owner/repo"].exists)
+            let sourcePreview = app.staticTexts["quick-add-source-title"]
+            XCTAssertTrue(sourcePreview.waitForExistence(timeout: 5))
+            XCTAssertEqual(sourcePreview.value as? String, "PR #123 in owner/repo")
             XCTAssertTrue(app.buttons["quick-add-remove-source"].exists)
             capture(app.windows.firstMatch, "task-source-capture-\(appearance)")
             app.typeKey(.return, modifierFlags: [])
@@ -870,7 +872,7 @@ final class SmokeTests: XCTestCase {
             app.typeKey(.tab, modifierFlags: [])
             let noDuePreview = app.descendants(matching: .any)["smart-add-preview-due"]
             XCTAssertTrue(noDuePreview.waitForExistence(timeout: 5))
-            XCTAssertEqual(noDuePreview.value as? String, "No due date")
+            XCTAssertEqual(noDuePreview.value as? String, "Someday")
             app.typeKey(.return, modifierFlags: [])
             XCTAssertTrue(input.waitForNonExistence(timeout: 5))
             openTaskRow("Smart no deadline", in: app)
@@ -897,6 +899,7 @@ final class SmokeTests: XCTestCase {
         waitForValue("AI review", of: app.textFields["task-title"])
         waitForValue("Home", of: app.buttons["task-category"])
         waitForValue("No date", of: app.buttons["task-due"])
+        XCTAssertEqual((app.checkBoxes["task-someday"].value as? NSNumber)?.intValue, 1)
         app.typeKey(.escape, modifierFlags: [])
         XCTAssertTrue(app.textFields["task-title"].waitForNonExistence(timeout: 5))
         app.typeKey("c", modifierFlags: [])
@@ -1350,14 +1353,14 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(row.exists)
             let priority = app.buttons["task-priority"]
             title.click()
-            waitForLabel("Selected task, Renew VPN certificate", of: row)
+            waitForLabel("Selected task, Renew VPN certificate, Inbox", of: row)
             capture(app.windows.firstMatch, "task-selection-\(appearance)")
             let editorTitle = app.textFields.matching(NSPredicate(format: "value == %@", "Renew VPN certificate")).firstMatch
             XCTAssertTrue(editorTitle.waitForExistence(timeout: 5), "one click must open the clicked task")
             XCTAssertTrue(priority.exists)
             app.typeKey(.escape, modifierFlags: [])
             XCTAssertTrue(editorTitle.waitForNonExistence(timeout: 5))
-            waitForLabel("Selected task, Renew VPN certificate", of: row)
+            waitForLabel("Selected task, Renew VPN certificate, Inbox", of: row)
             app.typeKey("e", modifierFlags: [])
             XCTAssertTrue(editorTitle.waitForExistence(timeout: 5), "E must act on the task-pane selection after the editor closes")
             app.typeKey(.escape, modifierFlags: [])
@@ -1436,10 +1439,22 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(window.waitForExistence(timeout: 15))
             XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 10))
 
-            // Only what is on screen gets a label. The VPN task's row is at the top of the task
-            // pane; the funds task's row is below the fold, and it has no block in these days.
+            app.typeKey("c", modifierFlags: [])
+            let input = app.textFields["palette-input"]
+            XCTAssertTrue(input.waitForExistence(timeout: 5))
+            input.typeText("Jump hidden fixture #home ^none // fixture")
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(input.waitForNonExistence(timeout: 5))
+            let deferred = app.descendants(matching: .any).matching(NSPredicate(
+                format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "task-row-", "Jump hidden fixture")).firstMatch
+            XCTAssertTrue(deferred.waitForExistence(timeout: 5))
+            let deferredId = String(deferred.identifier.dropFirst("task-row-".count))
+            app.typeKey("g", modifierFlags: [])
+            app.typeKey("t", modifierFlags: [])
+            app.typeKey("g", modifierFlags: [])
+            app.typeKey("g", modifierFlags: [])
             let nearTop = app.staticTexts["task-jump-demo-task-vpn"]
-            let atEnd = app.staticTexts["task-jump-demo-task-funds"]
+            let atEnd = app.staticTexts["task-jump-\(deferredId)"]
             app.typeKey("f", modifierFlags: [])
             XCTAssertTrue(nearTop.waitForExistence(timeout: 5))
             XCTAssertFalse(atEnd.exists, "a row scrolled out of view should get no label")
@@ -1476,7 +1491,7 @@ final class SmokeTests: XCTestCase {
             app.typeKey("g", modifierFlags: [])
             app.typeKey("t", modifierFlags: [])
             app.typeKey("g", modifierFlags: .shift)
-            try jump(to: "demo-task-funds", titled: "Rebalance index funds", in: app) {
+            try jump(to: deferredId, titled: "Jump hidden fixture", in: app) {
                 XCTAssertFalse(nearTop.exists, "a row scrolled out of view should get no label")
             }
 

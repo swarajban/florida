@@ -62,8 +62,12 @@ extension AppModel {
         return task
     }
 
-    func save(_ task: TaskItem, original: TaskItem? = nil) throws {
-        try perform { try $0.saveTask(task, original: original) }
+    func save(_ task: TaskItem, original: TaskItem? = nil, somedayIntent: Bool? = nil) throws {
+        var mutation: AppDatabase.TaskMutation?
+        try perform { mutation = try $0.saveTask(task, original: original, somedayIntent: somedayIntent) }
+        if let mutation {
+            refreshTaskDateState(mutation.after)
+        }
     }
 
     func reopen(_ task: TaskItem) {
@@ -153,6 +157,7 @@ extension AppModel {
             }
             removeGhosts(ids: toast.ghostIds)
             triageAttempted.remove("\(current.id)\n\(current.title)")
+            refreshTaskDateState(storedVersion(of: current))
         } else {
             showToast(alreadyChanged)
         }

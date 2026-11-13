@@ -54,6 +54,15 @@ enum WidgetSettings {
 }
 
 enum WidgetFormatting {
+    static func taskDateLabel(_ date: TaskListDate, now: Date, calendar: Calendar) -> String {
+        let day = dayLabel(date.date, now: now, calendar: calendar)
+        switch date {
+        case .due: return day
+        case .pinned: return "Pinned \(day)"
+        case .start: return "Start \(day)"
+        }
+    }
+
     /// "Today", "Tomorrow", a weekday name within the coming week, otherwise "Nov 20".
     static func dayLabel(_ date: Date, now: Date, calendar: Calendar) -> String {
         let day = calendar.startOfDay(for: date)

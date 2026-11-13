@@ -64,7 +64,7 @@ async function loadPlan(db: Db, now: Date) {
   const openTasks = await db
     .select()
     .from(tasks)
-    .where(and(isNull(tasks.deletedAt), isNull(tasks.completedAt)))
+    .where(and(isNull(tasks.deletedAt), isNull(tasks.completedAt), eq(tasks.someday, false)))
   const [summary] = await db.select().from(planSummary)
   const overrideRows = await db.select().from(dayOverrides).where(isNull(dayOverrides.deletedAt))
   const horizonEnd = now.getTime() + 28 * DAY
@@ -284,7 +284,7 @@ export async function weeklyFacts(db: Db, now: Date = new Date()) {
     .where(and(isNull(tasks.deletedAt), isNotNull(tasks.completedAt), gte(tasks.completedAt, new Date(start)), lt(tasks.completedAt, new Date(end))))
 
   const projectFacts = (project: ProjectRow) => {
-    const done = completed.filter((t) => t.projectId === project.id)
+    const done = completed.filter((t) => !t.someday && t.projectId === project.id)
     const projectTimeSpent = plan.projectTime
       .filter((p) => p.projectId === project.id && inWeek(p.startAt) && p.endAt.getTime() <= now.getTime())
       .reduce((sum, p) => sum + minutesBetween(p.startAt, p.endAt), 0)
@@ -334,7 +334,7 @@ export async function explainFacts(db: Db, taskId: string, now: Date = new Date(
   const plan = await loadPlan(db, now)
   const { timeZone } = plan
   const project = task.projectId === null ? undefined : plan.projects.get(task.projectId)
-  const mine = plan.placements.filter((p) => p.taskId === taskId)
+  const mine = task.someday ? [] : plan.placements.filter((p) => p.taskId === taskId)
   const firstStart = mine[0]?.startAt.getTime()
   const ahead =
     firstStart === undefined
@@ -361,12 +361,14 @@ export async function explainFacts(db: Db, taskId: string, now: Date = new Date(
       attention: effectiveAttention(task, project),
       durationMinutes: task.durationMinutes,
       completed: task.completedAt !== null,
+      someday: task.someday,
+      ...(task.someday ? { planningStatus: 'Someday' } : {}),
       ...(task.startAt !== null ? { notBefore: stamp(task.startAt, timeZone) } : {}),
       ...(task.pinnedStart !== null ? { pinnedTo: stamp(task.pinnedStart, timeZone) } : {}),
       ...(project !== undefined ? { projectStatus: project.status } : {}),
     },
     planned: mine.map((p) => ({ start: stamp(p.startAt, timeZone), end: clock(p.endAt, timeZone), ...(p.lane !== null ? { lane: p.lane } : {}) })),
-    unscheduled: plan.unscheduled.find((u) => u.taskId === taskId) ?? null,
+    unscheduled: task.someday ? null : plan.unscheduled.find((u) => u.taskId === taskId) ?? null,
     calendarBusyTime: calendarBusyTime(task, plan, firstStart),
     routineHoursAllowingItsContext: plan.blocks
       .filter((b) => !b.optional && b.allows.includes(task.context))
@@ -447,5 +449,7 @@ export async function latestBriefs(db: Db): Promise<BriefRow[]> {
 
 /** Explains one task's place in the plan. */
 export async function explainPlacement(db: Db, explainer: PlacementExplainer, taskId: string, now: Date = new Date()): Promise<string> {
-  return explainer.explain(await explainFacts(db, taskId, now))
+  const facts = await explainFacts(db, taskId, now)
+  if (facts.task.someday) return 'This task is Someday, so it stays off the plan until you turn Someday off or set a date.'
+  return explainer.explain(facts)
 }

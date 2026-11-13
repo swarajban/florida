@@ -179,6 +179,16 @@ import Testing
         #expect(ParallelWork.companions(of: spans).isEmpty)
     }
 
+    @Test func somedayIsNotAParallelWorkCompanion() {
+        let paused = TaskItem(id: "paused", categoryId: "work", title: "Paused", durationMinutes: 30,
+                              createdAt: Self.noon, updatedAt: Self.noon, someday: true)
+        let placement = Placement(id: "stale", taskId: paused.id, startAt: Self.at(9, 13), endAt: Self.at(9, 14),
+                                  pinned: false, lane: 1, computedAt: Self.noon)
+        let block = PlanBlock(id: "project", kind: .project(projectId: "p"), title: "Project",
+                              startAt: placement.startAt, endAt: placement.endAt, lane: 0)
+        #expect(ParallelWork.companionTitles(placements: [placement], tasksById: [paused.id: paused], planBlocks: [block]).isEmpty)
+    }
+
     // MARK: DayKind.of
 
     static let routine = [

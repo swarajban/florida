@@ -135,7 +135,7 @@ struct MacDateField: View {
     }
 }
 
-private struct MacDateSelector: View {
+struct MacDateSelector: View {
     let title: String
     let current: Date
     let hasTime: Bool

@@ -140,7 +140,16 @@ extension AppDatabase {
 
     /// Tasks the last scheduler run could not fully place, by task id.
     public func unscheduled() throws -> [UnscheduledTask] {
-        try writer.read { db in try UnscheduledTask.order(Column("taskId")).fetchAll(db) }
+        try writer.read { db in try Self.unscheduled(db) }
+    }
+
+    static func unscheduled(_ db: Database) throws -> [UnscheduledTask] {
+        try UnscheduledTask.fetchAll(db, sql: """
+            SELECT unscheduled.* FROM unscheduled
+            LEFT JOIN task ON task.id = unscheduled.taskId
+            WHERE COALESCE(task.someday, 0) = 0
+            ORDER BY unscheduled.taskId
+            """)
     }
 
     /// The scheduler's suggestions for optional routine blocks, by start. Never part of the plan:
@@ -150,7 +159,12 @@ extension AppDatabase {
     }
 
     static func optionalPlacements(_ db: Database) throws -> [OptionalPlacement] {
-        try OptionalPlacement.order(Column("startAt"), Column("taskId")).fetchAll(db)
+        try OptionalPlacement.fetchAll(db, sql: """
+            SELECT optionalPlacement.* FROM optionalPlacement
+            LEFT JOIN task ON task.id = optionalPlacement.taskId
+            WHERE COALESCE(task.someday, 0) = 0
+            ORDER BY optionalPlacement.startAt, optionalPlacement.taskId
+            """)
     }
 
     /// Placements overlapping `range`, by start.
@@ -175,8 +189,17 @@ extension AppDatabase {
     /// holds the scheduler's horizon, so the task list can derive each task's scheduled time from
     /// it without a date filter.
     public func placementsByTask() throws -> [String: [Placement]] {
-        let placements = try writer.read { db in try Placement.order(Column("startAt")).fetchAll(db) }
+        let placements = try writer.read { db in try Self.placements(db) }
         return Dictionary(grouping: placements, by: \.taskId)
+    }
+
+    static func placements(_ db: Database) throws -> [Placement] {
+        try Placement.fetchAll(db, sql: """
+            SELECT placement.* FROM placement
+            LEFT JOIN task ON task.id = placement.taskId
+            WHERE COALESCE(task.someday, 0) = 0
+            ORDER BY placement.startAt
+            """)
     }
 
     /// Visible events, scheduled task blocks, commitments and project time for the calendar day
@@ -206,9 +229,10 @@ extension AppDatabase {
 
     static func placements(_ db: Database, in range: Range<Date>) throws -> [Placement] {
         try Placement.fetchAll(db, sql: """
-            SELECT * FROM placement
-            WHERE startAt < ? AND endAt > ?
-            ORDER BY startAt
+            SELECT placement.* FROM placement
+            LEFT JOIN task ON task.id = placement.taskId
+            WHERE placement.startAt < ? AND placement.endAt > ? AND COALESCE(task.someday, 0) = 0
+            ORDER BY placement.startAt
             """, arguments: [range.upperBound, range.lowerBound])
     }
 
@@ -217,7 +241,7 @@ extension AppDatabase {
         let tasks = try TaskItem.filter(ids: Set(placements.map(\.taskId))).fetchAll(db)
         let tasksById = Dictionary(uniqueKeysWithValues: tasks.map { ($0.id, $0) })
         return placements.compactMap { placement in
-            guard let task = tasksById[placement.taskId], task.isOpen else { return nil }
+            guard let task = tasksById[placement.taskId], task.isOpen, !task.someday else { return nil }
             return ScheduledBlock(placement: placement, task: task)
         }
     }
@@ -308,10 +332,51 @@ extension AppDatabase {
         }
     }
 
+    public enum TaskDateDecision: Hashable, Sendable {
+        case due(Date)
+        case start(Date)
+        case someday
+    }
+
+    public func setTaskDateDecision(
+        id: String, decision: TaskDateDecision, now: Date = Date()
+    ) throws -> (before: TaskItem, after: TaskItem)? {
+        try writer.write { db in
+            guard let before = try TaskItem.fetchOne(db, id: id), before.isOpen else { return nil }
+            var task = before
+            switch decision {
+            case .due(let date):
+                task.dueAt = date
+                task.someday = false
+                if task.deadlineType == .none { task.deadlineType = .soft }
+            case .start(let date):
+                task.startAt = date
+                task.someday = false
+            case .someday:
+                task.dueAt = nil
+                task.pinnedStart = nil
+                task.deadlineType = .none
+                task.someday = true
+            }
+            try Self.saveTask(task, in: db, now: now)
+            guard let after = try TaskItem.fetchOne(db, id: id), after != before else { return nil }
+            return (before, after)
+        }
+    }
+
     static func saveTask(_ task: TaskItem, in db: Database, now: Date) throws {
         let previous = try TaskItem.fetchOne(db, id: task.id)
         let pending = try PendingWrite.filter(Column("entity") == "task" && Column("entityId") == task.id).fetchOne(db)
         var local = task
+        let dueChanged: Bool = local.dueAt?.databaseValue != previous?.dueAt?.databaseValue
+        let startChanged: Bool = local.startAt?.databaseValue != previous?.startAt?.databaseValue
+        let pinChanged: Bool = local.pinnedStart?.databaseValue != previous?.pinnedStart?.databaseValue
+        let datesChanged = dueChanged || startChanged || pinChanged
+        if local.someday && (previous?.someday != true || datesChanged) {
+            local.dueAt = nil
+            local.pinnedStart = nil
+            local.deadlineType = .none
+        }
         if previous?.deletedAt != nil || pending?.op == .delete || (previous == nil && task.recurrenceRevision != nil) {
             // Undo restores only this task. Sending the cached rule would instead look like a
             // stale attempt to restart the series after the delete rotated its revision.
@@ -353,7 +418,11 @@ extension AppDatabase {
         }
         try local.save(db)
         try enqueue(db, entity: .task, id: task.id, op: op, body: body, now: now)
-        if local.pinnedStart != previous?.pinnedStart {
+        if local.someday {
+            try Placement.filter(Column("taskId") == local.id).deleteAll(db)
+            try OptionalPlacement.filter(Column("taskId") == local.id).deleteAll(db)
+            try UnscheduledTask.filter(Column("taskId") == local.id).deleteAll(db)
+        } else if local.pinnedStart != previous?.pinnedStart {
             try placePin(of: local, in: db, now: now)
         }
     }
@@ -364,7 +433,7 @@ extension AppDatabase {
     /// block like every other row; other tasks keep their blocks until then.
     private static func placePin(of task: TaskItem, in db: Database, now: Date) throws {
         try Placement.filter(Column("taskId") == task.id).deleteAll(db)
-        guard let start = task.pinnedStart, task.isOpen, task.remainingMinutes > 0 else { return }
+        guard let start = task.pinnedStart, task.isOpen, !task.someday, task.remainingMinutes > 0 else { return }
         try UnscheduledTask.filter(Column("taskId") == task.id).deleteAll(db)
         try Placement(
             id: UUID().uuidString.lowercased(), taskId: task.id, startAt: start,
@@ -403,6 +472,7 @@ extension AppDatabase {
         track("priority", \.priority)
         track("deadlineType", \.deadlineType)
         trackDate("dueAt", \.dueAt)
+        track("someday", \.someday)
         trackDate("startAt", \.startAt)
         track("scheduleId", \.scheduleId)
         track("context", \.context)
@@ -412,6 +482,9 @@ extension AppDatabase {
         track("completedMinutes", \.completedMinutes)
         trackDate("completedAt", \.completedAt)
         track("recurrence", \.recurrence)
+        if after.someday && ["dueAt", "startAt", "pinnedStart"].contains(where: { changes[$0] != nil }) {
+            changes["someday"] = true
+        }
         return changes
     }
 
@@ -766,7 +839,9 @@ extension AppDatabase {
         for entry in pending where entry.entity == .task {
             guard let task = try TaskItem.fetchOne(db, id: entry.id) else { continue }
             let blocks = try Placement.filter(Column("taskId") == task.id).fetchAll(db)
-            let agrees = if let pin = task.pinnedStart {
+            let agrees = if task.someday {
+                blocks.isEmpty
+            } else if let pin = task.pinnedStart {
                 blocks.count == 1 && blocks[0].pinned && blocks[0].startAt == pin
             } else {
                 !blocks.contains(where: \.pinned)

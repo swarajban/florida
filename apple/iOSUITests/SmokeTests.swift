@@ -38,7 +38,7 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(input.waitForExistence(timeout: 5))
             app.buttons["quick-add-save"].tap()
             XCTAssertTrue(input.waitForNonExistence(timeout: 5))
-            let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "PR #123 in example/florida")).firstMatch
+            let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tasks-row-' AND label BEGINSWITH %@", "PR #123 in example/florida")).element
             XCTAssertTrue(row.waitForExistence(timeout: 5))
             XCTAssertFalse(element(startingWith: "task-source-open-", in: app).exists)
             row.tap()
@@ -63,7 +63,10 @@ final class SmokeTests: XCTestCase {
         XCTAssertEqual(url.value as? String, "https://github.com/example/florida/pull/456")
         app.buttons["Add"].tap()
         XCTAssertTrue(input.waitForNonExistence(timeout: 5))
-        let sourceButton = element(startingWith: "task-source-open-", in: app)
+        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tasks-row-' AND label BEGINSWITH %@", "Review source")).element
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        let taskID = String(row.identifier.dropFirst("tasks-row-".count))
+        let sourceButton = app.buttons["task-source-open-\(taskID)"]
         XCTAssertTrue(sourceButton.waitForExistence(timeout: 5))
         XCTAssertTrue(sourceButton.label.contains("PR #456"))
         sourceButton.tap()
@@ -72,7 +75,6 @@ final class SmokeTests: XCTestCase {
         XCTAssertEqual(opened.label, "https://github.com/example/florida/pull/456")
         XCTAssertFalse(app.navigationBars["Edit Task"].exists, "Opening the source must not also open the editor")
 
-        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Review source")).firstMatch
         row.tap()
         XCTAssertTrue(url.waitForExistence(timeout: 5))
         for _ in 0..<3 where !url.isHittable { app.swipeUp() }

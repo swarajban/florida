@@ -85,7 +85,7 @@ public enum QuickAddCompletion {
                 ("next week", "Next week"), ("eow", "End of week"), ("in 2 weeks", "In 2 weeks"),
             ]
             choices = dates.map { ($0.0, $0.1, symbol + $0.0, [], nil) }
-                + (symbol == "^" ? [("none", "No due date", "^none", ["none"], nil)] : [])
+                + (symbol == "^" ? [("someday", "Someday", "^someday", ["someday"], nil), ("none", "Someday", "^none", ["none"], nil)] : [])
         case "!":
             choices = [
                 ("1", "ASAP", "!1", ["asap", "urgent"], nil),

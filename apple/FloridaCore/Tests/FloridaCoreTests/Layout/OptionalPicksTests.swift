@@ -88,6 +88,12 @@ import Testing
         #expect(Self.picks(placements, tasks: tasks, now: PacificTestCalendar.date(2026, 11, 9, 22)).isEmpty)
     }
 
+    @Test func somedayDoesNotAppearInStaleSuggestions() {
+        var task = Self.task("paused")
+        task.someday = true
+        #expect(Self.picks([Self.suggestion("paused", from: (20, 0), to: (21, 0))], tasks: [task]).isEmpty)
+    }
+
     @Test func groupsByBlockInOrderOfFirstStartAndToleratesAnUnsyncedRoutine() {
         let groups = Self.picks(
             [

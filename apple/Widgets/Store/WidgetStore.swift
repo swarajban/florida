@@ -60,12 +60,14 @@ enum WidgetStore {
         }
     }
 
-    static func openTasks(limit: Int, at date: Date) -> (count: Int, tasks: [WidgetTask])? {
+    static func openTasks(
+        limit: Int, at date: Date, from database: AppDatabase? = WidgetStore.database
+    ) -> (count: Int, tasks: [WidgetTask])? {
         guard let database else { return nil }
         do {
             let categories = try database.categories()
             let categoriesById = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
-            let tasks = try database.openTasks()
+            let tasks = try database.openTasks().filter { !$0.someday }
             var calendar = Self.calendar
             if let identifier = try database.userSettings()?.timeZone, let timeZone = TimeZone(identifier: identifier) {
                 calendar.timeZone = timeZone

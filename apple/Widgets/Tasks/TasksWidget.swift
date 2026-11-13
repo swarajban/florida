@@ -121,8 +121,8 @@ struct TasksWidgetRow: View {
                 .lineLimit(1)
                 .foregroundStyle(task.late ? Color.red : Color.primary)
             Spacer(minLength: 4)
-            if showsDue, let dueAt = task.dueAt {
-                Text(WidgetFormatting.dayLabel(dueAt, now: now, calendar: WidgetStore.calendar))
+            if showsDue, let listDate = task.listDate {
+                Text(WidgetFormatting.taskDateLabel(listDate, now: now, calendar: WidgetStore.calendar))
                     .font(.caption2)
                     .foregroundStyle(task.late ? Color.red : Color.secondary)
             }

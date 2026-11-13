@@ -20,6 +20,7 @@ import SwiftUI
 struct TaskEditorSheet: View {
     @Environment(AppModel.self) private var model
     @State private var draft: TaskItem
+    @State private var somedayIntent: Bool? = nil
     @State private var hasDue: Bool
     @State private var dueAt: Date
     @State private var hasStart: Bool
@@ -91,7 +92,7 @@ struct TaskEditorSheet: View {
                         var task = preparedTask
                         task.completedAt = nil
                         task.completedMinutes = 0
-                        guard model.save(task, original: original, undoLabel: "Reopened \(AppModel.quoted(task.title))") else {
+                        guard model.save(task, original: original, somedayIntent: somedayIntent, undoLabel: "Reopened \(AppModel.quoted(task.title))") else {
                             saveError = model.statusMessage ?? "The task could not be reopened."
                             return
                         }
@@ -115,12 +116,32 @@ struct TaskEditorSheet: View {
                     .lineLimit(3...8)
                 }
                 Section("Dates") {
-                    MacDateField("Start", date: $startAt, isOn: $hasStart, hasTime: startHasTime,
+                    MacDateField("Start", date: dateSelection($startAt), isOn: dateEnabled($hasStart), hasTime: startHasTime,
                                  key: TaskEditorKey.start.keycap, isPresented: showing(.start), identifier: "task-start",
                                  onDismiss: leaveField, dayOnly: { TaskDay.notBefore(on: $0, calendar: model.calendar) })
-                    MacDateField("Due", date: $dueAt, isOn: $hasDue, hasTime: dueHasTime,
-                                 key: TaskEditorKey.due.keycap, isPresented: showing(.due), identifier: "task-due",
-                                 onDismiss: leaveField, dayOnly: { TaskDay.due(on: $0, calendar: model.calendar) })
+                    LabeledContent {
+                        HStack {
+                            MacDateField("Due", date: dateSelection($dueAt), isOn: dateEnabled($hasDue), hasTime: dueHasTime,
+                                         isPresented: showing(.due), identifier: "task-due", showsLabel: false,
+                                         onDismiss: leaveField, dayOnly: { TaskDay.due(on: $0, calendar: model.calendar) })
+                            VStack(alignment: .leading, spacing: 2) {
+                                Toggle("Someday", isOn: someday)
+                                    .toggleStyle(.checkbox)
+                                    .accessibilityIdentifier("task-someday")
+                                Text("No due date")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    } label: {
+                        keyLabel("Due", .due)
+                    }
+                    if !hasDue && !hasStart && !hasPinnedStart && !draft.someday {
+                        Text("Choose a due or start date, or Someday, to finish date triage.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("task-date-triage-warning")
+                    }
                     MacChoiceField("Deadline", selection: deadline,
                                    options: [DeadlineType.soft, .hard].map { MacChoice($0, $0.displayName) },
                                    key: TaskEditorKey.deadline.keycap, isPresented: showing(.deadline),
@@ -166,7 +187,7 @@ struct TaskEditorSheet: View {
                                    key: TaskEditorKey.attention.keycap, isPresented: showing(.attention),
                                    identifier: "task-attention", onDismiss: leaveField)
                     .help("Work that can run in parallel shares an hour with up to two other such tasks.")
-                    MacDateField("Pinned start", date: $pinnedStart, isOn: $hasPinnedStart, hasTime: .constant(true),
+                    MacDateField("Pinned start", date: dateSelection($pinnedStart), isOn: dateEnabled($hasPinnedStart), hasTime: .constant(true),
                                  key: TaskEditorKey.pinnedStart.keycap, isPresented: showing(.pinnedStart),
                                  identifier: "task-pinned-start", onDismiss: leaveField, requiresTime: true)
                 }
@@ -320,7 +341,11 @@ struct TaskEditorSheet: View {
     private var deadline: Binding<DeadlineType> {
         Binding(
             get: { draft.deadlineType == .hard ? .hard : .soft },
-            set: { draft.deadlineType = $0 })
+            set: {
+                somedayIntent = false
+                draft.someday = false
+                draft.deadlineType = $0
+            })
     }
 
     /// On when the due date carries a time. Without one the date picker moves the day and keeps
@@ -329,6 +354,8 @@ struct TaskEditorSheet: View {
         Binding(
             get: { dueTimeChoice ?? TaskDay.dueHasTime(dueAt, calendar: model.calendar) },
             set: { on in
+                somedayIntent = false
+                draft.someday = false
                 dueTimeChoice = on
                 if !on {
                     dueAt = TaskDay.due(on: dueAt, calendar: model.calendar)
@@ -340,6 +367,8 @@ struct TaskEditorSheet: View {
         Binding(
             get: { startTimeChoice ?? TaskDay.notBeforeHasTime(startAt, calendar: model.calendar) },
             set: { on in
+                somedayIntent = false
+                draft.someday = false
                 startTimeChoice = on
                 if !on {
                     startAt = TaskDay.notBefore(on: startAt, calendar: model.calendar)
@@ -382,6 +411,9 @@ struct TaskEditorSheet: View {
             draft.categoryId = id
         }
         draft.dueAt = parsed.dueAt
+        if parsed.dueAt != nil || parsed.startAt != nil || parsed.pinnedStart != nil {
+            draft.someday = false
+        }
         draft.startAt = parsed.startAt
         draft.pinnedStart = parsed.pinnedStart
         if let local = model.editorQuickAddDraft {
@@ -399,12 +431,42 @@ struct TaskEditorSheet: View {
         focus = .title
     }
 
+    private var someday: Binding<Bool> {
+        Binding(
+            get: { draft.someday },
+            set: { on in
+                somedayIntent = on
+                draft.someday = on
+                if on {
+                    hasDue = false
+                    hasPinnedStart = false
+                    draft.deadlineType = .none
+                }
+            })
+    }
+
+    private func dateSelection(_ date: Binding<Date>) -> Binding<Date> {
+        Binding(get: { date.wrappedValue }, set: {
+            somedayIntent = false
+            draft.someday = false
+            date.wrappedValue = $0
+        })
+    }
+
+    private func dateEnabled(_ enabled: Binding<Bool>) -> Binding<Bool> {
+        Binding(get: { enabled.wrappedValue }, set: {
+            somedayIntent = false
+            draft.someday = false
+            enabled.wrappedValue = $0
+        })
+    }
+
     /// True when a field differs from the task the sheet opened on.
     private var hasEdits: Bool {
         let due: Date? = hasDue ? dueAt : nil
         let start: Date? = hasStart ? startAt : nil
         let pinned: Date? = hasPinnedStart ? pinnedStart : nil
-        return draft != original || due != original.dueAt || start != original.startAt
+        return somedayIntent != nil || draft != original || due != original.dueAt || start != original.startAt
             || pinned != original.pinnedStart || editedSource != original.source
     }
 
@@ -446,7 +508,7 @@ struct TaskEditorSheet: View {
                 task.title = original.title
             }
         }
-        guard model.complete(task, savingEdits: hasEdits, original: original) else {
+        guard model.complete(task, savingEdits: hasEdits, original: original, somedayIntent: somedayIntent) else {
             saveError = model.statusMessage ?? "This task is no longer open. Nothing was saved."
             return
         }
@@ -459,9 +521,22 @@ struct TaskEditorSheet: View {
             model.editorTask = nil
             return
         }
+        if !isNew, original.isOpen {
+            do {
+                guard let stored = try model.database?.task(id: original.id), stored.isOpen else {
+                    model.statusMessage = "This task is no longer open"
+                    saveError = model.statusMessage
+                    return
+                }
+            } catch {
+                model.statusMessage = "Could not save: \(error.localizedDescription)"
+                saveError = model.statusMessage
+                return
+            }
+        }
         let task = preparedTask
         let label = isNew ? "Added \(AppModel.quoted(task.title))" : "Edited \(AppModel.quoted(task.title))"
-        guard model.save(task, original: isNew ? nil : original, undoLabel: label) else {
+        guard model.save(task, original: isNew ? nil : original, somedayIntent: somedayIntent, undoLabel: label) else {
             saveError = model.statusMessage ?? "The task could not be saved."
             return
         }

@@ -49,8 +49,8 @@ struct QuickAddChip: Identifiable, Hashable {
         if let recurrence = draft.recurrence {
             chips.append(QuickAddChip(id: "recurrence", symbol: "repeat", text: recurrence.summary))
         }
-        if draft.dueDateNotNeeded {
-            chips.append(QuickAddChip(id: "no-due-date", symbol: "calendar.badge.checkmark", text: "No due date"))
+        if draft.someday {
+            chips.append(QuickAddChip(id: "someday", symbol: "tray", text: "Someday"))
         }
         return chips
     }

@@ -65,6 +65,12 @@ import Testing
         #expect(Availability.merge([]).isEmpty)
     }
 
+    @Test func somedayDoesNotBlockAvailabilityEvenWithAStalePinOrPlacement() {
+        var task = Self.task("paused", pin: Self.hours(18, 19).start)
+        task.someday = true
+        #expect(Self.free(tasks: [task], placements: [Self.placement(task.id, start: 20, end: 21)]) == Self.free())
+    }
+
     @Test func subtractSplitsClipsAndRespectsTouchingEndpoints() {
         #expect(Availability.subtract([Self.hours(1, 6)], removing: Self.hours(2, 4)) == [Self.hours(1, 2), Self.hours(4, 6)])
         #expect(Availability.subtract([Self.hours(1, 6)], removing: Self.hours(0, 3)) == [Self.hours(3, 6)])

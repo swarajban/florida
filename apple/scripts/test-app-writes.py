@@ -121,7 +121,7 @@ final class AppDatabase {
         tasks[task.id] = task
     }
     @discardableResult
-    func saveTask(_ task: TaskItem, original: TaskItem?, now: Date = Date()) throws -> TaskMutation {
+    func saveTask(_ task: TaskItem, original: TaskItem?, somedayIntent: Bool? = nil, now: Date = Date()) throws -> TaskMutation {
         beforeSave?()
         beforeSave = nil
         let before = tasks[task.id]
@@ -137,6 +137,7 @@ final class AppDatabase {
             }
             after = try JSONCoding.decoder.decode(TaskItem.self, from: JSONSerialization.data(withJSONObject: fields))
         }
+        if let somedayIntent { after.someday = somedayIntent }
         tasks[task.id] = after
         return TaskMutation(before: before, after: after)
     }
@@ -407,6 +408,23 @@ for (name, action) in omittedActions {
     check(model.database!.tasks[initial.id]?.priority == .high, "undo after \(name) never reverts an unrelated task")
 }
 let oldDate = Date(timeIntervalSince1970: 1_795_132_800)
+for intent in [false, true] {
+    var original = initial
+    original.someday = intent
+    var live = original
+    live.someday = !intent
+    live.notes = "Remote notes"
+    let model = AppModel()
+    model.database!.tasks[initial.id] = live
+    _ = model.save(original, original: original, somedayIntent: intent)
+    check(model.database!.tasks[initial.id]?.someday == intent
+          && model.database!.tasks[initial.id]?.notes == live.notes,
+          "Mac save forwards explicit final Someday intent without clobbering untouched fields")
+    model.database!.tasks[initial.id] = live
+    _ = model.save(original, original: original)
+    check(model.database!.tasks[initial.id]?.someday == live.someday,
+          "Mac save preserves an untouched concurrent Someday decision")
+}
 let newDate = oldDate.addingTimeInterval(4 * 86_400)
 let section = TaskRecurrenceSection()
 section.recurrence = TaskRecurrence(frequency: .week, timeZone: "UTC", startDate: "")
@@ -610,6 +628,19 @@ editorCompletion.undo(editorCompletion.toasts.last!)
 check(editorCompletion.database!.tasks[initial.id]?.title == initial.title
       && editorCompletion.database!.tasks[initial.id]?.categoryId == initial.categoryId,
       "iPhone editor completion undo reverses all edited fields together")
+for intent in [false, true] {
+    var original = initial
+    original.someday = intent
+    var live = original
+    live.someday = !intent
+    live.notes = "Remote notes"
+    let model = AppModel()
+    model.database!.tasks[initial.id] = live
+    model.complete(original, original: original, somedayIntent: intent)
+    check(model.database!.tasks[initial.id]?.someday == intent
+          && model.database!.tasks[initial.id]?.notes == live.notes,
+          "iPhone editor completion forwards final Someday intent without clobbering untouched fields")
+}
 let actions: [(String, (AppModel, TaskItem) -> Void)] = [
     ("pin", { $0.pin($1, at: Date()) }),
     ("progress", { $0.doneForNow($1, minutes: 10) }),

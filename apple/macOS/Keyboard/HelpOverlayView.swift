@@ -40,6 +40,10 @@ struct HelpOverlayView: View {
                                         .foregroundStyle(.secondary)
                                 }
                                 .font(.callout)
+                                .accessibilityElement(children: .combine)
+                                .accessibilityLabel(item.label)
+                                .accessibilityValue(item.shortcut)
+                                .accessibilityIdentifier("help-command-\(item.label)")
                             }
                         }
                     }

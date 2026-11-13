@@ -173,7 +173,7 @@ struct GridLayout {
             let number = blockNumbers[placement.taskId, default: 0]
             blockNumbers[placement.taskId] = number + 1
             guard placement.endAt > firstDay, placement.startAt < rangeEnd,
-                  let task = tasksById[placement.taskId], task.isOpen
+                  let task = tasksById[placement.taskId], task.isOpen, !task.someday
             else { continue }
             sources[placement.id] = Source(
                 item: .task(task.id), kind: .task(pinned: placement.pinned), start: placement.startAt,

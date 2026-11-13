@@ -29,6 +29,7 @@ export const taskBody = z.object({
   priority,
   deadlineType,
   dueAt: isoInstant.nullish(),
+  someday: z.boolean().optional().describe('Keeps a task off the plan, with no due date or pin. Explicit true clears dueAt and pinnedStart but keeps startAt. When omitted, setting a changed nonnull due/start/pin turns it off; unrelated edits and same-value retries preserve it. A same-date scheduling action must send false. Defaults to false on creation.'),
   startAt: isoInstant.nullish(),
   scheduleId: z.string().min(1).nullish(),
   context: taskContext
@@ -72,6 +73,17 @@ export async function lockTaskRecurrences(db: Db): Promise<void> {
 }
 
 function taskFields(body: TaskBody, now: Date, current: TaskRow | undefined) {
+  const dueAt = toDate(body.dueAt)
+  const startAt = toDate(body.startAt)
+  const pinnedStart = toDate(body.pinnedStart)
+  const datesChanged = current !== undefined && (
+    (dueAt !== null && dueAt.getTime() !== current.dueAt?.getTime())
+    || (startAt !== null && startAt.getTime() !== current.startAt?.getTime())
+    || (pinnedStart !== null && pinnedStart.getTime() !== current.pinnedStart?.getTime())
+  )
+  const someday = body.someday === true
+    ? true
+    : datesChanged ? false : body.someday ?? current?.someday ?? false
   return {
     categoryId: body.categoryId,
     title: body.title,
@@ -80,16 +92,17 @@ function taskFields(body: TaskBody, now: Date, current: TaskRow | undefined) {
     durationMinutes: body.durationMinutes,
     minChunkMinutes: body.minChunkMinutes ?? null,
     priority: body.priority,
-    deadlineType: body.deadlineType,
-    dueAt: toDate(body.dueAt),
-    startAt: toDate(body.startAt),
+    deadlineType: someday ? 'none' as const : body.deadlineType,
+    dueAt: someday ? null : dueAt,
+    someday,
+    startAt,
     scheduleId: body.scheduleId ?? null,
     // Older shipped clients omit context; their edits must not reset a task to the default.
     context: body.context ?? current?.context ?? 'computer',
     // Likewise: absent keeps, null clears.
     projectId: body.projectId === undefined ? (current?.projectId ?? null) : body.projectId,
     attention: body.attention === undefined ? (current?.attention ?? null) : body.attention,
-    pinnedStart: toDate(body.pinnedStart),
+    pinnedStart: someday ? null : pinnedStart,
     completedMinutes: body.completedMinutes ?? 0,
     completedAt: toDate(body.completedAt),
     updatedAt: now,
@@ -109,6 +122,7 @@ function seriesTemplate(fields: Pick<TaskRow, keyof ReturnType<typeof taskFields
     priority: fields.priority,
     deadlineType: fields.deadlineType,
     dueAt: fields.dueAt?.toISOString() ?? null,
+    someday: fields.someday,
     startAt: fields.startAt?.toISOString() ?? null,
     scheduleId: fields.scheduleId,
     context: fields.context,
@@ -163,11 +177,11 @@ async function writeTask(db: Db, id: string, body: TaskBody, now: Date): Promise
       recurrenceDate = first
       recurrenceRevision = randomUUID()
       const template = seriesTemplate(fields, recurrence.startDate)
-      if (template.deadlineType === 'none') template.deadlineType = 'soft'
+      if (!template.someday && template.deadlineType === 'none') template.deadlineType = 'soft'
       await db.insert(taskRecurrences).values({ id: recurrenceSeriesId, revision: recurrenceRevision, rule: recurrence, template, fromDate: first, updatedAt: writeTimestamp })
       fields = { ...fields, ...occurrenceFields(template, recurrence, first) }
     } else if (current !== undefined && recurrenceDate !== null && series !== undefined) {
-      if (fields.deadlineType === 'none') fields.deadlineType = 'soft'
+      if (!fields.someday && fields.deadlineType === 'none') fields.deadlineType = 'soft'
       // A retried creation still contains dates relative to the original rule anchor. Normalize
       // that request exactly as the first write; omitted dates otherwise mean local day bounds.
       const incoming = seriesTemplate(fields, series.template.anchorDate)
@@ -243,6 +257,7 @@ export async function patchTask(db: Db, id: string, patch: TaskPatch, now: Date 
       priority: keep(patch.priority, current.priority),
       deadlineType: keep(patch.deadlineType, current.deadlineType),
       dueAt: keep(patch.dueAt, iso(current.dueAt)),
+      ...(patch.someday === undefined ? {} : { someday: patch.someday }),
       startAt: keep(patch.startAt, iso(current.startAt)),
       scheduleId: keep(patch.scheduleId, current.scheduleId),
       context: keep(patch.context, current.context),

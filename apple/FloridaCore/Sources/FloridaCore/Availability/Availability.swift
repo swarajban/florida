@@ -41,7 +41,7 @@ public enum Availability {
     ) -> [AvailabilityRange] {
         let lower = max(visible.lowerBound, now)
         guard lower < visible.upperBound else { return [] }
-        let liveTasks = tasks.filter { $0.deletedAt == nil && $0.completedAt == nil && $0.remainingMinutes > 0 }
+        let liveTasks = tasks.filter { $0.isOpen && !$0.someday && $0.remainingMinutes > 0 }
         let liveTaskIds = Set(liveTasks.map(\.id))
         let busyZone = timeZone ?? schedules.lazy.compactMap { TimeZone(identifier: $0.timeZone) }.first ?? .gmt
         var busy = events.compactMap { blockingRange($0, timeZone: busyZone) }

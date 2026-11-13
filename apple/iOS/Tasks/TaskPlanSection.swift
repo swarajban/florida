@@ -58,7 +58,12 @@ struct TaskPlanSection: View {
             }
         }
 
-        if let summary = scheduleSummary {
+        if task.someday {
+            Section {
+                Label("Someday", systemImage: "tray")
+                    .accessibilityIdentifier("task-plan-someday")
+            }
+        } else if let summary = scheduleSummary {
             Section {
                 Button {
                     askWhy()
@@ -142,7 +147,8 @@ struct TaskPlanSection: View {
     /// Where the saved task is on the plan; nil for a new task, a finished one, and one with no
     /// block, which have no "here" to ask about.
     private var scheduleSummary: TaskScheduleSummary? {
-        guard !isNew, original.isOpen else { return nil }
+        guard !isNew, original.isOpen, !original.someday, !task.someday,
+              model.task(id: original.id)?.someday != true else { return nil }
         let placements = model.placementsByTask[original.id] ?? []
         guard !placements.isEmpty else { return nil }
         return TaskScheduleSummary(

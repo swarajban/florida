@@ -69,7 +69,11 @@ final class AppModel {
     var briefErrors: [BriefKind: String] = [:]
     /// Events, task blocks, commitments and project time of `selectedDay`; nil until the first
     /// observation fires.
-    var agenda: DayAgenda?
+    private var storedAgenda: DayAgenda?
+    var agenda: DayAgenda? {
+        get { storedAgenda.map { visibleTaskPlan($0, excluding: somedayTaskIDs) } }
+        set { storedAgenda = newValue }
+    }
     var accounts: [GoogleAccount] = []
     var calendars: [CalendarInfo] = []
     /// Local writes not pushed yet, oldest first (`AppModel+Queue`).
@@ -120,7 +124,14 @@ final class AppModel {
     @ObservationIgnored var observers: [Task<Void, Never>] = []
     @ObservationIgnored var agendaObserver: Task<Void, Never>?
     /// Events and task blocks of the days the hour grid shows (`AppModel+Grid`).
-    var gridDays: [DayAgenda] = []
+    private var storedGridDays: [DayAgenda] = []
+    var gridDays: [DayAgenda] {
+        get {
+            let somedayIDs = somedayTaskIDs
+            return storedGridDays.map { visibleTaskPlan($0, excluding: somedayIDs) }
+        }
+        set { storedGridDays = newValue }
+    }
     @ObservationIgnored var gridObservation: GridObservation?
 
     var isSyncing: Bool { activeOperations > 0 }

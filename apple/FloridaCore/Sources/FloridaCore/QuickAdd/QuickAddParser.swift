@@ -21,15 +21,15 @@ public struct QuickAddDraft: Hashable, Sendable {
     /// Text after the first ` // ` or ` -- ` separator, untouched by the token grammar.
     public var notes: String?
     public var source: TaskSource?
-    public var dueDateNotNeeded: Bool
+    public var someday: Bool
     public var recurrence: TaskRecurrence?
+    var clearsDueAndPin = false
 
     public init(
         title: String = "", durationMinutes: Int? = nil, priority: Priority? = nil,
         deadlineType: DeadlineType? = nil, dueAt: Date? = nil, startAt: Date? = nil,
         pinnedStart: Date? = nil, categoryHint: String? = nil, context: TaskContext? = nil, notes: String? = nil,
-        source: TaskSource? = nil,
-        dueDateNotNeeded: Bool = false, recurrence: TaskRecurrence? = nil
+        source: TaskSource? = nil, someday: Bool = false, recurrence: TaskRecurrence? = nil
     ) {
         self.title = title
         self.durationMinutes = durationMinutes
@@ -42,7 +42,7 @@ public struct QuickAddDraft: Hashable, Sendable {
         self.context = context
         self.notes = notes
         self.source = source
-        self.dueDateNotNeeded = dueDateNotNeeded
+        self.someday = someday
         self.recurrence = recurrence
     }
 }
@@ -107,24 +107,40 @@ public enum QuickAddParser {
                 continue
             }
 
+            if word == "someday", !draft.someday {
+                draft.someday = true
+                draft.clearsDueAndPin = true
+                draft.dueAt = nil
+                draft.deadlineType = nil
+                draft.pinnedStart = nil
+                i += 1
+                continue
+            }
+
             if let symbol = word.first, "^*=~".contains(symbol),
                let clause = scanner.symbolClause(at: i) {
                 var accepted = false
                 switch clause.value {
                 case .due(let moment):
-                    if draft.dueAt == nil, !draft.dueDateNotNeeded {
+                    if draft.dueAt == nil {
                         draft.dueAt = scanner.resolve(moment, defaultClock: .endOfWorkday)
                         draft.deadlineType = .soft
+                        draft.someday = false
                         accepted = true
                     }
-                case .noDue:
-                    if draft.dueAt == nil, !draft.dueDateNotNeeded {
-                        draft.dueDateNotNeeded = true
+                case .someday:
+                    if !draft.someday {
+                        draft.someday = true
+                        draft.clearsDueAndPin = true
+                        draft.dueAt = nil
+                        draft.deadlineType = nil
+                        draft.pinnedStart = nil
                         accepted = true
                     }
                 case .start(let moment):
-                    if draft.startAt == nil {
+                    if draft.startAt == nil || draft.someday {
                         draft.startAt = scanner.resolve(moment, defaultClock: .startOfDay)
+                        draft.someday = false
                         accepted = true
                     }
                 case .duration(let minutes):
@@ -166,22 +182,25 @@ public enum QuickAddParser {
                     continue
                 }
             }
-            if let deadline = QuickAddScanner.dueKeywords[word], draft.dueAt == nil, !draft.dueDateNotNeeded,
+            if let deadline = QuickAddScanner.dueKeywords[word], draft.dueAt == nil,
                let moment = scanner.parseMoment(at: i + 1, bareHourFirst: false) {
                 draft.dueAt = scanner.resolve(moment, defaultClock: .endOfWorkday)
                 draft.deadlineType = deadline
+                draft.someday = false
                 i += 1 + moment.consumed
                 continue
             }
-            if QuickAddScanner.startKeywords.contains(word), draft.startAt == nil,
+            if QuickAddScanner.startKeywords.contains(word), draft.startAt == nil || draft.someday,
                let moment = scanner.parseMoment(at: i + 1, bareHourFirst: false) {
                 draft.startAt = scanner.resolve(moment, defaultClock: .startOfDay)
+                draft.someday = false
                 i += 1 + moment.consumed
                 continue
             }
             if word == "at", draft.pinnedStart == nil,
                let moment = scanner.parseMoment(at: i + 1, bareHourFirst: true), moment.clock != nil {
                 draft.pinnedStart = scanner.resolve(moment, defaultClock: .startOfDay)
+                draft.someday = false
                 i += 1 + moment.consumed
                 continue
             }
@@ -189,12 +208,14 @@ public enum QuickAddParser {
                 if moment.clock != nil {
                     if draft.pinnedStart == nil {
                         draft.pinnedStart = scanner.resolve(moment, defaultClock: .startOfDay)
+                        draft.someday = false
                         i += moment.consumed
                         continue
                     }
-                } else if draft.dueAt == nil, !draft.dueDateNotNeeded {
+                } else if draft.dueAt == nil {
                     draft.dueAt = scanner.resolve(moment, defaultClock: .endOfWorkday)
                     draft.deadlineType = .soft
+                    draft.someday = false
                     i += moment.consumed
                     continue
                 }
@@ -358,7 +379,7 @@ struct QuickAddScanner {
             trailingTrim.remove(charactersIn: "/~")
         }
         let title = String(tokens.joined(separator: " ").drop { $0.unicodeScalars.allSatisfy(leadingTrim.contains) })
-        if let last = tokens.last, TaskSource.from(url: last) != nil || last.contains("://") { return title }
+        if let last = tokens.last, last.contains("://") || TaskSource.from(url: last) != nil { return title }
         return title.trimmingCharacters(in: trailingTrim)
     }
 

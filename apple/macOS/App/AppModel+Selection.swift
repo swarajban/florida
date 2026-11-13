@@ -94,7 +94,9 @@ extension AppModel {
         if focus == .calendar, let item, let day = gridLayout.day(of: item) {
             selectedDay = day
         }
-        if let pick = selectedSuggestion {
+        if selectedTask?.someday == true {
+            statusMessage = "Someday"
+        } else if let pick = selectedSuggestion {
             let take = RoutineText.takeTitle(pick.placement, now: Date(), calendar: calendar)
             statusMessage = "Suggestion, not on the plan · P: \(take.lowercased())"
         } else if let note = planNote(for: item) {
