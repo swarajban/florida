@@ -18,6 +18,36 @@ import Testing
         Fixtures.event(id: "event", start: "2026-11-09T17:00:00Z", end: "2026-11-09T18:00:00Z")
     }
 
+    @Test func rsvpUpdatesLiveSelfAttendeeWithoutRevertingOtherGuests() throws {
+        let db = try store()
+        var original = event()
+        original.responseStatus = "needsAction"
+        original.attendees = [
+            EventAttendee(email: "me@example.com", responseStatus: "needsAction", isSelf: true),
+            EventAttendee(email: "guest@example.com", responseStatus: "accepted"),
+        ]
+        var live = original
+        live.attendees = [
+            EventAttendee(email: "me@example.com", responseStatus: "needsAction", isSelf: true),
+            EventAttendee(email: "guest@example.com", responseStatus: "declined"),
+            EventAttendee(email: "new@example.com", responseStatus: "tentative"),
+        ]
+        try db.apply(SyncResponse(cursor: "changed-guests", events: [live]))
+        var draft = original
+        draft.responseStatus = "accepted"
+        draft.attendees?[0].responseStatus = "accepted"
+        try db.saveEvent(draft, original: original)
+        let saved = try #require(try db.event(id: original.id))
+        #expect(saved.responseStatus == "accepted")
+        #expect(saved.attendees?.first(where: \.isSelf)?.responseStatus == "accepted")
+        #expect(saved.attendees?.filter { !$0.isSelf } == live.attendees?.filter { !$0.isSelf })
+        let pending = try #require(try db.pendingWrites().first { $0.entity == .event })
+        let data = try #require(pending.body)
+        let body = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(body["responseStatus"] as? String == "accepted")
+        #expect(body["attendees"] == nil)
+    }
+
     @Test func taskEditorPreservesUntouchedLiveFieldsAndExplicitClears() throws {
         let db = try store()
         var original = Fixtures.task(id: "task")
@@ -31,8 +61,9 @@ import Testing
         var draft = original
         draft.title = "My title"
         draft.notes = nil
-        try db.saveTask(draft, original: original, now: Fixtures.t0)
+        let mutation = try db.saveTask(draft, original: original, now: Fixtures.t0)
         let saved = try #require(try db.task(id: original.id))
+        #expect(mutation.before == live && mutation.after == saved)
         #expect(saved.title == "My title" && saved.notes == nil)
         #expect(saved.priority == .high && saved.completedMinutes == 20)
         #expect(saved.recurrenceRevision == "new-revision")

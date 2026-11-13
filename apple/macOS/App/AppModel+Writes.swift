@@ -48,8 +48,7 @@ extension AppModel {
         guard let database else { return }
         let next = neighbor(of: item(for: task))
         do {
-            guard let snapshot = try database.task(id: task.id), snapshot.deletedAt == nil else { return }
-            try database.deleteTask(id: task.id)
+            guard let snapshot = try database.deleteTask(id: task.id), snapshot.deletedAt == nil else { return }
             pushUndo(UndoEntry(label: "Deleted \(Self.quoted(snapshot.title))", restores: [.undelete(snapshot)], at: Date()))
         } catch {
             statusMessage = "Could not delete: \(error.localizedDescription)"
@@ -88,9 +87,9 @@ extension AppModel {
                     var completed = task
                     completed.completedAt = Date()
                     completed.completedMinutes = completed.durationMinutes
-                    try database.saveTask(completed, original: original ?? stored)
+                    return try database.saveTask(completed, original: original ?? stored)
                 } else {
-                    try database.completeTask(id: task.id)
+                    return try database.completeTask(id: task.id)
                 }
             }
         } catch {

@@ -106,16 +106,11 @@ struct Ghost: Identifiable, Equatable {
 extension AppModel {
     static let undoLimit = 50
 
-    /// Runs `write` on task `taskId` as one undoable step: the row is read before and after, and
-    /// the fields that differ are what `z` puts back; a task that did not exist before is undone
-    /// by deleting it. Rethrows what `write` throws, recording nothing.
-    func recordingUndo(_ label: String, taskId: String, _ write: () throws -> Void) throws {
-        guard let database else { return }
-        let before = try database.task(id: taskId)
-        try write()
+    func recordingUndo(_ label: String, taskId: String, _ write: () throws -> AppDatabase.TaskMutation?) throws {
+        guard let mutation = try write() else { return }
         let restore: UndoEntry.Restore
-        if let before, let after = try database.task(id: taskId) {
-            let changes = UndoEntry.FieldChange.changes(from: before, to: after)
+        if let before = mutation.before {
+            let changes = UndoEntry.FieldChange.changes(from: before, to: mutation.after)
             guard !changes.isEmpty else { return }
             restore = .revert(taskId: taskId, changes: changes)
         } else {

@@ -2,6 +2,11 @@ import Foundation
 import GRDB
 
 extension AppDatabase {
+    public struct TaskMutation: Sendable {
+        public let before: TaskItem?
+        public let after: TaskItem
+    }
+
     @discardableResult
     public func updateTask(id: String, now: Date = Date(), _ update: (inout TaskItem) throws -> Bool) throws -> Bool {
         try writer.write { db in
@@ -15,15 +20,18 @@ extension AppDatabase {
         }
     }
 
-    public func saveTask(_ draft: TaskItem, original: TaskItem?, now: Date = Date()) throws {
+    @discardableResult
+    public func saveTask(_ draft: TaskItem, original: TaskItem?, now: Date = Date()) throws -> TaskMutation {
         try writer.write { db in
+            let before = try TaskItem.fetchOne(db, id: draft.id)
             guard let original else {
                 var task = draft
                 try Self.sanitizeDestinations(of: &task, in: db)
                 try Self.saveTask(task, in: db, now: now)
-                return
+                guard let after = try TaskItem.fetchOne(db, id: task.id) else { throw WriteError.taskNoLongerExists }
+                return TaskMutation(before: before, after: after)
             }
-            guard var live = try TaskItem.fetchOne(db, id: original.id), live.deletedAt == nil,
+            guard var live = before, live.deletedAt == nil,
                   draft.id == original.id else { throw WriteError.taskNoLongerOpen }
             let reopening = original.completedAt != nil && draft.completedAt == nil
                 && original.completedAt?.databaseValue == live.completedAt?.databaseValue
@@ -62,6 +70,8 @@ extension AppDatabase {
                 live.completedAt = now
             }
             try Self.saveTask(live, in: db, now: now)
+            guard let after = try TaskItem.fetchOne(db, id: live.id) else { throw WriteError.taskNoLongerExists }
+            return TaskMutation(before: before, after: after)
         }
     }
 
@@ -92,6 +102,11 @@ extension AppDatabase {
             applyDate(\.endAt)
             apply(\.allDay)
             apply(\.responseStatus)
+            if draft.responseStatus != original.responseStatus, let response = live.responseStatus,
+               var attendees = live.attendees, let index = attendees.firstIndex(where: \.isSelf) {
+                attendees[index].responseStatus = response
+                live.attendees = attendees
+            }
             guard live != before else { return }
             try Self.saveEvent(live, recurrence: recurrence, in: db, now: now)
         }

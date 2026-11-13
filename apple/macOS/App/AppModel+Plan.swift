@@ -94,6 +94,7 @@ extension AppModel {
             statusMessage = "Could not delete the project: \(error.localizedDescription)"
             return
         }
+        pushUndo(UndoEntry(label: "Deleted project", restores: [.unavailable], at: Date()))
         showGhost("Deleted \(Self.quoted(project.name))")
         scheduleSync()
     }

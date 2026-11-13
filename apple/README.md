@@ -384,9 +384,10 @@ Reopen action. New repeat rules follow subsequent Due/Start changes until Starts
 is explicitly edited. Reducing a task's duration below work already logged completes it.
 
 Task delete Undo works after sync removes the local row. Deleting a repeating task
-stops the series; Undo restores one task only and says so. On Mac, event and project
-edits stop Undo from falling through to an earlier task action: `z` reports that the
-latest change cannot be undone. Declining an invitation asks first. Event drags
+stops the series; Undo restores one task only and says so. On Mac, category, event
+and project edits/deletions, including event day blocking, stop Undo from falling
+through to an earlier task action: `z` reports that the latest change cannot be
+undone. Declining an invitation asks first. Event drags
 remain undoable, and saving an unchanged task does not add an undo step.
 
 Run `python3 apple/scripts/test-app-writes.py` on Linux or Mac for portable app-write

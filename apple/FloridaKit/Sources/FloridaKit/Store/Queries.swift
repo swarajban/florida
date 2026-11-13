@@ -416,10 +416,11 @@ extension AppDatabase {
     }
 
     /// Marks the task deleted locally and queues a `delete`, replacing any queued `put`.
-    public func deleteTask(id: String, now: Date = Date()) throws {
+    @discardableResult
+    public func deleteTask(id: String, now: Date = Date()) throws -> TaskItem? {
         try writer.write { db in
-            if let task = try TaskItem.fetchOne(db, id: id),
-               let series = task.recurrenceSeriesId, let date = task.recurrenceDate {
+            let task = try TaskItem.fetchOne(db, id: id)
+            if let task, let series = task.recurrenceSeriesId, let date = task.recurrenceDate {
                 try db.execute(sql: """
                     UPDATE task SET deletedAt = ?, updatedAt = ?
                     WHERE recurrenceSeriesId = ? AND recurrenceDate > ? AND completedAt IS NULL AND deletedAt IS NULL
@@ -431,16 +432,21 @@ extension AppDatabase {
             }
             try db.execute(sql: "UPDATE task SET deletedAt = ?, updatedAt = ? WHERE id = ?", arguments: [now, now, id])
             try Self.enqueue(db, entity: .task, id: id, op: .delete, body: nil, now: now)
+            return task
         }
     }
 
     /// Marks the task complete at `at` (its remaining minutes count as done).
-    public func completeTask(id: String, at completedAt: Date = Date()) throws {
+    @discardableResult
+    public func completeTask(id: String, at completedAt: Date = Date()) throws -> TaskMutation? {
         try writer.write { db in
-            guard var task = try TaskItem.fetchOne(db, id: id) else { return }
+            guard var task = try TaskItem.fetchOne(db, id: id), task.isOpen else { return nil }
+            let before = task
             task.completedAt = completedAt
             task.completedMinutes = task.durationMinutes
             try Self.saveTask(task, in: db, now: completedAt)
+            guard let after = try TaskItem.fetchOne(db, id: id) else { throw WriteError.taskNoLongerExists }
+            return TaskMutation(before: before, after: after)
         }
     }
 

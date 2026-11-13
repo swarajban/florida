@@ -233,13 +233,14 @@ extension AppModel {
 
     func setBlocksDay(_ event: CalendarEvent, blocksDay: Bool?) {
         let current = storedVersion(of: event)
-        guard current.allDay, let database else { return }
+        guard current.allDay, current.blocksDay != blocksDay, let database else { return }
         do {
             try database.setEventBlocksDay(id: current.id, blocksDay: blocksDay)
         } catch {
             statusMessage = "Could not save: \(error.localizedDescription)"
             return
         }
+        pushUndo(UndoEntry(label: "Event day blocking", restores: [.unavailable], at: Date()))
         scheduleSync()
     }
 
@@ -421,6 +422,7 @@ extension AppModel {
             statusMessage = "Could not delete: \(error.localizedDescription)"
             return
         }
+        pushUndo(UndoEntry(label: "Deleted event", restores: [.unavailable], at: Date()))
         didRemove(event, selecting: next)
         showGhost("Deleted \(Self.quoted(Self.title(of: event)))", for: .seconds(3))
         scheduleSync()

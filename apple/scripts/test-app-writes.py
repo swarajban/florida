@@ -33,6 +33,11 @@ methods = '\n'.join(method(undo, name) for name in ['recordingUndo', 'pushUndo',
 methods += '\n' + '\n'.join(method(writes, name) for name in ['save', 'pinSelection', 'setPriority', 'deleteTask'])
 methods += '\n' + method(source('apple/macOS/App/AppModel+Events.swift'), 'save')
 methods += '\n' + method(source('apple/macOS/App/AppModel+Plan.swift'), 'save')
+methods += '\n' + '\n'.join(method(source('apple/macOS/App/AppModel+Events.swift'), name)
+                             for name in ['setBlocksDay', 'delete', 'storedVersion'])
+methods += '\n' + method(source('apple/macOS/App/AppModel+Plan.swift'), 'delete')
+methods += '\n' + '\n'.join(method(source('apple/macOS/App/AppModel+Categories.swift'), name)
+                             for name in ['save', 'deleteCategory'])
 if 'var liveSelectedTask:' in selection:
     start = selection.index('    var liveSelectedTask:')
     methods += '\n' + selection[start:selection.index('\n    }', start) + len('\n    }')]
@@ -68,15 +73,30 @@ import Foundation
 
 extension Priority { var displayName: String { rawValue } }
 final class AppDatabase {
+    struct TaskMutation {
+        let before: TaskItem?
+        let after: TaskItem
+    }
     var tasks: [String: TaskItem] = [:]
+    var events: [String: CalendarEvent] = [:]
     func task(id: String) throws -> TaskItem? { tasks[id] }
     func saveTask(_ task: TaskItem) throws { tasks[task.id] = task }
-    func saveTask(_ task: TaskItem, original: TaskItem?) throws { tasks[task.id] = task }
+    @discardableResult
+    func saveTask(_ task: TaskItem, original: TaskItem?) throws -> TaskMutation {
+        let before = tasks[task.id]
+        tasks[task.id] = task
+        return TaskMutation(before: before, after: task)
+    }
     func updateTask(id: String, _ update: (inout TaskItem) throws -> Bool) throws {
         guard var task = tasks[id], task.deletedAt == nil else { return }
         if try update(&task) { tasks[id] = task }
     }
-    func deleteTask(id: String) throws { tasks[id]?.deletedAt = Date() }
+    @discardableResult
+    func deleteTask(id: String) throws -> TaskItem? {
+        let before = tasks[id]
+        tasks[id]?.deletedAt = Date()
+        return before
+    }
     func restoreTask(_ snapshot: TaskItem) throws -> Bool {
         var restored = snapshot
         restored.deletedAt = nil
@@ -84,12 +104,17 @@ final class AppDatabase {
         tasks[snapshot.id] = restored
         return snapshot.recurrence != nil
     }
-    func event(id: String) throws -> CalendarEvent? { nil }
+    func event(id: String) throws -> CalendarEvent? { events[id] }
     func saveEvent(_ event: CalendarEvent) throws {}
     func saveEvent(_ event: CalendarEvent, recurrence: EventRecurrence?) throws {}
     func saveEvent(_ event: CalendarEvent, original: CalendarEvent?, recurrence: EventRecurrence?) throws {}
     func saveProject(_ project: Project) throws {}
     func saveProject(_ project: Project, original: Project?) throws {}
+    func saveCategory(_ category: TaskCategory) throws {}
+    func deleteCategory(id: String) throws {}
+    func deleteProject(id: String) throws {}
+    func deleteEvent(id: String) throws { events[id] = nil }
+    func setEventBlocksDay(id: String, blocksDay: Bool?) throws { events[id]?.blocksDay = blocksDay }
     func moveEventSeries(instanceId: String, start: Date, end: Date) throws {}
 }
 enum Item: Equatable { case task(String), event(String) }
@@ -103,12 +128,15 @@ final class AppModel {
     var statusMessage: String?
     var selection: Item?
     var selectedTask: TaskItem?
+    var categoriesById: [String: TaskCategory] = [:]
     var selectedSuggestion: Int? { nil }
     var placementsByTask: [String: [Placement]] = [:]
     var calendar = Calendar(identifier: .gregorian)
     var ghosts: [String] = []
     func scheduleSync() {}
     func requireEditable(_ event: CalendarEvent) -> Bool { true }
+    func didRemove(_ event: CalendarEvent, selecting next: Item?) {}
+    static func title(of event: CalendarEvent) -> String { event.summary ?? "Event" }
     static func trimmedOrNil(_ text: String?) -> String? { text }
     func take(_ pick: Int) {}
     func neighbor(of item: Item) -> Item? { nil }
@@ -138,7 +166,7 @@ model.pinSelection(true)
 model.setPriority(.high)
 check(model.database!.tasks[initial.id]?.pinnedStart == start, "rapid priority after pin preserves the pin despite stale observation")
 model.undoStack = []
-try model.recordingUndo("No edit", taskId: initial.id) {}
+try model.recordingUndo("No edit", taskId: initial.id) { __NO_EDIT_RESULT__ }
 check(model.undoStack.isEmpty, "no-op edit does not consume an undo step")
 var closed = initial
 closed.completedAt = start
@@ -155,18 +183,34 @@ check(model.database!.tasks[initial.id]?.title == initial.title, "delete undo re
 model.database!.tasks[initial.id] = initial
 model.undoStack = []
 try model.recordingUndo("Priority", taskId: initial.id) {
+    let before = model.database!.tasks[initial.id]!
     model.database!.tasks[initial.id]?.priority = .high
+    __PRIORITY_RESULT__
 }
 model.database!.tasks[initial.id]?.notes = "Remote notes"
 model.undo()
 check(model.database!.tasks[initial.id]?.notes == "Remote notes" && model.database!.tasks[initial.id]?.priority == .medium,
       "field-scoped undo keeps unrelated remote edits")
 try model.recordingUndo("Priority", taskId: initial.id) {
+    let before = model.database!.tasks[initial.id]!
     model.database!.tasks[initial.id]?.priority = .high
+    __PRIORITY_RESULT__
 }
 model.database!.tasks[initial.id]?.priority = .low
 model.undo()
 check(model.database!.tasks[initial.id]?.priority == .low, "undo refuses a field changed since the action")
+let interleaved = AppModel()
+interleaved.database!.tasks[initial.id] = initial
+try interleaved.recordingUndo("Title edit", taskId: initial.id) {
+    interleaved.database!.tasks[initial.id]?.notes = "Concurrent remote notes"
+    let before = interleaved.database!.tasks[initial.id]!
+    interleaved.database!.tasks[initial.id]?.title = "User title"
+    __INTERLEAVED_RESULT__
+}
+interleaved.undo()
+check(interleaved.database!.tasks[initial.id]?.title == initial.title
+      && interleaved.database!.tasks[initial.id]?.notes == "Concurrent remote notes",
+      "undo transaction snapshot preserves a concurrent update before the user write")
 let eventModel = AppModel()
 eventModel.database!.tasks[initial.id] = initial
 eventModel.selectedTask = initial
@@ -183,6 +227,28 @@ let project = Project(id: "project", name: "A project", createdAt: Date(), updat
 _ = projectModel.save(project: project)
 projectModel.undo()
 check(projectModel.database!.tasks[initial.id]?.priority == .high, "undo after project edit never reverts an unrelated task")
+let category = TaskCategory(id: "category", name: "Category", scheduleId: "schedule", createdAt: Date(), updatedAt: Date())
+let omittedActions: [(String, (AppModel) -> Void)] = [
+    ("category save", { _ = $0.save(category) }),
+    ("category delete", { $0.deleteCategory(category) }),
+    ("event blocksDay", { model in
+        var allDay = event
+        allDay.allDay = true
+        model.database!.events[event.id] = allDay
+        model.setBlocksDay(allDay, blocksDay: true)
+    }),
+    ("event delete", { $0.delete(event: event) }),
+    ("project delete", { $0.delete(project: project) }),
+]
+for (name, action) in omittedActions {
+    let model = AppModel()
+    model.database!.tasks[initial.id] = initial
+    model.selectedTask = initial
+    model.setPriority(.high)
+    action(model)
+    model.undo()
+    check(model.database!.tasks[initial.id]?.priority == .high, "undo after \(name) never reverts an unrelated task")
+}
 let oldDate = Date(timeIntervalSince1970: 1_795_132_800)
 let newDate = oldDate.addingTimeInterval(4 * 86_400)
 let section = TaskRecurrenceSection()
@@ -201,6 +267,13 @@ editor.draft.recurrence = section.recurrence
 check(editor.saved().dueAt == explicitDate, "explicit recurrence Starts remains authoritative")
 exit(failed == 0 ? 0 : 1)
 '''
+uses_mutations = 'AppDatabase.TaskMutation' in undo
+tests = tests.replace('__NO_EDIT_RESULT__',
+                      'return AppDatabase.TaskMutation(before: initial, after: initial)' if uses_mutations else '')
+tests = tests.replace('__PRIORITY_RESULT__',
+                      'return AppDatabase.TaskMutation(before: before, after: model.database!.tasks[initial.id]!)' if uses_mutations else '')
+tests = tests.replace('__INTERLEAVED_RESULT__',
+                      'return AppDatabase.TaskMutation(before: before, after: interleaved.database!.tasks[initial.id]!)' if uses_mutations else '')
 
 ios_model = r'''
 final class AppModel {

@@ -73,13 +73,13 @@ extension AppModel {
     /// Deletes the task and offers Undo, which clears `deletedAt` again. The server's
     /// `PUT /api/tasks/:id` does the same, so it works after the delete was pushed.
     func delete(_ task: TaskItem) {
-        let previous = storedVersion(of: task)
         let now = Date()
+        var previous: TaskItem?
+        guard write({ previous = try $0.deleteTask(id: task.id, now: now) }), let previous, previous.deletedAt == nil else { return }
         var deleted = previous
         deleted.deletedAt = now
-        guard write({ try $0.deleteTask(id: task.id, now: now) }) else { return }
         showToast(Toast(
-            message: previous.recurrence == nil ? "Deleted “\(task.title)”" : "Deleted “\(task.title)”. Undo restores one task, not the repeating series.", systemImage: "trash.fill", style: .info,
+            message: previous.recurrence == nil ? "Deleted “\(previous.title)”" : "Deleted “\(previous.title)”. Undo restores one task, not the repeating series.", systemImage: "trash.fill", style: .info,
             undo: TaskUndo(from: previous, to: deleted)))
     }
 
