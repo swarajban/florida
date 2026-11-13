@@ -105,6 +105,7 @@ jobs:
           )
           events=(
             Florida-iOSUITests/EventQuickAddTests
+            Florida-iOSUITests/TaskDateRegressionTests
             Florida-iOSUITests/SmokeTests/testTaskShortcutAndRecurringEvent
             Florida-iOSUITests/SmokeTests/testEventDayBlockingOverrides
             Florida-iOSUITests/SmokeTests/testCalendarVisibilityAndBlockingAreIndependent
