@@ -173,6 +173,9 @@ final class AppModel {
     var lastSyncError: String?
     var syncsInFlight = 0
     var isSyncing: Bool { syncsInFlight > 0 }
+    #if DEBUG
+    var editorDiagnostics: EditorDiagnostics?
+    #endif
 
     @ObservationIgnored var matcher = MacKeySequenceMatcher(keymap: .default)
     @ObservationIgnored var changeStream: ChangeStream?
@@ -212,6 +215,7 @@ final class AppModel {
                 let database = try AppDatabase.inMemory()
                 try database.apply(DemoData.syncResponse(now: Date(), calendar: calendar))
                 self.database = database
+                try installEditorDiagnosticsIfNeeded()
                 config = ServerConfig(token: "demo")
                 viewMode = .threeDays
                 startObserving(database)
@@ -314,6 +318,9 @@ final class AppModel {
             observe(database.observeTasks()) { model, tasks in
                 model.openTasks = tasks.filter(\.isOpen)
                 model.tasksById = Dictionary(tasks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                #if DEBUG
+                model.refreshEditorDiagnostics()
+                #endif
                 model.rebuildLayout()
                 model.refreshSuggestions()
             },

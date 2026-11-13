@@ -1,3 +1,4 @@
+import AppKit
 import FloridaKit
 import SwiftUI
 
@@ -176,12 +177,15 @@ struct TaskEditorSheet: View {
             }
             .padding()
         }
-        .frame(width: 560, height: 720)
+        .frame(width: 560, height: min(720, model.mainWindow?.contentLayoutRect.height ?? 720))
         .background(TaskEditorKeyMonitor(keyboard: keyboard, startsUnfocused: true, onPress: handle,
                                          onPriority: { draft.priority = $0 }))
         .onChange(of: startAt) { keepDueAfterStart() }
         .onChange(of: hasStart) { keepDueAfterStart() }
         .onChange(of: hasDue) { keepDueAfterStart() }
+        #if DEBUG
+        .onChange(of: draft.title) { model.applyEditorTestSyncIfNeeded() }
+        #endif
     }
 
     private func keyLabel(_ title: String, _ key: TaskEditorKey) -> KeyLabel {
@@ -354,10 +358,9 @@ struct TaskEditorSheet: View {
             if task.title.isEmpty {
                 task.title = original.title
             }
-            guard model.save(task, undoLabel: "Edited \(AppModel.quoted(task.title))") else { return }
         }
+        guard model.complete(task, savingEdits: hasEdits) else { return }
         model.editorTask = nil
-        model.complete(task)
     }
 
     private func save() {

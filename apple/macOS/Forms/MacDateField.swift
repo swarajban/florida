@@ -18,6 +18,7 @@ struct MacDateField: View {
     @State private var originWindow: NSWindow?
     @State private var ownsOrigin = false
     @State private var origin = SelectorOrigin()
+    @State private var anchorReady = false
     @Environment(\.calendar) private var calendar
 
     init(_ title: String, date: Binding<Date>, isOn: Binding<Bool>? = nil, hasTime: Binding<Bool>? = nil,
@@ -38,6 +39,10 @@ struct MacDateField: View {
 
     private var presented: Binding<Bool> { isPresented ?? $localPresented }
 
+    private var popoverPresented: Binding<Bool> {
+        Binding(get: { presented.wrappedValue && anchorReady }, set: { presented.wrappedValue = $0 })
+    }
+
     var body: some View {
         Group {
             if showsLabel {
@@ -53,14 +58,18 @@ struct MacDateField: View {
                 control
             }
         }
-        .onChange(of: presented.wrappedValue) {
-            if presented.wrappedValue {
+        .onChange(of: presented.wrappedValue, initial: true) { wasOpen, isOpen in
+            guard wasOpen != isOpen || isOpen else { return }
+            if isOpen {
                 originWindow = origin.window ?? originWindow ?? NSApp.keyWindow
                 if let originWindow, !ownsOrigin {
                     SelectorWindowHost.register(originWindow)
                     ownsOrigin = true
                 }
+                origin.reveal()
+                anchorReady = true
             } else {
+                anchorReady = false
                 releaseOrigin()
                 Task { @MainActor in
                     await Task.yield()
@@ -90,7 +99,7 @@ struct MacDateField: View {
         .accessibilityIdentifier(identifier)
         .accessibilityValue(isOn?.wrappedValue == false ? "No date" : label)
         .background(SelectorOriginView(origin: origin))
-        .popover(isPresented: presented, arrowEdge: .bottom) {
+        .popover(isPresented: popoverPresented, arrowEdge: .bottom) {
             MacDateSelector(title: title, current: date, hasTime: hasTime?.wrappedValue ?? false,
                             allowsTime: hasTime != nil, requiresTime: requiresTime,
                             allowsClear: isOn != nil, identifier: identifier) { result in

@@ -21,6 +21,7 @@ extension AppModel {
         guard let chord = KeyChord(event: event) else { return false }
         let isCommandChord = chord.modifiers.contains(.command)
         let isEscape = chord == KeyChord("escape")
+        if event.isARepeat, chord == KeyChord("space"), !(event.window?.firstResponder is NSText) { return true }
 
         if isAvailabilityZoneOpen {
             if isEscape { isAvailabilityZoneOpen = false }

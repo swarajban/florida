@@ -45,7 +45,7 @@ schemes:
       config: Debug
     test:
       config: Debug
-      targets: [Florida-macOSUITests]
+      targets: [Florida-macOSKeyboardTests, Florida-macOSUITests]
       preferredScreenCaptureFormat: screenRecording
       deleteScreenshotsWhenEachTestSucceeds: false
     archive:
@@ -182,6 +182,23 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.swarajban.florida.uitests
         TARGETED_DEVICE_FAMILY: "1"
+
+  Florida-macOSKeyboardTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - macOSTests
+      - macOS/Tasks/TaskEditorKeys.swift
+      - macOS/Keyboard/KeyChord+NSEvent.swift
+      - path: macOS/Forms
+        optional: true
+        includes: [SelectorInput.swift]
+    dependencies:
+      - package: FloridaKit
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.swarajban.florida.mac.keyboardtests
 
   Florida-macOSUITests:
     type: bundle.ui-testing

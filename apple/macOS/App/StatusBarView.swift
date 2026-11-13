@@ -28,6 +28,14 @@ struct StatusBarView: View {
                     .lineLimit(1)
             }
             Spacer()
+            #if DEBUG
+            if let diagnostics = model.editorDiagnostics {
+                Text(diagnostics.text)
+                    .monospaced()
+                    .accessibilityIdentifier("editor-diagnostics")
+                    .accessibilityValue(diagnostics.text)
+            }
+            #endif
             if model.pendingWriteCount > 0 {
                 Text("\(model.pendingWriteCount) pending")
                     .foregroundStyle(.secondary)
