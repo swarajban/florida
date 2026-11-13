@@ -23,6 +23,9 @@ extension AppDatabase {
               AND event.startAt < ? AND event.endAt > ?
             ORDER BY event.startAt, event.id
             """, arguments: [stored.upperBound, stored.lowerBound])
-            .filter { AllDayBlocking.isEffective($0, calendarBlocksScheduling: true) }
+            .filter {
+                AllDayBlocking.isEffective($0, calendarBlocksScheduling: true)
+                    && AllDayBlocking.protectedDays(for: $0, calendar: calendar)?.overlaps(range) == true
+            }
     }
 }

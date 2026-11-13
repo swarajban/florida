@@ -3,6 +3,42 @@ import Testing
 @testable import FloridaCore
 
 @Suite struct AllDayBlockingTests {
+    @Test(arguments: [
+        ("2026-11-13", "2026-11-17", "2026-11-16T08:00:00Z"),
+        ("2026-11-13", "2026-11-16", "2026-11-15T08:00:00Z"),
+        ("2026-11-13", "2026-11-15", "2026-11-14T08:00:00Z"),
+        ("2026-11-13", "2026-11-14", "2026-11-14T08:00:00Z"),
+        ("2026-10-31", "2026-11-03", "2026-11-02T08:00:00Z"),
+        ("2026-03-07", "2026-03-10", "2026-03-09T07:00:00Z"),
+    ])
+    func automaticTripsOpenLastCoveredDate(start: String, end: String, blockingEnd: String) throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "America/Los_Angeles"))
+        var event = event()
+        event.autoBlocksDay = true
+        event.blockingReason = "Your trip"
+        event.startAt = JSONCoding.parseInstant("\(start)T00:00:00Z")
+        event.endAt = JSONCoding.parseInstant("\(end)T00:00:00Z")
+        let days = try #require(AllDayBlocking.protectedDays(for: event, calendar: calendar))
+        #expect(days.upperBound == JSONCoding.parseInstant(blockingEnd))
+        #expect(AllDayBlocking.events(on: days.lowerBound, from: [event], calendar: calendar) == [event])
+        #expect(AllDayBlocking.events(on: days.upperBound, from: [event], calendar: calendar).isEmpty)
+        let singleDay = event.endAt!.timeIntervalSince(event.startAt!) == 86_400
+        #expect(AllDayBlocking.explanation(for: event) == (singleDay ? "Automatic: Your trip" : "Automatic: Your trip · last day open"))
+        event.blocksDay = true
+        let full = AllDayDate.localDays(start: event.startAt!, end: event.endAt!, calendar: calendar)
+        #expect(AllDayBlocking.protectedDays(for: event, calendar: calendar) == full)
+        #expect(AllDayBlocking.explanation(for: event).hasPrefix("Manual override: Blocks. Automatic:"))
+        event.blocksDay = false
+        #expect(!AllDayBlocking.isEffective(event, calendarBlocksScheduling: true))
+        event.blocksDay = nil
+        for reason in ["Company holiday", "Your time off", "Unclassified"] {
+            event.blockingReason = reason
+            #expect(AllDayBlocking.protectedDays(for: event, calendar: calendar) == full)
+            #expect(AllDayBlocking.explanation(for: event) == "Automatic: \(reason)")
+        }
+    }
+
     func event() -> CalendarEvent {
         CalendarEvent(id: "e", calendarId: "cal", googleId: "g-e", summary: "Holiday", allDay: true, updatedAt: .distantPast)
     }

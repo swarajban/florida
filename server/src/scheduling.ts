@@ -31,6 +31,7 @@ import type {
   TaskRow,
 } from './db/schema.js'
 import { materializeRecurringTasks } from './tasks.js'
+import { automaticTripEnd } from './all-day-blocking.js'
 import { parseCalendarDate } from './validation.js'
 
 /** Smallest piece of shared work: long enough for an agent to get somewhere between check-ins. */
@@ -124,7 +125,8 @@ export function blockingEventInterval(event: EventRow, timeZone: string): Interv
   let end = event.endAt.getTime()
   if (event.allDay) {
     const first = parseCalendarDate(event.startAt.toISOString().slice(0, 10))
-    const last = parseCalendarDate(event.endAt.toISOString().slice(0, 10))
+    const blockingEnd = event.blocksDay === null ? automaticTripEnd(event) ?? event.endAt : event.endAt
+    const last = parseCalendarDate(blockingEnd.toISOString().slice(0, 10))
     if (first === undefined || last === undefined) return undefined
     start = zonedToUtc(first, 0, timeZone)
     end = zonedToUtc(last, 0, timeZone)

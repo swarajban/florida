@@ -22,6 +22,7 @@ import {
 } from './db/schema.js'
 import type { BriefKind, BriefRow, ProjectRow, RoutineBlockRow, TaskRow } from './db/schema.js'
 import { blockingEventInterval, effectiveAttention, localWeeks } from './scheduling.js'
+import { automaticDayReason } from './all-day-blocking.js'
 import { getTask } from './tasks.js'
 import { parseCalendarDate } from './validation.js'
 
@@ -79,7 +80,7 @@ async function loadPlan(db: Db, now: Date) {
     busyEvents: busyRows.flatMap((e) => {
       const interval = blockingEventInterval(e, timeZone)
       return interval === undefined ? [] : [{ title: e.summary ?? '(no title)', start: Date.parse(interval.start), end: Date.parse(interval.end),
-        ...(e.allDay && e.blocksDay === null && e.blockingReason !== null ? { blockingReason: e.blockingReason } : {}) }]
+        ...(e.allDay && e.blocksDay === null && e.blockingReason !== null ? { blockingReason: automaticDayReason(e) } : {}) }]
     }),
     today,
     todayKey: isoDate(today),

@@ -1,4 +1,5 @@
 import { schedule } from '@florida/scheduler'
+import { automaticDayReason } from '../src/all-day-blocking.js'
 import { eq, inArray } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import {
@@ -340,6 +341,44 @@ describe('buildSchedulerInput', () => {
   it('does not apply automatic day judgments to timed events', () => {
     expect(blockingEventInterval(eventRow('timed', { autoBlocksDay: false, blocksDay: false }), LA)).toBeDefined()
     expect(blockingEventInterval(eventRow('timed', { autoBlocksDay: true, blocksDay: true, transparency: 'transparent' }), LA)).toBeUndefined()
+  })
+
+  it.each([
+    ['Stay at Marshall', '2026-11-13', '2026-11-17', '2026-11-16T08:00:00.000Z'],
+    ['Stay at Tomales Bay Retreat', '2026-11-13', '2026-11-16', '2026-11-15T08:00:00.000Z'],
+    ['Two-day trip', '2026-11-13', '2026-11-15', '2026-11-14T08:00:00.000Z'],
+    ['One-day trip', '2026-11-13', '2026-11-14', '2026-11-14T08:00:00.000Z'],
+    ['Fall DST trip', '2026-10-31', '2026-11-03', '2026-11-02T08:00:00.000Z'],
+    ['Spring DST trip', '2026-03-07', '2026-03-10', '2026-03-09T07:00:00.000Z'],
+  ])('opens only the final covered date of automatic %s', (summary, start, end, blockingEnd) => {
+    const event = eventRow('trip', { summary, allDay: true, eventType: 'fromGmail', transparency: 'transparent',
+      autoBlocksDay: true, blockingReason: 'Your trip', startAt: new Date(`${start}T00:00:00Z`), endAt: new Date(`${end}T00:00:00Z`) })
+    expect(blockingEventInterval(event, LA)?.end).toBe(blockingEnd)
+    expect(automaticDayReason(event)).toBe(summary === 'One-day trip' ? 'Your trip' : 'Your trip · last day open')
+    expect(blockingEventInterval({ ...event, blocksDay: true }, LA)?.end)
+      .toBe(blockingEventInterval({ ...event, blockingReason: 'Your time off' }, LA)?.end)
+    expect(blockingEventInterval({ ...event, blocksDay: false }, LA)).toBeUndefined()
+    for (const blockingReason of ['Company holiday', 'Your time off', 'Unclassified']) {
+      expect(blockingEventInterval({ ...event, blockingReason }, LA)?.end)
+        .toBe(blockingEventInterval({ ...event, blocksDay: true }, LA)?.end)
+      expect(automaticDayReason({ ...event, blockingReason })).toBe(blockingReason)
+    }
+    expect(blockingEventInterval({ ...event, autoBlocksDay: false }, LA)).toBeUndefined()
+  })
+
+  it('keeps Nov 13–15 busy but schedules on Monday Nov 16 for the two real stays', () => {
+    const stays = ['2026-11-17', '2026-11-16'].map((end, i) => eventRow(`stay-${i}`, {
+      allDay: true, autoBlocksDay: true, blockingReason: 'Your trip', transparency: 'transparent',
+      startAt: new Date('2026-11-13T00:00:00Z'), endAt: new Date(`${end}T00:00:00Z`),
+    }))
+    const input = buildSchedulerInput({ ...base, now: new Date('2026-11-13T16:00:00Z'),
+      categories: [categoryRow('inbox')], tasks: [taskRow('task', 'inbox')], events: stays,
+    })
+    expect(input.busy).toEqual([
+      { start: '2026-11-13T08:00:00.000Z', end: '2026-11-16T08:00:00.000Z' },
+      { start: '2026-11-13T08:00:00.000Z', end: '2026-11-15T08:00:00.000Z' },
+    ])
+    expect(schedule(input).placements[0]?.start).toBe('2026-11-16T17:00:00.000Z')
   })
 
   it('unions duplicate busy copies without changing placements, capacity or unscheduled work', () => {
