@@ -27,7 +27,7 @@ final class TaskTriageTests: XCTestCase {
             XCTAssertEqual(chip.value as? String, "Category: Work Engineering")
             XCTAssertTrue(app.buttons["task-triage-date-group-categorized-inbox"].exists)
             app.typeKey("i", modifierFlags: [])
-            waitForTriage("Categorized", of: row)
+            waitForTriage("Categorized", of: row, in: app)
             let schedule = row.staticTexts["task-schedule-label-group-categorized-inbox"]
             XCTAssertTrue(schedule.waitForExistence(timeout: 5))
             XCTAssertEqual(schedule.value as? String, "Someday")
@@ -36,7 +36,7 @@ final class TaskTriageTests: XCTestCase {
             app.typeKey("s", modifierFlags: [])
             XCTAssertTrue(app.staticTexts["Opened source: https://example.com/inbox"].waitForExistence(timeout: 5))
             app.typeKey("z", modifierFlags: [])
-            waitForTriage("Inbox", of: row)
+            waitForTriage("Inbox", of: row, in: app)
             XCTAssertTrue(app.buttons["task-triage-date-group-categorized-inbox"].waitForExistence(timeout: 5))
             XCTAssertEqual(chip.value as? String, "Category: Work Engineering")
             app.typeKey("b", modifierFlags: [])
@@ -45,7 +45,7 @@ final class TaskTriageTests: XCTestCase {
             dateInput.typeText("nov 20 2026")
             app.typeKey(.return, modifierFlags: [])
             XCTAssertTrue(dateInput.waitForNonExistence(timeout: 5))
-            waitForTriage("Categorized", of: row)
+            waitForTriage("Categorized", of: row, in: app)
             app.typeKey("e", modifierFlags: [])
             let title = app.textFields["task-title"]
             XCTAssertTrue(title.waitForExistence(timeout: 5))
@@ -99,8 +99,10 @@ final class TaskTriageTests: XCTestCase {
     }
 
     @MainActor
-    private func waitForTriage(_ state: String, of row: XCUIElement) {
+    private func waitForTriage(_ state: String, of row: XCUIElement, in app: XCUIApplication) {
         wait(for: [expectation(for: NSPredicate(format: "label ENDSWITH %@", ", \(state)"), evaluatedWith: row)], timeout: 5)
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: row.identifier).count, 1,
+                       "A task must have only one native row after changing sections")
     }
 
     @MainActor

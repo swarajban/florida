@@ -27,7 +27,7 @@ final class InboxTriageTests: XCTestCase {
             quickAdd("Triage categorized #work-infosec // local fixture", in: app)
             let categorized = row("Triage categorized", in: app)
             XCTAssertTrue(categorized.waitForExistence(timeout: 5))
-            waitForTriage("Inbox", of: categorized)
+            waitForTriage("Inbox", of: categorized, in: app)
             let id = String(categorized.identifier.dropFirst("task-row-".count))
             XCTAssertEqual(rows("Triage categorized", in: app).count, 1)
             let categoryChip = categorized.staticTexts["task-category-chip-demo-infosec"]
@@ -35,12 +35,12 @@ final class InboxTriageTests: XCTestCase {
             XCTAssertEqual(categoryChip.value as? String, "Category: Work Infosec")
 
             app.typeKey("i", modifierFlags: [])
-            waitForTriage("Categorized", of: categorized)
+            waitForTriage("Categorized", of: categorized, in: app)
             assertSomeday(id: id, in: app)
             XCTAssertEqual(rows("Triage categorized", in: app).count, 1)
             XCTAssertFalse(app.buttons["task-triage-date-\(id)"].exists)
             app.typeKey("z", modifierFlags: [])
-            waitForTriage("Inbox", of: categorized)
+            waitForTriage("Inbox", of: categorized, in: app)
             XCTAssertNotEqual(app.staticTexts["task-schedule-label-\(id)"].value as? String, "Someday")
 
             app.typeKey("b", modifierFlags: [])
@@ -51,17 +51,17 @@ final class InboxTriageTests: XCTestCase {
             date.typeText("tomorrow")
             app.typeKey(.return, modifierFlags: [])
             XCTAssertTrue(date.waitForNonExistence(timeout: 5))
-            waitForTriage("Categorized", of: categorized)
+            waitForTriage("Categorized", of: categorized, in: app)
             app.typeKey("z", modifierFlags: [])
-            waitForTriage("Inbox", of: categorized)
+            waitForTriage("Inbox", of: categorized, in: app)
 
             runPalette("Set due date", in: app)
             XCTAssertTrue(date.waitForExistence(timeout: 5))
             app.typeKey(.escape, modifierFlags: [])
             XCTAssertTrue(date.waitForNonExistence(timeout: 5))
-            waitForTriage("Inbox", of: categorized)
+            waitForTriage("Inbox", of: categorized, in: app)
             runPalette("Someday", in: app)
-            waitForTriage("Categorized", of: categorized)
+            waitForTriage("Categorized", of: categorized, in: app)
             assertSomeday(id: id, in: app)
             app.typeKey("y", modifierFlags: [])
             let explanation = app.staticTexts["explanation-text"]
@@ -84,7 +84,7 @@ final class InboxTriageTests: XCTestCase {
             app.buttons["Save"].click()
             XCTAssertTrue(noDue.waitForNonExistence(timeout: 5))
             let edited = row("Triage edited", in: app)
-            waitForTriage("Categorized", of: edited)
+            waitForTriage("Categorized", of: edited, in: app)
             edited.click()
             XCTAssertTrue(noDue.waitForExistence(timeout: 5))
             XCTAssertEqual((noDue.value as? NSNumber)?.intValue, 1)
@@ -104,25 +104,25 @@ final class InboxTriageTests: XCTestCase {
             noDue.click()
             app.buttons["Save"].click()
             XCTAssertTrue(noDue.waitForNonExistence(timeout: 5))
-            waitForTriage("Inbox", of: edited)
+            waitForTriage("Inbox", of: edited, in: app)
             app.typeKey("z", modifierFlags: [])
-            waitForTriage("Categorized", of: edited)
+            waitForTriage("Categorized", of: edited, in: app)
 
             quickAdd("Triage uncategorized // local fixture", in: app)
             let uncategorized = row("Triage uncategorized", in: app)
             XCTAssertTrue(uncategorized.waitForExistence(timeout: 5))
-            waitForTriage("Inbox", of: uncategorized)
+            waitForTriage("Inbox", of: uncategorized, in: app)
             app.typeKey("i", modifierFlags: [])
-            waitForTriage("Inbox", of: uncategorized)
+            waitForTriage("Inbox", of: uncategorized, in: app)
             app.typeKey("m", modifierFlags: [])
             let move = app.textFields["palette-input"]
             XCTAssertTrue(move.waitForExistence(timeout: 5))
             move.typeText("Work Infosec")
             app.typeKey(.return, modifierFlags: [])
             XCTAssertTrue(move.waitForNonExistence(timeout: 5))
-            waitForTriage("Categorized", of: uncategorized)
+            waitForTriage("Categorized", of: uncategorized, in: app)
             app.typeKey("z", modifierFlags: [])
-            waitForTriage("Inbox", of: uncategorized)
+            waitForTriage("Inbox", of: uncategorized, in: app)
         }
     }
 
@@ -136,7 +136,7 @@ final class InboxTriageTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 15))
         quickAdd("Retained repeat decision #home ~today *weekly ^none // fixture", in: app)
         let task = row("Retained repeat decision", in: app)
-        waitForTriage("Categorized", of: task)
+        waitForTriage("Categorized", of: task, in: app)
         task.click()
         let title = app.textFields["task-title"]
         XCTAssertTrue(title.waitForExistence(timeout: 5))
@@ -145,7 +145,7 @@ final class InboxTriageTests: XCTestCase {
         title.typeText("Retained repeat renamed")
         app.buttons["Save"].click()
         let renamed = row("Retained repeat renamed", in: app)
-        waitForTriage("Categorized", of: renamed)
+        waitForTriage("Categorized", of: renamed, in: app)
         renamed.click()
         XCTAssertTrue(app.buttons["task-due"].waitForExistence(timeout: 5))
         XCTAssertEqual((app.checkBoxes["task-someday"].value as? NSNumber)?.intValue, 1)
@@ -162,14 +162,14 @@ final class InboxTriageTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["task-date-triage-warning"].exists)
         app.buttons["Save"].click()
         XCTAssertTrue(app.checkBoxes["task-someday"].waitForNonExistence(timeout: 5))
-        waitForTriage("Categorized", of: renamed)
+        waitForTriage("Categorized", of: renamed, in: app)
         renamed.click()
         XCTAssertTrue(app.buttons["task-start"].waitForExistence(timeout: 5))
         chooseEditorDate("task-start", "none", in: app)
         XCTAssertEqual((app.checkBoxes["task-someday"].value as? NSNumber)?.intValue, 0)
         app.buttons["Save"].click()
         XCTAssertTrue(app.checkBoxes["task-someday"].waitForNonExistence(timeout: 5))
-        waitForTriage("Inbox", of: renamed)
+        waitForTriage("Inbox", of: renamed, in: app)
         XCTAssertEqual(rows("Retained repeat renamed", in: app).count, 1)
     }
 
@@ -184,7 +184,7 @@ final class InboxTriageTests: XCTestCase {
 
         quickAdd("Deferred transitions #home ~tomorrow // fixture", in: app)
         let task = row("Deferred transitions", in: app)
-        waitForTriage("Categorized", of: task)
+        waitForTriage("Categorized", of: task, in: app)
         let id = String(task.identifier.dropFirst("task-row-".count))
         XCTAssertFalse(app.buttons["task-triage-date-\(id)"].exists)
         task.click()
@@ -225,7 +225,7 @@ final class InboxTriageTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["task-date-triage-warning"].exists)
         app.buttons["Save"].click()
         XCTAssertTrue(someday.waitForNonExistence(timeout: 5))
-        waitForTriage("Inbox", of: task)
+        waitForTriage("Inbox", of: task, in: app)
         app.typeKey("i", modifierFlags: [])
         assertSomeday(id: id, in: app)
 
@@ -237,7 +237,7 @@ final class InboxTriageTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["task-date-triage-warning"].exists)
         app.buttons["Save"].click()
         XCTAssertTrue(someday.waitForNonExistence(timeout: 5))
-        waitForTriage("Categorized", of: task)
+        waitForTriage("Categorized", of: task, in: app)
         task.click()
         XCTAssertTrue(someday.waitForExistence(timeout: 5))
         chooseEditorDate("task-pinned-start", "none", in: app)
@@ -246,9 +246,9 @@ final class InboxTriageTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["task-date-triage-warning"].exists)
         app.buttons["Save"].click()
         XCTAssertTrue(someday.waitForNonExistence(timeout: 5))
-        waitForTriage("Inbox", of: task)
+        waitForTriage("Inbox", of: task, in: app)
         app.typeKey("z", modifierFlags: [])
-        waitForTriage("Categorized", of: task)
+        waitForTriage("Categorized", of: task, in: app)
         app.typeKey("i", modifierFlags: [])
         assertSomeday(id: id, in: app)
 
@@ -268,7 +268,7 @@ final class InboxTriageTests: XCTestCase {
         app.typeKey("s", modifierFlags: [])
         wait(for: [expectation(for: NSPredicate(format: "value != %@", "Someday"),
                                evaluatedWith: app.staticTexts["task-schedule-label-\(id)"])], timeout: 5)
-        waitForTriage("Categorized", of: task)
+        waitForTriage("Categorized", of: task, in: app)
         app.typeKey("z", modifierFlags: [])
         assertSomeday(id: id, in: app)
         app.typeKey("n", modifierFlags: [])
@@ -290,7 +290,7 @@ final class InboxTriageTests: XCTestCase {
             let title = "Deferred alias \(index)"
             quickAdd("\(title) #home \(token) // fixture", in: app)
             let task = row(title, in: app)
-            waitForTriage("Categorized", of: task)
+            waitForTriage("Categorized", of: task, in: app)
             assertSomeday(id: String(task.identifier.dropFirst("task-row-".count)), in: app)
         }
     }
@@ -358,8 +358,10 @@ final class InboxTriageTests: XCTestCase {
     }
 
     @MainActor
-    private func waitForTriage(_ state: String, of row: XCUIElement) {
+    private func waitForTriage(_ state: String, of row: XCUIElement, in app: XCUIApplication) {
         wait(for: [expectation(for: NSPredicate(format: "label ENDSWITH %@", ", \(state)"), evaluatedWith: row)], timeout: 5)
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: row.identifier).count, 1,
+                       "A task must have only one native row after changing sections")
         XCTAssertTrue(row.isHittable, "The selected task must remain visible after date triage changes its section")
     }
 

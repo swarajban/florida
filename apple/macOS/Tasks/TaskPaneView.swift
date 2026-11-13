@@ -87,7 +87,7 @@ struct TaskPaneView: View {
                             } else {
                                 Section {
                                     ForEach(group.tasks, id: \.paneItemID) { task in
-                                        TaskPaneRow(taskID: task.id, isInbox: group.isInbox, onClick: handleRowClick)
+                                        TaskPaneRow(taskID: task.id, sectionID: group.id, isInbox: group.isInbox, onClick: handleRowClick)
                                     }
                                 } header: {
                                     TaskGroupHeader(group: group)
@@ -177,11 +177,16 @@ struct TaskPaneView: View {
 private struct TaskPaneRow: View {
     @Environment(AppModel.self) private var model
     let taskID: String
+    let sectionID: String
     let isInbox: Bool
     let onClick: @MainActor (ItemID, Bool) -> Void
 
     var body: some View {
-        if let task = model.tasksById[taskID], task.isOpen {
+        if let task = model.tasksById[taskID], task.isOpen,
+           model.taskListGrouping.sections(
+               tasks: [task], categories: model.categoriesById[task.categoryId].map { [$0] } ?? [],
+               now: model.clockNow, calendar: model.taskListCalendar
+           ).contains(where: { $0.id == sectionID && !$0.tasks.isEmpty }) {
             content(task)
         }
     }

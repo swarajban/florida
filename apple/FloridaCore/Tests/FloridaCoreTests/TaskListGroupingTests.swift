@@ -113,6 +113,36 @@ import Testing
         }
     }
 
+    @Test(arguments: TaskListGrouping.allCases)
+    func singleTaskMembershipMatchesTheCompleteList(grouping: TaskListGrouping) {
+        let categories = [
+            Self.category(TaskCategory.inboxId, "Inbox"),
+            Self.category("work", "Work"),
+            Self.category("deleted", "Deleted", deleted: Self.now),
+        ]
+        var tasks: [TaskItem] = []
+        for category in [TaskCategory.inboxId, "work", "deleted", "missing"] {
+            for mask in 0..<8 {
+                for someday in [false, true] {
+                    tasks.append(Self.task(
+                        "\(category)-\(mask)-\(someday)", due: mask & 1 == 0 ? nil : Self.now,
+                        category: category, start: mask & 2 == 0 ? nil : Self.now,
+                        someday: someday, pin: mask & 4 == 0 ? nil : Self.now))
+                }
+            }
+        }
+        tasks.append(Self.task("completed", completed: Self.now))
+        tasks.append(Self.task("deleted", deleted: Self.now))
+        let sections = Self.sections(tasks, grouping: grouping, categories: categories)
+        for task in tasks {
+            let currentCategory = categories.filter { $0.id == task.categoryId }
+            let single = Self.sections([task], grouping: grouping, categories: currentCategory)
+                .filter { !$0.tasks.isEmpty }.map(\.id)
+            let complete = sections.filter { $0.tasks.contains { $0.id == task.id } }.map(\.id)
+            #expect(single == complete)
+        }
+    }
+
     @Test func dueSectionsHaveSemanticOrderAndStableIDs() {
         let tasks = [
             Self.task("none", someday: true),
