@@ -29,6 +29,16 @@ struct StatusBarView: View {
             }
             Spacer()
             #if DEBUG
+            HeldKeyDiagnostics(keys: ["x", "z", "c", "/"])
+            if UserDefaults.standard.bool(forKey: "demoData"),
+               UserDefaults.standard.bool(forKey: "uiHeldKeyDiagnostics") {
+                Text(model.eventDetailID ?? "none")
+                    .accessibilityIdentifier("interaction-event-target")
+                    .accessibilityValue(model.eventDetailID ?? "none")
+                Text(model.selection.map { String(describing: $0) } ?? "none")
+                    .accessibilityIdentifier("interaction-selection")
+                    .accessibilityValue(model.selection.map { String(describing: $0) } ?? "none")
+            }
             if let diagnostics = model.editorDiagnostics {
                 Text(diagnostics.text)
                     .monospaced()

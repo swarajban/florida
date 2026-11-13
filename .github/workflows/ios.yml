@@ -18,6 +18,10 @@ on:
         description: Run both PR UI suites only (never upload)
         type: boolean
         default: false
+      mac_test_selector:
+        description: Optional Mac test bundle, class or method for a focused UI-only run
+        type: string
+        default: ''
 
 concurrency:
   group: ${{ inputs.ui_only && format('apple-ui-{0}', github.ref) || format('ios-run-{0}', github.run_id) }}
@@ -30,10 +34,40 @@ jobs:
 
   ui:
     name: On-demand Apple UI
-    if: github.event_name == 'workflow_dispatch' && inputs.ui_only
+    if: github.event_name == 'workflow_dispatch' && inputs.ui_only && inputs.mac_test_selector == ''
     uses: ./.github/workflows/apple-checks.yml
     with:
       run_ui: true
+
+  mac_focused:
+    name: Focused Mac tests
+    if: github.event_name == 'workflow_dispatch' && inputs.ui_only && inputs.mac_test_selector != ''
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - name: Validate test selector
+        env:
+          MAC_TEST_SELECTOR: ${{ inputs.mac_test_selector }}
+        run: |
+          [[ "$MAC_TEST_SELECTOR" =~ ^Florida-macOS(KeyboardTests|UITests)(/[A-Za-z_][A-Za-z0-9_]*){0,2}$ ]] || exit 2
+      - run: brew install xcodegen
+      - name: Build and run selected Mac tests
+        env:
+          MAC_TEST_SELECTOR: ${{ inputs.mac_test_selector }}
+        run: |
+          set -o pipefail
+          bash apple/scripts/check.sh macos "-only-testing:$MAC_TEST_SELECTOR" 2>&1 | tee apple/ui-test.log
+      - name: Upload focused results and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-macos-focused
+          path: |
+            apple/build/results/
+            apple/ui-test.log
+          retention-days: 7
+          if-no-files-found: ignore
 
   build:
     name: iPhone UI suite

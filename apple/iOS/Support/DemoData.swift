@@ -283,6 +283,13 @@ enum DemoData {
             response.optionalPlacements = []
             response.unscheduled = []
         }
+        if UserDefaults.standard.bool(forKey: "uiInteractionTripDemo") {
+            response.events.append(CalendarEvent(
+                id: "interaction-trip", calendarId: "demo-cal-work", googleId: "interaction-trip",
+                summary: "Interaction trip", startAt: utcDay(-2), endAt: utcDay(1), allDay: true,
+                htmlLink: "https://example.com/interaction-trip", updatedAt: now,
+                autoBlocksDay: true, blockingReason: "Your trip"))
+        }
         return response
     }
 

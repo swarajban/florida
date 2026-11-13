@@ -203,6 +203,9 @@ struct TaskEditorSheet: View {
                 }
             }
             .formStyle(.grouped)
+            #if DEBUG
+            HeldKeyDiagnostics(keys: ["t"])
+            #endif
             Divider()
             HStack {
                 Button {

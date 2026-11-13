@@ -107,6 +107,17 @@ gh workflow run ios.yml --ref <PR-branch> -f ui_only=true
 gh run list --workflow ios.yml --branch <PR-branch> --event workflow_dispatch
 ```
 
+For a failing-test baseline or a focused Mac check, add the optional selector:
+
+```sh
+gh workflow run ios.yml --ref <PR-branch> -f ui_only=true \
+  -f mac_test_selector=Florida-macOSKeyboardTests
+```
+
+The selector accepts a Mac test bundle, bundle/class, or bundle/class/method.
+It runs one Mac job without retries or TestFlight uploads. An empty selector retains the
+full gate; each final PR head still needs one complete unfiltered run.
+
 This explicit dispatch uses the existing iOS workflow's `ui_only` mode: it never
 starts a release or reads release secrets. It runs against the branch head, so
 its **On-demand Apple UI** checks appear on that commit in the PR. Unlike a

@@ -51,6 +51,9 @@ struct EventDetailView: View {
     private func detailContent(_ resources: [EventResource]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             header
+            #if DEBUG
+            HeldKeyDiagnostics(keys: ["1"])
+            #endif
             if event.allDay {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
