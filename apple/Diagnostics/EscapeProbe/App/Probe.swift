@@ -78,7 +78,7 @@ final class ProbeTextView: UITextView {
     var defaultCommandInventory: [[String: Any]] {
         (super.keyCommands ?? []).map { command in
             [
-                "selector": NSStringFromSelector(command.action),
+                "selector": command.action.map(NSStringFromSelector) ?? "nil",
                 "escape": command.input == UIKeyCommand.inputEscape,
                 "modifiers": command.modifierFlags.rawValue,
                 "priority": command.wantsPriorityOverSystemBehavior,
@@ -148,7 +148,7 @@ final class ProbeController: UIViewController {
         while let current = responder {
             let commands = current.keyCommands ?? []
             let escapeSelectors = commands.filter { $0.input == UIKeyCommand.inputEscape }
-                .map { "\(NSStringFromSelector($0.action)):modifiers=\($0.modifierFlags.rawValue)" }
+                .map { "\($0.action.map(NSStringFromSelector) ?? "nil"):modifiers=\($0.modifierFlags.rawValue)" }
             ProbeTrace.shared.record("responder=\(String(describing: type(of: current))) commands=\(commands.count) escapeSelectors=\(escapeSelectors)")
             responder = current.next
         }
