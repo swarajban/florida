@@ -1,0 +1,78 @@
+name: Escape delivery diagnostic
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Plain UIKit Escape probe
+    runs-on: macos-26
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apple/Diagnostics/EscapeProbe
+    steps:
+      - uses: actions/checkout@v5
+      - name: Generate isolated project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+      - name: Pick standard iPhone simulator
+        run: |
+          mkdir -p build
+          xcodebuild -version | tee build/environment.log
+          xcrun simctl list devices available -j > build/simulators.json
+          UDID=$(python3 -c '
+          import json
+          devices = json.load(open("build/simulators.json"))["devices"]
+          ios = sorted((k for k in devices if "iOS-" in k), key=lambda k: [int(p) for p in k.split("iOS-")[-1].split("-")])
+          phones = [d for d in devices[ios[-1]] if d["name"].startswith("iPhone")]
+          pro = [d for d in phones if "Pro" in d["name"] and "Max" not in d["name"]]
+          print((pro or phones)[0]["udid"])
+          ')
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          echo "Using simulator $UDID" | tee -a build/environment.log
+          if ! xcrun simctl list devices booted | grep -Fq "$UDID"; then
+            xcrun simctl boot "$UDID"
+          fi
+          xcrun simctl bootstatus "$UDID" -b
+      - name: Run one diagnostic test without retry
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project EscapeProbe.xcodeproj \
+            -scheme EscapeProbe \
+            -configuration Debug \
+            -destination "id=$UDID" \
+            -destination-timeout 120 \
+            -parallel-testing-enabled NO \
+            -test-timeouts-enabled YES \
+            -default-test-execution-time-allowance 120 \
+            -maximum-test-execution-time-allowance 120 \
+            -only-testing:EscapeProbeUITests/EscapeProbeTests/testEscapeDelivery \
+            -derivedDataPath build/DerivedData \
+            -resultBundlePath build/diagnostic.xcresult \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            | tee build/diagnostic.log
+      - name: Export diagnostic attachments
+        if: always()
+        run: |
+          if [ -d build/diagnostic.xcresult ]; then
+            xcrun xcresulttool export attachments --path build/diagnostic.xcresult --output-path build/attachments
+          fi
+      - name: Upload diagnostic evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: escape-probe
+          path: |
+            apple/Diagnostics/EscapeProbe/build/diagnostic.xcresult/
+            apple/Diagnostics/EscapeProbe/build/diagnostic.log
+            apple/Diagnostics/EscapeProbe/build/environment.log
+            apple/Diagnostics/EscapeProbe/build/simulators.json
+            apple/Diagnostics/EscapeProbe/build/attachments/
+          retention-days: 7
+          if-no-files-found: warn
