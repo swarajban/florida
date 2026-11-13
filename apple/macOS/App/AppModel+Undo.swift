@@ -26,7 +26,7 @@ struct UndoEntry {
         /// A drag moved the event from one time to another.
         case moveEvent(eventId: String, from: DateInterval, to: DateInterval)
         /// A drag moved this instance of a repeating event, and the rest of its series with it.
-        case moveEventSeries(eventId: String, from: DateInterval, to: DateInterval)
+        case moveEventSeries(eventId: String, from: DateInterval, to: DateInterval, expectedSeries: [AppDatabase.EventSeriesMember]? = nil)
 
         /// The task the write was on; nil for an event.
         var taskId: String? {
@@ -102,7 +102,7 @@ extension AppModel {
             var restored: [TaskItem] = []
             var restoredOneOff = false
             var created: [String] = []
-            var eventMoves: [(id: String, expected: DateInterval, restoring: DateInterval, series: Bool)] = []
+            var eventMoves: [(id: String, expected: DateInterval, restoring: DateInterval, series: Bool, expectedSeries: [AppDatabase.EventSeriesMember]?)] = []
             for restore in entry.restores {
                 switch restore {
                 case .unavailable:
@@ -135,9 +135,9 @@ extension AppModel {
                     }
                     created.append(taskId)
                 case .moveEvent(let eventId, let from, let to):
-                    eventMoves.append((eventId, to, from, false))
-                case .moveEventSeries(let eventId, let from, let to):
-                    eventMoves.append((eventId, to, from, true))
+                    eventMoves.append((eventId, to, from, false, nil))
+                case .moveEventSeries(let eventId, let from, let to, let expectedSeries):
+                    eventMoves.append((eventId, to, from, true, expectedSeries))
                 }
             }
             for (taskId, changes) in taskReverts {
@@ -160,7 +160,8 @@ extension AppModel {
                 try database.deleteTask(id: taskId)
             }
             for move in eventMoves {
-                guard try database.undoEventMove(id: move.id, expected: move.expected, restoring: move.restoring, series: move.series) else {
+                guard try database.undoEventMove(id: move.id, expected: move.expected, restoring: move.restoring,
+                    series: move.series, expectedSeries: move.expectedSeries) else {
                     showGhost("Already changed")
                     return
                 }

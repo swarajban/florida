@@ -372,7 +372,7 @@ extension AppModel {
         pushUndo(UndoEntry(
             label: "Moved every \(Self.quoted(Self.title(of: event)))",
             restores: [.moveEventSeries(
-                eventId: event.id, from: mutation.from, to: mutation.to)],
+                eventId: event.id, from: mutation.from, to: mutation.to, expectedSeries: mutation.expectedSeries)],
             at: Date()))
         showGhost("Moved all to \(DateText.time(start)) · z to undo", for: .seconds(3))
     }

@@ -103,7 +103,12 @@ import Foundation
 
 extension Priority { var displayName: String { rawValue } }
 final class AppDatabase {
-    struct EventMutation { let from: DateInterval; let to: DateInterval }
+    __EVENT_SERIES_MEMBER__
+    struct EventMutation {
+        let from: DateInterval
+        let to: DateInterval
+        var expectedSeries: [EventSeriesMember]? = nil
+    }
     struct TaskMutation {
         let before: TaskItem?
         let after: TaskItem
@@ -197,7 +202,9 @@ final class AppDatabase {
         let end = start.addingTimeInterval(from.duration)
         events[id]?.startAt = start
         events[id]?.endAt = end
-        return EventMutation(from: from, to: DateInterval(start: start, end: end))
+        if series { shiftSiblings(of: event, by: start.timeIntervalSince(from.start), duration: from.duration) }
+        return EventMutation(from: from, to: DateInterval(start: start, end: end),
+            expectedSeries: series ? seriesMembers(of: events[id]!) : nil)
     }
     @discardableResult
     func moveEventSeries(instanceId: String, start: Date, end: Date) throws -> EventMutation {
@@ -207,16 +214,44 @@ final class AppDatabase {
         let from = DateInterval(start: oldStart, end: oldEnd)
         events[instanceId]?.startAt = start
         events[instanceId]?.endAt = end
-        return EventMutation(from: from, to: DateInterval(start: start, end: end))
+        shiftSiblings(of: event, by: start.timeIntervalSince(from.start), duration: end.timeIntervalSince(start))
+        return EventMutation(from: from, to: DateInterval(start: start, end: end),
+            expectedSeries: seriesMembers(of: events[instanceId]!))
     }
-    func undoEventMove(id: String, expected: DateInterval, restoring: DateInterval, series: Bool = false) throws -> Bool {
+    func undoEventMove(id: String, expected: DateInterval, restoring: DateInterval, series: Bool = false,
+                       expectedSeries: [EventSeriesMember]? = nil) throws -> Bool {
         eventInterleave?()
         eventInterleave = nil
         guard let live = events[id], live.deletedAt == nil,
               live.startAt == expected.start, live.endAt == expected.end else { return false }
+        if series {
+            let members = seriesMembers(of: live)
+            if let expectedSeries {
+                guard members.count == expectedSeries.count,
+                      zip(members, expectedSeries).allSatisfy({ live, expected in
+                          live.id == expected.id && live.calendarId == expected.calendarId
+                              && live.recurringEventId == expected.recurringEventId && live.allDay == expected.allDay
+                              && live.status == expected.status && live.startAt == expected.startAt && live.endAt == expected.endAt
+                      }) else { return false }
+            } else if members.count != 1 { return false }
+            shiftSiblings(of: live, by: restoring.start.timeIntervalSince(expected.start), duration: restoring.duration)
+        }
         events[id]?.startAt = restoring.start
         events[id]?.endAt = restoring.end
         return true
+    }
+    func seriesMembers(of event: CalendarEvent) -> [EventSeriesMember] {
+        events.values.filter {
+            $0.id == event.id || (event.recurringEventId != nil && $0.recurringEventId == event.recurringEventId
+                && $0.calendarId == event.calendarId && !$0.allDay && $0.deletedAt == nil)
+        }.sorted { $0.id < $1.id }.map(EventSeriesMember.init)
+    }
+    func shiftSiblings(of event: CalendarEvent, by shift: TimeInterval, duration: TimeInterval) {
+        for member in seriesMembers(of: event) where member.id != event.id {
+            guard let start = member.startAt else { continue }
+            events[member.id]?.startAt = start.addingTimeInterval(shift)
+            events[member.id]?.endAt = start.addingTimeInterval(shift + duration)
+        }
     }
 }
 enum Item: Equatable { case task(String), event(String) }
@@ -251,6 +286,10 @@ final class AppModel {
     static func quoted(_ text: String) -> String { text }
 }
 '''
+series_types = (ROOT / 'apple/FloridaKit/Sources/FloridaKit/Store/AppDatabase+EventMoves.swift').read_text()
+series_start = series_types.index('    public struct EventSeriesMember:')
+harness = harness.replace('    __EVENT_SERIES_MEMBER__',
+                          series_types[series_start:series_types.index('    public struct EventMutation:', series_start)])
 tests = r'''
 func task() -> TaskItem {
     TaskItem(id: "task", categoryId: "inbox", title: "Original", durationMinutes: 30,
@@ -406,6 +445,33 @@ for (name, action) in omittedActions {
     action(model)
     model.undo()
     check(model.database!.tasks[initial.id]?.priority == .high, "undo after \(name) never reverts an unrelated task")
+}
+for changedSibling in [false, true] {
+    let producer = AppModel()
+    var anchor = event
+    anchor.startAt = start
+    anchor.endAt = start.addingTimeInterval(3_600)
+    anchor.recurringEventId = "series"
+    var sibling = anchor
+    sibling.id = "sibling"
+    sibling.startAt = start.addingTimeInterval(86_400)
+    sibling.endAt = start.addingTimeInterval(90_000)
+    producer.database!.events[anchor.id] = anchor
+    producer.database!.events[sibling.id] = sibling
+    producer.moveSeries(of: anchor, toStart: start.addingTimeInterval(3_600))
+    if changedSibling {
+        producer.database!.events[sibling.id]?.recurringEventId = "other-series"
+    }
+    producer.undo()
+    if changedSibling {
+        check(producer.database!.events[anchor.id]?.startAt == start.addingTimeInterval(3_600)
+              && producer.database!.events[sibling.id]?.recurringEventId == "other-series",
+              "Mac series undo carries member state and refuses changed sibling membership")
+    } else {
+        check(producer.database!.events[anchor.id]?.startAt == anchor.startAt
+              && producer.database!.events[sibling.id]?.startAt == sibling.startAt,
+              "Mac series move producer and undo consumer retain the full transaction snapshot")
+    }
 }
 let oldDate = Date(timeIntervalSince1970: 1_795_132_800)
 let newDate = oldDate.addingTimeInterval(4 * 86_400)

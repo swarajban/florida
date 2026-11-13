@@ -566,7 +566,8 @@ extension AppDatabase {
         try instance.save(db)
         try Self.storeSeriesMoveTimes(db, id: instanceId, times: snapshots)
         try Self.enqueue(db, entity: .event, id: instanceId, op: .put, body: try JSONCoding.encoder.encode(write), now: now)
-        return EventMutation(from: DateInterval(start: oldStart, end: oldEnd), to: DateInterval(start: start, end: end))
+        return EventMutation(from: DateInterval(start: oldStart, end: oldEnd), to: DateInterval(start: start, end: end),
+            expectedSeries: try Self.eventSeriesMembers(of: instance, in: db))
     }
 
     /// Marks the event deleted locally, so every query and observation hides it at once, and

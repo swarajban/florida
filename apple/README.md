@@ -428,6 +428,8 @@ and project edits/deletions, including event day blocking, stop Undo from fallin
 through to an earlier task action: `z` reports that the latest change cannot be
 undone. Declining an invitation asks first. Event drags
 remain undoable against their current local times, and saving an unchanged task does not add an undo step.
+Series undo also checks every local member's times and membership; a changed, missing or added
+member refuses the undo instead of shifting a different series state.
 Task undo uses the same full-field patch on Mac and iPhone, including editor edits committed
 with completion. Unchanged remote fields are preserved; a later completion, deletion or change
 to one of the affected fields refuses the undo.
