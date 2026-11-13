@@ -82,7 +82,7 @@ extension AppModel {
         let next = neighbor(of: item)
         do {
             guard let stored = try database.task(id: task.id), stored.isOpen else { return false }
-            try recordingUndo("Completed \(Self.quoted(task.title))", taskId: task.id) {
+            guard try recordingUndo("Completed \(Self.quoted(task.title))", taskId: task.id, {
                 if savingEdits {
                     var completed = task
                     completed.completedAt = Date()
@@ -91,7 +91,7 @@ extension AppModel {
                 } else {
                     return try database.completeTask(id: task.id)
                 }
-            }
+            }) else { return false }
         } catch {
             statusMessage = "Could not complete: \(error.localizedDescription)"
             return false
@@ -116,18 +116,19 @@ extension AppModel {
             statusMessage = "Select a task first"
             return
         }
+        let original = task
         if pinned {
             guard let start = placementsByTask[task.id]?.first?.startAt else {
                 statusMessage = "This task has no scheduled time to pin"
                 return
             }
             task.pinnedStart = start
-            if save(task, undoLabel: "Pinned \(Self.quoted(task.title))") {
+            if save(task, original: original, undoLabel: "Pinned \(Self.quoted(task.title))") {
                 showGhost("Pinned to \(DateText.dayAndTime(start, calendar: calendar))")
             }
         } else {
             task.pinnedStart = nil
-            if save(task, undoLabel: "Unpinned \(Self.quoted(task.title))") {
+            if save(task, original: original, undoLabel: "Unpinned \(Self.quoted(task.title))") {
                 showGhost("Unpinned")
             }
         }
@@ -140,9 +141,10 @@ extension AppModel {
             return
         }
         let tomorrow = DateNavigation.shift(today, by: 1, calendar: calendar)
+        let original = task
         task.startAt = tomorrow
         task.pinnedStart = nil
-        if save(task, undoLabel: "Pushed \(Self.quoted(task.title)) to tomorrow") {
+        if save(task, original: original, undoLabel: "Pushed \(Self.quoted(task.title)) to tomorrow") {
             showGhost("Pushed to \(tomorrow.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))")
         }
     }
@@ -152,8 +154,9 @@ extension AppModel {
             statusMessage = "Select a task first"
             return
         }
+        let original = task
         task.priority = priority
-        if save(task, undoLabel: "Set \(Self.quoted(task.title)) to \(priority.displayName)") {
+        if save(task, original: original, undoLabel: "Set \(Self.quoted(task.title)) to \(priority.displayName)") {
             showGhost("Priority: \(priority.displayName)")
         }
     }

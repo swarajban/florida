@@ -60,10 +60,12 @@ extension AppModel {
         guard previous.categoryId != category.id else { return }
         var moved = previous
         moved.categoryId = category.id
-        guard write({ try $0.saveTask(moved) }) else { return }
+        var mutation: AppDatabase.TaskMutation?
+        guard write({ mutation = try $0.saveTask(moved, original: previous) }),
+              let mutation, let before = mutation.before else { return }
         triageSuggestions[task.id] = nil
         showToast(Toast(
-            message: "Moved to \(category.name)", systemImage: "folder.fill", style: .info, undo: TaskUndo(from: previous, to: moved)))
+            message: "Moved to \(category.name)", systemImage: "folder.fill", style: .info, undo: TaskUndo(from: before, to: mutation.after)))
     }
 
     // MARK: - Schedules

@@ -16,7 +16,7 @@ extension AppModel {
         var moved = task
         moved.categoryId = category.id
         lastAction = .move(categoryId: category.id)
-        if save(moved, undoLabel: "Moved \(Self.quoted(task.title)) to \(category.name)") {
+        if save(moved, original: task, undoLabel: "Moved \(Self.quoted(task.title)) to \(category.name)") {
             aiSuggestions[task.id] = nil
             showGhost("Moved to \(category.name)")
         }

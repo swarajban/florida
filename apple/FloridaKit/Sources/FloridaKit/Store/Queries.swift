@@ -288,7 +288,7 @@ extension AppDatabase {
 
         public var errorDescription: String? {
             switch self {
-            case .eventWithoutTimes(let id): "Event \(id) has no start or end time."
+            case .eventWithoutTimes(let id): "Event \(id) has missing or invalid start and end times."
             case .eventNotAllDay(let id): "Event \(id) is not an all-day event."
             case .taskNoLongerOpen: "This task was deleted or completed elsewhere. Your changes were not saved."
             case .eventNoLongerExists: "This event was deleted elsewhere. Your changes were not saved."
@@ -506,35 +506,42 @@ extension AppDatabase {
     /// `scope: series`: the server moves the series on Google from it, and its rows replace these
     /// on the next sync. An event that does not repeat moves alone.
     /// Throws `WriteError.eventWithoutTimes` when there is no such row or it has no times.
-    public func moveEventSeries(instanceId: String, start: Date, end: Date, now: Date = Date()) throws {
+    @discardableResult
+    public func moveEventSeries(instanceId: String, start: Date, end: Date, now: Date = Date()) throws -> EventMutation {
         try writer.write { db in
-            guard var instance = try CalendarEvent.fetchOne(db, id: instanceId), let oldStart = instance.startAt,
-                  instance.endAt != nil
-            else { throw WriteError.eventWithoutTimes(id: instanceId) }
-            let shift = start.timeIntervalSince(oldStart)
-            let length = end.timeIntervalSince(start)
-            if let series = instance.recurringEventId {
-                let others = try CalendarEvent
-                    .filter(Column("calendarId") == instance.calendarId && Column("recurringEventId") == series)
-                    .filter(Column("id") != instanceId && Column("deletedAt") == nil && Column("allDay") == false)
-                    .fetchAll(db)
-                for var other in others {
-                    guard let otherStart = other.startAt else { continue }
-                    let moved = otherStart.addingTimeInterval(shift)
-                    other.startAt = moved
-                    other.endAt = moved.addingTimeInterval(length)
-                    other.updatedAt = now
-                    try other.save(db)
-                }
-            }
-            instance.startAt = start
-            instance.endAt = end
-            instance.updatedAt = now
-            guard var write = EventWrite(instance) else { throw WriteError.eventWithoutTimes(id: instanceId) }
-            write.scope = .series
-            try instance.save(db)
-            try Self.enqueue(db, entity: .event, id: instanceId, op: .put, body: try JSONCoding.encoder.encode(write), now: now)
+            try Self.moveEventSeries(instanceId: instanceId, start: start, end: end, in: db, now: now)
         }
+    }
+
+    static func moveEventSeries(instanceId: String, start: Date, end: Date, in db: Database, now: Date) throws -> EventMutation {
+        guard var instance = try CalendarEvent.fetchOne(db, id: instanceId), let oldStart = instance.startAt,
+              let oldEnd = instance.endAt, oldEnd > oldStart, end > start,
+              instance.deletedAt == nil, instance.status != "cancelled"
+        else { throw WriteError.eventWithoutTimes(id: instanceId) }
+        let shift = start.timeIntervalSince(oldStart)
+        let length = end.timeIntervalSince(start)
+        if let series = instance.recurringEventId {
+            let others = try CalendarEvent
+                .filter(Column("calendarId") == instance.calendarId && Column("recurringEventId") == series)
+                .filter(Column("id") != instanceId && Column("deletedAt") == nil && Column("allDay") == false)
+                .fetchAll(db)
+            for var other in others {
+                guard let otherStart = other.startAt else { continue }
+                let moved = otherStart.addingTimeInterval(shift)
+                other.startAt = moved
+                other.endAt = moved.addingTimeInterval(length)
+                other.updatedAt = now
+                try other.save(db)
+            }
+        }
+        instance.startAt = start
+        instance.endAt = end
+        instance.updatedAt = now
+        guard var write = EventWrite(instance) else { throw WriteError.eventWithoutTimes(id: instanceId) }
+        write.scope = .series
+        try instance.save(db)
+        try Self.enqueue(db, entity: .event, id: instanceId, op: .put, body: try JSONCoding.encoder.encode(write), now: now)
+        return EventMutation(from: DateInterval(start: oldStart, end: oldEnd), to: DateInterval(start: start, end: end))
     }
 
     /// Marks the event deleted locally, so every query and observation hides it at once, and

@@ -65,10 +65,12 @@ extension AppModel {
         let previous = storedVersion(of: task)
         var updated = previous
         updated.pinnedStart = calendar.dateInterval(of: .minute, for: start)?.start ?? start
-        guard write({ try $0.saveTask(updated) }) else { return }
+        var mutation: AppDatabase.TaskMutation?
+        guard write({ mutation = try $0.saveTask(updated, original: previous) }),
+              let mutation, let before = mutation.before else { return }
         showToast(Toast(
             message: "Pinned “\(task.title)” at \(Formatting.time(updated.pinnedStart ?? start))",
-            systemImage: "pin.fill", style: .info, undo: TaskUndo(from: previous, to: updated)))
+            systemImage: "pin.fill", style: .info, undo: TaskUndo(from: before, to: mutation.after)))
     }
 
     // MARK: - Optional blocks

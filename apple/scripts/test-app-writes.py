@@ -30,8 +30,10 @@ writes = source('apple/macOS/App/AppModel+Writes.swift')
 selection = source('apple/macOS/App/AppModel+Selection.swift')
 types = undo[undo.index('struct UndoEntry'):undo.index('/// A short-lived label')]
 methods = '\n'.join(method(undo, name) for name in ['recordingUndo', 'pushUndo', 'undo'])
-methods += '\n' + '\n'.join(method(writes, name) for name in ['save', 'pinSelection', 'setPriority', 'deleteTask'])
+methods += '\n' + '\n'.join(method(writes, name) for name in ['save', 'pinSelection', 'setPriority', 'deleteTask', 'complete'])
 methods += '\n' + method(source('apple/macOS/App/AppModel+Events.swift'), 'save')
+methods += '\n' + method(source('apple/macOS/App/AppModel+Events.swift'), 'move')
+methods += '\n' + method(source('apple/macOS/App/AppModel+Events.swift'), 'moveSeries')
 methods += '\n' + method(source('apple/macOS/App/AppModel+Plan.swift'), 'save')
 methods += '\n' + '\n'.join(method(source('apple/macOS/App/AppModel+Events.swift'), name)
                              for name in ['setBlocksDay', 'delete', 'storedVersion'])
@@ -73,23 +75,55 @@ import Foundation
 
 extension Priority { var displayName: String { rawValue } }
 final class AppDatabase {
+    struct EventMutation { let from: DateInterval; let to: DateInterval }
     struct TaskMutation {
         let before: TaskItem?
         let after: TaskItem
     }
     var tasks: [String: TaskItem] = [:]
+    var beforeComplete: (() -> Void)?
+    var beforeSave: (() -> Void)?
     var events: [String: CalendarEvent] = [:]
+    var eventInterleave: (() -> Void)?
     func task(id: String) throws -> TaskItem? { tasks[id] }
-    func saveTask(_ task: TaskItem) throws { tasks[task.id] = task }
-    @discardableResult
-    func saveTask(_ task: TaskItem, original: TaskItem?) throws -> TaskMutation {
-        let before = tasks[task.id]
+    func saveTask(_ task: TaskItem) throws {
+        beforeSave?()
+        beforeSave = nil
         tasks[task.id] = task
-        return TaskMutation(before: before, after: task)
+    }
+    @discardableResult
+    func saveTask(_ task: TaskItem, original: TaskItem?, now: Date = Date()) throws -> TaskMutation {
+        beforeSave?()
+        beforeSave = nil
+        let before = tasks[task.id]
+        var after = task
+        if let original, let live = before {
+            var fields = try JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(live)) as! [String: Any]
+            let old = try JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(TaskWrite(original))) as! [String: Any]
+            let new = try JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(TaskWrite(task))) as! [String: Any]
+            for key in Set(old.keys).union(new.keys) where key != "expectedRecurrenceRevision" {
+                if !NSDictionary(dictionary: [key: old[key] ?? NSNull()]).isEqual(to: [key: new[key] ?? NSNull()]) {
+                    fields[key] = new[key] ?? NSNull()
+                }
+            }
+            after = try JSONCoding.decoder.decode(TaskItem.self, from: JSONSerialization.data(withJSONObject: fields))
+        }
+        tasks[task.id] = after
+        return TaskMutation(before: before, after: after)
     }
     func updateTask(id: String, _ update: (inout TaskItem) throws -> Bool) throws {
         guard var task = tasks[id], task.deletedAt == nil else { return }
         if try update(&task) { tasks[id] = task }
+    }
+    func completeTask(id: String, at: Date = Date()) throws -> TaskMutation? {
+        beforeComplete?()
+        beforeComplete = nil
+        guard var task = tasks[id], task.isOpen else { return nil }
+        let before = task
+        task.completedAt = at
+        task.completedMinutes = task.durationMinutes
+        tasks[id] = task
+        return TaskMutation(before: before, after: task)
     }
     @discardableResult
     func deleteTask(id: String) throws -> TaskItem? {
@@ -104,10 +138,21 @@ final class AppDatabase {
         tasks[snapshot.id] = restored
         return snapshot.recurrence != nil
     }
-    func event(id: String) throws -> CalendarEvent? { events[id] }
-    func saveEvent(_ event: CalendarEvent) throws {}
+    func event(id: String) throws -> CalendarEvent? {
+        let row = events[id]
+        eventInterleave?()
+        eventInterleave = nil
+        return row
+    }
+    func saveEvent(_ event: CalendarEvent) throws { events[event.id] = event }
     func saveEvent(_ event: CalendarEvent, recurrence: EventRecurrence?) throws {}
-    func saveEvent(_ event: CalendarEvent, original: CalendarEvent?, recurrence: EventRecurrence?) throws {}
+    func saveEvent(_ event: CalendarEvent, original: CalendarEvent?, recurrence: EventRecurrence?) throws {
+        guard let original, var live = events[event.id] else { events[event.id] = event; return }
+        if event.startAt != original.startAt { live.startAt = event.startAt }
+        if event.endAt != original.endAt { live.endAt = event.endAt }
+        if event.summary != original.summary { live.summary = event.summary }
+        events[event.id] = live
+    }
     func saveProject(_ project: Project) throws {}
     func saveProject(_ project: Project, original: Project?) throws {}
     func saveCategory(_ category: TaskCategory) throws {}
@@ -115,11 +160,38 @@ final class AppDatabase {
     func deleteProject(id: String) throws {}
     func deleteEvent(id: String) throws { events[id] = nil }
     func setEventBlocksDay(id: String, blocksDay: Bool?) throws { events[id]?.blocksDay = blocksDay }
-    func moveEventSeries(instanceId: String, start: Date, end: Date) throws {}
+    func moveEvent(id: String, toStart start: Date, series: Bool = false) throws -> EventMutation {
+        let event = events[id]!
+        let from = DateInterval(start: event.startAt!, end: event.endAt!)
+        let end = start.addingTimeInterval(from.duration)
+        events[id]?.startAt = start
+        events[id]?.endAt = end
+        return EventMutation(from: from, to: DateInterval(start: start, end: end))
+    }
+    @discardableResult
+    func moveEventSeries(instanceId: String, start: Date, end: Date) throws -> EventMutation {
+        guard let event = events[instanceId], let oldStart = event.startAt, let oldEnd = event.endAt else {
+            throw NSError(domain: "test-row", code: 404)
+        }
+        let from = DateInterval(start: oldStart, end: oldEnd)
+        events[instanceId]?.startAt = start
+        events[instanceId]?.endAt = end
+        return EventMutation(from: from, to: DateInterval(start: start, end: end))
+    }
+    func undoEventMove(id: String, expected: DateInterval, restoring: DateInterval, series: Bool = false) throws -> Bool {
+        eventInterleave?()
+        eventInterleave = nil
+        guard let live = events[id], live.deletedAt == nil,
+              live.startAt == expected.start, live.endAt == expected.end else { return false }
+        events[id]?.startAt = restoring.start
+        events[id]?.endAt = restoring.end
+        return true
+    }
 }
 enum Item: Equatable { case task(String), event(String) }
 enum DateText {
     static func dayAndTime(_ date: Date, calendar: Calendar) -> String { "time" }
+    static func time(_ date: Date) -> String { "time" }
 }
 final class AppModel {
     static let undoLimit = 50
@@ -133,6 +205,9 @@ final class AppModel {
     var placementsByTask: [String: [Placement]] = [:]
     var calendar = Calendar(identifier: .gregorian)
     var ghosts: [String] = []
+    var completionCount = 0
+    var gridDrag: Int?
+    func completionFeedback(for task: TaskItem) { completionCount += 1 }
     func scheduleSync() {}
     func requireEditable(_ event: CalendarEvent) -> Bool { true }
     func didRemove(_ event: CalendarEvent, selecting next: Item?) {}
@@ -157,6 +232,58 @@ func check(_ condition: Bool, _ name: String) {
 }
 let model = AppModel()
 let initial = task()
+let closedDuringCompletion = AppModel()
+closedDuringCompletion.database!.tasks[initial.id] = initial
+closedDuringCompletion.database!.beforeComplete = { closedDuringCompletion.database!.tasks[initial.id] = nil }
+let completedMissing = closedDuringCompletion.complete(initial)
+check(!completedMissing && closedDuringCompletion.completionCount == 0,
+      "Mac completion cancelled before transaction has no success feedback")
+for series in [false, true] {
+    let undoMove = AppModel()
+    let time = Date(timeIntervalSince1970: 1_794_000_000)
+    let from = DateInterval(start: time, duration: 3_600)
+    let to = DateInterval(start: time.addingTimeInterval(7_200), duration: 3_600)
+    let event = CalendarEvent(id: "event", calendarId: "cal", googleId: "google", status: "confirmed",
+                              startAt: to.start, endAt: to.end, allDay: false, updatedAt: time)
+    undoMove.database!.events[event.id] = event
+    undoMove.database!.eventInterleave = { undoMove.database!.events[event.id]?.location = "Remote room" }
+    let restore: UndoEntry.Restore = series
+        ? .moveEventSeries(eventId: event.id, from: from, to: to)
+        : .moveEvent(eventId: event.id, from: from, to: to)
+    undoMove.pushUndo(UndoEntry(label: "Move", restores: [restore], at: time))
+    undoMove.undo()
+    check(undoMove.database!.events[event.id]?.location == "Remote room"
+          && undoMove.database!.events[event.id]?.startAt == from.start,
+          "event move undo preserves a sync change inside the predicate/write gap (series=\(series))")
+    undoMove.database!.events[event.id] = event
+    undoMove.database!.eventInterleave = { undoMove.database!.events[event.id] = nil }
+    undoMove.pushUndo(UndoEntry(label: "Move", restores: [restore], at: time))
+    undoMove.undo()
+    check(undoMove.database!.events[event.id] == nil,
+          "event move undo never resurrects a concurrently deleted row (series=\(series))")
+    undoMove.database!.events[event.id] = event
+    let remoteTime = to.start.addingTimeInterval(1_800)
+    undoMove.database!.eventInterleave = {
+        undoMove.database!.events[event.id]?.startAt = remoteTime
+        undoMove.database!.events[event.id]?.endAt = remoteTime.addingTimeInterval(3_600)
+    }
+    undoMove.pushUndo(UndoEntry(label: "Move", restores: [restore], at: time))
+    undoMove.undo()
+    check(undoMove.database!.events[event.id]?.startAt == remoteTime,
+          "event move undo refuses a concurrent time change (series=\(series))")
+
+    let producer = AppModel()
+    var live = event
+    live.startAt = time.addingTimeInterval(10_800)
+    live.endAt = time.addingTimeInterval(18_000)
+    producer.database!.events[event.id] = live
+    if series { producer.moveSeries(of: event, toStart: time) }
+    else { producer.move(event: event, toStart: time) }
+    producer.undo()
+    check(producer.database!.events[event.id]?.startAt == live.startAt
+          && producer.database!.events[event.id]?.endAt == live.endAt,
+          "event move undo uses the transaction's original times (series=\(series))")
+}
 model.database!.tasks[initial.id] = initial
 model.selectedTask = initial
 let start = Date(timeIntervalSince1970: 1_800_000_000)
@@ -276,14 +403,32 @@ tests = tests.replace('__INTERLEAVED_RESULT__',
                       'return AppDatabase.TaskMutation(before: before, after: interleaved.database!.tasks[initial.id]!)' if uses_mutations else '')
 
 ios_model = r'''
+struct Animation {
+    static func easeInOut(duration: Double) -> Animation { Animation() }
+}
+func withAnimation(_ animation: Animation, _ body: () -> Void) { body() }
+struct BloomingTask { let task: TaskItem; let index: Int }
+enum Formatting {
+    static func duration(minutes: Int) -> String { "\(minutes)m" }
+    static func time(_ date: Date) -> String { "time" }
+}
 final class AppModel {
+    static let bloomDuration: Duration = .milliseconds(150)
     var database: AppDatabase? = AppDatabase()
+    var openTasks: [TaskItem] = []
+    var blooming: [String: BloomingTask] = [:]
+    var completionCount = 0
+    var calendar = Calendar(identifier: .gregorian)
+    var today: Date { calendar.startOfDay(for: Date()) }
+    var triageSuggestions: [String: Int] = [:]
     var ghostIds: Set<String> = ["ghost"]
     var triageAttempted: Set<String> = []
     var toasts: [Toast] = []
     func dismissToast() {}
     func removeGhosts(ids: [String]) { ghostIds.subtract(ids) }
     func showToast(_ toast: Toast) { toasts.append(toast) }
+    func storedVersion(of task: TaskItem) -> TaskItem { database!.tasks[task.id] ?? task }
+    func recordGhosts(for task: TaskItem, includeUpcoming: Bool) -> [String] { [] }
     func write(_ change: (AppDatabase) throws -> Void) -> Bool {
         do { try change(database!); return true } catch { return false }
     }
@@ -307,6 +452,43 @@ model.undo(toast)
 check(!model.ghostIds.contains("ghost"), "successful undo removes calendar ghost blocks")
 check(model.database!.tasks[initial.id]?.notes == "Remote notes", "iPhone undo preserves unrelated remote edits")
 check(model.database!.tasks[initial.id]?.completedMinutes == 0, "iPhone undo restores only action fields")
+let completion = AppModel()
+completion.database!.tasks[initial.id] = initial
+completion.database!.beforeComplete = { completion.database!.tasks[initial.id]?.categoryId = "remote-category" }
+completion.complete(initial)
+completion.undo(completion.toasts.last!)
+check(completion.database!.tasks[initial.id]?.categoryId == "remote-category",
+      "iPhone completion undo preserves a concurrent remote category change")
+check(completion.database!.tasks[initial.id]?.completedAt == nil,
+      "iPhone completion undo reopens the task")
+let absentCompletion = AppModel()
+absentCompletion.complete(initial)
+check(absentCompletion.completionCount == 0 && absentCompletion.toasts.isEmpty,
+      "iPhone completion of an absent task has no success feedback")
+let editorCompletion = AppModel()
+editorCompletion.database!.tasks[initial.id] = initial
+var editorDraft = initial
+editorDraft.title = "Edited title"
+editorDraft.categoryId = "edited-category"
+editorCompletion.complete(editorDraft, original: initial)
+editorCompletion.undo(editorCompletion.toasts.last!)
+check(editorCompletion.database!.tasks[initial.id]?.title == initial.title
+      && editorCompletion.database!.tasks[initial.id]?.categoryId == initial.categoryId,
+      "iPhone editor completion undo reverses all edited fields together")
+let actions: [(String, (AppModel, TaskItem) -> Void)] = [
+    ("pin", { $0.pin($1, at: Date()) }),
+    ("progress", { $0.doneForNow($1, minutes: 10) }),
+    ("tomorrow", { $0.pushToTomorrow($1) }),
+    ("move", { $0.move($1, to: TaskCategory(id: "destination", name: "Destination", scheduleId: "work", createdAt: Date(), updatedAt: Date())) }),
+]
+for (name, action) in actions {
+    let model = AppModel()
+    model.database!.tasks[initial.id] = initial
+    model.database!.beforeSave = { model.database!.tasks[initial.id]?.notes = "Concurrent remote notes" }
+    action(model, initial)
+    check(model.database!.tasks[initial.id]?.notes == "Concurrent remote notes",
+          "iPhone \(name) preserves a sync update before the write transaction")
+}
 exit(failed == 0 ? 0 : 1)
 '''
 
@@ -324,6 +506,11 @@ with tempfile.TemporaryDirectory(prefix='florida-app-writes-') as directory:
     ios.write_text(harness[:harness.index('enum Item:')] + ios_model
                    + source('apple/iOS/Support/Toast.swift')
                    + '\nextension AppModel {\n' + method(source('apple/iOS/App/AppModel+Writes.swift'), 'undo') + '\n}\n'
+                   + '\nextension AppModel {\n' + method(source('apple/iOS/App/AppModel+Actions.swift'), 'complete') + '\n}\n'
+                   + '\nextension AppModel {\n' + method(source('apple/iOS/App/AppModel+Actions.swift'), 'doneForNow') + '\n}\n'
+                   + '\nextension AppModel {\n' + method(source('apple/iOS/App/AppModel+Actions.swift'), 'pushToTomorrow') + '\n}\n'
+                   + '\nextension AppModel {\n' + method(source('apple/iOS/App/AppModel+Joy.swift'), 'pin') + '\n}\n'
+                   + '\nextension AppModel {\n' + method(source('apple/iOS/App/AppModel+Categories.swift'), 'move') + '\n}\n'
                    + ios_tests)
     subprocess.run([swiftc, '-I', directory, '-L', directory, '-lFloridaKit', str(ios), '-o', str(work / 'ios-tests')], check=True)
     ios_result = subprocess.run([str(work / 'ios-tests')], env={**os.environ, 'LD_LIBRARY_PATH': directory})

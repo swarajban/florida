@@ -50,49 +50,8 @@ extension UndoEntry.FieldChange {
     /// with a second of slack for the server's echo; a tombstone only has to still be one, since
     /// the server stamps `deletedAt` itself.
     static func changes(from before: TaskItem, to after: TaskItem) -> [Self] {
-        var changes: [Self] = []
-        func track<Value: Equatable>(
-            _ keyPath: WritableKeyPath<TaskItem, Value>,
-            isStillApplied: @escaping (Value, Value) -> Bool = { $0 == $1 }
-        ) {
-            let old = before[keyPath: keyPath]
-            let new = after[keyPath: keyPath]
-            guard old != new else { return }
-            changes.append(Self(
-                isStillApplied: { isStillApplied($0[keyPath: keyPath], new) },
-                revert: { $0[keyPath: keyPath] = old }))
-        }
-        track(\.categoryId)
-        track(\.title)
-        track(\.notes)
-        track(\.source)
-        track(\.durationMinutes)
-        track(\.minChunkMinutes)
-        track(\.priority)
-        track(\.deadlineType)
-        track(\.dueAt, isStillApplied: sameInstant)
-        track(\.startAt, isStillApplied: sameInstant)
-        track(\.scheduleId)
-        track(\.context)
-        track(\.projectId)
-        track(\.attention)
-        track(\.pinnedStart, isStillApplied: sameInstant)
-        track(\.completedMinutes)
-        track(\.completedAt, isStillApplied: sameInstant)
-        track(\.recurrence)
-        // Series membership and occurrence date belong to the server. Undo leaves the latest
-        // metadata intact, just as completing/reopening an occurrence does.
-        track(\.deletedAt) { ($0 == nil) == ($1 == nil) }
-        return changes
-    }
-
-    /// Both nil, or within a second of each other.
-    private static func sameInstant(_ a: Date?, _ b: Date?) -> Bool {
-        switch (a, b) {
-        case (nil, nil): true
-        case (let a?, let b?): abs(a.timeIntervalSince(b)) < 1
-        default: false
-        }
+        guard let undo = TaskUndo(from: before, to: after) else { return [] }
+        return [Self(isStillApplied: undo.stillApplies, revert: { $0 = undo.reverted($0) })]
     }
 }
 
@@ -106,17 +65,19 @@ struct Ghost: Identifiable, Equatable {
 extension AppModel {
     static let undoLimit = 50
 
-    func recordingUndo(_ label: String, taskId: String, _ write: () throws -> AppDatabase.TaskMutation?) throws {
-        guard let mutation = try write() else { return }
+    @discardableResult
+    func recordingUndo(_ label: String, taskId: String, _ write: () throws -> AppDatabase.TaskMutation?) throws -> Bool {
+        guard let mutation = try write() else { return false }
         let restore: UndoEntry.Restore
         if let before = mutation.before {
             let changes = UndoEntry.FieldChange.changes(from: before, to: mutation.after)
-            guard !changes.isEmpty else { return }
+            guard !changes.isEmpty else { return false }
             restore = .revert(taskId: taskId, changes: changes)
         } else {
             restore = .delete(taskId: taskId)
         }
         pushUndo(UndoEntry(label: label, restores: [restore], at: Date()))
+        return true
     }
 
     /// Remembers a write for `z`, dropping the oldest past `undoLimit`.
@@ -141,17 +102,7 @@ extension AppModel {
             var restored: [TaskItem] = []
             var restoredOneOff = false
             var created: [String] = []
-            var movedBack: [CalendarEvent] = []
-            var seriesBack: [(eventId: String, back: DateInterval)] = []
-            /// The event if it is still where the move left it. The store keeps milliseconds: the
-            /// same instant is within a second.
-            func event(_ id: String, stillAt to: DateInterval) throws -> CalendarEvent? {
-                guard let event = try database.event(id: id), event.deletedAt == nil,
-                      let start = event.startAt, let end = event.endAt,
-                      abs(start.timeIntervalSince(to.start)) < 1, abs(end.timeIntervalSince(to.end)) < 1
-                else { return nil }
-                return event
-            }
+            var eventMoves: [(id: String, expected: DateInterval, restoring: DateInterval, series: Bool)] = []
             for restore in entry.restores {
                 switch restore {
                 case .unavailable:
@@ -184,19 +135,9 @@ extension AppModel {
                     }
                     created.append(taskId)
                 case .moveEvent(let eventId, let from, let to):
-                    guard var event = try event(eventId, stillAt: to) else {
-                        showGhost("Already changed")
-                        return
-                    }
-                    event.startAt = from.start
-                    event.endAt = from.end
-                    movedBack.append(event)
+                    eventMoves.append((eventId, to, from, false))
                 case .moveEventSeries(let eventId, let from, let to):
-                    guard try event(eventId, stillAt: to) != nil else {
-                        showGhost("Already changed")
-                        return
-                    }
-                    seriesBack.append((eventId, from))
+                    eventMoves.append((eventId, to, from, true))
                 }
             }
             for (taskId, changes) in taskReverts {
@@ -218,15 +159,15 @@ extension AppModel {
             for taskId in created {
                 try database.deleteTask(id: taskId)
             }
-            for event in movedBack {
-                try database.saveEvent(event)
-            }
-            for series in seriesBack {
-                try database.moveEventSeries(instanceId: series.eventId, start: series.back.start, end: series.back.end)
+            for move in eventMoves {
+                guard try database.undoEventMove(id: move.id, expected: move.expected, restoring: move.restoring, series: move.series) else {
+                    showGhost("Already changed")
+                    return
+                }
             }
             if let task = restored.first ?? reverted.first, task.isOpen {
                 selection = .task(task.id)
-            } else if let eventId = movedBack.first?.id ?? seriesBack.first?.eventId {
+            } else if let eventId = eventMoves.first?.id {
                 selection = .event(eventId)
             }
             if restoredOneOff {

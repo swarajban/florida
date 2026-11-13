@@ -34,11 +34,12 @@ extension AppModel {
             statusMessage = "Select a task first"
             return
         }
+        let original = task
         let now = calendar.date(bySetting: .second, value: 0, of: Date()) ?? Date()
         task.pinnedStart = now
         task.startAt = nil
         lastAction = .doNow
-        if save(task, undoLabel: "Pinned \(Self.quoted(task.title)) to now") {
+        if save(task, original: original, undoLabel: "Pinned \(Self.quoted(task.title)) to now") {
             showGhost("Pinned to \(DateText.dayAndTime(now, calendar: calendar))")
         }
     }
@@ -70,6 +71,7 @@ extension AppModel {
     /// A pin in the past is released so the scheduler places what is left.
     func logProgress(taskId: String, minutes: Int) {
         guard var task = try? database?.task(id: taskId), task.isOpen, minutes > 0 else { return }
+        let original = task
         let now = Date()
         task.completedMinutes = min(task.durationMinutes, task.completedMinutes + minutes)
         if let pinned = task.pinnedStart, pinned < now {
@@ -81,7 +83,7 @@ extension AppModel {
         }
         lastAction = .doneForNow(minutes: minutes)
         let worked = DateText.duration(minutes: minutes)
-        if save(task, undoLabel: "Logged \(worked) on \(Self.quoted(task.title))") {
+        if save(task, original: original, undoLabel: "Logged \(worked) on \(Self.quoted(task.title))") {
             if finished {
                 completionFeedback(for: task)
                 if selection == item(for: task) { selection = neighbor(of: item(for: task)) }

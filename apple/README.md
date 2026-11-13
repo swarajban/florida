@@ -381,17 +381,20 @@ Task, event and project editors save only fields changed since opening, against 
 current local row. A deletion or completion elsewhere is refused in the editor;
 deleted task destinations fall back to Inbox/no project. Completed tasks have a
 Reopen action. New repeat rules follow subsequent Due/Start changes until Starts
-is explicitly edited. Reducing a task's duration below work already logged completes it.
+is explicitly edited. Reducing a task's duration to or below work already logged completes it.
 
 Task delete Undo works after sync removes the local row. Deleting a repeating task
 stops the series; Undo restores one task only and says so. On Mac, category, event
 and project edits/deletions, including event day blocking, stop Undo from falling
 through to an earlier task action: `z` reports that the latest change cannot be
 undone. Declining an invitation asks first. Event drags
-remain undoable, and saving an unchanged task does not add an undo step.
+remain undoable against their current local times, and saving an unchanged task does not add an undo step.
+Task undo uses the same full-field patch on Mac and iPhone, including editor edits committed
+with completion. Unchanged remote fields are preserved; a later completion, deletion or change
+to one of the affected fields refuses the undo.
 
 Run `python3 apple/scripts/test-app-writes.py` on Linux or Mac for portable app-write
-regressions. It compiles the actual Mac shortcut/editor/undo and iPhone undo methods
+regressions. It compiles the actual Mac shortcut/editor/undo and iPhone action/undo methods
 with real FloridaCore models and a synchronous test row adapter, keeping the observed
 task snapshot deliberately stale. Use `--ref <commit>` to reproduce against an older
 app implementation. SQLite merge/restore behavior is covered separately by FloridaKit
