@@ -43,35 +43,46 @@ extension AppModel {
     /// Creates or updates the project and syncs. False, with a status message, when the name is
     /// empty or the store refused.
     @discardableResult
-    func save(project: Project) -> Bool {
+    func save(project: Project, original: Project? = nil) -> Bool {
         guard let database else { return false }
         var project = project
-        project.name = project.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if original == nil || project.name != original?.name {
+            project.name = project.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         guard !project.name.isEmpty else {
             statusMessage = "Give the project a name"
             return false
         }
-        project.nextStep = Self.trimmedOrNil(project.nextStep)
-        project.notes = Self.trimmedOrNil(project.notes)
-        if let minutes = project.weeklyMinutes, minutes <= 0 {
+        if original == nil || project.nextStep != original?.nextStep {
+            project.nextStep = Self.trimmedOrNil(project.nextStep)
+        }
+        if original == nil || project.notes != original?.notes {
+            project.notes = Self.trimmedOrNil(project.notes)
+        }
+        if original == nil || project.weeklyMinutes != original?.weeklyMinutes,
+           let minutes = project.weeklyMinutes, minutes <= 0 {
             project.weeklyMinutes = nil
         }
         do {
-            try database.saveProject(project)
+            try database.saveProject(project, original: original)
         } catch {
             statusMessage = "Could not save the project: \(error.localizedDescription)"
             return false
         }
         scheduleSync()
+        if original != project {
+            pushUndo(UndoEntry(label: "Project changes", restores: [.unavailable], at: Date()))
+        }
         return true
     }
 
     /// Only an active project's tasks are scheduled, so this is how a project is paused or resumed.
     func setStatus(_ status: ProjectStatus, of project: Project) {
         guard project.status != status else { return }
+        let original = project
         var project = project
         project.status = status
-        if save(project: project) {
+        if save(project: project, original: original) {
             showGhost("\(project.name): \(status.label)")
         }
     }
@@ -90,6 +101,7 @@ extension AppModel {
             statusMessage = "Could not delete the project: \(error.localizedDescription)"
             return
         }
+        pushUndo(UndoEntry(label: "Deleted project", restores: [.unavailable], at: Date()))
         showGhost("Deleted \(Self.quoted(project.name))")
         scheduleSync()
     }

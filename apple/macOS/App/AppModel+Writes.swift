@@ -11,11 +11,11 @@ extension AppModel {
     /// Upserts a task locally, remembers the fields it changes for `z`, and syncs in the
     /// background. `undoLabel` is past tense ("Edited “X”"); returns false when the store refused.
     @discardableResult
-    func save(_ task: TaskItem, undoLabel: String? = nil) -> Bool {
+    func save(_ task: TaskItem, original: TaskItem? = nil, undoLabel: String? = nil) -> Bool {
         guard let database else { return false }
         do {
             try recordingUndo(undoLabel ?? "Edited \(Self.quoted(task.title))", taskId: task.id) {
-                try database.saveTask(task)
+                try database.saveTask(task, original: original)
             }
         } catch {
             statusMessage = "Could not save: \(error.localizedDescription)"
@@ -48,9 +48,8 @@ extension AppModel {
         guard let database else { return }
         let next = neighbor(of: item(for: task))
         do {
-            try recordingUndo("Deleted \(Self.quoted(task.title))", taskId: task.id) {
-                try database.deleteTask(id: task.id)
-            }
+            guard let snapshot = try database.deleteTask(id: task.id), snapshot.deletedAt == nil else { return }
+            pushUndo(UndoEntry(label: "Deleted \(Self.quoted(snapshot.title))", restores: [.undelete(snapshot)], at: Date()))
         } catch {
             statusMessage = "Could not delete: \(error.localizedDescription)"
             return
@@ -77,22 +76,22 @@ extension AppModel {
     /// Marks `task` done, with the sound and bloom, an undo entry and the "Done" ghost; when it
     /// was the selection, the selection moves to its neighbor. Also the editor's Mark done.
     @discardableResult
-    func complete(_ task: TaskItem, savingEdits: Bool = false) -> Bool {
+    func complete(_ task: TaskItem, savingEdits: Bool = false, original: TaskItem? = nil) -> Bool {
         guard let database else { return false }
         let item = item(for: task)
         let next = neighbor(of: item)
         do {
             guard let stored = try database.task(id: task.id), stored.isOpen else { return false }
-            try recordingUndo("Completed \(Self.quoted(task.title))", taskId: task.id) {
+            guard try recordingUndo("Completed \(Self.quoted(task.title))", taskId: task.id, {
                 if savingEdits {
                     var completed = task
                     completed.completedAt = Date()
                     completed.completedMinutes = completed.durationMinutes
-                    try database.saveTask(completed)
+                    return try database.saveTask(completed, original: original ?? stored)
                 } else {
-                    try database.completeTask(id: task.id)
+                    return try database.completeTask(id: task.id)
                 }
-            }
+            }) else { return false }
         } catch {
             statusMessage = "Could not complete: \(error.localizedDescription)"
             return false
@@ -113,22 +112,23 @@ extension AppModel {
             take(pick)
             return
         }
-        guard var task = selectedTask else {
+        guard var task = liveSelectedTask, task.isOpen else {
             statusMessage = "Select a task first"
             return
         }
+        let original = task
         if pinned {
             guard let start = placementsByTask[task.id]?.first?.startAt else {
                 statusMessage = "This task has no scheduled time to pin"
                 return
             }
             task.pinnedStart = start
-            if save(task, undoLabel: "Pinned \(Self.quoted(task.title))") {
+            if save(task, original: original, undoLabel: "Pinned \(Self.quoted(task.title))") {
                 showGhost("Pinned to \(DateText.dayAndTime(start, calendar: calendar))")
             }
         } else {
             task.pinnedStart = nil
-            if save(task, undoLabel: "Unpinned \(Self.quoted(task.title))") {
+            if save(task, original: original, undoLabel: "Unpinned \(Self.quoted(task.title))") {
                 showGhost("Unpinned")
             }
         }
@@ -136,25 +136,27 @@ extension AppModel {
 
     /// `s`: the task may not start before tomorrow, and a pinned start is released.
     func snoozeSelection() {
-        guard var task = selectedTask else {
+        guard var task = liveSelectedTask, task.isOpen else {
             statusMessage = "Select a task first"
             return
         }
         let tomorrow = DateNavigation.shift(today, by: 1, calendar: calendar)
+        let original = task
         task.startAt = tomorrow
         task.pinnedStart = nil
-        if save(task, undoLabel: "Pushed \(Self.quoted(task.title)) to tomorrow") {
+        if save(task, original: original, undoLabel: "Pushed \(Self.quoted(task.title)) to tomorrow") {
             showGhost("Pushed to \(tomorrow.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))")
         }
     }
 
     func setPriority(_ priority: Priority) {
-        guard var task = selectedTask else {
+        guard var task = liveSelectedTask, task.isOpen else {
             statusMessage = "Select a task first"
             return
         }
+        let original = task
         task.priority = priority
-        if save(task, undoLabel: "Set \(Self.quoted(task.title)) to \(priority.displayName)") {
+        if save(task, original: original, undoLabel: "Set \(Self.quoted(task.title)) to \(priority.displayName)") {
             showGhost("Priority: \(priority.displayName)")
         }
     }

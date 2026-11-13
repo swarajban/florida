@@ -83,6 +83,7 @@ extension AppModel {
             statusMessage = "Could not save the category: \(error.localizedDescription)"
             return false
         }
+        pushUndo(UndoEntry(label: "Category changes", restores: [.unavailable], at: Date()))
         scheduleSync()
         return true
     }
@@ -96,6 +97,7 @@ extension AppModel {
             statusMessage = "Could not delete the category: \(error.localizedDescription)"
             return
         }
+        pushUndo(UndoEntry(label: "Deleted category", restores: [.unavailable], at: Date()))
         showGhost("Deleted \(category.name)")
         scheduleSync()
     }

@@ -216,27 +216,31 @@ extension AppModel {
     /// Upserts the event locally and syncs in the background. Returns false, with a status
     /// message, when its calendar is read-only or the store refused.
     @discardableResult
-    func save(event: CalendarEvent, recurrence: EventRecurrence? = nil) -> Bool {
+    func save(event: CalendarEvent, original: CalendarEvent? = nil, recurrence: EventRecurrence? = nil) -> Bool {
         guard requireEditable(event), let database else { return false }
         do {
-            try database.saveEvent(event, recurrence: recurrence)
+            try database.saveEvent(event, original: original, recurrence: recurrence)
         } catch {
             statusMessage = "Could not save: \(error.localizedDescription)"
             return false
         }
         scheduleSync()
+        if original != event {
+            pushUndo(UndoEntry(label: "Event changes", restores: [.unavailable], at: Date()))
+        }
         return true
     }
 
     func setBlocksDay(_ event: CalendarEvent, blocksDay: Bool?) {
         let current = storedVersion(of: event)
-        guard current.allDay, let database else { return }
+        guard current.allDay, current.blocksDay != blocksDay, let database else { return }
         do {
             try database.setEventBlocksDay(id: current.id, blocksDay: blocksDay)
         } catch {
             statusMessage = "Could not save: \(error.localizedDescription)"
             return
         }
+        pushUndo(UndoEntry(label: "Event day blocking", restores: [.unavailable], at: Date()))
         scheduleSync()
     }
 
@@ -327,22 +331,23 @@ extension AppModel {
 
     /// Moves a timed event to `start`, keeping its length; `z` puts it back.
     func move(event: CalendarEvent, toStart start: Date) {
-        guard let oldStart = event.startAt, let oldEnd = event.endAt, oldEnd >= oldStart else {
+        guard requireEditable(event), let database else {
             gridDrag = nil
             return
         }
-        var moved = event
-        let end = start.addingTimeInterval(oldEnd.timeIntervalSince(oldStart))
-        moved.startAt = start
-        moved.endAt = end
-        guard save(event: moved) else {
+        let mutation: AppDatabase.EventMutation
+        do {
+            mutation = try database.moveEvent(id: event.id, toStart: start)
+        } catch {
             gridDrag = nil
+            statusMessage = "Could not save: \(error.localizedDescription)"
             return
         }
+        scheduleSync()
         pushUndo(UndoEntry(
             label: "Moved \(Self.quoted(Self.title(of: event)))",
             restores: [.moveEvent(
-                eventId: event.id, from: DateInterval(start: oldStart, end: oldEnd), to: DateInterval(start: start, end: end))],
+                eventId: event.id, from: mutation.from, to: mutation.to)],
             at: Date()))
         showGhost("Moved to \(DateText.dayAndTime(start, calendar: calendar)) · z to undo", for: .seconds(3))
     }
@@ -351,15 +356,14 @@ extension AppModel {
     /// on its own day; `z` moves them back. The store shifts the instances it holds at once, and
     /// the server moves the series on Google from the one queued write.
     func moveSeries(of event: CalendarEvent, toStart start: Date) {
-        guard requireEditable(event), let database, let oldStart = event.startAt, let oldEnd = event.endAt,
-              oldEnd >= oldStart
+        guard requireEditable(event), let database
         else {
             gridDrag = nil
             return
         }
-        let end = start.addingTimeInterval(oldEnd.timeIntervalSince(oldStart))
+        let mutation: AppDatabase.EventMutation
         do {
-            try database.moveEventSeries(instanceId: event.id, start: start, end: end)
+            mutation = try database.moveEvent(id: event.id, toStart: start, series: true)
         } catch {
             gridDrag = nil
             statusMessage = "Could not save: \(error.localizedDescription)"
@@ -369,7 +373,7 @@ extension AppModel {
         pushUndo(UndoEntry(
             label: "Moved every \(Self.quoted(Self.title(of: event)))",
             restores: [.moveEventSeries(
-                eventId: event.id, from: DateInterval(start: oldStart, end: oldEnd), to: DateInterval(start: start, end: end))],
+                eventId: event.id, from: mutation.from, to: mutation.to)],
             at: Date()))
         showGhost("Moved all to \(DateText.time(start)) · z to undo", for: .seconds(3))
     }
@@ -381,6 +385,14 @@ extension AppModel {
         guard requireEditable(event) else { return }
         let previous = storedVersion(of: event)
         if previous.responseStatus != status {
+            if status == "declined" {
+                let alert = NSAlert()
+                alert.messageText = "Decline \(Self.quoted(Self.title(of: event)))?"
+                alert.informativeText = "Google will be notified. This response cannot be undone here."
+                alert.addButton(withTitle: "Decline")
+                alert.addButton(withTitle: "Cancel")
+                guard alert.runModal() == .alertFirstButtonReturn else { return }
+            }
             var updated = previous
             updated.responseStatus = status
             if var attendees = updated.attendees, let index = attendees.firstIndex(where: \.isSelf) {
@@ -388,7 +400,7 @@ extension AppModel {
                 updated.attendees = attendees
             }
             let next = neighbor(of: .event(event.id))
-            guard save(event: updated) else { return }
+            guard save(event: updated, original: previous) else { return }
             if status == "declined" {
                 didRemove(event, selecting: next)
             }
@@ -410,6 +422,7 @@ extension AppModel {
             statusMessage = "Could not delete: \(error.localizedDescription)"
             return
         }
+        pushUndo(UndoEntry(label: "Deleted event", restores: [.unavailable], at: Date()))
         didRemove(event, selecting: next)
         showGhost("Deleted \(Self.quoted(Self.title(of: event)))", for: .seconds(3))
         scheduleSync()

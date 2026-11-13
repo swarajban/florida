@@ -11,14 +11,22 @@ extension AppModel {
 
     /// Completes the task: one `.success` haptic, the row blooms in its category color for
     /// ~150 ms while it folds away, then Undo (which saves the version from before).
-    func complete(_ task: TaskItem) {
-        let previous = storedVersion(of: task)
+    @discardableResult
+    func complete(_ task: TaskItem, original: TaskItem? = nil) -> Bool {
         let index = openTasks.firstIndex { $0.id == task.id }
         let now = Date()
-        var completed = previous
-        completed.completedAt = now
-        completed.completedMinutes = previous.durationMinutes
-        guard write({ try $0.completeTask(id: task.id, at: now) }) else { return }
+        var mutation: AppDatabase.TaskMutation?
+        guard write({ database in
+            if let original {
+                var draft = task
+                draft.completedAt = now
+                draft.completedMinutes = draft.durationMinutes
+                mutation = try database.saveTask(draft, original: original, now: now)
+            } else {
+                mutation = try database.completeTask(id: task.id, at: now)
+            }
+        }), let mutation, let previous = mutation.before else { return false }
+        let completed = mutation.after
         completionCount += 1
         if let index {
             blooming[task.id] = BloomingTask(task: previous, index: index)
@@ -30,8 +38,9 @@ extension AppModel {
             }
         }
         showToast(Toast(
-            message: "Completed “\(task.title)”", systemImage: "checkmark.circle.fill", style: .success,
+            message: "Completed “\(completed.title)”", systemImage: "checkmark.circle.fill", style: .success,
             undo: TaskUndo(from: previous, to: completed)))
+        return true
     }
 
     /// Credits `minutes` of work without finishing: the rest stays open and the scheduler places
@@ -48,11 +57,13 @@ extension AppModel {
         if let pinned = updated.pinnedStart, pinned <= Date() {
             updated.pinnedStart = nil
         }
-        guard write({ try $0.saveTask(updated) }) else { return }
-        let ghosts = recordGhosts(for: previous, includeUpcoming: false)
+        var mutation: AppDatabase.TaskMutation?
+        guard write({ mutation = try $0.saveTask(updated, original: previous) }),
+              let mutation, let before = mutation.before else { return }
+        let ghosts = recordGhosts(for: before, includeUpcoming: false)
         showToast(Toast(
             message: "\(Formatting.duration(minutes: minutes)) done · \(Formatting.duration(minutes: updated.remainingMinutes)) left on “\(task.title)”",
-            systemImage: "checkmark.circle", style: .success, undo: TaskUndo(from: previous, to: updated), ghostIds: ghosts))
+            systemImage: "checkmark.circle", style: .success, undo: TaskUndo(from: before, to: mutation.after), ghostIds: ghosts))
     }
 
     /// Pins the task to start now (to the minute).
@@ -66,10 +77,12 @@ extension AppModel {
         var updated = previous
         updated.startAt = calendar.date(byAdding: .day, value: 1, to: today)
         updated.pinnedStart = nil
-        guard write({ try $0.saveTask(updated) }) else { return }
+        var mutation: AppDatabase.TaskMutation?
+        guard write({ mutation = try $0.saveTask(updated, original: previous) }),
+              let mutation, let before = mutation.before else { return }
         showToast(Toast(
             message: "Pushed “\(task.title)” to tomorrow", systemImage: "arrow.turn.down.right", style: .info,
-            undo: TaskUndo(from: previous, to: updated)))
+            undo: TaskUndo(from: before, to: mutation.after)))
     }
 
     /// Minutes "Done for now" proposes: the time since its in-progress block started, else the

@@ -40,9 +40,9 @@ extension AppModel {
     }
 
     @discardableResult
-    func save(event: CalendarEvent, recurrence: EventRecurrence? = nil) -> Bool {
+    func save(event: CalendarEvent, original: CalendarEvent? = nil, recurrence: EventRecurrence? = nil) -> Bool {
         guard requireEditable(event) else { return false }
-        return write { try $0.saveEvent(event, recurrence: recurrence) }
+        return write { try $0.saveEvent(event, original: original, recurrence: recurrence) }
     }
 
     func setBlocksDay(_ event: CalendarEvent, blocksDay: Bool?) {
@@ -59,7 +59,7 @@ extension AppModel {
         var moved = previous
         moved.startAt = start
         moved.endAt = end
-        guard write({ try $0.saveEvent(moved) }) else { return }
+        guard write({ try $0.saveEvent(moved, original: previous) }) else { return }
         showToast(Toast(message: "Moved to \(movedToText(moved, from: previous))", systemImage: "arrow.left.arrow.right", style: .info))
     }
 
@@ -75,7 +75,7 @@ extension AppModel {
             attendees[index].responseStatus = status
             updated.attendees = attendees
         }
-        write { try $0.saveEvent(updated) }
+        write { try $0.saveEvent(updated, original: previous) }
     }
 
     /// Tombstones the event locally and queues the delete; Google removes it on push.

@@ -7,6 +7,7 @@ import SwiftUI
 struct ProjectEditorSheet: View {
     @Environment(AppModel.self) private var model
     @State private var draft: Project
+    private let original: Project
     /// Not in the store when the sheet opened: titled "New project" and saved with "Add Project".
     /// Kept from then, so the sheet does not change its words while it closes on a saved project.
     @State private var isNew: Bool
@@ -20,6 +21,7 @@ struct ProjectEditorSheet: View {
     private static let weeklyHours = [1, 2, 3, 4, 5, 6, 8, 10]
 
     init(project: Project, isNew: Bool) {
+        original = project
         _draft = State(initialValue: project)
         _isNew = State(initialValue: isNew)
         // A project already holding another amount keeps it as a choice.
@@ -184,7 +186,7 @@ struct ProjectEditorSheet: View {
             message = "This project was deleted. Nothing was saved."
             return
         }
-        guard model.save(project: draft) else {
+        guard model.save(project: draft, original: isNew ? nil : original) else {
             message = model.statusMessage ?? "The project could not be saved"
             return
         }

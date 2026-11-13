@@ -29,24 +29,32 @@ extension AppModel {
     }
 
     /// Creates or updates the project. Throws `LocalWriteError`.
-    func saveProject(_ project: Project) throws {
+    func saveProject(_ project: Project, original: Project? = nil) throws {
         var project = project
-        project.name = project.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if original == nil || project.name != original?.name {
+            project.name = project.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         guard !project.name.isEmpty else { throw LocalWriteError("Give the project a name.") }
-        project.nextStep = Self.trimmedOrNil(project.nextStep)
-        project.notes = Self.trimmedOrNil(project.notes)
-        if let minutes = project.weeklyMinutes, minutes <= 0 {
+        if original == nil || project.nextStep != original?.nextStep {
+            project.nextStep = Self.trimmedOrNil(project.nextStep)
+        }
+        if original == nil || project.notes != original?.notes {
+            project.notes = Self.trimmedOrNil(project.notes)
+        }
+        if original == nil || project.weeklyMinutes != original?.weeklyMinutes,
+           let minutes = project.weeklyMinutes, minutes <= 0 {
             project.weeklyMinutes = nil
         }
-        try perform { try $0.saveProject(project) }
+        try perform { try $0.saveProject(project, original: original) }
     }
 
     /// Only an active project's tasks are scheduled, so this is how a project is paused or resumed.
     func setStatus(_ status: ProjectStatus, of project: Project) {
         guard project.status != status else { return }
+        let original = project
         var project = project
         project.status = status
-        if write({ try $0.saveProject(project) }) {
+        if write({ try $0.saveProject(project, original: original) }) {
             showToast(Toast(message: "\(project.name): \(status.label)", systemImage: status.symbolName, style: .info))
         }
     }

@@ -65,6 +65,8 @@ jobs:
         working-directory: apple/FloridaKit
       - run: swift test
         working-directory: apple/FloridaKit
+      - run: apt-get update && apt-get install -y python3
+      - run: python3 apple/scripts/test-app-writes.py
 
   apple:
     name: Apple apps (Xcode)

@@ -140,7 +140,7 @@ struct TaskEditorView: View {
                 }
 
                 Section("Scheduling") {
-                    Stepper(value: $draft.durationMinutes, in: 15...(24 * 60), step: 15) {
+                    Stepper(value: $draft.durationMinutes, in: 1...(24 * 60), step: 5) {
                         LabeledContent("Duration", value: Formatting.duration(minutes: draft.durationMinutes))
                     }
                     Picker("Priority", selection: $draft.priority) {
@@ -188,7 +188,7 @@ struct TaskEditorView: View {
                             }
                         } message: {
                             if original.recurrence != nil {
-                                Text("This and future unfinished occurrences will be removed. Completed history is kept.")
+                                Text("This and future unfinished occurrences will be removed. Completed history is kept. Undo restores one task only, not the repeating series.")
                             }
                         }
                     }
@@ -254,7 +254,10 @@ struct TaskEditorView: View {
     }
 
     private var validatedSource: TaskSource? {
-        TaskSource.from(url: sourceURL, title: sourceTitle)
+        if !isNew, sourceURL == (original.source?.url ?? ""), sourceTitle == (original.source?.title ?? "") {
+            return original.source
+        }
+        return TaskSource.from(url: sourceURL, title: sourceTitle)
     }
 
     private var sourceValidationMessage: String? {
@@ -396,28 +399,24 @@ struct TaskEditorView: View {
     private func completeFromEditor() {
         guard recurrenceValidationMessage == nil, sourceValidationMessage == nil else { return }
         var task = preparedTask
-        if task != original {
-            task.title = trimmedTitle.isEmpty ? original.title : trimmedTitle
-            do {
-                try model.save(task)
-            } catch {
-                saveError = error.localizedDescription
-                return
-            }
+        if task.title.isEmpty {
+            task.title = original.title
         }
-        model.complete(task)
+        guard model.complete(task, original: original) else {
+            saveError = "This task could not be completed. It may have been deleted or completed elsewhere."
+            return
+        }
         dismiss()
     }
 
     private var preparedTask: TaskItem {
         var task = draft
-        task.title = trimmedTitle
-        task.source = validatedSource
-        // A project deleted while the editor was open: the server refuses a task that names it.
-        if model.project(id: task.projectId) == nil {
-            task.projectId = nil
+        if isNew || task.title != original.title {
+            task.title = trimmedTitle
         }
-        if task.deadlineType == .none && task.recurrence == nil {
+        task.source = validatedSource
+        if isNew || task.deadlineType != original.deadlineType || task.dueAt != original.dueAt,
+           task.deadlineType == .none && task.recurrence == nil {
             task.dueAt = nil
         }
         if original.recurrence == nil && task.recurrence != nil {
@@ -429,7 +428,7 @@ struct TaskEditorView: View {
     private func save() {
         guard recurrenceValidationMessage == nil, sourceValidationMessage == nil else { return }
         do {
-            try model.save(preparedTask)
+            try model.save(preparedTask, original: isNew ? nil : original)
             dismiss()
         } catch {
             saveError = error.localizedDescription

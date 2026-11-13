@@ -58,12 +58,12 @@ extension AppModel {
             throw LocalWriteError("There are no categories yet. Connect to the server in Settings and sync first.")
         }
         let task = QuickAddTaskBuilder.makeTask(from: draft, category: category, now: Date())
-        try perform { try $0.saveTask(task) }
+        try perform { try $0.saveTask(task, original: nil) }
         return task
     }
 
-    func save(_ task: TaskItem) throws {
-        try perform { try $0.saveTask(task) }
+    func save(_ task: TaskItem, original: TaskItem? = nil) throws {
+        try perform { try $0.saveTask(task, original: original) }
     }
 
     func reopen(_ task: TaskItem) {
@@ -73,13 +73,13 @@ extension AppModel {
     /// Deletes the task and offers Undo, which clears `deletedAt` again. The server's
     /// `PUT /api/tasks/:id` does the same, so it works after the delete was pushed.
     func delete(_ task: TaskItem) {
-        let previous = storedVersion(of: task)
         let now = Date()
+        var previous: TaskItem?
+        guard write({ previous = try $0.deleteTask(id: task.id, now: now) }), let previous, previous.deletedAt == nil else { return }
         var deleted = previous
         deleted.deletedAt = now
-        guard write({ try $0.deleteTask(id: task.id, now: now) }) else { return }
         showToast(Toast(
-            message: "Deleted “\(task.title)”", systemImage: "trash.fill", style: .info,
+            message: previous.recurrence == nil ? "Deleted “\(previous.title)”" : "Deleted “\(previous.title)”. Undo restores one task, not the repeating series.", systemImage: "trash.fill", style: .info,
             undo: TaskUndo(from: previous, to: deleted)))
     }
 
@@ -113,7 +113,6 @@ extension AppModel {
     /// pushed tombstone does: its version from before the delete is saved back, live.
     func undo(_ toast: Toast) {
         dismissToast()
-        removeGhosts(ids: toast.ghostIds)
         guard let undo = toast.undo else { return }
         let current: TaskItem?
         do {
@@ -123,15 +122,37 @@ extension AppModel {
             return
         }
         let alreadyChanged = Toast(message: "Already changed since; nothing to undo.", systemImage: "arrow.uturn.backward.circle", style: .info)
-        if let current {
+        if let snapshot = undo.deleted {
+            guard current == nil || current?.deletedAt != nil else {
+                showToast(alreadyChanged)
+                return
+            }
+            var oneOff = false
+            guard write({ oneOff = try $0.restoreTask(snapshot) }) else { return }
+            removeGhosts(ids: toast.ghostIds)
+            if oneOff {
+                showToast(Toast(message: "Restored one task only. Repeating series cannot be restored.", systemImage: "arrow.uturn.backward.circle", style: .info))
+            }
+        } else if let current {
             guard undo.stillApplies(to: current) else {
                 showToast(alreadyChanged)
                 return
             }
-            write { try $0.saveTask(undo.reverted(current)) }
-        } else if var restored = undo.deleted {
-            restored.deletedAt = nil
-            write { try $0.saveTask(restored) }
+            var applied = false
+            guard write({ database in
+                try database.updateTask(id: undo.taskId) { task in
+                    guard undo.stillApplies(to: task) else { return false }
+                    task = undo.reverted(task)
+                    applied = true
+                    return true
+                }
+            }) else { return }
+            guard applied else {
+                showToast(alreadyChanged)
+                return
+            }
+            removeGhosts(ids: toast.ghostIds)
+            triageAttempted.remove("\(current.id)\n\(current.title)")
         } else {
             showToast(alreadyChanged)
         }

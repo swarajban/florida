@@ -74,7 +74,7 @@ struct RootView: View {
             }
             Button("Cancel", role: .cancel) { model.recurringTaskToDelete = nil }
         } message: { _ in
-            Text("This and future unfinished occurrences will be removed. Completed history is kept.")
+            Text("This and future unfinished occurrences will be removed. Completed history is kept. Undo restores one task only, not the repeating series.")
         }
         .confirmationDialog(
             "Delete this event?",

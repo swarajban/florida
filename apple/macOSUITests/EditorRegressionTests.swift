@@ -2,6 +2,27 @@ import XCTest
 
 final class EditorRegressionTests: XCTestCase {
     @MainActor
+    func testUnchangedEditorDoesNotConsumeUndoOrWrite() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-demoData", "YES", "-uiEditorDiagnostics", "YES"]
+        app.launch()
+        defer { app.terminate() }
+        let diagnostics = app.staticTexts["editor-diagnostics"]
+        XCTAssertTrue(diagnostics.waitForExistence(timeout: 15))
+        let row = app.staticTexts["Renew VPN certificate"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.click()
+        let save = app.sheets.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save")).firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        save.click()
+        XCTAssertTrue(save.waitForNonExistence(timeout: 5))
+        waitForValue("taskWrites=0 queueChanges=0 sounds=0 pendingRows=0 syncApplied=false", of: diagnostics)
+        app.typeKey("z", modifierFlags: [])
+        assertValueRemains("taskWrites=0 queueChanges=0 sounds=0 pendingRows=0 syncApplied=false", of: diagnostics)
+        XCTAssertTrue(row.exists)
+    }
+
+    @MainActor
     func testEditedTaskCompletesWithOneWriteAndOneSoundInBothAppearances() {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {

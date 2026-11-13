@@ -33,10 +33,11 @@ struct TaskEditorSheet: View {
     @State private var startTimeChoice: Bool?
     private let original: TaskItem
     /// Not in the store yet: titled "New task", shows the AI section, and saves as "Added".
-    let isNew: Bool
+    @State private var isNew: Bool
     @FocusState private var focus: TextFocus?
     @State private var keyboard = TaskEditorKeyboard()
     @State private var openField: TaskEditorKey?
+    @State private var saveError: String?
 
     /// The text fields a key can put the keyboard in.
     private enum TextFocus {
@@ -58,7 +59,7 @@ struct TaskEditorSheet: View {
         _sourceURL = State(initialValue: task.source?.url ?? "")
         _sourceTitle = State(initialValue: task.source?.title ?? "")
         original = task
-        self.isNew = isNew
+        _isNew = State(initialValue: isNew)
     }
 
     var body: some View {
@@ -80,6 +81,23 @@ struct TaskEditorSheet: View {
                 .padding([.horizontal, .top], 20)
             }
             Form {
+                if let saveError {
+                    Label(saveError, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                        .accessibilityIdentifier("task-save-error")
+                }
+                if !isNew, !original.isOpen {
+                    Button("Reopen", systemImage: "arrow.uturn.backward.circle") {
+                        var task = preparedTask
+                        task.completedAt = nil
+                        task.completedMinutes = 0
+                        guard model.save(task, original: original, undoLabel: "Reopened \(AppModel.quoted(task.title))") else {
+                            saveError = model.statusMessage ?? "The task could not be reopened."
+                            return
+                        }
+                        model.editorTask = nil
+                    }
+                }
                 if isNew {
                     AIParseSection(apply: apply)
                 }
@@ -337,7 +355,10 @@ struct TaskEditorSheet: View {
     }
 
     private var editedSource: TaskSource? {
-        TaskSource.from(url: sourceURL, title: sourceTitle)
+        if !isNew, sourceURL == (original.source?.url ?? ""), sourceTitle == (original.source?.title ?? "") {
+            return original.source
+        }
+        return TaskSource.from(url: sourceURL, title: sourceTitle)
     }
 
     private var sourceValidationMessage: String? {
@@ -388,15 +409,21 @@ struct TaskEditorSheet: View {
     private var preparedTask: TaskItem {
         var task = draft
         task.source = editedSource
-        task.title = task.title.trimmingCharacters(in: .whitespaces)
-        task.durationMinutes = max(5, task.durationMinutes)
+        if isNew || task.title != original.title {
+            task.title = task.title.trimmingCharacters(in: .whitespaces)
+        }
+        if isNew || task.durationMinutes != original.durationMinutes {
+            task.durationMinutes = max(1, task.durationMinutes)
+        }
         task.dueAt = hasDue ? dueAt : nil
         task.startAt = hasStart ? startAt : nil
         task.pinnedStart = hasPinnedStart ? pinnedStart : nil
-        if task.dueAt == nil {
-            task.deadlineType = .none
-        } else if task.deadlineType == .none {
-            task.deadlineType = .soft
+        if isNew || task.dueAt != original.dueAt || task.deadlineType != original.deadlineType {
+            if task.dueAt == nil {
+                task.deadlineType = .none
+            } else if task.deadlineType == .none {
+                task.deadlineType = .soft
+            }
         }
         if original.recurrence == nil && task.recurrence != nil {
             task.prepareToEnableRecurrence()
@@ -415,15 +442,25 @@ struct TaskEditorSheet: View {
                 task.title = original.title
             }
         }
-        guard model.complete(task, savingEdits: hasEdits) else { return }
+        guard model.complete(task, savingEdits: hasEdits, original: original) else {
+            saveError = model.statusMessage ?? "This task is no longer open. Nothing was saved."
+            return
+        }
         model.editorTask = nil
     }
 
     private func save() {
         guard recurrenceValidationMessage == nil, sourceValidationMessage == nil else { return }
+        guard isNew || hasEdits else {
+            model.editorTask = nil
+            return
+        }
         let task = preparedTask
         let label = isNew ? "Added \(AppModel.quoted(task.title))" : "Edited \(AppModel.quoted(task.title))"
-        guard model.save(task, undoLabel: label) else { return }
+        guard model.save(task, original: isNew ? nil : original, undoLabel: label) else {
+            saveError = model.statusMessage ?? "The task could not be saved."
+            return
+        }
         model.editorTask = nil
         if isNew {
             model.selection = .task(task.id)

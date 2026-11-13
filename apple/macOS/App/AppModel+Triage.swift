@@ -8,6 +8,7 @@ import Foundation
 extension AppModel {
     /// Moves a task to another category (undoable).
     func move(_ task: TaskItem, to category: TaskCategory) {
+        guard let task = try? database?.task(id: task.id), task.isOpen else { return }
         guard task.categoryId != category.id else {
             showGhost("Already in \(category.name)")
             return
@@ -15,7 +16,7 @@ extension AppModel {
         var moved = task
         moved.categoryId = category.id
         lastAction = .move(categoryId: category.id)
-        if save(moved, undoLabel: "Moved \(Self.quoted(task.title)) to \(category.name)") {
+        if save(moved, original: task, undoLabel: "Moved \(Self.quoted(task.title)) to \(category.name)") {
             aiSuggestions[task.id] = nil
             showGhost("Moved to \(category.name)")
         }
@@ -23,7 +24,7 @@ extension AppModel {
 
     /// `m`: the Move to… picker for the selected task.
     func openMovePicker() {
-        guard let task = selectedTask else {
+        guard let task = liveSelectedTask, task.isOpen else {
             statusMessage = "Select a task first"
             return
         }

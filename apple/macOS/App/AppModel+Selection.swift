@@ -2,6 +2,11 @@ import FloridaKit
 import Foundation
 
 extension AppModel {
+    var liveSelectedTask: TaskItem? {
+        guard let id = selectedTask?.id else { return nil }
+        return try? database?.task(id: id)
+    }
+
     var taskGroups: [TaskListSection] {
         taskListGrouping.sections(
             tasks: openTasks, categories: categories, now: clockNow, calendar: taskListCalendar)

@@ -103,11 +103,12 @@ extension AppModel {
 
     /// Pins `task` to start at `start` (a picked gap).
     func fill(start: Date, with task: TaskItem) {
+        guard let task = try? database?.task(id: task.id), task.isOpen else { return }
         var pinned = task
         pinned.pinnedStart = start
         pinned.startAt = nil
         let when = DateText.dayAndTime(start, calendar: calendar)
-        if save(pinned, undoLabel: "Pinned \(Self.quoted(task.title)) to \(when)") {
+        if save(pinned, original: task, undoLabel: "Pinned \(Self.quoted(task.title)) to \(when)") {
             selection = .task(task.id)
             showGhost("Pinned to \(when)")
         }
@@ -142,7 +143,7 @@ extension AppModel {
     /// Takes a suggestion: pins the task where it was suggested, which moves it onto the plan and
     /// out of the suggestions at once (`z` undoes it).
     func take(_ pick: OptionalPicks.Pick) {
-        guard let task = tasksById[pick.task.id] else { return }
+        guard let task = try? database?.task(id: pick.task.id), task.isOpen else { return }
         fill(start: pick.placement.startAt, with: task)
     }
 }

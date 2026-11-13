@@ -280,11 +280,21 @@ extension AppDatabase {
         /// `saveEvent` of a row without `startAt` or `endAt`; the server requires both.
         case eventWithoutTimes(id: String)
         case eventNotAllDay(id: String)
+        case taskNoLongerOpen
+        case eventNoLongerExists
+        case projectNoLongerExists
+        case taskAlreadyRestored
+        case taskNoLongerExists
 
         public var errorDescription: String? {
             switch self {
-            case .eventWithoutTimes(let id): "Event \(id) has no start or end time."
+            case .eventWithoutTimes(let id): "Event \(id) has missing or invalid start and end times."
             case .eventNotAllDay(let id): "Event \(id) is not an all-day event."
+            case .taskNoLongerOpen: "This task was deleted or completed elsewhere. Your changes were not saved."
+            case .eventNoLongerExists: "This event was deleted elsewhere. Your changes were not saved."
+            case .projectNoLongerExists: "This project was deleted elsewhere. Your changes were not saved."
+            case .taskAlreadyRestored: "This task has already been restored or changed elsewhere."
+            case .taskNoLongerExists: "This task was deleted elsewhere. Your changes were not saved."
             }
         }
     }
@@ -298,7 +308,7 @@ extension AppDatabase {
         }
     }
 
-    private static func saveTask(_ task: TaskItem, in db: Database, now: Date) throws {
+    static func saveTask(_ task: TaskItem, in db: Database, now: Date) throws {
         let previous = try TaskItem.fetchOne(db, id: task.id)
         let pending = try PendingWrite.filter(Column("entity") == "task" && Column("entityId") == task.id).fetchOne(db)
         var local = task
@@ -406,20 +416,37 @@ extension AppDatabase {
     }
 
     /// Marks the task deleted locally and queues a `delete`, replacing any queued `put`.
-    public func deleteTask(id: String, now: Date = Date()) throws {
+    @discardableResult
+    public func deleteTask(id: String, now: Date = Date()) throws -> TaskItem? {
         try writer.write { db in
+            let task = try TaskItem.fetchOne(db, id: id)
+            if let task, let series = task.recurrenceSeriesId, let date = task.recurrenceDate {
+                try db.execute(sql: """
+                    UPDATE task SET deletedAt = ?, updatedAt = ?
+                    WHERE recurrenceSeriesId = ? AND recurrenceDate > ? AND completedAt IS NULL AND deletedAt IS NULL
+                    """, arguments: [now, now, series, date])
+                try db.execute(sql: """
+                    UPDATE task SET recurrence = NULL, recurrenceSeriesId = NULL, recurrenceDate = NULL, updatedAt = ?
+                    WHERE recurrenceSeriesId = ? AND id != ? AND completedAt IS NULL AND deletedAt IS NULL
+                    """, arguments: [now, series, id])
+            }
             try db.execute(sql: "UPDATE task SET deletedAt = ?, updatedAt = ? WHERE id = ?", arguments: [now, now, id])
             try Self.enqueue(db, entity: .task, id: id, op: .delete, body: nil, now: now)
+            return task
         }
     }
 
     /// Marks the task complete at `at` (its remaining minutes count as done).
-    public func completeTask(id: String, at completedAt: Date = Date()) throws {
+    @discardableResult
+    public func completeTask(id: String, at completedAt: Date = Date()) throws -> TaskMutation? {
         try writer.write { db in
-            guard var task = try TaskItem.fetchOne(db, id: id) else { return }
+            guard var task = try TaskItem.fetchOne(db, id: id), task.isOpen else { return nil }
+            let before = task
             task.completedAt = completedAt
             task.completedMinutes = task.durationMinutes
             try Self.saveTask(task, in: db, now: completedAt)
+            guard let after = try TaskItem.fetchOne(db, id: id) else { throw WriteError.taskNoLongerExists }
+            return TaskMutation(before: before, after: after)
         }
     }
 
@@ -438,35 +465,39 @@ extension AppDatabase {
     /// Throws `WriteError.eventWithoutTimes` for a row missing `startAt` or `endAt`, which the
     /// server would refuse; nothing is stored or queued.
     public func saveEvent(_ event: CalendarEvent, recurrence: EventRecurrence? = nil, now: Date = Date()) throws {
+        try writer.write { db in
+            try Self.saveEvent(event, recurrence: recurrence, in: db, now: now)
+        }
+    }
+
+    static func saveEvent(_ event: CalendarEvent, recurrence: EventRecurrence?, in db: Database, now: Date) throws {
         var event = event
         event.updatedAt = now
         guard let initial = EventWrite(event) else { throw WriteError.eventWithoutTimes(id: event.id) }
-        try writer.write { db in
-            var write = initial
-            if let stored = try CalendarEvent.fetchOne(db, key: event.id) {
-                event.blocksDay = stored.blocksDay
-                write.blocksDay = stored.blocksDay
-                event.autoBlocksDay = stored.autoBlocksDay
-                event.blockingReason = stored.blockingReason
-            }
-            write.recurrence = recurrence
-            if let pending = try PendingWrite.filter(Column("entity") == "event" && Column("entityId") == event.id).fetchOne(db),
-               pending.op == .put, let body = pending.body {
-                let queued = try JSONCoding.decoder.decode(EventWrite.self, from: body)
-                // An offline rename/reschedule must not erase the queued series creation.
-                if write.recurrence == nil, event.googleId.isEmpty {
-                    write.recurrence = queued.recurrence
-                }
-                // Nor may an RSVP or a rename erase a queued move of the whole series: the other
-                // instances have moved here already, and only this write tells the server.
-                if queued.scope == .series, queued.startAt == write.startAt, queued.endAt == write.endAt {
-                    write.scope = .series
-                }
-            }
-            let body = try JSONCoding.encoder.encode(write)
-            try event.save(db)
-            try Self.enqueue(db, entity: .event, id: event.id, op: .put, body: body, now: now)
+        var write = initial
+        if let stored = try CalendarEvent.fetchOne(db, key: event.id) {
+            event.blocksDay = stored.blocksDay
+            write.blocksDay = stored.blocksDay
+            event.autoBlocksDay = stored.autoBlocksDay
+            event.blockingReason = stored.blockingReason
         }
+        write.recurrence = recurrence
+        if let pending = try PendingWrite.filter(Column("entity") == "event" && Column("entityId") == event.id).fetchOne(db),
+           pending.op == .put, let body = pending.body {
+            let queued = try JSONCoding.decoder.decode(EventWrite.self, from: body)
+            // An offline rename/reschedule must not erase the queued series creation.
+            if write.recurrence == nil, event.googleId.isEmpty {
+                write.recurrence = queued.recurrence
+            }
+            // Nor may an RSVP or a rename erase a queued move of the whole series: the other
+            // instances have moved here already, and only this write tells the server.
+            if queued.scope == .series, queued.startAt == write.startAt, queued.endAt == write.endAt {
+                write.scope = .series
+            }
+        }
+        let body = try JSONCoding.encoder.encode(write)
+        try event.save(db)
+        try Self.enqueue(db, entity: .event, id: event.id, op: .put, body: body, now: now)
     }
 
     /// Moves a repeating event as a whole. The instance `instanceId` goes to `start`…`end`; every
@@ -475,35 +506,42 @@ extension AppDatabase {
     /// `scope: series`: the server moves the series on Google from it, and its rows replace these
     /// on the next sync. An event that does not repeat moves alone.
     /// Throws `WriteError.eventWithoutTimes` when there is no such row or it has no times.
-    public func moveEventSeries(instanceId: String, start: Date, end: Date, now: Date = Date()) throws {
+    @discardableResult
+    public func moveEventSeries(instanceId: String, start: Date, end: Date, now: Date = Date()) throws -> EventMutation {
         try writer.write { db in
-            guard var instance = try CalendarEvent.fetchOne(db, id: instanceId), let oldStart = instance.startAt,
-                  instance.endAt != nil
-            else { throw WriteError.eventWithoutTimes(id: instanceId) }
-            let shift = start.timeIntervalSince(oldStart)
-            let length = end.timeIntervalSince(start)
-            if let series = instance.recurringEventId {
-                let others = try CalendarEvent
-                    .filter(Column("calendarId") == instance.calendarId && Column("recurringEventId") == series)
-                    .filter(Column("id") != instanceId && Column("deletedAt") == nil && Column("allDay") == false)
-                    .fetchAll(db)
-                for var other in others {
-                    guard let otherStart = other.startAt else { continue }
-                    let moved = otherStart.addingTimeInterval(shift)
-                    other.startAt = moved
-                    other.endAt = moved.addingTimeInterval(length)
-                    other.updatedAt = now
-                    try other.save(db)
-                }
-            }
-            instance.startAt = start
-            instance.endAt = end
-            instance.updatedAt = now
-            guard var write = EventWrite(instance) else { throw WriteError.eventWithoutTimes(id: instanceId) }
-            write.scope = .series
-            try instance.save(db)
-            try Self.enqueue(db, entity: .event, id: instanceId, op: .put, body: try JSONCoding.encoder.encode(write), now: now)
+            try Self.moveEventSeries(instanceId: instanceId, start: start, end: end, in: db, now: now)
         }
+    }
+
+    static func moveEventSeries(instanceId: String, start: Date, end: Date, in db: Database, now: Date) throws -> EventMutation {
+        guard var instance = try CalendarEvent.fetchOne(db, id: instanceId), let oldStart = instance.startAt,
+              let oldEnd = instance.endAt, oldEnd > oldStart, end > start,
+              instance.deletedAt == nil, instance.status != "cancelled"
+        else { throw WriteError.eventWithoutTimes(id: instanceId) }
+        let shift = start.timeIntervalSince(oldStart)
+        let length = end.timeIntervalSince(start)
+        if let series = instance.recurringEventId {
+            let others = try CalendarEvent
+                .filter(Column("calendarId") == instance.calendarId && Column("recurringEventId") == series)
+                .filter(Column("id") != instanceId && Column("deletedAt") == nil && Column("allDay") == false)
+                .fetchAll(db)
+            for var other in others {
+                guard let otherStart = other.startAt else { continue }
+                let moved = otherStart.addingTimeInterval(shift)
+                other.startAt = moved
+                other.endAt = moved.addingTimeInterval(length)
+                other.updatedAt = now
+                try other.save(db)
+            }
+        }
+        instance.startAt = start
+        instance.endAt = end
+        instance.updatedAt = now
+        guard var write = EventWrite(instance) else { throw WriteError.eventWithoutTimes(id: instanceId) }
+        write.scope = .series
+        try instance.save(db)
+        try Self.enqueue(db, entity: .event, id: instanceId, op: .put, body: try JSONCoding.encoder.encode(write), now: now)
+        return EventMutation(from: DateInterval(start: oldStart, end: oldEnd), to: DateInterval(start: start, end: end))
     }
 
     /// Marks the event deleted locally, so every query and observation hides it at once, and
@@ -535,13 +573,17 @@ extension AppDatabase {
     /// Saves the project and queues a `put`. Its tasks keep their blocks until the server has
     /// rescheduled; the push's answer brings the new plan.
     public func saveProject(_ project: Project, now: Date = Date()) throws {
+        try writer.write { db in
+            try Self.saveProject(project, in: db, now: now)
+        }
+    }
+
+    static func saveProject(_ project: Project, in db: Database, now: Date) throws {
         var project = project
         project.updatedAt = now
         let body = try JSONCoding.encoder.encode(ProjectWrite(project))
-        try writer.write { db in
-            try project.save(db)
-            try Self.enqueue(db, entity: .project, id: project.id, op: .put, body: body, now: now)
-        }
+        try project.save(db)
+        try Self.enqueue(db, entity: .project, id: project.id, op: .put, body: body, now: now)
     }
 
     /// Marks the project deleted and queues a `delete`. Its tasks stay, unfiled from it, as the
