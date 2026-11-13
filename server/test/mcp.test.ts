@@ -11,6 +11,7 @@ import type { Db } from '../src/db/client.js'
 import { briefs, calendars, events, googleAccounts, tasks } from '../src/db/schema.js'
 import { runScheduling } from '../src/scheduling.js'
 import { seed } from '../src/seed.js'
+import type { TaskSource } from '../src/task-source.js'
 import { createTestDb } from './db.js'
 import { FakeSync, testConfig as config } from './fixtures.js'
 
@@ -200,6 +201,30 @@ describe('transport and auth', () => {
 })
 
 describe('task tools', () => {
+  it('accepts sources, exposes them in reads, preserves omitted values, and updates and clears them', async () => {
+    const id = 'mcp-source'
+    const url = 'https://github.com/acme/app/issues/42'
+    const source = { url, title: 'Issue #42 in acme/app', kind: 'github' }
+    const created = await data<{ task: TaskView & { source: TaskSource | null } }>('create_task', { id, categoryId: 'inbox', title: 'Fix', source: { url, kind: 'web' } })
+    expect(created.task.source).toEqual(source)
+    expect((await data<{ task: { source: TaskSource } }>('get_task', { id })).task.source).toEqual(source)
+    expect((await data<{ tasks: { id: string; source: TaskSource | null }[] }>('list_tasks', { limit: 200 })).tasks.find((task) => task.id === id)?.source).toEqual(source)
+    expect((await data<{ task: { source: TaskSource } }>('update_task', { id, notes: 'keep link' })).task.source).toEqual(source)
+    const replacement = { url: 'mailto:person@example.com', title: 'Email thread', kind: 'email' }
+    expect((await data<{ task: { source: TaskSource } }>('update_task', { id, source: { ...replacement, kind: 'slack' } })).task.source).toEqual(replacement)
+    expect((await data<{ task: { source: null } }>('update_task', { id, source: null })).task.source).toBeNull()
+    expect((await data<{ task: { source: null } }>('get_task', { id })).task.source).toBeNull()
+    for (const url of ['javascript:alert(1)', 'file:///etc/passwd', 'data:text/html,bad']) {
+      for (const tool of ['create_task', 'update_task']) {
+        const rejected = await call(tool, { id: tool === 'create_task' ? 'mcp-source-rejected' : id, categoryId: 'inbox', title: 'Unsafe', source: { url } })
+        expect(rejected.isError).toBe(true)
+        expect(rejected.content[0]?.text).toContain('source')
+      }
+    }
+    expect((await call('get_task', { id: 'mcp-source-rejected' })).isError).toBe(true)
+    await data('delete_task', { id })
+  })
+
   let createdId = ''
   const dueAt = at(upcomingMonday(), 17 * 60).toISOString()
 

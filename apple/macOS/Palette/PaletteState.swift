@@ -26,6 +26,7 @@ struct PaletteState {
     var text = ""
     var selectedIndex = 0
     var draft = QuickAddDraft()
+    private var removedSourceURL: String?
     var commands: [MacCommand] = MacCommand.paletteCommands
     var searchResults: [SearchResult] = []
     var categoryResults: [TaskCategory] = []
@@ -72,6 +73,11 @@ struct PaletteState {
         switch mode {
         case .quickAdd:
             draft = QuickAddParser.parse(text, now: now, calendar: calendar)
+            if draft.source?.url == removedSourceURL {
+                draft.source = nil
+            } else {
+                removedSourceURL = nil
+            }
         case .command:
             commands = FuzzyMatch.filter(MacCommand.paletteCommands, query: query, label: \.label)
         case .search, .move, .fit, .eventResources:
@@ -85,5 +91,10 @@ struct PaletteState {
             return
         }
         selectedIndex = min(max(selectedIndex + delta, 0), resultCount - 1)
+    }
+
+    mutating func removeSource() {
+        removedSourceURL = draft.source?.url
+        draft.source = nil
     }
 }

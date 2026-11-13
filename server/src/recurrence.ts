@@ -1,6 +1,7 @@
 import { dateFromDayNumber, dayNumber, localDate, localParts, weekdayOf, zonedToUtc } from '@florida/scheduler'
 import type { Attention, DeadlineType, Priority, TaskContext } from '@florida/scheduler'
 import { z } from 'zod'
+import type { TaskSource } from './task-source.js'
 import { calendarDate, formatCalendarDate, parseCalendarDate, timeZone } from './validation.js'
 
 /** Calendar-based intervals, not elapsed milliseconds. Weekly intervals use Monday-based weeks. */
@@ -31,6 +32,7 @@ export interface RecurringTaskTemplate {
   categoryId: string
   title: string
   notes: string | null
+  source?: TaskSource | null
   durationMinutes: number
   minChunkMinutes: number | null
   priority: Priority
@@ -126,6 +128,7 @@ export function occurrenceFields(template: RecurringTaskTemplate, rule: Recurren
   const shift = (instant: string) => shiftRecurrenceInstant(instant, anchorDate, occurrence, rule.timeZone)
   return {
     ...fields,
+    source: template.source ?? null,
     startAt: startAt === null ? new Date(zonedToUtc(day, 0, rule.timeZone)) : shift(startAt),
     dueAt: dueAt === null ? new Date(zonedToUtc(dateFromDayNumber(dayNumber(day) + 1), 0, rule.timeZone) - 1) : shift(dueAt),
     pinnedStart: pinnedStart === null ? null : shift(pinnedStart),

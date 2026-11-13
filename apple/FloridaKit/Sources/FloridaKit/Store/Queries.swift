@@ -386,6 +386,7 @@ extension AppDatabase {
         track("categoryId", \.categoryId)
         track("title", \.title)
         track("notes", \.notes)
+        track("source", \.source)
         track("durationMinutes", \.durationMinutes)
         track("minChunkMinutes", \.minChunkMinutes)
         track("priority", \.priority)

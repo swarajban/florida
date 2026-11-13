@@ -26,6 +26,8 @@ struct TaskEditorSheet: View {
     @State private var startAt: Date
     @State private var hasPinnedStart: Bool
     @State private var pinnedStart: Date
+    @State private var sourceURL: String
+    @State private var sourceTitle: String
     /// The "Add a time" boxes once the user has touched them; until then each follows its date.
     @State private var dueTimeChoice: Bool?
     @State private var startTimeChoice: Bool?
@@ -38,7 +40,7 @@ struct TaskEditorSheet: View {
 
     /// The text fields a key can put the keyboard in.
     private enum TextFocus {
-        case title, notes, duration
+        case title, notes, duration, sourceURL, sourceTitle
     }
 
     init(task: TaskItem, isNew: Bool) {
@@ -53,6 +55,8 @@ struct TaskEditorSheet: View {
         _startAt = State(initialValue: task.startAt ?? today)
         _hasPinnedStart = State(initialValue: task.pinnedStart != nil)
         _pinnedStart = State(initialValue: task.pinnedStart ?? nextHour)
+        _sourceURL = State(initialValue: task.source?.url ?? "")
+        _sourceTitle = State(initialValue: task.source?.title ?? "")
         original = task
         self.isNew = isNew
     }
@@ -71,7 +75,7 @@ struct TaskEditorSheet: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .disabled(hasEdits && recurrenceValidationMessage != nil)
+                .disabled(hasEdits && (recurrenceValidationMessage != nil || sourceValidationMessage != nil))
                 .help("Completes the task and closes the editor")
                 .padding([.horizontal, .top], 20)
             }
@@ -149,6 +153,33 @@ struct TaskEditorSheet: View {
                     recurrence: $draft.recurrence,
                     anchorDate: hasDue ? dueAt : (hasStart ? startAt : nil),
                     defaultTimeZone: recurrenceTimeZone, wasRecurring: original.recurrence != nil)
+                Section("Source") {
+                    TextField("Source URL", text: $sourceURL)
+                        .focused($focus, equals: .sourceURL)
+                        .accessibilityIdentifier("task-source-url")
+                    TextField("Source title (optional)", text: $sourceTitle)
+                        .focused($focus, equals: .sourceTitle)
+                        .accessibilityIdentifier("task-source-title")
+                    if let source = editedSource {
+                        HStack {
+                            Button {
+                                if let url = source.openURL { model.open(url: url) }
+                            } label: {
+                                Label("Open source", systemImage: source.symbolName)
+                            }
+                            .accessibilityIdentifier("task-open-source")
+                            Spacer()
+                            Button("Remove source") {
+                                sourceURL = ""
+                                sourceTitle = ""
+                            }
+                            .accessibilityIdentifier("task-remove-source")
+                        }
+                    }
+                    if let message = sourceValidationMessage {
+                        Text(message).foregroundStyle(.red)
+                    }
+                }
             }
             .formStyle(.grouped)
             Divider()
@@ -173,7 +204,7 @@ struct TaskEditorSheet: View {
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
-                .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty || recurrenceValidationMessage != nil)
+                .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty || recurrenceValidationMessage != nil || sourceValidationMessage != nil)
             }
             .padding()
         }
@@ -215,7 +246,13 @@ struct TaskEditorSheet: View {
     }
 
     private func showing(_ field: TaskEditorKey) -> Binding<Bool> {
-        Binding(get: { openField == field }, set: { openField = $0 ? field : nil })
+        Binding(get: { openField == field }, set: { presented in
+            if presented {
+                openField = field
+            } else if openField == field {
+                openField = nil
+            }
+        })
     }
 
     private func leaveField() {
@@ -296,6 +333,15 @@ struct TaskEditorSheet: View {
             : draft.recurrence?.validationMessage
     }
 
+    private var editedSource: TaskSource? {
+        TaskSource.from(url: sourceURL, title: sourceTitle)
+    }
+
+    private var sourceValidationMessage: String? {
+        sourceURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || editedSource != nil
+            ? nil : "Enter an http, https or mailto source URL."
+    }
+
     /// Fills the form from an AI-parsed draft; unknown categories fall back to Inbox.
     private func apply(_ parsed: TaskDraft) {
         draft.title = parsed.title
@@ -325,13 +371,14 @@ struct TaskEditorSheet: View {
         let start: Date? = hasStart ? startAt : nil
         let pinned: Date? = hasPinnedStart ? pinnedStart : nil
         return draft != original || due != original.dueAt || start != original.startAt
-            || pinned != original.pinnedStart
+            || pinned != original.pinnedStart || editedSource != original.source
     }
 
     /// The draft as it is written: title trimmed, the date rows applied, deadline type and
     /// recurrence made consistent with them.
     private var preparedTask: TaskItem {
         var task = draft
+        task.source = editedSource
         task.title = task.title.trimmingCharacters(in: .whitespaces)
         task.durationMinutes = max(5, task.durationMinutes)
         task.dueAt = hasDue ? dueAt : nil
@@ -353,7 +400,7 @@ struct TaskEditorSheet: View {
     private func markDone() {
         var task = original
         if hasEdits {
-            guard recurrenceValidationMessage == nil else { return }
+            guard recurrenceValidationMessage == nil, sourceValidationMessage == nil else { return }
             task = preparedTask
             if task.title.isEmpty {
                 task.title = original.title
@@ -364,7 +411,7 @@ struct TaskEditorSheet: View {
     }
 
     private func save() {
-        guard recurrenceValidationMessage == nil else { return }
+        guard recurrenceValidationMessage == nil, sourceValidationMessage == nil else { return }
         let task = preparedTask
         let label = isNew ? "Added \(AppModel.quoted(task.title))" : "Edited \(AppModel.quoted(task.title))"
         guard model.save(task, undoLabel: label) else { return }

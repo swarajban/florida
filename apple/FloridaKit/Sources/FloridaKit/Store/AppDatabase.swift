@@ -356,6 +356,13 @@ public final class AppDatabase: Sendable {
             try db.execute(sql: "DELETE FROM syncState WHERE key = 'cursor'")
         }
 
+        migrator.registerMigration("v9-task-source") { db in
+            try db.alter(table: "task") { t in
+                t.add(column: "source", .text)
+            }
+            try db.execute(sql: "DELETE FROM syncState WHERE key = 'cursor'")
+        }
+
         return migrator
     }
 }

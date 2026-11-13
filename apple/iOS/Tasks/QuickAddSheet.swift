@@ -15,7 +15,11 @@ struct QuickAddSheet: View {
     @State private var reviewedTaskID: String?
 
     private var draft: QuickAddDraft {
-        QuickAddParser.parse(model.quickAddText, now: Date(), calendar: model.calendar)
+        var draft = QuickAddParser.parse(model.quickAddText, now: Date(), calendar: model.calendar)
+        if draft.source?.url == model.quickAddRemovedSourceURL {
+            draft.source = nil
+        }
+        return draft
     }
 
     private var category: TaskCategory? {
@@ -69,6 +73,10 @@ struct QuickAddSheet: View {
                 error = nil
                 parsing?.cancel()
                 parsing = nil
+                let parsedSource = QuickAddParser.parse(model.quickAddText, now: Date(), calendar: model.calendar).source
+                if parsedSource?.url != model.quickAddRemovedSourceURL {
+                    model.quickAddRemovedSourceURL = nil
+                }
                 if draft.categoryHint != model.quickAddCategoryHint {
                     model.quickAddCategory = nil
                     model.quickAddCategoryHint = nil
@@ -98,6 +106,7 @@ struct QuickAddSheet: View {
                 if !model.quickAddText.isEmpty || model.quickAddCategory != nil {
                     Button {
                         model.quickAddText = ""
+                        model.quickAddRemovedSourceURL = nil
                         model.quickAddCategory = nil
                         model.quickAddCategoryHint = nil
                         focused = true
@@ -125,6 +134,27 @@ struct QuickAddSheet: View {
             Text(draft.title)
                 .font(.body.weight(.medium))
                 .accessibilityIdentifier("quick-add-title")
+            if let source = draft.source {
+                HStack(spacing: 8) {
+                    Label(source.title, systemImage: source.symbolName)
+                        .lineLimit(2)
+                    Button {
+                        model.quickAddRemovedSourceURL = source.url
+                        parsing?.cancel()
+                        parsing = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .frame(minWidth: 44, minHeight: 44)
+                    }
+                    .accessibilityLabel("Remove source")
+                    .accessibilityIdentifier("quick-add-remove-source")
+                }
+                .font(.caption)
+                .padding(.leading, 10)
+                .background(FloridaStyle.panel, in: RoundedRectangle(cornerRadius: 12))
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("quick-add-source")
+            }
             let chips = QuickAddChip.chips(for: draft, categories: model.categories, calendar: model.calendar)
                 .filter { $0.id != "category" }
             if !chips.isEmpty {
@@ -300,6 +330,7 @@ struct QuickAddSheet: View {
     private func finished(_ task: TaskItem) {
         let name = model.category(id: task.categoryId)?.name ?? model.quickAddCategory?.name ?? "Inbox"
         model.quickAddText = ""
+        model.quickAddRemovedSourceURL = nil
         model.quickAddCategory = nil
         model.quickAddCategoryHint = nil
         model.showToast(Toast(message: "Added to \(name)", systemImage: "checkmark.circle.fill", style: .success))
@@ -315,9 +346,13 @@ struct QuickAddSheet: View {
         Button {
             guard parsing == nil else { return }
             let text = model.quickAddText
+            let parsedSource = QuickAddParser.parse(text, now: Date(), calendar: model.calendar).source
+            let source = draft.source
+            let sourceFreeText = QuickAddParser.removingSource(from: text)
+            let aiText = draft.title == parsedSource?.title ? "\(draft.title)\n\(sourceFreeText)" : sourceFreeText
             parsing = Task {
                 do {
-                    var request = try await model.parseWithAI(text)
+                    var request = try await model.parseWithAI(aiText)
                     try Task.checkCancellation()
                     guard model.quickAddText == text else { return }
                     guard let chosen = category else {
@@ -327,6 +362,7 @@ struct QuickAddSheet: View {
                     if draft.categoryHint != nil || model.quickAddCategory != nil {
                         request.task.categoryId = chosen.id
                     }
+                    request.task.source = source
                     review(request)
                 } catch is CancellationError {
                     return

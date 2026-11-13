@@ -20,6 +20,9 @@ struct TaskEditorView: View {
     @State private var draft: TaskItem
     @State private var confirmingDelete = false
     @State private var saveError: String?
+    @State private var sourceURL: String
+    @State private var sourceTitle: String
+    @State private var editingSource: Bool
     /// The "Add a time" switches once the user has touched them; until then each follows its date.
     @State private var dueTimeChoice: Bool?
     @State private var startTimeChoice: Bool?
@@ -35,6 +38,9 @@ struct TaskEditorView: View {
         self.isNew = isNew
         self.rationale = rationale
         _draft = State(initialValue: task)
+        _sourceURL = State(initialValue: task.source?.url ?? "")
+        _sourceTitle = State(initialValue: task.source?.title ?? "")
+        _editingSource = State(initialValue: task.source != nil)
     }
 
     init(request: TaskEditorRequest) {
@@ -114,6 +120,8 @@ struct TaskEditorView: View {
                         }
                     }
                 }
+
+                sourceSection
 
                 Section("Category") {
                     Picker("Category", selection: $draft.categoryId) {
@@ -198,7 +206,7 @@ struct TaskEditorView: View {
                     Button(isNew ? "Add" : "Save") {
                         save()
                     }
-                    .disabled(trimmedTitle.isEmpty || recurrenceValidationMessage != nil)
+                    .disabled(trimmedTitle.isEmpty || recurrenceValidationMessage != nil || sourceValidationMessage != nil)
                 }
             }
             .onAppear {
@@ -208,6 +216,50 @@ struct TaskEditorView: View {
     }
 
     // MARK: - Bindings over optional fields
+
+    private var sourceSection: some View {
+        Section {
+            if editingSource {
+                TextField("Source URL", text: $sourceURL)
+                    .textContentType(.URL)
+                    .keyboardType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .accessibilityIdentifier("task-source-url")
+                TextField("Source title", text: $sourceTitle)
+                    .accessibilityIdentifier("task-source-title")
+                if let source = validatedSource {
+                    TaskSourceButton(source: source, identifier: "task-source-open")
+                }
+                Button("Remove source", role: .destructive) {
+                    sourceURL = ""
+                    sourceTitle = ""
+                    editingSource = false
+                }
+                .accessibilityIdentifier("task-source-remove")
+            } else {
+                Button("Add source", systemImage: "link") { editingSource = true }
+                    .accessibilityIdentifier("task-source-add")
+            }
+        } header: {
+            Text("Source")
+        } footer: {
+            if let sourceValidationMessage {
+                Text(sourceValidationMessage)
+                    .foregroundStyle(.red)
+                    .accessibilityIdentifier("task-source-error")
+            }
+        }
+    }
+
+    private var validatedSource: TaskSource? {
+        TaskSource.from(url: sourceURL, title: sourceTitle)
+    }
+
+    private var sourceValidationMessage: String? {
+        guard !sourceURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return validatedSource == nil ? "Use a valid https://, http://, or mailto: URL." : nil
+    }
 
     private var notes: Binding<String> {
         Binding(
@@ -341,9 +393,9 @@ struct TaskEditorView: View {
     /// Saves pending edits, then completes through the model so the haptic, bloom and Undo
     /// toast match a swipe.
     private func completeFromEditor() {
-        guard recurrenceValidationMessage == nil else { return }
+        guard recurrenceValidationMessage == nil, sourceValidationMessage == nil else { return }
         var task = preparedTask
-        if draft != original {
+        if task != original {
             task.title = trimmedTitle.isEmpty ? original.title : trimmedTitle
             do {
                 try model.save(task)
@@ -359,6 +411,7 @@ struct TaskEditorView: View {
     private var preparedTask: TaskItem {
         var task = draft
         task.title = trimmedTitle
+        task.source = validatedSource
         // A project deleted while the editor was open: the server refuses a task that names it.
         if model.project(id: task.projectId) == nil {
             task.projectId = nil
@@ -373,7 +426,7 @@ struct TaskEditorView: View {
     }
 
     private func save() {
-        guard recurrenceValidationMessage == nil else { return }
+        guard recurrenceValidationMessage == nil, sourceValidationMessage == nil else { return }
         do {
             try model.save(preparedTask)
             dismiss()

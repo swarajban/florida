@@ -162,7 +162,7 @@ extension AppModel {
     /// ⇧N / `>New task`: the full editor on a new task with quick add's defaults (Inbox, 30m,
     /// medium priority) plus a soft due date on the default day, since nearly every task gets one
     /// (the editor's Due box removes it). `aiText` is parsed by the AI as the editor opens.
-    func openNewTaskEditor(aiText: String? = nil) {
+    func openNewTaskEditor(aiText: String? = nil, source: TaskSource? = nil) {
         guard let category = inboxCategory else {
             statusMessage = "No categories yet — sync with the server first"
             return
@@ -173,6 +173,7 @@ extension AppModel {
             id: UUID().uuidString.lowercased(), categoryId: category.id, title: "",
             durationMinutes: Self.defaultDurationMinutes, priority: .medium, deadlineType: .soft,
             dueAt: TaskDay.defaultDue(now: now, calendar: calendar), createdAt: now, updatedAt: now)
+        editorTask?.source = source
     }
 
     /// Creates a task from quick-add text. Returns false (with a status message) when nothing
@@ -190,7 +191,7 @@ extension AppModel {
             return false
         }
         let now = Date()
-        let task = TaskItem(
+        var task = TaskItem(
             id: UUID().uuidString.lowercased(),
             categoryId: category.id,
             title: title,
@@ -204,6 +205,7 @@ extension AppModel {
             pinnedStart: draft.pinnedStart,
             createdAt: now,
             updatedAt: now)
+        task.source = draft.source
         guard save(task, undoLabel: "Added \(Self.quoted(task.title))") else { return false }
         selection = .task(task.id)
         showGhost("Added to \(category.name)")

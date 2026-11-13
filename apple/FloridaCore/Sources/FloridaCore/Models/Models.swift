@@ -245,6 +245,7 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
     public var categoryId: String
     public var title: String
     public var notes: String?
+    public var source: TaskSource?
     public var durationMinutes: Int
     /// Smallest piece the scheduler may split the task into; nil means one contiguous block.
     public var minChunkMinutes: Int?
@@ -281,12 +282,13 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
         pinnedStart: Date? = nil, completedMinutes: Int = 0, completedAt: Date? = nil, createdAt: Date,
         updatedAt: Date, deletedAt: Date? = nil, recurrence: TaskRecurrence? = nil,
         recurrenceSeriesId: String? = nil, recurrenceDate: String? = nil, recurrenceRevision: String? = nil,
-        projectId: String? = nil, attention: TaskAttention? = nil
+        projectId: String? = nil, attention: TaskAttention? = nil, source: TaskSource? = nil
     ) {
         self.id = id
         self.categoryId = categoryId
         self.title = title
         self.notes = notes
+        self.source = source
         self.durationMinutes = durationMinutes
         self.minChunkMinutes = minChunkMinutes
         self.priority = priority
@@ -317,6 +319,7 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
         categoryId = try c.decode(String.self, forKey: .categoryId)
         title = try c.decode(String.self, forKey: .title)
         notes = try c.decodeIfPresent(String.self, forKey: .notes)
+        source = try c.decodeIfPresent(TaskSource.self, forKey: .source)
         durationMinutes = try c.decode(Int.self, forKey: .durationMinutes)
         minChunkMinutes = try c.decodeIfPresent(Int.self, forKey: .minChunkMinutes)
         priority = try c.decode(Priority.self, forKey: .priority)
@@ -1146,6 +1149,7 @@ public struct TaskWrite: Codable, Hashable, Sendable {
     public var categoryId: String
     public var title: String
     public var notes: String?
+    public var source: TaskSource?
     public var durationMinutes: Int
     public var minChunkMinutes: Int?
     public var priority: Priority
@@ -1169,6 +1173,7 @@ public struct TaskWrite: Codable, Hashable, Sendable {
         categoryId = task.categoryId
         title = task.title
         notes = task.notes
+        source = task.source
         durationMinutes = task.durationMinutes
         minChunkMinutes = task.minChunkMinutes
         priority = task.priority
@@ -1191,6 +1196,7 @@ public struct TaskWrite: Codable, Hashable, Sendable {
         try container.encode(categoryId, forKey: .categoryId)
         try container.encode(title, forKey: .title)
         try container.encodeIfPresent(notes, forKey: .notes)
+        try container.encode(source, forKey: .source)
         try container.encode(durationMinutes, forKey: .durationMinutes)
         try container.encodeIfPresent(minChunkMinutes, forKey: .minChunkMinutes)
         try container.encode(priority, forKey: .priority)

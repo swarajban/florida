@@ -33,6 +33,7 @@ final class AppModel {
     /// a local save succeeds or the user clears it.
     var showingQuickAdd = false
     var quickAddText = ""
+    var quickAddRemovedSourceURL: String?
     var quickAddCategory: TaskCategory?
     /// The first #hint this explicit choice resolves; changing the hint invalidates the choice.
     var quickAddCategoryHint: String?

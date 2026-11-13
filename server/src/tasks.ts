@@ -9,6 +9,7 @@ import { taskRecurrences, tasks } from './db/schema.js'
 import type { TaskRow } from './db/schema.js'
 import { addCalendarDays, localDay, nextOccurrence, occurrenceDates, occurrenceFields, recurrenceRule } from './recurrence.js'
 import type { RecurringTaskTemplate } from './recurrence.js'
+import { normalizeTaskSource, taskSourceInput } from './task-source.js'
 import { badRequest, isoInstant, notFound, toDate } from './validation.js'
 
 export const priority = z.enum(['asap', 'high', 'medium', 'low'])
@@ -21,6 +22,7 @@ export const taskBody = z.object({
   categoryId: z.string().min(1),
   title: z.string().min(1),
   notes: z.string().nullish(),
+  source: taskSourceInput.nullish(),
   durationMinutes: z.number().int().min(1),
   minChunkMinutes: z.number().int().min(1).nullish(),
   priority,
@@ -73,6 +75,7 @@ function taskFields(body: TaskBody, now: Date, current: TaskRow | undefined) {
     categoryId: body.categoryId,
     title: body.title,
     notes: body.notes ?? null,
+    source: body.source === undefined ? (current?.source ?? null) : body.source === null ? null : normalizeTaskSource(body.source),
     durationMinutes: body.durationMinutes,
     minChunkMinutes: body.minChunkMinutes ?? null,
     priority: body.priority,
@@ -99,6 +102,7 @@ function seriesTemplate(fields: Pick<TaskRow, keyof ReturnType<typeof taskFields
     categoryId: fields.categoryId,
     title: fields.title,
     notes: fields.notes,
+    source: fields.source,
     durationMinutes: fields.durationMinutes,
     minChunkMinutes: fields.minChunkMinutes,
     priority: fields.priority,
@@ -166,8 +170,9 @@ async function writeTask(db: Db, id: string, body: TaskBody, now: Date): Promise
       // A retried creation still contains dates relative to the original rule anchor. Normalize
       // that request exactly as the first write; omitted dates otherwise mean local day bounds.
       const incoming = seriesTemplate(fields, series.template.anchorDate)
-      const source = isDeepStrictEqual(incoming, series.template) && isDeepStrictEqual(recurrence, series.rule)
-        ? series.template
+      const stored = { ...series.template, source: series.template.source ?? null }
+      const source = isDeepStrictEqual(incoming, stored) && isDeepStrictEqual(recurrence, series.rule)
+        ? stored
         : seriesTemplate(fields, recurrenceDate)
       fields = { ...fields, ...occurrenceFields(source, recurrence, recurrenceDate) }
       const template = seriesTemplate(fields, recurrenceDate)
@@ -231,6 +236,7 @@ export async function patchTask(db: Db, id: string, patch: TaskPatch, now: Date 
       categoryId: keep(patch.categoryId, current.categoryId),
       title: keep(patch.title, current.title),
       notes: keep(patch.notes, current.notes),
+      source: keep(patch.source, current.source),
       durationMinutes: keep(patch.durationMinutes, current.durationMinutes),
       minChunkMinutes: keep(patch.minChunkMinutes, current.minChunkMinutes),
       priority: keep(patch.priority, current.priority),

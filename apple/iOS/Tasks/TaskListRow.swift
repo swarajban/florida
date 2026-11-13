@@ -25,6 +25,9 @@ struct TaskListRow: View {
             .buttonStyle(.borderless)
             .tint(.primary)
             .accessibilityHint("Edits the task")
+            if let source = task.source {
+                TaskSourceButton(source: source, identifier: "task-source-open-\(task.id)", compact: true)
+            }
             if isBlooming {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(Color.category(model.category(id: task.categoryId)))

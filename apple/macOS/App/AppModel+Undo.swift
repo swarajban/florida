@@ -62,6 +62,7 @@ extension UndoEntry.FieldChange {
         track(\.categoryId)
         track(\.title)
         track(\.notes)
+        track(\.source)
         track(\.durationMinutes)
         track(\.minChunkMinutes)
         track(\.priority)

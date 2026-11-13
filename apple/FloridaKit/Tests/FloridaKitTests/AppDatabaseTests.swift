@@ -55,7 +55,7 @@ import Testing
 
         let db = try AppDatabase(writer: queue)
         let applied = try queue.read { db in try AppDatabase.migrator.appliedMigrations(db) }
-        #expect(applied == ["v1", "v2", "v3", "v4", "v5", "v6", "v7-calendar-blocking", "v8-event-blocks-day"])
+        #expect(applied == ["v1", "v2", "v3", "v4", "v5", "v6", "v7-calendar-blocking", "v8-event-blocks-day", "v9-task-source"])
         // Rows that predate the context column read as the default.
         #expect(try db.task(id: "t1")?.context == .computer)
         #expect(try db.routineBlocks() == [] && db.userSettings() == nil)
