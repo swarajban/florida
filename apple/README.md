@@ -26,8 +26,9 @@ or no recorded sync, adds a warning to the preview and copied text.
 Availability is computed from the local store, without a server request. Events are read from
 calendars that block scheduling, even when hidden; visible non-blocking calendars do not take
 time. Busy rules match the scheduler: live timed opaque events block, focus time and working
-location do not, and out-of-office blocks even when transparent. All-day out-of-office and
-explicitly protected dates block the routine's local day, with the per-event override honored.
+location do not, and timed out-of-office blocks even when transparent. All-day events use
+the per-event override, then the stored automatic judgment, then the legacy OOO fallback
+to decide whether to block the routine's local day.
 Pinned tasks and routine commitments block; flexible task placements do not. The small
 `Availability.eventBlocksTime` predicate is the alignment point for future busy-time changes.
 This is static text, not a reservation or a live booking link.
@@ -361,15 +362,34 @@ switches. Both apps update these locally at once: hidden calendars can still
 block tasks, and visible calendars can be informational only. While open, the app listens to the
 server's `/api/events` stream and also syncs every 60 s.
 
-Ordinary all-day events do not block tasks by default, regardless of Google's busy/free
-setting. In either app's all-day event details, **Blocks my day** offers **Automatic**,
-**Blocks**, and **Does not block**, and shows the effective state. Automatic blocks
-only out-of-office events; an explicit choice overrides that, including for OOO.
+All-day blocking uses the server's stored judgment and short reason, regardless of
+Google's busy/free setting. In either app's all-day event details, **Blocks my day**
+offers directly selectable **Automatic**, **Blocks**, and **Does not block** segments,
+and shows the effective state and reason. On iPhone, all-day details open at the large
+sheet height, with those controls and their explanation directly below the title,
+above Resources. You can still resize the sheet down to medium. Timed-event details
+still open at medium height.
+At iPhone's largest text sizes or in a narrow
+row, the same three choices use an explicit-action menu so their labels remain readable
+instead of being squeezed into one row. Manual overrides are labelled separately and always win,
+including for OOO. Settings leaves extra bottom scroll space so its final calendar
+controls can be brought fully above the floating tab bar.
+Before a server judgment exists, Automatic falls back to blocking OOO only.
 The choice applies to this occurrence only, even on a read-only Google calendar,
 and is saved locally and queued for Florida sync without editing Google. On Mac,
 `r b` cycles the three choices in the popover or on the selected all-day event;
 "Cycle day blocking" is also in the command palette. The calendar's
 **Blocks scheduling** switch remains the outer control.
+Gusto events explicitly marked as paid company holidays supply automatic days off.
+Public holiday feeds are not enabled automatically; turn on **Blocks scheduling**
+for one in Settings if you also want its public holidays to protect your day.
+Protected dates have a shield and the event title in iPhone agenda/day headers and
+Mac day/week/month headers. A hidden calendar with blocking enabled still
+shows these protected-date indicators, without showing its ordinary event cells.
+Open an indicator to see the reason or change that occurrence's override. On Mac,
+the detail stays usable when **Does not block** removes the last indicator, so you
+can restore **Automatic** without reopening it. All of this reads the local store;
+the apps do not classify titles or ask AI while rendering.
 
 ### iOS (`Florida-iOS`)
 

@@ -232,7 +232,8 @@ extension AppDatabase {
             completedTasks: try TaskItem
                 .filter(Column("deletedAt") == nil && Column("completedAt") >= range.lowerBound && Column("completedAt") < range.upperBound)
                 .order(Column("completedAt"), Column("id"))
-                .fetchAll(db))
+                .fetchAll(db),
+            blockingAllDayEvents: try blockingAllDayEvents(db, in: range, calendar: calendar))
     }
 
     /// The commitments and project time overlapping `range`, by start. Reads all four tables
@@ -445,6 +446,8 @@ extension AppDatabase {
             if let stored = try CalendarEvent.fetchOne(db, key: event.id) {
                 event.blocksDay = stored.blocksDay
                 write.blocksDay = stored.blocksDay
+                event.autoBlocksDay = stored.autoBlocksDay
+                event.blockingReason = stored.blockingReason
             }
             write.recurrence = recurrence
             if let pending = try PendingWrite.filter(Column("entity") == "event" && Column("entityId") == event.id).fetchOne(db),

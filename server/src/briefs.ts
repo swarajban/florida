@@ -78,7 +78,8 @@ async function loadPlan(db: Db, now: Date) {
     horizonEnd,
     busyEvents: busyRows.flatMap((e) => {
       const interval = blockingEventInterval(e, timeZone)
-      return interval === undefined ? [] : [{ title: e.summary ?? '(no title)', start: Date.parse(interval.start), end: Date.parse(interval.end) }]
+      return interval === undefined ? [] : [{ title: e.summary ?? '(no title)', start: Date.parse(interval.start), end: Date.parse(interval.end),
+        ...(e.allDay && e.blocksDay === null && e.blockingReason !== null ? { blockingReason: e.blockingReason } : {}) }]
     }),
     today,
     todayKey: isoDate(today),
@@ -123,7 +124,8 @@ function calendarBusyTime(task: TaskRow, plan: Plan, before = plan.horizonEnd) {
     return false
   })
   const unique = [...new Map(relevant.map((e) => [`${e.title}\0${e.start}\0${e.end}`, e])).values()]
-  return { count: unique.length, first: unique.slice(0, FACT_LIST_LIMIT).map((e) => ({ title: e.title, start: stamp(new Date(e.start), plan.timeZone), end: stamp(new Date(e.end), plan.timeZone) })) }
+  return { count: unique.length, first: unique.slice(0, FACT_LIST_LIMIT).map((e) => ({ title: e.title, start: stamp(new Date(e.start), plan.timeZone), end: stamp(new Date(e.end), plan.timeZone),
+    ...(e.blockingReason === undefined ? {} : { blockingReason: e.blockingReason }) })) }
 }
 
 function taskFact(task: TaskRow, plan: Plan) {

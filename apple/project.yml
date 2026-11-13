@@ -63,6 +63,8 @@ targets:
       - Design/EventQuickAddComposer.swift
       - Design/TaskContext+Display.swift
       - Design/Plan+Display.swift
+      - Design/DayBlockingIndicator.swift
+      - Design/DayBlockingControl.swift
       - Design/Assets.xcassets
     dependencies:
       - package: FloridaKit
@@ -129,8 +131,10 @@ targets:
       - Design/EventQuickAddComposer.swift
       - Design/TaskContext+Display.swift
       - Design/Plan+Display.swift
+      - Design/DayBlockingIndicator.swift
       - Design/Assets.xcassets
       - iOS/Support/DemoData.swift
+      - Design/DayBlockingControl.swift
     dependencies:
       - package: FloridaKit
     settings:

@@ -95,7 +95,10 @@ final class EventQuickAddTests: XCTestCase {
         for _ in 0..<8 where !saved.exists { app.collectionViews.firstMatch.swipeDown() }
         let list = app.collectionViews.firstMatch
         for _ in 0..<12 where !saved.exists {
-            let from = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+            let frame = list.frame
+            let bottom = min(frame.maxY, app.tabBars.firstMatch.frame.minY)
+            let from = list.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: frame.width * 0.5, dy: (bottom - frame.minY) * 0.9))
             let to = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
             from.press(forDuration: 0.05, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.3)
         }

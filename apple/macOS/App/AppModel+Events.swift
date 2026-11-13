@@ -49,10 +49,14 @@ extension AppModel {
 
     /// The event the event keys act on: the one whose detail popover is open, else the selected one.
     var commandEvent: CalendarEvent? {
-        if let id = eventDetailID, let event = events.first(where: { $0.id == id }) {
+        if let id = eventDetailID, let event = eventForDetail(id: id) {
             return event
         }
         return selectedEvent
+    }
+
+    func eventForDetail(id: String) -> CalendarEvent? {
+        events.first { $0.id == id } ?? blockingAllDayEvents.first { $0.id == id } ?? (try? database?.event(id: id))
     }
 
     // MARK: - Commands
@@ -120,7 +124,7 @@ extension AppModel {
 
     func handleEventResourceKey(_ chord: KeyChord) -> Bool {
         guard !isSheetOpen, !isPaletteOpen, !isHelpOpen,
-              let id = eventDetailID, let event = events.first(where: { $0.id == id }),
+              let id = eventDetailID, let event = eventForDetail(id: id),
               (NSApplication.shared.keyWindow?.firstResponder as? NSTextView)?.isEditable != true
         else { return false }
         guard chord.modifiers.isEmpty, chord.key.count == 1, "1234567890".contains(chord.key) else {

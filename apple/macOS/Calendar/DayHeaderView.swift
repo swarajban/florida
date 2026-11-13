@@ -41,9 +41,13 @@ struct DayHeaderView: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                    DayBlockingHeader(day: day)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 6)
+                .eventDetailPopover(
+                    model, eventId: model.eventDetailIndicatorDay == day ? model.eventDetailID : nil,
+                    indicatorDay: day)
                 .contentShape(Rectangle())
                 .onClick { isDouble in
                     guard model.availabilityShare == nil else { return }

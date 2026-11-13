@@ -54,8 +54,10 @@ struct MonthCellView: View {
         let inMonth = calendar.isDate(day, equalTo: model.anchorDate, toGranularity: .month)
         let allDay = layout.allDayByDay[dayIndex]
         let timed = layout.blocksByDay[dayIndex]
+        let protected = AllDayBlocking.events(on: day, from: model.blockingAllDayEvents, calendar: calendar)
+        let lineLimit = max(0, MonthGridView.maxLinesPerCell - protected.count)
         let total = allDay.count + timed.count
-        let overflow = max(0, total - MonthGridView.maxLinesPerCell)
+        let overflow = max(0, total - lineLimit)
 
         VStack(alignment: .leading, spacing: 2) {
             Text(day.formatted(.dateTime.day()))
@@ -63,10 +65,11 @@ struct MonthCellView: View {
                 .foregroundStyle(isToday ? FloridaStyle.paper : (inMonth ? FloridaStyle.ink : Color.secondary))
                 .frame(width: 20, height: 20)
                 .background(isToday ? FloridaStyle.ink : .clear, in: Circle())
-            ForEach(allDay.prefix(MonthGridView.maxLinesPerCell)) { block in
+            DayBlockingHeader(day: day)
+            ForEach(allDay.prefix(lineLimit)) { block in
                 line(item: block.item, day: day, text: block.title, tint: block.tint, filled: true)
             }
-            ForEach(timed.prefix(max(0, MonthGridView.maxLinesPerCell - allDay.count))) { block in
+            ForEach(timed.prefix(max(0, lineLimit - allDay.count))) { block in
                 line(
                     item: block.item, day: day, text: "\(DateText.time(block.start)) \(block.title)",
                     tint: block.tint, filled: block.isEvent, completed: block.kind == .completed)
@@ -84,6 +87,9 @@ struct MonthCellView: View {
         .overlay(alignment: .trailing) {
             Divider()
         }
+        .eventDetailPopover(
+            model, eventId: model.eventDetailIndicatorDay == day ? model.eventDetailID : nil,
+            indicatorDay: day)
         .contentShape(Rectangle())
         .onClick { isDouble in
             if isDouble {

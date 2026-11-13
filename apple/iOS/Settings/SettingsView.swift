@@ -126,10 +126,14 @@ struct SettingsView: View {
                         .padding(.vertical, 8)
                     LabeledContent("Version", value: Self.appVersion)
                     if let serverConfig = model.serverConfig {
-                        LabeledContent("Server", value: serverConfig.baseURL.host() ?? serverConfig.baseURL.absoluteString)
+                        LabeledContent("Server") {
+                            Text(serverConfig.baseURL.host() ?? serverConfig.baseURL.absoluteString)
+                                .accessibilityIdentifier("settings-server-host")
+                        }
                     }
                 }
             }
+            .contentMargins(.bottom, 24, for: .scrollContent)
             .scrollContentBackground(.hidden)
             .background(FloridaStyle.paper)
             .navigationTitle("Settings")

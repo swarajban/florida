@@ -52,6 +52,12 @@ struct AgendaView: View {
                     }
                 }
                 Divider()
+                if mode != .threeDays {
+                    DayBlockingIndicator(
+                        events: model.agenda?.blockingAllDayEvents ?? [], day: model.selectedDay,
+                        calendar: model.calendar, onSelect: { selectedEvent = $0 })
+                        .padding(.horizontal, 20)
+                }
                 content
             }
             .background(FloridaStyle.paper)
@@ -168,7 +174,7 @@ struct AgendaView: View {
 
     /// Nothing on the day: no events, blocks or suggestions.
     private var isEmptyDay: Bool {
-        items.isEmpty && allDayEvents.isEmpty && picks.isEmpty
+        items.isEmpty && allDayEvents.isEmpty && picks.isEmpty && (model.agenda?.blockingAllDayEvents.isEmpty ?? true)
     }
 
     /// Suggestions for the day's optional routine blocks; not part of the timeline above.

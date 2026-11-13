@@ -220,7 +220,9 @@ struct DayGridView: View {
                 if dayCount > 1 {
                     DayGridHeader(
                         days: days, today: model.today, gutterWidth: Self.gutterWidth,
-                        columnWidth: geometry.columnWidth, pinnedGutterX: pinnedGutterX, calendar: model.calendar)
+                        columnWidth: geometry.columnWidth, pinnedGutterX: pinnedGutterX, calendar: model.calendar,
+                        blockingByDay: Dictionary(uniqueKeysWithValues: model.gridDays.map { ($0.day, $0.blockingAllDayEvents) }),
+                        onSelect: onSelectEvent)
                     Divider()
                 }
                 if layout.allDayRowCount > 0 {

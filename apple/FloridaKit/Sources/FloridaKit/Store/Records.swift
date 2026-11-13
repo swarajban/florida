@@ -151,6 +151,7 @@ public struct DayAgenda: Hashable, Sendable {
     /// Start of the day in the calendar it was computed for.
     public var day: Date
     public var events: [CalendarEvent]
+    public var blockingAllDayEvents: [CalendarEvent]
     public var placements: [ScheduledBlock]
     /// The day's commitments (the gym) and time held for active projects, by start.
     public var planBlocks: [PlanBlock]
@@ -159,10 +160,11 @@ public struct DayAgenda: Hashable, Sendable {
 
     public init(
         day: Date, events: [CalendarEvent], placements: [ScheduledBlock],
-        planBlocks: [PlanBlock] = [], completedTasks: [TaskItem] = []
+        planBlocks: [PlanBlock] = [], completedTasks: [TaskItem] = [], blockingAllDayEvents: [CalendarEvent] = []
     ) {
         self.day = day
         self.events = events
+        self.blockingAllDayEvents = blockingAllDayEvents
         self.placements = placements
         self.planBlocks = planBlocks
         self.completedTasks = completedTasks

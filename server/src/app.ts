@@ -86,6 +86,7 @@ const publicAccountColumns = {
   id: googleAccounts.id,
   email: googleAccounts.email,
   label: googleAccounts.label,
+  displayName: googleAccounts.displayName,
   createdAt: googleAccounts.createdAt,
   updatedAt: googleAccounts.updatedAt,
 }

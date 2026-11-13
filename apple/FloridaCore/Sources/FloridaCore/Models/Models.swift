@@ -650,6 +650,8 @@ public struct CalendarEvent: Codable, Hashable, Sendable, Identifiable {
     public var endAt: Date?
     public var allDay: Bool
     public var blocksDay: Bool?
+    public var autoBlocksDay: Bool?
+    public var blockingReason: String?
     /// "opaque" (busy, default) or "transparent" (free).
     public var transparency: String?
     /// The user's own attendee response: "accepted", "declined", "tentative", "needsAction".
@@ -675,7 +677,8 @@ public struct CalendarEvent: Codable, Hashable, Sendable, Identifiable {
         transparency: String? = nil, responseStatus: String? = nil, htmlLink: String? = nil,
         description: String? = nil, conferenceUrl: String? = nil, attendees: [EventAttendee]? = nil,
         organizer: EventOrganizer? = nil, eventType: String? = nil, recurringEventId: String? = nil,
-        icalUid: String? = nil, updatedAt: Date, deletedAt: Date? = nil, blocksDay: Bool? = nil
+        icalUid: String? = nil, updatedAt: Date, deletedAt: Date? = nil, blocksDay: Bool? = nil,
+        autoBlocksDay: Bool? = nil, blockingReason: String? = nil
     ) {
         self.id = id
         self.calendarId = calendarId
@@ -687,6 +690,8 @@ public struct CalendarEvent: Codable, Hashable, Sendable, Identifiable {
         self.endAt = endAt
         self.allDay = allDay
         self.blocksDay = blocksDay
+        self.autoBlocksDay = autoBlocksDay
+        self.blockingReason = blockingReason
         self.transparency = transparency
         self.responseStatus = responseStatus
         self.htmlLink = htmlLink
@@ -715,6 +720,8 @@ public struct CalendarEvent: Codable, Hashable, Sendable, Identifiable {
         endAt = try container.decodeIfPresent(Date.self, forKey: .endAt)
         allDay = try container.decode(Bool.self, forKey: .allDay)
         blocksDay = try container.decodeIfPresent(Bool.self, forKey: .blocksDay)
+        autoBlocksDay = try container.decodeIfPresent(Bool.self, forKey: .autoBlocksDay)
+        blockingReason = try container.decodeIfPresent(String.self, forKey: .blockingReason)
         transparency = try container.decodeIfPresent(String.self, forKey: .transparency)
         responseStatus = try container.decodeIfPresent(String.self, forKey: .responseStatus)
         htmlLink = try container.decodeIfPresent(String.self, forKey: .htmlLink)
@@ -797,12 +804,14 @@ public struct GoogleAccount: Codable, Hashable, Sendable, Identifiable {
     public var email: String
     /// Short slug such as "work" or "personal".
     public var label: String
+    public var displayName: String?
     public var updatedAt: Date
 
-    public init(id: String, email: String, label: String, updatedAt: Date) {
+    public init(id: String, email: String, label: String, updatedAt: Date, displayName: String? = nil) {
         self.id = id
         self.email = email
         self.label = label
+        self.displayName = displayName
         self.updatedAt = updatedAt
     }
 }

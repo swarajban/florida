@@ -137,7 +137,7 @@ struct GridLayout {
         planBlocks: [PlanBlock] = [], projectsById: [String: Project] = [:],
         tasksById: [String: TaskItem],
         categoriesById: [String: TaskCategory], calendarsById: [String: CalendarInfo], schedules: [Schedule],
-        options: Options, lineLimit: Int?, now: Date, calendar: Calendar
+        options: Options, lineLimit: Int?, now: Date, calendar: Calendar, reservedLinesByDay: [Date: Int] = [:]
     ) -> GridLayout {
         var layout = GridLayout()
         layout.days = days
@@ -278,6 +278,7 @@ struct GridLayout {
         for (index, day) in days.enumerated() {
             let lines: [ItemID]
             if let lineLimit {
+                let lineLimit = max(0, lineLimit - (reservedLinesByDay[day] ?? 0))
                 // The month cell's lines: all-day bars touching the day, then timed blocks.
                 let allDayLines = layout.allDayByDay[index].prefix(lineLimit).map(\.item)
                 lines = allDayLines + layout.blocksByDay[index].prefix(max(0, lineLimit - allDayLines.count)).map(\.item)
