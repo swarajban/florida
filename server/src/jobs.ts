@@ -11,6 +11,7 @@ export interface JobDeps {
   /** Writes the daily brief and weekly review that are due and missing; absent when Claude is not configured. */
   ensureBriefs?: () => Promise<BriefRow[]>
   refreshAllDayJudgments?: () => Promise<void>
+  repairJudgmentCursors?: () => Promise<void>
 }
 
 const MINUTE = 60_000
@@ -64,6 +65,7 @@ export function startJobs(deps: JobDeps): () => void {
   const timers: NodeJS.Timeout[] = [
     setTimeout(() => {
       void run('startup', async () => {
+        await deps.repairJudgmentCursors?.()
         if (deps.refreshAllDayJudgments !== undefined) {
           await deps.refreshAllDayJudgments()
           await reschedule()

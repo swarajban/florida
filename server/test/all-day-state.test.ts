@@ -67,6 +67,7 @@ describe('automatic all-day persistence', () => {
   })
   afterAll(() => close())
   beforeEach(async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(now.getTime())
     await db.delete(events)
     await db.delete(calendars)
     await db.delete(googleAccounts)
@@ -82,7 +83,10 @@ describe('automatic all-day persistence', () => {
     work = rows.find((row) => row.id === 'work-cal')!
     gusto = rows.find((row) => row.id === 'gusto-cal')!
   })
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
 
   it('does not enroll other people or new holiday feeds when an account connects', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ items: [

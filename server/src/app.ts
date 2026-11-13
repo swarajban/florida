@@ -16,6 +16,7 @@ import { explainPlacement, generateBrief, latestBriefs } from './briefs.js'
 import { ChangeBus } from './changes.js'
 import type { Config } from './config.js'
 import type { Db } from './db/client.js'
+import { syncCursor, writeTimestamp } from './db/sync-clock.js'
 import { INBOX_CATEGORY_ID, SETTINGS_ID, categoriesWithExamples, defaultTimeZone, scheduleExists } from './db/queries.js'
 import {
   calendars,
@@ -250,7 +251,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
   app.get('/api/sync', async (c) => {
     const sinceIso = isoInstant.optional().parse(c.req.query('since'))
     const since = sinceIso === undefined ? undefined : new Date(sinceIso)
-    const cursor = new Date()
+    const cursor = await syncCursor(db)
     const changedAfter = (column: PgColumn) => (since === undefined ? undefined : gt(column, since))
 
     const routineBlockRows = await db.select().from(routineBlocks).where(changedAfter(routineBlocks.updatedAt))
@@ -398,7 +399,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
       area: body.area,
       scheduleId: body.scheduleId,
       sortOrder: body.sortOrder ?? 0,
-      updatedAt: new Date(),
+      updatedAt: writeTimestamp,
       deletedAt: null,
     }
     const [category] = await db
@@ -420,7 +421,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
       await lockTaskRecurrences(tx)
       const rows = await tx
         .update(categories)
-        .set({ deletedAt: now, updatedAt: now })
+        .set({ deletedAt: now, updatedAt: writeTimestamp })
         .where(eq(categories.id, id))
         .returning({ id: categories.id, scheduleId: categories.scheduleId })
       const [row] = rows
@@ -429,15 +430,15 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
       // schedule rather than orphan the tasks.
       await tx
         .insert(categories)
-        .values({ id: INBOX_CATEGORY_ID, name: 'Inbox', scheduleId: row.scheduleId, sortOrder: 0, updatedAt: now })
+        .values({ id: INBOX_CATEGORY_ID, name: 'Inbox', scheduleId: row.scheduleId, sortOrder: 0, updatedAt: writeTimestamp })
         .onConflictDoNothing({ target: categories.id })
       await tx
         .update(tasks)
-        .set({ categoryId: INBOX_CATEGORY_ID, updatedAt: now })
+        .set({ categoryId: INBOX_CATEGORY_ID, updatedAt: writeTimestamp })
         .where(and(eq(tasks.categoryId, id), isNull(tasks.deletedAt)))
       await moveRecurringTaskCategory(tx, id, INBOX_CATEGORY_ID, now)
       // A project's category is optional; keeping the tombstone's id would fail its next edit.
-      await tx.update(projects).set({ categoryId: null, updatedAt: now }).where(eq(projects.categoryId, id))
+      await tx.update(projects).set({ categoryId: null, updatedAt: writeTimestamp }).where(eq(projects.categoryId, id))
       return true
     })
     if (!deleted) throw notFound(`category ${id}`)
@@ -500,7 +501,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
   app.put('/api/routine-blocks/:id', async (c) => {
     const id = c.req.param('id')
     const body = routineBlockBody.parse(await c.req.json())
-    const fields = { ...body, updatedAt: new Date(), deletedAt: null }
+    const fields = { ...body, updatedAt: writeTimestamp, deletedAt: null }
     const [routineBlock] = await db
       .insert(routineBlocks)
       .values({ id, ...fields })
@@ -515,7 +516,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
     const now = new Date()
     const deleted = await db
       .update(routineBlocks)
-      .set({ deletedAt: now, updatedAt: now })
+      .set({ deletedAt: now, updatedAt: writeTimestamp })
       .where(eq(routineBlocks.id, id))
       .returning({ id: routineBlocks.id })
     if (deleted.length === 0) throw notFound(`routine block ${id}`)
@@ -525,7 +526,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
 
   app.put('/api/settings', async (c) => {
     const body = settingsBody.parse(await c.req.json())
-    const fields = { timeZone: body.timeZone, updatedAt: new Date() }
+    const fields = { timeZone: body.timeZone, updatedAt: writeTimestamp }
     const [row] = await db
       .insert(settings)
       .values({ id: SETTINGS_ID, ...fields })
@@ -544,7 +545,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
       name: body.name,
       timeZone: body.timeZone,
       windows: body.windows,
-      updatedAt: new Date(),
+      updatedAt: writeTimestamp,
       deletedAt: null,
     }
     const [schedule] = await db
@@ -561,7 +562,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
     const now = new Date()
     const deleted = await db
       .update(schedules)
-      .set({ deletedAt: now, updatedAt: now })
+      .set({ deletedAt: now, updatedAt: writeTimestamp })
       .where(eq(schedules.id, id))
       .returning({ id: schedules.id })
     if (deleted.length === 0) throw notFound(`schedule ${id}`)
@@ -666,7 +667,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
       const activated = !current.selected && !current.blocksScheduling && (body.selected === true || body.blocksScheduling === true)
       const [row] = await tx
         .update(calendars)
-        .set({ ...body, ...(activated ? { syncToken: null } : {}), updatedAt: now })
+        .set({ ...body, ...(activated ? { syncToken: null } : {}), updatedAt: writeTimestamp })
         .where(eq(calendars.id, id))
         .returning(publicCalendarColumns)
       return row === undefined ? undefined : { row, activated }
@@ -685,7 +686,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
   // Full re-download of every visible or blocking calendar: rewrites every event row (and bumps `updatedAt`),
   // e.g. to backfill columns added after the rows were first synced.
   app.post('/api/google/resync', async (c) => {
-    await db.update(calendars).set({ syncToken: null, updatedAt: new Date() }).where(or(eq(calendars.selected, true), eq(calendars.blocksScheduling, true)))
+    await db.update(calendars).set({ syncToken: null, updatedAt: writeTimestamp }).where(or(eq(calendars.selected, true), eq(calendars.blocksScheduling, true)))
     await sync.syncAll()
     return c.json(await reschedule())
   })

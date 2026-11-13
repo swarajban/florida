@@ -1,6 +1,7 @@
 import { and, eq, isNull, sql } from 'drizzle-orm'
 import type { Db } from '../db/client.js'
 import { calendars, events, googleAccounts } from '../db/schema.js'
+import { writeTimestamp } from '../db/sync-clock.js'
 import { judgeAllDayEvent } from './all-day-judgment.js'
 import type { AllDayAccountProfile, AllDayJudgmentCalendar, AllDayJudgmentEvent } from './all-day-judgment.js'
 import { mapEvent } from './client.js'
@@ -21,7 +22,7 @@ export async function learnAccountProfiles(db: Db, items: readonly ProfileMetada
       const email = person.email.toLowerCase()
       const profile = profiles.find((p) => p.email.toLowerCase() === email)
       if (profile === undefined || profile.displayName !== null) continue
-      const [updated] = await db.update(googleAccounts).set({ displayName: name, updatedAt: now })
+      const [updated] = await db.update(googleAccounts).set({ displayName: name, updatedAt: sql`greatest(${writeTimestamp}, ${now.toISOString()}::timestamptz)` })
         .where(and(eq(googleAccounts.id, profile.id), isNull(googleAccounts.displayName))).returning()
       const stored = updated ?? (await db.select({ displayName: googleAccounts.displayName }).from(googleAccounts)
         .where(eq(googleAccounts.id, profile.id)))[0]
@@ -46,9 +47,10 @@ export function judgedGoogleEvent(calendar: AllDayJudgmentCalendar & { id: strin
 }
 
 export async function refreshAllDayJudgments(db: Db, now: Date = new Date()): Promise<void> {
+  const started = Date.now()
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      await db.transaction(async (tx) => {
+      const result = await db.transaction(async (tx) => {
         const { profiles } = await learnAccountProfiles(tx, [], now)
         const unidentified = profiles.filter((profile) => profile.displayName === null).map((profile) => profile.email.toLowerCase())
         if (unidentified.length > 0) {
@@ -60,20 +62,42 @@ export async function refreshAllDayJudgments(db: Db, now: Date = new Date()): Pr
             )`))
           await learnAccountProfiles(tx, metadata, now, profiles)
         }
-        const rows = await tx.select({ event: events, calendar: calendars }).from(events)
+        const rows = await tx.select({ event: events, calendar: calendars, version: sql<string>`${events.updatedAt}::text` }).from(events)
           .innerJoin(calendars, eq(events.calendarId, calendars.id))
           .where(and(eq(events.allDay, true), isNull(events.deletedAt)))
-        for (const { event, calendar } of rows) {
+        const changes = []
+        for (const { event, calendar, version } of rows) {
           const fields = automaticDayFields(event, calendar, profiles)
           if (event.autoBlocksDay === fields.autoBlocksDay && event.blockingReason === fields.blockingReason) continue
-          await tx.update(events).set({ ...fields, updatedAt: new Date(Math.max(now.getTime(), event.updatedAt.getTime() + 1)) })
-            .where(and(eq(events.id, event.id), eq(events.updatedAt, event.updatedAt), isNull(events.deletedAt)))
+          changes.push({ id: event.id, auto_blocks_day: fields.autoBlocksDay, blocking_reason: fields.blockingReason, version })
         }
+        if (changes.length > 0) {
+          await tx.execute(sql`update ${events} as target set
+            auto_blocks_day = changed.auto_blocks_day,
+            blocking_reason = changed.blocking_reason,
+            updated_at = greatest(${writeTimestamp}, ${now.toISOString()}::timestamptz, target.updated_at + interval '1 millisecond')
+            from jsonb_to_recordset(${JSON.stringify(changes)}::jsonb)
+              as changed(id text, auto_blocks_day boolean, blocking_reason text, version timestamptz)
+            where target.id = changed.id and target.updated_at = changed.version and target.deleted_at is null`)
+        }
+        return { examined: rows.length, changed: changes.length }
       }, { isolationLevel: 'repeatable read' })
+      console.log(`[all-day] refresh: ${result.examined} examined, ${result.changed} changed in ${Date.now() - started}ms; rss=${process.memoryUsage().rss}`)
       return
     } catch (error) {
       const cause = error instanceof Error && error.cause !== undefined ? error.cause : error
       if (attempt === 2 || typeof cause !== 'object' || cause === null || !('code' in cause) || cause.code !== '40001') throw error
     }
   }
+}
+
+export async function repairLegacyJudgmentCursors(db: Db): Promise<void> {
+  const started = Date.now()
+  const rows = await db.update(events).set({
+    updatedAt: sql`greatest(${writeTimestamp}, ${events.updatedAt} + interval '1 millisecond')`,
+  }).where(and(
+    eq(events.allDay, true), isNull(events.deletedAt), sql`${events.autoBlocksDay} is not null`,
+    sql`${events.updatedAt} <= '2026-11-13T13:32:03.087Z'::timestamptz`,
+  )).returning({ id: events.id })
+  console.log(`[all-day] cursor repair: ${rows.length} restamped in ${Date.now() - started}ms; rss=${process.memoryUsage().rss}`)
 }

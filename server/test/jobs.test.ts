@@ -25,4 +25,32 @@ describe('automatic judgment background job', () => {
       vi.useRealTimers()
     }
   })
+
+  it('repairs old cursors only at startup before refresh and publication', async () => {
+    vi.useFakeTimers()
+    const calls: string[] = []
+    const stop = startJobs({
+      sync: {
+        ensureAllWatches: async () => { calls.push('watches') },
+        syncAll: async () => { calls.push('sync') },
+      },
+      repairJudgmentCursors: async () => { calls.push('repair') },
+      refreshAllDayJudgments: async () => { calls.push('refresh') },
+      changes: { publish: () => { calls.push('publish') } },
+      reschedule: async () => {
+        calls.push('reschedule')
+        return { placements: [], unscheduled: [], optional: [], routine: [], missed: [], capacity: [] }
+      },
+    })
+    try {
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(calls).toEqual(['repair', 'refresh', 'reschedule', 'publish', 'watches', 'sync', 'refresh', 'reschedule', 'publish'])
+      await vi.advanceTimersByTimeAsync(60 * 60_000)
+      expect(calls.filter((call) => call === 'repair')).toHaveLength(1)
+      expect(calls.filter((call) => call === 'sync')).toHaveLength(2)
+    } finally {
+      stop()
+      vi.useRealTimers()
+    }
+  })
 })

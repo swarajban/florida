@@ -8,7 +8,7 @@ import { ChangeBus } from './changes.js'
 import { loadConfig } from './config.js'
 import { createDb } from './db/client.js'
 import { GoogleSync } from './google/sync.js'
-import { refreshAllDayJudgments } from './google/all-day-state.js'
+import { refreshAllDayJudgments, repairLegacyJudgmentCursors } from './google/all-day-state.js'
 import { startJobs } from './jobs.js'
 import { runScheduling } from './scheduling.js'
 
@@ -35,6 +35,7 @@ const stopJobs = startJobs({
   reschedule,
   changes,
   refreshAllDayJudgments: () => refreshAllDayJudgments(db),
+  repairJudgmentCursors: () => repairLegacyJudgmentCursors(db),
   ...(briefWriter === undefined ? {} : { ensureBriefs: briefJob(db, briefWriter) }),
 })
 

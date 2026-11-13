@@ -1,6 +1,7 @@
 import { pathToFileURL } from 'node:url'
 import { createDb } from './db/client.js'
 import type { Db } from './db/client.js'
+import { writeTimestamp } from './db/sync-clock.js'
 import { INBOX_CATEGORY_ID, SETTINGS_ID } from './db/queries.js'
 import { categories, routineBlocks, schedules, settings } from './db/schema.js'
 import type { ScheduleWindow } from './db/schema.js'
@@ -70,25 +71,24 @@ const STARTER_CATEGORIES: (typeof categories.$inferInsert)[] = [
  * categories when missing, so the user's edits to those survive. Safe to run repeatedly.
  */
 export async function seed(db: Db): Promise<void> {
-  const now = new Date()
-  await db.insert(settings).values({ ...SETTINGS, updatedAt: now }).onConflictDoNothing({ target: settings.id })
+  await db.insert(settings).values({ ...SETTINGS, updatedAt: writeTimestamp }).onConflictDoNothing({ target: settings.id })
   await db
     .insert(routineBlocks)
-    .values(SEED_ROUTINE.map((b) => ({ ...b, updatedAt: now })))
+    .values(SEED_ROUTINE.map((b) => ({ ...b, updatedAt: writeTimestamp })))
     .onConflictDoNothing({ target: routineBlocks.id })
   // Shipped clients still edit and delete schedules; a re-seed on every deploy must not undo that.
   await db
     .insert(schedules)
-    .values(SEED_SCHEDULES.map((s) => ({ ...s, updatedAt: now })))
+    .values(SEED_SCHEDULES.map((s) => ({ ...s, updatedAt: writeTimestamp })))
     .onConflictDoNothing({ target: schedules.id })
-  const inbox = { name: INBOX.name, scheduleId: INBOX.scheduleId, sortOrder: INBOX.sortOrder, updatedAt: now, deletedAt: null }
+  const inbox = { name: INBOX.name, scheduleId: INBOX.scheduleId, sortOrder: INBOX.sortOrder, updatedAt: writeTimestamp, deletedAt: null }
   await db
     .insert(categories)
     .values({ id: INBOX.id, ...inbox })
     .onConflictDoUpdate({ target: categories.id, set: inbox })
   await db
     .insert(categories)
-    .values(STARTER_CATEGORIES.map((p) => ({ ...p, updatedAt: now })))
+    .values(STARTER_CATEGORIES.map((p) => ({ ...p, updatedAt: writeTimestamp })))
     .onConflictDoNothing({ target: categories.id })
 }
 
