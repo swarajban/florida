@@ -43,7 +43,7 @@ extension AppModel {
     /// Creates or updates the project and syncs. False, with a status message, when the name is
     /// empty or the store refused.
     @discardableResult
-    func save(project: Project) -> Bool {
+    func save(project: Project, original: Project? = nil) -> Bool {
         guard let database else { return false }
         var project = project
         project.name = project.name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -57,21 +57,25 @@ extension AppModel {
             project.weeklyMinutes = nil
         }
         do {
-            try database.saveProject(project)
+            try database.saveProject(project, original: original)
         } catch {
             statusMessage = "Could not save the project: \(error.localizedDescription)"
             return false
         }
         scheduleSync()
+        if original != project {
+            pushUndo(UndoEntry(label: "Project changes", restores: [.unavailable], at: Date()))
+        }
         return true
     }
 
     /// Only an active project's tasks are scheduled, so this is how a project is paused or resumed.
     func setStatus(_ status: ProjectStatus, of project: Project) {
         guard project.status != status else { return }
+        let original = project
         var project = project
         project.status = status
-        if save(project: project) {
+        if save(project: project, original: original) {
             showGhost("\(project.name): \(status.label)")
         }
     }

@@ -208,24 +208,7 @@ struct ProjectEditorView: View {
 
     private func save() {
         do {
-            if isNew {
-                try model.saveProject(draft)
-            } else {
-                // The live row with only what was edited here written over it, so a reorder or
-                // sync since the sheet opened is kept. A project deleted since is not saved back.
-                guard var updated = model.project(id: original.id) else {
-                    saveError = "This project was deleted."
-                    return
-                }
-                if draft.name != original.name { updated.name = draft.name }
-                if draft.status != original.status { updated.status = draft.status }
-                if draft.categoryId != original.categoryId { updated.categoryId = draft.categoryId }
-                if draft.nextStep != original.nextStep { updated.nextStep = draft.nextStep }
-                if draft.notes != original.notes { updated.notes = draft.notes }
-                if draft.parallel != original.parallel { updated.parallel = draft.parallel }
-                if draft.weeklyMinutes != original.weeklyMinutes { updated.weeklyMinutes = draft.weeklyMinutes }
-                try model.saveProject(updated)
-            }
+            try model.saveProject(draft, original: isNew ? nil : original)
             dismiss()
         } catch {
             saveError = error.localizedDescription

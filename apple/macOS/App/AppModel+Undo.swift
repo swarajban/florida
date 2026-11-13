@@ -21,6 +21,8 @@ struct UndoEntry {
         case revert(taskId: String, changes: [FieldChange])
         /// The write created the task.
         case delete(taskId: String)
+        case undelete(TaskItem)
+        case unavailable
         /// A drag moved the event from one time to another.
         case moveEvent(eventId: String, from: DateInterval, to: DateInterval)
         /// A drag moved this instance of a repeating event, and the rest of its series with it.
@@ -30,7 +32,8 @@ struct UndoEntry {
         var taskId: String? {
             switch self {
             case .revert(let id, _), .delete(let id): id
-            case .moveEvent, .moveEventSeries: nil
+            case .undelete(let task): task.id
+            case .moveEvent, .moveEventSeries, .unavailable: nil
             }
         }
     }
@@ -112,7 +115,9 @@ extension AppModel {
         try write()
         let restore: UndoEntry.Restore
         if let before, let after = try database.task(id: taskId) {
-            restore = .revert(taskId: taskId, changes: UndoEntry.FieldChange.changes(from: before, to: after))
+            let changes = UndoEntry.FieldChange.changes(from: before, to: after)
+            guard !changes.isEmpty else { return }
+            restore = .revert(taskId: taskId, changes: changes)
         } else {
             restore = .delete(taskId: taskId)
         }
@@ -137,6 +142,9 @@ extension AppModel {
         guard let database else { return }
         do {
             var reverted: [TaskItem] = []
+            var taskReverts: [(String, [UndoEntry.FieldChange])] = []
+            var restored: [TaskItem] = []
+            var restoredOneOff = false
             var created: [String] = []
             var movedBack: [CalendarEvent] = []
             var seriesBack: [(eventId: String, back: DateInterval)] = []
@@ -151,6 +159,15 @@ extension AppModel {
             }
             for restore in entry.restores {
                 switch restore {
+                case .unavailable:
+                    showGhost("Cannot undo: \(entry.label)", for: .seconds(3))
+                    return
+                case .undelete(let snapshot):
+                    if let current = try database.task(id: snapshot.id), current.deletedAt == nil {
+                        showGhost("Already changed")
+                        return
+                    }
+                    restored.append(snapshot)
                 case .revert(let taskId, let changes):
                     guard var task = try database.task(id: taskId),
                           changes.allSatisfy({ $0.isStillApplied(task) })
@@ -163,6 +180,7 @@ extension AppModel {
                     }
                     if !changes.isEmpty {
                         reverted.append(task)
+                        taskReverts.append((taskId, changes))
                     }
                 case .delete(let taskId):
                     guard let task = try database.task(id: taskId), task.deletedAt == nil else {
@@ -186,8 +204,21 @@ extension AppModel {
                     seriesBack.append((eventId, from))
                 }
             }
-            for task in reverted {
-                try database.saveTask(task)
+            for (taskId, changes) in taskReverts {
+                var applied = false
+                try database.updateTask(id: taskId) { task in
+                    guard changes.allSatisfy({ $0.isStillApplied(task) }) else { return false }
+                    for change in changes { change.revert(&task) }
+                    applied = true
+                    return true
+                }
+                guard applied else {
+                    showGhost("Already changed")
+                    return
+                }
+            }
+            for snapshot in restored {
+                restoredOneOff = try database.restoreTask(snapshot) || restoredOneOff
             }
             for taskId in created {
                 try database.deleteTask(id: taskId)
@@ -198,10 +229,15 @@ extension AppModel {
             for series in seriesBack {
                 try database.moveEventSeries(instanceId: series.eventId, start: series.back.start, end: series.back.end)
             }
-            if let task = reverted.first, task.isOpen {
+            if let task = restored.first ?? reverted.first, task.isOpen {
                 selection = .task(task.id)
             } else if let eventId = movedBack.first?.id ?? seriesBack.first?.eventId {
                 selection = .event(eventId)
+            }
+            if restoredOneOff {
+                showGhost("Restored one task only. Repeating series cannot be restored.", for: .seconds(5))
+                scheduleSync()
+                return
             }
         } catch {
             statusMessage = "Could not undo: \(error.localizedDescription)"

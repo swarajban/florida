@@ -11,14 +11,25 @@ extension AppModel {
 
     /// Completes the task: one `.success` haptic, the row blooms in its category color for
     /// ~150 ms while it folds away, then Undo (which saves the version from before).
-    func complete(_ task: TaskItem) {
+    @discardableResult
+    func complete(_ task: TaskItem, original: TaskItem? = nil) -> Bool {
         let previous = storedVersion(of: task)
         let index = openTasks.firstIndex { $0.id == task.id }
         let now = Date()
         var completed = previous
         completed.completedAt = now
         completed.completedMinutes = previous.durationMinutes
-        guard write({ try $0.completeTask(id: task.id, at: now) }) else { return }
+        guard write({ database in
+            if let original {
+                var draft = task
+                draft.completedAt = now
+                draft.completedMinutes = draft.durationMinutes
+                try database.saveTask(draft, original: original, now: now)
+            } else {
+                try database.completeTask(id: task.id, at: now)
+            }
+        }) else { return false }
+        completed = (try? database?.task(id: task.id)) ?? completed
         completionCount += 1
         if let index {
             blooming[task.id] = BloomingTask(task: previous, index: index)
@@ -32,6 +43,7 @@ extension AppModel {
         showToast(Toast(
             message: "Completed “\(task.title)”", systemImage: "checkmark.circle.fill", style: .success,
             undo: TaskUndo(from: previous, to: completed)))
+        return true
     }
 
     /// Credits `minutes` of work without finishing: the rest stays open and the scheduler places

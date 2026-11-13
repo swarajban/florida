@@ -12,6 +12,8 @@ struct EventEditorView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var draft: CalendarEvent
+    private let original: CalendarEvent
+    @State private var saveError: String?
     @State private var recurrence: EventRecurrence?
     /// The clock and length of the timed event from before All-day was switched on, so switching
     /// it off again brings them back on whatever day is chosen by then.
@@ -20,6 +22,7 @@ struct EventEditorView: View {
     private let isNew: Bool
 
     init(event: CalendarEvent, isNew: Bool, recurrence: EventRecurrence? = nil) {
+        original = event
         self.isNew = isNew
         var event = event
         // Rows without times never reach the agenda, but the shape allows them; give the pickers something.
@@ -35,6 +38,11 @@ struct EventEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if let saveError {
+                    Label(saveError, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                        .accessibilityIdentifier("event-save-error")
+                }
                 Section {
                     EventComposerTextField(
                         placeholder: "Title", text: title,
@@ -271,15 +279,17 @@ struct EventEditorView: View {
     /// Writes the edited fields over the store's row, so a sync since the sheet opened (a guest's
     /// answer, say) is kept, then closes. A failure shows in the toast.
     private func save() {
-        var event = model.storedVersion(of: draft)
-        event.calendarId = draft.calendarId
+        var event = draft
         event.summary = Self.cleaned(draft.summary)
         event.location = Self.cleaned(draft.location)
         event.description = Self.cleaned(draft.description)
         event.allDay = draft.allDay
         event.startAt = draft.startAt
         event.endAt = draft.endAt
-        guard model.save(event: event, recurrence: isNew ? recurrence : nil) else { return }
+        guard model.save(event: event, original: isNew ? nil : original, recurrence: isNew ? recurrence : nil) else {
+            saveError = "The event could not be saved. It may have been deleted or its calendar changed."
+            return
+        }
         dismiss()
     }
 

@@ -7,6 +7,7 @@ struct TaskRecurrenceSection: View {
     let anchorDate: Date?
     let defaultTimeZone: String
     let wasRecurring: Bool
+    @State private var startDateEdited = false
 
     var body: some View {
         Section {
@@ -105,6 +106,12 @@ struct TaskRecurrenceSection: View {
                 Text("Past dates are not backfilled. Edits apply to this and future unfinished occurrences; completed history is kept. Complete marks only this occurrence done. Delete stops repeats and removes this and future unfinished occurrences.")
             }
         }
+        .onChange(of: anchorDate) { updateAnchor(anchorDate) }
+    }
+
+    private func updateAnchor(_ date: Date?) {
+        guard !wasRecurring, !startDateEdited, let date, let rule = recurrence else { return }
+        recurrence?.startDate = rule.dateString(for: date)
     }
 
     private var frequency: Binding<String> {
@@ -121,6 +128,7 @@ struct TaskRecurrenceSection: View {
                     rule.dayOfMonth = nil
                     recurrence = rule
                 } else {
+                    startDateEdited = false
                     var rule = TaskRecurrence(frequency: frequency, timeZone: defaultTimeZone, startDate: "")
                     rule.startDate = rule.dateString(for: anchorDate ?? Date())
                     recurrence = rule
@@ -182,7 +190,10 @@ struct TaskRecurrenceSection: View {
     private func startDate(_ rule: TaskRecurrence) -> Binding<Date> {
         Binding(
             get: { rule.date(for: recurrence?.startDate ?? rule.startDate) ?? anchorDate ?? Date() },
-            set: { recurrence?.startDate = rule.dateString(for: $0) })
+            set: {
+                startDateEdited = true
+                recurrence?.startDate = rule.dateString(for: $0)
+            })
     }
 
     private func hasEndDate(_ rule: TaskRecurrence) -> Binding<Bool> {

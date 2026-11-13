@@ -12,6 +12,8 @@ import SwiftUI
 struct EventEditorSheet: View {
     @Environment(AppModel.self) private var model
     @State private var draft: CalendarEvent
+    private let original: CalendarEvent
+    @State private var saveError: String?
     @State private var recurrence: EventRecurrence?
     /// The clock and length of the timed event from before All-day was switched on, so switching
     /// it off again brings them back on whatever day is chosen by then.
@@ -21,6 +23,7 @@ struct EventEditorSheet: View {
     let isNew: Bool
 
     init(event: CalendarEvent, isNew: Bool, recurrence: EventRecurrence? = nil) {
+        original = event
         self.isNew = isNew
         _recurrence = State(initialValue: recurrence)
         var event = event
@@ -36,6 +39,11 @@ struct EventEditorSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             Form {
+                if let saveError {
+                    Label(saveError, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                        .accessibilityIdentifier("event-save-error")
+                }
                 Section(isNew ? "New event" : "Event") {
                     TextField("Title", text: title)
                         .focused($isTitleFocused)
@@ -248,15 +256,17 @@ struct EventEditorSheet: View {
     /// A new event is selected on its day, so it is in view once the calendar redraws.
     private func save() {
         guard canSave else { return }
-        var event = model.storedVersion(of: draft)
-        event.calendarId = draft.calendarId
+        var event = draft
         event.summary = Self.cleaned(draft.summary)
         event.location = Self.cleaned(draft.location)
         event.description = Self.cleaned(draft.description)
         event.allDay = draft.allDay
         event.startAt = draft.startAt
         event.endAt = draft.endAt
-        guard model.save(event: event, recurrence: isNew ? recurrence : nil) else { return }
+        guard model.save(event: event, original: isNew ? nil : original, recurrence: isNew ? recurrence : nil) else {
+            saveError = model.statusMessage ?? "The event could not be saved."
+            return
+        }
         model.eventEditor = nil
         if isNew {
             model.selectDay(shownStart)

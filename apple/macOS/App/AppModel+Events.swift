@@ -216,15 +216,18 @@ extension AppModel {
     /// Upserts the event locally and syncs in the background. Returns false, with a status
     /// message, when its calendar is read-only or the store refused.
     @discardableResult
-    func save(event: CalendarEvent, recurrence: EventRecurrence? = nil) -> Bool {
+    func save(event: CalendarEvent, original: CalendarEvent? = nil, recurrence: EventRecurrence? = nil, recordsUndoBarrier: Bool = true) -> Bool {
         guard requireEditable(event), let database else { return false }
         do {
-            try database.saveEvent(event, recurrence: recurrence)
+            try database.saveEvent(event, original: original, recurrence: recurrence)
         } catch {
             statusMessage = "Could not save: \(error.localizedDescription)"
             return false
         }
         scheduleSync()
+        if recordsUndoBarrier, original != event {
+            pushUndo(UndoEntry(label: "Event changes", restores: [.unavailable], at: Date()))
+        }
         return true
     }
 
@@ -335,7 +338,7 @@ extension AppModel {
         let end = start.addingTimeInterval(oldEnd.timeIntervalSince(oldStart))
         moved.startAt = start
         moved.endAt = end
-        guard save(event: moved) else {
+        guard save(event: moved, original: event, recordsUndoBarrier: false) else {
             gridDrag = nil
             return
         }
@@ -381,6 +384,14 @@ extension AppModel {
         guard requireEditable(event) else { return }
         let previous = storedVersion(of: event)
         if previous.responseStatus != status {
+            if status == "declined" {
+                let alert = NSAlert()
+                alert.messageText = "Decline \(Self.quoted(Self.title(of: event)))?"
+                alert.informativeText = "Google will be notified. This response cannot be undone here."
+                alert.addButton(withTitle: "Decline")
+                alert.addButton(withTitle: "Cancel")
+                guard alert.runModal() == .alertFirstButtonReturn else { return }
+            }
             var updated = previous
             updated.responseStatus = status
             if var attendees = updated.attendees, let index = attendees.firstIndex(where: \.isSelf) {
@@ -388,7 +399,7 @@ extension AppModel {
                 updated.attendees = attendees
             }
             let next = neighbor(of: .event(event.id))
-            guard save(event: updated) else { return }
+            guard save(event: updated, original: previous) else { return }
             if status == "declined" {
                 didRemove(event, selecting: next)
             }

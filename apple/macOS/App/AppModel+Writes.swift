@@ -11,11 +11,11 @@ extension AppModel {
     /// Upserts a task locally, remembers the fields it changes for `z`, and syncs in the
     /// background. `undoLabel` is past tense ("Edited “X”"); returns false when the store refused.
     @discardableResult
-    func save(_ task: TaskItem, undoLabel: String? = nil) -> Bool {
+    func save(_ task: TaskItem, original: TaskItem? = nil, undoLabel: String? = nil) -> Bool {
         guard let database else { return false }
         do {
             try recordingUndo(undoLabel ?? "Edited \(Self.quoted(task.title))", taskId: task.id) {
-                try database.saveTask(task)
+                try database.saveTask(task, original: original)
             }
         } catch {
             statusMessage = "Could not save: \(error.localizedDescription)"
@@ -48,9 +48,9 @@ extension AppModel {
         guard let database else { return }
         let next = neighbor(of: item(for: task))
         do {
-            try recordingUndo("Deleted \(Self.quoted(task.title))", taskId: task.id) {
-                try database.deleteTask(id: task.id)
-            }
+            guard let snapshot = try database.task(id: task.id), snapshot.deletedAt == nil else { return }
+            try database.deleteTask(id: task.id)
+            pushUndo(UndoEntry(label: "Deleted \(Self.quoted(snapshot.title))", restores: [.undelete(snapshot)], at: Date()))
         } catch {
             statusMessage = "Could not delete: \(error.localizedDescription)"
             return
@@ -77,7 +77,7 @@ extension AppModel {
     /// Marks `task` done, with the sound and bloom, an undo entry and the "Done" ghost; when it
     /// was the selection, the selection moves to its neighbor. Also the editor's Mark done.
     @discardableResult
-    func complete(_ task: TaskItem, savingEdits: Bool = false) -> Bool {
+    func complete(_ task: TaskItem, savingEdits: Bool = false, original: TaskItem? = nil) -> Bool {
         guard let database else { return false }
         let item = item(for: task)
         let next = neighbor(of: item)
@@ -88,7 +88,7 @@ extension AppModel {
                     var completed = task
                     completed.completedAt = Date()
                     completed.completedMinutes = completed.durationMinutes
-                    try database.saveTask(completed)
+                    try database.saveTask(completed, original: original ?? stored)
                 } else {
                     try database.completeTask(id: task.id)
                 }
@@ -113,7 +113,7 @@ extension AppModel {
             take(pick)
             return
         }
-        guard var task = selectedTask else {
+        guard var task = liveSelectedTask, task.isOpen else {
             statusMessage = "Select a task first"
             return
         }
@@ -136,7 +136,7 @@ extension AppModel {
 
     /// `s`: the task may not start before tomorrow, and a pinned start is released.
     func snoozeSelection() {
-        guard var task = selectedTask else {
+        guard var task = liveSelectedTask, task.isOpen else {
             statusMessage = "Select a task first"
             return
         }
@@ -149,7 +149,7 @@ extension AppModel {
     }
 
     func setPriority(_ priority: Priority) {
-        guard var task = selectedTask else {
+        guard var task = liveSelectedTask, task.isOpen else {
             statusMessage = "Select a task first"
             return
         }
