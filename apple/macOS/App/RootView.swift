@@ -45,10 +45,7 @@ struct RootView: View {
         .frame(minWidth: 960, minHeight: 600)
         .background(FloridaStyle.paper)
         .background(KeyEventMonitorView(model: model))
-        .sheet(item: $model.editorTask, onDismiss: {
-            guard !model.isPaletteOpen, !model.isSheetOpen else { return }
-            model.mainWindow?.makeFirstResponder(nil)
-        }) { task in
+        .sheet(item: $model.editorTask) { task in
             TaskEditorSheet(task: task, isNew: model.tasksById[task.id] == nil)
         }
         .sheet(isPresented: $model.isGoToDateOpen) {

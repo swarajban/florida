@@ -127,7 +127,13 @@ struct TaskPaneView: View {
                     guard previous.item == current.item, current.sectionId != nil,
                           let selection = current.item, selection.isTask,
                           model.focus == .tasks || model.gridLayout.day(of: selection) == nil else { return }
-                    proxy.scrollTo(selection, anchor: .center)
+                    DispatchQueue.main.async {
+                        guard model.selection == selection,
+                              model.taskGroups.first(where: { group in
+                                  group.tasks.contains { ItemID.task($0.id) == selection }
+                              })?.id == current.sectionId else { return }
+                        proxy.scrollTo(selection, anchor: .center)
+                    }
                 }
                 .onChange(of: model.taskListGrouping) {
                     if let selection = model.selection { proxy.scrollTo(selection, anchor: .center) }

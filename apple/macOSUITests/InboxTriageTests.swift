@@ -134,7 +134,7 @@ final class InboxTriageTests: XCTestCase {
         app.launch()
         defer { app.terminate() }
         XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 15))
-        quickAdd("Retained repeat decision #home *weekly ^none // fixture", in: app)
+        quickAdd("Retained repeat decision #home ~today *weekly ^none // fixture", in: app)
         let task = row("Retained repeat decision", in: app)
         waitForTriage("Categorized", of: task)
         task.click()
@@ -221,10 +221,12 @@ final class InboxTriageTests: XCTestCase {
         chooseEditorDate("task-start", "none", in: app)
         chooseEditorDate("task-pinned-start", "none", in: app)
         revealEditorControl(someday, in: app)
-        XCTAssertEqual((someday.value as? NSNumber)?.intValue, 1)
-        XCTAssertFalse(app.staticTexts["task-date-triage-warning"].exists)
+        XCTAssertEqual((someday.value as? NSNumber)?.intValue, 0)
+        XCTAssertTrue(app.staticTexts["task-date-triage-warning"].exists)
         app.buttons["Save"].click()
         XCTAssertTrue(someday.waitForNonExistence(timeout: 5))
+        waitForTriage("Inbox", of: task)
+        app.typeKey("i", modifierFlags: [])
         assertSomeday(id: id, in: app)
 
         task.click()

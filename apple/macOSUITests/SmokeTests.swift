@@ -1491,6 +1491,10 @@ final class SmokeTests: XCTestCase {
             app.typeKey("g", modifierFlags: [])
             app.typeKey("t", modifierFlags: [])
             app.typeKey("g", modifierFlags: .shift)
+            let pane = app.scrollViews["task-pane-scroll"]
+            XCTAssertTrue(deferred.isHittable)
+            XCTAssertGreaterThanOrEqual(deferred.frame.minY, pane.frame.minY + 34)
+            XCTAssertLessThanOrEqual(deferred.frame.maxY, pane.frame.maxY)
             try jump(to: deferredId, titled: "Jump hidden fixture", in: app) {
                 XCTAssertFalse(nearTop.exists, "a row scrolled out of view should get no label")
             }
@@ -1557,6 +1561,12 @@ final class SmokeTests: XCTestCase {
         let pane = app.scrollViews["task-pane-scroll"]
         XCTAssertTrue(pane.waitForExistence(timeout: 5))
         let row = pane.staticTexts[title].firstMatch
+        revealTaskRow(row, in: pane)
+        row.click()
+    }
+
+    @MainActor
+    private func revealTaskRow(_ row: XCUIElement, in pane: XCUIElement) {
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         var delta: CGFloat = 180
         for _ in 0..<8 {
@@ -1570,11 +1580,13 @@ final class SmokeTests: XCTestCase {
         XCTAssertTrue(row.isHittable)
         XCTAssertGreaterThanOrEqual(row.frame.minY, pane.frame.minY + 34)
         XCTAssertLessThanOrEqual(row.frame.maxY, pane.frame.maxY)
-        row.click()
     }
 
     @MainActor
     private func typeJumpLabel(of id: String, in app: XCUIApplication, whileLabelled: () -> Void = {}) throws {
+        let pane = app.scrollViews["task-pane-scroll"]
+        XCTAssertTrue(pane.waitForExistence(timeout: 5))
+        revealTaskRow(pane.descendants(matching: .any)["task-row-\(id)"], in: pane)
         app.typeKey("f", modifierFlags: [])
         let label = app.staticTexts["task-jump-\(id)"]
         XCTAssertTrue(label.waitForExistence(timeout: 5))

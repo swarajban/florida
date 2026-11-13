@@ -668,8 +668,11 @@ final class SmokeTests: XCTestCase {
             XCTAssertEqual(unfiled.count, 1)
             unfiled.firstMatch.tap()
             XCTAssertTrue(app.buttons["task-category"].label.contains("Inbox"))
+            revealTaskEditorControl(app.buttons["task-category"], in: app)
             app.buttons["task-category"].tap()
             XCTAssertTrue(app.buttons["Home"].waitForExistence(timeout: 5))
+            wait(for: [expectation(for: NSPredicate(format: "isHittable == true"),
+                                   evaluatedWith: app.buttons["Home"])], timeout: 5)
             XCTAssertTrue(app.buttons["Home"].isHittable)
             app.buttons["Home"].tap()
             wait(for: [expectation(for: NSPredicate(format: "label CONTAINS %@", "Home"),

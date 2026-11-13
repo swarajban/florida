@@ -362,17 +362,44 @@ final class InboxTriageTests: XCTestCase {
 
     @MainActor
     private func reveal(_ row: XCUIElement, in app: XCUIApplication) {
+        let list = app.collectionViews["tasks-list"]
+        XCTAssertTrue(list.waitForExistence(timeout: 5))
+        let top = max(list.frame.minY, app.navigationBars.firstMatch.frame.maxY + 8)
+        let bottom = min(list.frame.maxY, app.tabBars.firstMatch.frame.minY - 60)
+        let middle = app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: list.frame.midX, dy: (top + bottom) / 2))
+        var identifier: String?
         if !row.exists {
-            for _ in 0..<6 { app.swipeDown() }
+            for _ in 0..<6 {
+                middle.press(forDuration: 0.05, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: 160)),
+                             withVelocity: .slow, thenHoldForDuration: 0.3)
+            }
         }
         for _ in 0..<12 {
-            if row.exists, row.isHittable,
-               row.frame.minY > app.navigationBars.firstMatch.frame.maxY,
-               row.frame.maxY < app.tabBars.firstMatch.frame.minY - 60 { break }
-            if row.exists, row.frame.minY < app.navigationBars.firstMatch.frame.maxY { app.swipeDown() }
-            else { app.swipeUp() }
+            let current = identifier.map { app.buttons[$0] } ?? row
+            var travel: CGFloat = -160
+            if current.exists {
+                identifier = current.identifier
+                let frame = current.frame
+                if !frame.isEmpty, [frame.minX, frame.minY, frame.maxX, frame.maxY].allSatisfy(\.isFinite) {
+                    if frame.minY >= top, frame.maxY <= bottom, current.isHittable { break }
+                    let distance = frame.minY < top ? top - frame.minY : bottom - frame.maxY
+                    travel = distance > 0 ? min(160, max(32, distance)) : max(-160, min(-32, distance))
+                }
+            }
+            middle.press(forDuration: 0.05, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: travel)),
+                         withVelocity: .slow, thenHoldForDuration: 0.3)
         }
-        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        let current = identifier.map { app.buttons[$0] } ?? row
+        XCTAssertTrue(current.waitForExistence(timeout: 5))
+        let frame = current.frame
+        guard !frame.isEmpty, [frame.minX, frame.minY, frame.maxX, frame.maxY].allSatisfy(\.isFinite) else {
+            XCTFail("The task row must have a finite, nonempty frame")
+            return
+        }
+        XCTAssertGreaterThanOrEqual(frame.minY, top)
+        XCTAssertLessThanOrEqual(frame.maxY, bottom)
+        XCTAssertTrue(current.isHittable)
     }
 
     @MainActor
