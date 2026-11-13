@@ -302,6 +302,9 @@ final class SmokeTests: XCTestCase {
             app.launch()
             XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 15))
             app.typeKey("c", modifierFlags: .shift)
+            let details = app.buttons["event-quick-add-details"]
+            XCTAssertTrue(details.waitForExistence(timeout: 5))
+            details.click()
             let title = app.sheets.textFields.firstMatch
             XCTAssertTrue(title.waitForExistence(timeout: 5))
             title.typeText("Weekly planning")
@@ -380,6 +383,147 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(saved.waitForExistence(timeout: 5))
             app.terminate()
         }
+    }
+
+    @MainActor
+    func testNaturalLanguageEventCapture() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-demoData", "YES", "-uiAppearance", appearance]
+            app.launch()
+            XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 15))
+            app.typeKey("c", modifierFlags: .shift)
+            let input = app.textFields["event-quick-add-input"]
+            XCTAssertTrue(input.waitForExistence(timeout: 5))
+            input.typeText("lunch with Dana tomorrow 12-1 at Blue Bottle")
+            XCTAssertTrue(app.buttons["event-quick-add-title"].exists)
+            XCTAssertTrue(app.buttons["event-quick-add-date"].exists)
+            XCTAssertTrue(app.buttons["event-quick-add-time"].exists)
+            XCTAssertTrue(app.buttons["event-quick-add-location"].exists)
+            let destination = app.descendants(matching: .any).matching(identifier: "event-quick-add-destination").firstMatch
+            XCTAssertTrue(destination.waitForExistence(timeout: 5))
+            XCTAssertTrue(destination.label.contains("demo@sempre-health.com"), destination.debugDescription)
+            capture(app.windows.firstMatch, "event-preview-\(appearance)")
+
+            app.typeKey("6", modifierFlags: .command)
+            let title = app.textFields["event-quick-add-edit-title"]
+            XCTAssertTrue(title.waitForExistence(timeout: 5))
+            app.typeKey("a", modifierFlags: .command)
+            title.typeText("Lunch with Dana and Lee")
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(title.waitForNonExistence(timeout: 5))
+            XCTAssertTrue(input.exists)
+            app.typeKey("3", modifierFlags: .command)
+            let personal = app.buttons["event-quick-add-calendar-demo-cal-personal"]
+            XCTAssertTrue(personal.waitForExistence(timeout: 5))
+            personal.click()
+            XCTAssertTrue(personal.waitForNonExistence(timeout: 5))
+            XCTAssertTrue(destination.label.contains("demo@personal.example"), destination.debugDescription)
+            capture(app.windows.firstMatch, "event-corrected-\(appearance)")
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(input.waitForNonExistence(timeout: 5))
+
+            app.typeKey("e", modifierFlags: .shift)
+            let savedTitle = app.textFields["event-editor-title"]
+            XCTAssertTrue(savedTitle.waitForExistence(timeout: 5))
+            XCTAssertEqual(savedTitle.value as? String, "Lunch with Dana and Lee")
+            XCTAssertEqual(app.buttons["event-calendar"].value as? String, "demo@personal.example")
+            XCTAssertEqual(app.staticTexts["event-editor-account"].value as? String, "demo@personal.example")
+            XCTAssertFalse(app.buttons["event-calendar"].isEnabled)
+            XCTAssertEqual(app.textFields["event-editor-location"].value as? String, "Blue Bottle")
+            XCTAssertEqual((app.switches["event-editor-all-day"].value as? NSNumber)?.intValue, 0)
+            XCTAssertEqual(app.buttons["time-Starts"].value as? String, eventTimeLabel(hour: 12))
+            XCTAssertEqual(app.buttons["time-Ends"].value as? String, eventTimeLabel(hour: 13))
+            XCTAssertFalse(input.exists)
+            capture(app.windows.firstMatch, "event-saved-\(appearance)")
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testEventComposerFullFormPrefill() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-demoData", "YES", "-uiAppearance", "light"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 15))
+        app.typeKey("k", modifierFlags: .command)
+        let palette = app.textFields.firstMatch
+        XCTAssertTrue(palette.waitForExistence(timeout: 5))
+        palette.typeText("New event")
+        app.typeKey(.return, modifierFlags: [])
+        let input = app.textFields["event-quick-add-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        input.typeText("Planning every tuesday 10am 45m at Blue Bottle")
+        app.typeKey("e", modifierFlags: .command)
+        let title = app.textFields["event-editor-title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        XCTAssertFalse(input.exists)
+        XCTAssertEqual(app.sheets.count, 1)
+        XCTAssertEqual(title.value as? String, "Planning")
+        XCTAssertEqual(app.textFields["event-editor-location"].value as? String, "Blue Bottle")
+        XCTAssertEqual(app.buttons["time-Starts"].value as? String, eventTimeLabel(hour: 10))
+        XCTAssertEqual(app.buttons["time-Ends"].value as? String, eventTimeLabel(hour: 10, minute: 45))
+        XCTAssertEqual(app.buttons["event-repeat"].value as? String, "Weekly")
+        XCTAssertTrue(app.staticTexts["Every 1 week"].exists)
+        XCTAssertEqual(app.buttons["event-calendar"].value as? String, "demo@sempre-health.com")
+        XCTAssertEqual(app.staticTexts["event-editor-account"].value as? String, "demo@sempre-health.com")
+        capture(app.windows.firstMatch, "event-full-form-prefilled")
+        app.sheets.buttons["Add Event"].click()
+        XCTAssertTrue(title.waitForNonExistence(timeout: 5))
+        app.typeKey("e", modifierFlags: .shift)
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        XCTAssertEqual(title.value as? String, "Planning")
+    }
+
+    @MainActor
+    func testEventComposerMenuAndGridEntries() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-demoData", "YES", "-uiAppearance", "light"]
+        app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 15))
+        app.menuBars.menuBarItems["File"].click()
+        app.menuBars.menuBarItems["File"].menus.menuItems["New Event…"].click()
+        let input = app.textFields["event-quick-add-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        input.typeText("Team retreat tomorrow all day")
+        app.typeKey(.return, modifierFlags: [])
+        XCTAssertTrue(input.waitForNonExistence(timeout: 5))
+        app.typeKey("e", modifierFlags: .shift)
+        let title = app.textFields["event-editor-title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        XCTAssertEqual(title.value as? String, "Team retreat")
+        XCTAssertEqual((app.switches["event-editor-all-day"].value as? NSNumber)?.intValue, 1)
+        XCTAssertFalse(app.buttons["time-Starts"].exists)
+        XCTAssertFalse(app.buttons["time-Ends"].exists)
+        app.sheets.buttons["Cancel"].click()
+        XCTAssertTrue(title.waitForNonExistence(timeout: 5))
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 15))
+        let grid = app.descendants(matching: .any).matching(identifier: "calendar-time-grid").firstMatch
+        XCTAssertTrue(grid.exists)
+        let slot = grid.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 100, dy: 465))
+        XCTAssertTrue(app.windows.firstMatch.frame.contains(slot.screenPoint))
+        slot.hover()
+        slot.rightClick()
+        let createEvent = app.windows.firstMatch.menuItems["New Event…"]
+        XCTAssertTrue(createEvent.waitForExistence(timeout: 5))
+        createEvent.click()
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        app.typeKey("e", modifierFlags: .command)
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons["time-Starts"].value as? String, eventTimeLabel(hour: 7, minute: 45))
+        XCTAssertEqual(app.buttons["time-Ends"].value as? String, eventTimeLabel(hour: 8, minute: 15))
+    }
+
+    private func eventTimeLabel(hour: Int, minute: Int = 0) -> String {
+        let at = Calendar.current.date(bySettingHour: hour, minute: minute, second: 0, of: Date())!
+        return at.formatted(.dateTime.hour().minute())
     }
 
     @MainActor

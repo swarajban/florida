@@ -26,7 +26,7 @@ struct QuarterHourDatePicker: View {
 
     private var timeChoices: [MacChoice<Int>] {
         let current = minutes.wrappedValue
-        let offGrid = current % 15 != 0 ? [MacChoice(current, date.formatted(.dateTime.hour().minute()))] : []
+        let offGrid = current % 15 != 0 ? [MacChoice(current, date.formatted(timeFormat))] : []
         return offGrid + stride(from: 0, to: 1440, by: 15).map { MacChoice($0, timeLabel($0)) }
     }
 
@@ -42,6 +42,10 @@ struct QuarterHourDatePicker: View {
         // A fixed ordinary day avoids missing/repeated clock labels on DST transition days.
         let reference = calendar.date(from: DateComponents(year: 2001, month: 1, day: 15))!
         let time = calendar.date(bySettingHour: minute / 60, minute: minute % 60, second: 0, of: reference)!
-        return time.formatted(.dateTime.hour().minute())
+        return time.formatted(timeFormat)
+    }
+
+    private var timeFormat: Date.FormatStyle {
+        Date.FormatStyle(calendar: calendar, timeZone: calendar.timeZone).hour().minute()
     }
 }

@@ -58,7 +58,7 @@ struct RootView: View {
             DoneForNowSheet(request: request)
         }
         .sheet(item: $model.eventEditor) { request in
-            EventEditorSheet(event: request.event, isNew: request.isNew)
+            EventCaptureSheet(request: request)
         }
         .modifier(PlanSheets())
         .confirmationDialog(

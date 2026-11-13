@@ -220,6 +220,29 @@ Quick add parses natural language locally (`QuickAddParser`): "infosec review
 palette shows the parsed chips before you press return. Double-clicking an
 empty slot opens quick add prefilled with that time as a pinned start.
 
+**New event** (`⇧C`, the app menu, the palette, or an empty slot’s context menu)
+opens a local sentence composer, separate from task capture. Try “Lunch with Dana
+tomorrow 12-1 at Blue Bottle #work” or “Dentist fri 3pm 45m”. The preview shows the
+date, start/end, settings time zone, recurrence, location, and destination calendar
+and account before saving. `#` calendar hints must resolve to one writable calendar;
+names, slugs and email IDs such as `#me@gmail.com` are accepted; unknown or ambiguous
+hints require a choice. Without a hint, the existing preferred
+calendar order applies. Numeric dates use month/day; weekday names mean the next
+occurrence, and an end before the start clock crosses midnight. “All day” stores
+calendar dates, and “every Tuesday” creates a weekly series on that weekday.
+Daily, weekly, monthly and yearly rules use the existing recurrence model.
+Explicit 24-hour ranges such as `15:00-04:00` keep their clock values. Unsupported
+recurrence bounds (`until December 1`, `for 4 weeks`) stay literal rather than
+creating an unlimited series; use the Repeat chip to set an occurrence limit.
+
+Click a preview chip to correct it, or use `⌘1` Date, `⌘2` Time, `⌘3` Calendar,
+`⌘4` Repeat, `⌘5` Location and `⌘6` Title. Return commits a correction; Return in
+the sentence field saves through the local event queue. Corrections stay while
+you type until **Reset corrections**. **Details** (`⌘E`) opens the full event form
+with the preview’s fields and recurrence prefilled. No guests are parsed or added,
+so creating an event this way cannot send invitations. Typing and saving use no AI
+or network request; ordinary background sync sends the queued write later.
+
 An opened task or event shows the key for each control beside it. The task
 editor opens with no field focused, so its keys (`TaskEditorKey` in
 FloridaCore) act at once: `space` marks the task done; `s`, `d` and `i` open
@@ -317,6 +340,14 @@ and is saved locally and queued for Florida sync without editing Google. On Mac,
 **Blocks scheduling** switch remains the outer control.
 
 ### iOS (`Florida-iOS`)
+
+**New Event** in Agenda’s add menu or an empty calendar slot opens the same local
+sentence composer, styled like task quick add. Tap any preview chip to correct it,
+use **Details** for the full prefilled form, and tap **Add event** or Return to save.
+The calendar and account stay visible above the save button, including while the
+keyboard is open. **Hide keyboard** exposes more of the preview without saving,
+and the destination footer opens the calendar chooser directly. Task capture, its
+retained draft and optional AI action are unchanged.
 
 Three tabs. **Agenda**: a week strip over the day's all-day events, timed
 events, and scheduled task blocks; swipe to change day, pull to refresh. An

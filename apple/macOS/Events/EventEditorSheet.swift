@@ -1,7 +1,7 @@
 import FloridaKit
 import SwiftUI
 
-/// Edits a Google event, or fills in a new one (⇧C, `>New event`). Editing works on a copy
+/// Edits a Google event, or fills in a new one from capture's Details. Editing works on a copy
 /// written back with Save; Cancel discards. A new event goes on a calendar of the user's choice;
 /// an existing one stays on its calendar, since moving between calendars is not supported. Save
 /// writes locally and closes; nothing waits on Google.
@@ -20,8 +20,9 @@ struct EventEditorSheet: View {
     /// Not in the store yet: titled "New event", offers the calendar, and saves as "Added".
     let isNew: Bool
 
-    init(event: CalendarEvent, isNew: Bool) {
+    init(event: CalendarEvent, isNew: Bool, recurrence: EventRecurrence? = nil) {
         self.isNew = isNew
+        _recurrence = State(initialValue: recurrence)
         var event = event
         // Rows without times never reach the calendar, but the shape allows them; give the pickers something.
         if event.startAt == nil || event.endAt == nil {
@@ -38,14 +39,22 @@ struct EventEditorSheet: View {
                 Section(isNew ? "New event" : "Event") {
                     TextField("Title", text: title)
                         .focused($isTitleFocused)
+                        .accessibilityIdentifier("event-editor-title")
                     MacChoiceField(
                         "Calendar", selection: $draft.calendarId,
                         options: calendarChoices.map { MacChoice($0.id, $0.summary) },
                         identifier: "event-calendar")
                     .disabled(!isNew)
+                    if let account = model.accounts.first(where: { $0.id == model.calendarsById[draft.calendarId]?.accountId }) {
+                        Text(account.email)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("event-editor-account")
+                    }
                 }
                 Section {
                     Toggle("All-day", isOn: allDay)
+                        .accessibilityIdentifier("event-editor-all-day")
                     QuarterHourDatePicker(title: "Starts", date: start, showsTime: !draft.allDay)
                     QuarterHourDatePicker(title: "Ends", date: end, showsTime: !draft.allDay)
                 } footer: {
@@ -65,6 +74,7 @@ struct EventEditorSheet: View {
                 }
                 Section {
                     TextField("Location", text: location)
+                        .accessibilityIdentifier("event-editor-location")
                     TextField("Description", text: notes, axis: .vertical)
                         .lineLimit(3...8)
                 }
@@ -87,8 +97,10 @@ struct EventEditorSheet: View {
             .padding()
         }
         .frame(width: 520, height: 520)
+        .environment(\.calendar, calendar)
+        .environment(\.timeZone, calendar.timeZone)
         .onAppear {
-            isTitleFocused = true
+            DispatchQueue.main.async { isTitleFocused = true }
         }
     }
 

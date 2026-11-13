@@ -16,10 +16,10 @@ struct EventEditorView: View {
     /// The clock and length of the timed event from before All-day was switched on, so switching
     /// it off again brings them back on whatever day is chosen by then.
     @State private var timedShape: (hour: Int, minute: Int, duration: TimeInterval)?
-    @FocusState private var titleFocused: Bool
+    @State private var titleFocused = false
     private let isNew: Bool
 
-    init(event: CalendarEvent, isNew: Bool) {
+    init(event: CalendarEvent, isNew: Bool, recurrence: EventRecurrence? = nil) {
         self.isNew = isNew
         var event = event
         // Rows without times never reach the agenda, but the shape allows them; give the pickers something.
@@ -29,16 +29,17 @@ struct EventEditorView: View {
             event.endAt = event.endAt ?? start.addingTimeInterval(30 * 60)
         }
         _draft = State(initialValue: event)
+        _recurrence = State(initialValue: recurrence)
     }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Title", text: title)
-                        .focused($titleFocused)
-                        .submitLabel(.done)
-                        .onSubmit { titleFocused = false }
+                    EventComposerTextField(
+                        placeholder: "Title", text: title,
+                        focused: Binding(get: { titleFocused }, set: { titleFocused = $0 }),
+                        onSubmit: { titleFocused = false })
                 }
 
                 Section {
@@ -55,6 +56,13 @@ struct EventEditorView: View {
                     }
                     .disabled(!isNew)
                     .accessibilityIdentifier("event-calendar")
+                    if let info = model.calendarInfo(id: draft.calendarId),
+                       let account = model.accounts.first(where: { $0.id == info.accountId }) {
+                        Text(account.email)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("event-account")
+                    }
                 } footer: {
                     if isNew, model.writableCalendars.isEmpty {
                         Text("No calendar you can add events to. Connect a Google account in Settings.")
@@ -113,6 +121,8 @@ struct EventEditorView: View {
             }
         }
         .presentationDetents([.large])
+        .environment(\.calendar, model.calendar)
+        .environment(\.timeZone, model.calendar.timeZone)
     }
 
     // MARK: - Bindings over optional fields
