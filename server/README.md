@@ -37,6 +37,9 @@ transaction's start in this database, minus one millisecond. This keeps a later 
 to receive rows that commit after the current pull. Do not move the cursor query into a
 long-lived transaction, use a statement-end clock for its upper bound, or precompute write
 timestamps before awaiting work. Long read transactions can conservatively repeat rows.
+If an open transaction holds the cursor back by at least one minute, the server logs a warning
+with the lag and cursor, at most once per minute. It keeps the safe bound rather than skipping
+uncommitted changes; the warning includes no query text or credentials.
 This contract requires `track_activities=on` and visibility of all writing transactions;
 the current deployment uses one database role for its application writers. New writer roles
 must provide equivalent activity visibility before they are used.
