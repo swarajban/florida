@@ -233,7 +233,8 @@ struct TaskEditorSheet: View {
             .padding()
         }
         .frame(width: 560, height: min(720, model.mainWindow?.contentLayoutRect.height ?? 720))
-        .background(TaskEditorKeyMonitor(keyboard: keyboard, startsUnfocused: true, onPress: handle,
+        .background(TaskEditorKeyMonitor(keyboard: keyboard, shortcutRepeats: model.shortcutRepeats,
+                                        startsUnfocused: true, onPress: handle,
                                          onPriority: { draft.priority = $0 }))
         .onChange(of: startAt) { keepDueAfterStart() }
         .onChange(of: hasStart) { keepDueAfterStart() }

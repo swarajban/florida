@@ -12,6 +12,7 @@ final class MacInteractionStateTests: XCTestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 5))
         hold("t", in: app)
         XCTAssertEqual(title.value as? String, "Updated account task")
+        capture(app, name: "mac-held-title-dark")
     }
 
     @MainActor
@@ -50,6 +51,7 @@ final class MacInteractionStateTests: XCTestCase {
             let input = app.textFields["palette-input"]
             XCTAssertTrue(input.waitForExistence(timeout: 5))
             XCTAssertEqual(input.value as? String, "")
+            capture(app, name: "mac-held-palette-\(key == "/" ? "slash" : key)-dark")
         }
     }
 
@@ -79,12 +81,12 @@ final class MacInteractionStateTests: XCTestCase {
         for prefix in ["g", "r"] {
             app.typeKey(prefix, modifierFlags: [])
             let hint = app.staticTexts["\(prefix) …"]
-            XCTAssertTrue(hint.waitForExistence(timeout: 5))
+            XCTAssertTrue(hint.exists)
             XCTAssertTrue(hint.waitForNonExistence(timeout: 3))
             app.typeKey(.escape, modifierFlags: [])
         }
         app.typeKey("g", modifierFlags: [])
-        XCTAssertTrue(app.staticTexts["g …"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["g …"].exists)
         row("date-updated", in: app).staticTexts["Updated account task"].click()
         XCTAssertTrue(app.buttons["task-due"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["g …"].exists)
@@ -103,6 +105,27 @@ final class MacInteractionStateTests: XCTestCase {
         app.typeKey("x", modifierFlags: [])
         app.typeKey("t", modifierFlags: .command)
         XCTAssertTrue(row("date-updated", in: app).waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testHidingTaskPanePreservesAVisibleShieldSelection() {
+        continueAfterFailure = false
+        let app = launch("dark")
+        defer { app.terminate() }
+        let shield = app.buttons["day-blocking-2026-11-13-demo-event-holiday"]
+        XCTAssertTrue(shield.waitForExistence(timeout: 5))
+        shield.click()
+        let detail = app.staticTexts["event-blocks-day-effective-demo-event-holiday"]
+        XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(detail.waitForNonExistence(timeout: 5))
+        app.typeKey("t", modifierFlags: .command)
+        XCTAssertTrue(app.scrollViews["task-pane-scroll"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(shield.exists)
+        XCTAssertEqual(app.staticTexts["interaction-selection"].value as? String, "event(\"demo-event-holiday\")")
+        app.typeKey("c", modifierFlags: [.command, .shift])
+        XCTAssertEqual(NSPasteboard.general.string(forType: .string),
+                       "https://calendar.google.com/calendar/event?eid=demo-event-holiday")
     }
 
     @MainActor
@@ -170,6 +193,17 @@ final class MacInteractionStateTests: XCTestCase {
         XCTAssertTrue((reason.value as? String)?.contains("last day open") == true)
         XCTAssertNotEqual(app.staticTexts["event-blocks-day-effective-interaction-trip"].value as? String,
                           "Blocks your day")
+        XCTAssertEqual(app.staticTexts["event-blocks-day-effective-interaction-trip"].value as? String,
+                       "Blocks trip days; last day open")
+        capture(app, name: "mac-checkout-detail-dark")
+    }
+
+    @MainActor
+    private func capture(_ app: XCUIApplication, name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     @MainActor

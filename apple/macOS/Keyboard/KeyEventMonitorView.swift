@@ -1,4 +1,5 @@
 import AppKit
+import FloridaKit
 import SwiftUI
 
 /// An invisible view that installs one local key-down monitor for the window it lives in and
@@ -61,15 +62,30 @@ final class KeyMonitorHostView: NSView {
     private func startMonitoring() {
         guard monitor == nil else { return }
         let box = box
-        let inEventPopover = isEventPopover
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
             let handled = MainActor.assumeIsolated {
-                guard let window = box.view?.window, event.window === window else { return false }
-                guard !SelectorInput.isEditing(in: window) else { return false }
-                return box.model?.handleKeyDown(event, inEventPopover: inEventPopover) ?? false
+                box.view?.handle(event) ?? false
             }
             return handled ? nil : event
         }
+    }
+
+    private func handle(_ event: NSEvent) -> Bool {
+        guard let model = box.model, let window else { return false }
+        if event.type == .keyUp {
+            model.shortcutRepeats.gate.keyUp(keyCode: event.keyCode)
+            return false
+        }
+        if model.shortcutRepeats.gate.keyDown(keyCode: event.keyCode, isRepeat: event.isARepeat) { return true }
+        guard event.window === window else { return false }
+        guard !SelectorInput.isEditing(in: window) else { return false }
+        let chord = KeyChord(event: event)
+        let allowsRepeat = model.jump == nil && chord.map(ShortcutKeyRepeat.isNavigation) == true
+        let handled = model.handleKeyDown(event, inEventPopover: isEventPopover)
+        if handled, !allowsRepeat {
+            model.shortcutRepeats.gate.didHandle(keyCode: event.keyCode)
+        }
+        return handled
     }
 
     private func stopMonitoring() {
@@ -84,5 +100,5 @@ final class KeyMonitorHostView: NSView {
 /// on the main actor.
 private final class MonitorBox: @unchecked Sendable {
     weak var model: AppModel?
-    weak var view: NSView?
+    weak var view: KeyMonitorHostView?
 }

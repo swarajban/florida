@@ -20,6 +20,16 @@ public enum AllDayBlocking {
             && (event.blocksDay ?? event.autoBlocksDay ?? event.isOutOfOffice)
     }
 
+    public static func schedulingSummary(for event: CalendarEvent, calendarBlocksScheduling: Bool) -> String {
+        guard isEffective(event, calendarBlocksScheduling: calendarBlocksScheduling) else {
+            return "Does not block scheduling"
+        }
+        if event.blocksDay == nil, automaticTripEnd(event) != event.endAt {
+            return "Blocks trip days; last day open"
+        }
+        return "Blocks your day"
+    }
+
     public static func explanation(for event: CalendarEvent) -> String {
         let reason = event.blockingReason?.trimmingCharacters(in: .whitespacesAndNewlines)
         var automatic = reason.flatMap { $0.isEmpty ? nil : $0 }
