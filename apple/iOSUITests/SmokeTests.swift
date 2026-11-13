@@ -164,6 +164,108 @@ final class SmokeTests: XCTestCase {
     }
 
     @MainActor
+    func testHiddenProtectedDayAndStoredReason() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = launch(appearance: appearance)
+            let indicator = app.buttons.matching(NSPredicate(
+                format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@", "day-blocking-", "-demo-event-holiday")).firstMatch
+            XCTAssertTrue(indicator.waitForExistence(timeout: 15))
+            XCTAssertTrue(indicator.label.contains("Public holiday"))
+            XCTAssertEqual(indicator.value as? String, "Automatic: US public holiday on your calendar.")
+            XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Public holiday")).firstMatch.exists)
+            capture(app, "protected-hidden-day-agenda-\(appearance)")
+            indicator.tap()
+            let choice = app.descendants(matching: .any).matching(identifier: "event-blocks-day-demo-event-holiday").firstMatch
+            let reason = app.staticTexts["event-blocking-reason-demo-event-holiday"]
+            XCTAssertTrue(choice.waitForExistence(timeout: 5))
+            XCTAssertEqual(choice.value as? String, "Automatic")
+            XCTAssertTrue(reason.label.contains("Automatic: US public holiday"))
+            choice.descendants(matching: .any)["Does not block"].tap()
+            XCTAssertTrue(reason.label.contains("Manual override: Does not block"))
+            XCTAssertTrue(reason.label.contains("Automatic: US public holiday"))
+            capture(app, "protected-day-manual-reason-\(appearance)")
+            choice.descendants(matching: .any)["Automatic"].tap()
+            XCTAssertEqual(choice.value as? String, "Automatic")
+            XCTAssertTrue(reason.label.hasPrefix("Automatic: US public holiday"))
+            XCTAssertEqual(app.staticTexts["event-blocks-day-effective-demo-event-holiday"].label, "Blocks your day")
+            app.navigationBars.buttons["Done"].tap()
+            XCTAssertTrue(indicator.waitForExistence(timeout: 5))
+            app.segmentedControls["agenda-mode"].buttons["3 Days"].tap()
+            XCTAssertTrue(indicator.waitForExistence(timeout: 5))
+            XCTAssertTrue(indicator.isHittable)
+            capture(app, "protected-hidden-day-columns-\(appearance)")
+            indicator.tap()
+            XCTAssertTrue(choice.waitForExistence(timeout: 5))
+            XCTAssertTrue(reason.label.contains("Automatic: US public holiday"))
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testDayBlockingAndCalendarControlsAtLargeText() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            for (textSize, accessibilityText) in [("xxxl", false), ("accessibility-xl", true)] {
+                let app = launch(appearance: appearance, tab: "settings", largeText: true, accessibilityText: accessibilityText)
+                waitForText("Save and sync", in: app)
+                let lastCalendar = app.switches["calendar-blocks-scheduling-demo-colleague"]
+                for _ in 0..<24 where !(lastCalendar.exists && lastCalendar.isHittable) {
+                    app.swipeUp()
+                }
+                XCTAssertEqual(lastCalendar.value as? String, "1")
+                tapSwitch(lastCalendar, in: app)
+                XCTAssertEqual(lastCalendar.value as? String, "0")
+                tapSwitch(lastCalendar, in: app)
+                XCTAssertEqual(lastCalendar.value as? String, "1")
+                XCTAssertLessThan(lastCalendar.frame.maxY, app.tabBars.firstMatch.frame.minY)
+                capture(app, "settings-last-calendar-accessibility-\(textSize)-\(appearance)")
+                let lastSetting = app.staticTexts["settings-server-host"]
+                for _ in 0..<24 where !(lastSetting.exists && lastSetting.isHittable)
+                    || lastSetting.frame.maxY > app.tabBars.firstMatch.frame.minY - 8 {
+                    app.swipeUp()
+                }
+                XCTAssertTrue(lastSetting.isHittable)
+                XCTAssertLessThanOrEqual(lastSetting.frame.maxY, app.tabBars.firstMatch.frame.minY - 8)
+                capture(app, "settings-bottom-clearance-accessibility-\(textSize)-\(appearance)")
+                app.tabBars.buttons["Agenda"].tap()
+                let indicator = app.buttons.matching(NSPredicate(
+                    format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@", "day-blocking-", "-demo-event-holiday")).firstMatch
+                XCTAssertTrue(indicator.waitForExistence(timeout: 10))
+                indicator.tap()
+                let choice = app.buttons["event-blocks-day-demo-event-holiday"]
+                for _ in 0..<6 where !(choice.exists && choice.isHittable) {
+                    app.swipeUp()
+                }
+                XCTAssertTrue(choice.isHittable)
+                XCTAssertEqual(choice.value as? String, "Automatic")
+                choice.tap()
+                let informational = app.buttons["Does not block"]
+                XCTAssertTrue(informational.waitForExistence(timeout: 5))
+                XCTAssertTrue(app.buttons["Automatic"].exists)
+                XCTAssertTrue(app.buttons["Blocks"].exists)
+                capture(app, "day-blocking-accessibility-menu-\(textSize)-\(appearance)")
+                app.buttons["Blocks"].tap()
+                XCTAssertEqual(choice.value as? String, "Blocks")
+                XCTAssertEqual(app.staticTexts["event-blocks-day-effective-demo-event-holiday"].label, "Blocks your day")
+                choice.tap()
+                XCTAssertTrue(informational.waitForExistence(timeout: 5))
+                informational.tap()
+                XCTAssertEqual(choice.value as? String, "Does not block")
+                XCTAssertEqual(app.staticTexts["event-blocks-day-effective-demo-event-holiday"].label, "Does not block scheduling")
+                choice.tap()
+                let automatic = app.buttons["Automatic"]
+                XCTAssertTrue(automatic.waitForExistence(timeout: 5))
+                automatic.tap()
+                XCTAssertEqual(choice.value as? String, "Automatic")
+                XCTAssertEqual(app.staticTexts["event-blocks-day-effective-demo-event-holiday"].label, "Blocks your day")
+                capture(app, "day-blocking-accessibility-restored-\(textSize)-\(appearance)")
+                app.terminate()
+            }
+        }
+    }
+
+    @MainActor
     func testEventDayBlockingOverrides() {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {
@@ -175,54 +277,75 @@ final class SmokeTests: XCTestCase {
             }
             XCTAssertTrue(showBirthdays.isEnabled)
             XCTAssertEqual(showBirthdays.value as? String, "0")
-            tapSwitch(showBirthdays)
+            tapSwitch(showBirthdays, in: app)
             app.tabBars.buttons["Agenda"].tap()
             let birthday = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Mom's birthday")).firstMatch
             XCTAssertTrue(birthday.waitForExistence(timeout: 10))
             birthday.tap()
-            let choice = app.buttons["event-blocks-day-demo-event-birthday"]
+            let choice = app.descendants(matching: .any).matching(identifier: "event-blocks-day-demo-event-birthday").firstMatch
             let effective = app.staticTexts["event-blocks-day-effective-demo-event-birthday"]
             XCTAssertTrue(choice.waitForExistence(timeout: 5))
             XCTAssertTrue(choice.isEnabled)
             XCTAssertEqual(choice.value as? String, "Automatic")
             XCTAssertEqual(effective.label, "Does not block scheduling")
             XCTAssertFalse(app.navigationBars.buttons["Edit"].exists)
-            choice.tap()
-            app.buttons["Blocks"].tap()
+            choice.descendants(matching: .any)["Blocks"].tap()
             XCTAssertEqual(choice.value as? String, "Blocks")
             XCTAssertEqual(effective.label, "Blocks your day")
             capture(app, "event-day-blocking-read-only-\(appearance)")
-            choice.tap()
-            app.buttons["Does not block"].tap()
-            XCTAssertEqual(effective.label, "Does not block scheduling")
-            choice.tap()
-            app.buttons["Automatic"].tap()
-            XCTAssertEqual(choice.value as? String, "Automatic")
             app.navigationBars.buttons["Done"].tap()
-            birthday.tap()
+            app.tabBars.buttons["Settings"].tap()
+            for _ in 0..<6 where !showBirthdays.isHittable { app.swipeUp() }
+            tapSwitch(showBirthdays, in: app)
+            XCTAssertEqual(showBirthdays.value as? String, "0")
+            app.tabBars.buttons["Agenda"].tap()
+            let hiddenBirthday = app.buttons.matching(NSPredicate(
+                format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@", "day-blocking-", "-demo-event-birthday")).firstMatch
+            XCTAssertTrue(hiddenBirthday.waitForExistence(timeout: 5))
+            hiddenBirthday.tap()
             XCTAssertTrue(choice.waitForExistence(timeout: 5))
+            XCTAssertEqual(choice.value as? String, "Blocks")
+            choice.descendants(matching: .any)["Does not block"].tap()
+            XCTAssertEqual(choice.value as? String, "Does not block")
+            XCTAssertEqual(effective.label, "Does not block scheduling")
+            choice.descendants(matching: .any)["Automatic"].tap()
             XCTAssertEqual(choice.value as? String, "Automatic")
+            XCTAssertTrue(app.staticTexts["event-blocking-reason-demo-event-birthday"].label.hasPrefix("Automatic:"))
+            capture(app, "hidden-informational-event-reset-\(appearance)")
+            choice.descendants(matching: .any)["Blocks"].tap()
+            XCTAssertEqual(choice.value as? String, "Blocks")
+            app.navigationBars.buttons["Done"].tap()
+            XCTAssertTrue(hiddenBirthday.waitForExistence(timeout: 5))
+            hiddenBirthday.tap()
+            XCTAssertTrue(choice.waitForExistence(timeout: 5))
+            XCTAssertEqual(choice.value as? String, "Blocks")
+            choice.descendants(matching: .any)["Automatic"].tap()
+            XCTAssertEqual(choice.value as? String, "Automatic")
+            XCTAssertEqual(effective.label, "Does not block scheduling")
+            XCTAssertTrue(app.staticTexts["event-blocking-reason-demo-event-birthday"].label.hasPrefix("Automatic:"))
+            capture(app, "reopened-hidden-event-reset-\(appearance)")
             app.navigationBars.buttons["Done"].tap()
 
             let ooo = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Marcus out of office")).firstMatch
             ooo.tap()
-            let oooChoice = app.buttons["event-blocks-day-demo-event-ooo"]
+            let oooChoice = app.descendants(matching: .any).matching(identifier: "event-blocks-day-demo-event-ooo").firstMatch
             let oooEffective = app.staticTexts["event-blocks-day-effective-demo-event-ooo"]
             XCTAssertTrue(oooChoice.waitForExistence(timeout: 5))
             XCTAssertEqual(oooChoice.value as? String, "Automatic")
+            XCTAssertEqual(oooEffective.label, "Does not block scheduling")
+            XCTAssertTrue(app.staticTexts["event-blocking-reason-demo-event-ooo"].label.contains("A teammate is out of office"))
+            oooChoice.descendants(matching: .any)["Blocks"].tap()
             XCTAssertEqual(oooEffective.label, "Blocks your day")
-            oooChoice.tap()
-            app.buttons["Does not block"].tap()
+            oooChoice.descendants(matching: .any)["Does not block"].tap()
             XCTAssertEqual(oooEffective.label, "Does not block scheduling")
             capture(app, "event-day-blocking-ooo-override-\(appearance)")
-            oooChoice.tap()
-            app.buttons["Automatic"].tap()
-            XCTAssertEqual(oooEffective.label, "Blocks your day")
+            oooChoice.descendants(matching: .any)["Automatic"].tap()
+            XCTAssertEqual(oooEffective.label, "Does not block scheduling")
             app.terminate()
 
             let timed = launch(appearance: appearance, sheet: "event")
             waitForText("Design review: scheduler v2", in: timed)
-            XCTAssertFalse(timed.buttons["event-blocks-day-demo-event-design"].exists)
+            XCTAssertFalse(timed.descendants(matching: .any)["event-blocks-day-demo-event-design"].exists)
             timed.terminate()
         }
     }
@@ -838,17 +961,17 @@ final class SmokeTests: XCTestCase {
             XCTAssertEqual(visible.value as? String, "1")
             XCTAssertEqual(blocking.value as? String, "1")
 
-            tapSwitch(blocking)
+            tapSwitch(blocking, in: app)
             XCTAssertEqual(blocking.value as? String, "0")
             XCTAssertEqual(visible.value as? String, "1")
             app.tabBars.buttons["Agenda"].tap()
             waitForText("Marcus out of office", in: app)
             app.tabBars.buttons["Settings"].tap()
 
-            tapSwitch(visible)
+            tapSwitch(visible, in: app)
             XCTAssertEqual(visible.value as? String, "0")
             XCTAssertEqual(blocking.value as? String, "0")
-            tapSwitch(blocking)
+            tapSwitch(blocking, in: app)
             XCTAssertEqual(blocking.value as? String, "1")
             XCTAssertEqual(visible.value as? String, "0")
             capture(app, "calendar-hidden-blocking-\(appearance)")
@@ -858,10 +981,10 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(event.waitForNonExistence(timeout: 5))
             app.tabBars.buttons["Settings"].tap()
 
-            tapSwitch(blocking)
+            tapSwitch(blocking, in: app)
             XCTAssertEqual(blocking.value as? String, "0")
             XCTAssertEqual(visible.value as? String, "0")
-            tapSwitch(visible)
+            tapSwitch(visible, in: app)
             XCTAssertEqual(visible.value as? String, "1")
             XCTAssertEqual(blocking.value as? String, "0")
             capture(app, "calendar-visible-informational-\(appearance)")
@@ -872,8 +995,17 @@ final class SmokeTests: XCTestCase {
     }
 
     @MainActor
-    private func tapSwitch(_ control: XCUIElement) {
+    private func tapSwitch(_ control: XCUIElement, in app: XCUIApplication) {
+        let tabBar = app.tabBars.firstMatch
+        for _ in 0..<6 where control.frame.maxY > tabBar.frame.minY - 8 {
+            app.swipeUp()
+        }
+        XCTAssertTrue(control.isHittable)
+        XCTAssertLessThanOrEqual(control.frame.maxY, tabBar.frame.minY - 8)
+        let previous = control.value as? String
+        XCTAssertTrue(previous == "0" || previous == "1")
         control.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        XCTAssertEqual(control.value as? String, previous == "1" ? "0" : "1")
     }
 
     @MainActor
@@ -951,7 +1083,7 @@ final class SmokeTests: XCTestCase {
     @MainActor
     private func launch(
         appearance: String = "light", tab: String = "agenda", sheet: String? = nil, mode: String = "list", largeText: Bool = false,
-        recordResourceOpens: Bool = false, recordSourceOpens: Bool = false, demoNow: Date? = nil
+        recordResourceOpens: Bool = false, recordSourceOpens: Bool = false, demoNow: Date? = nil, accessibilityText: Bool = false
     ) -> XCUIApplication {
         let app = XCUIApplication()
         // The agenda mode is always passed: the app remembers the last one in the App Group
@@ -963,7 +1095,8 @@ final class SmokeTests: XCTestCase {
         if recordSourceOpens { app.launchArguments += ["-uiRecordSourceOpens", "YES"] }
         app.launchArguments += [
             "-UIPreferredContentSizeCategoryName",
-            largeText ? "UICTContentSizeCategoryXXXL" : "UICTContentSizeCategoryL",
+            accessibilityText ? "UICTContentSizeCategoryAccessibilityXL"
+                : largeText ? "UICTContentSizeCategoryXXXL" : "UICTContentSizeCategoryL",
         ]
         app.launch()
         return app

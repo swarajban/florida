@@ -363,6 +363,17 @@ public final class AppDatabase: Sendable {
             try db.execute(sql: "DELETE FROM syncState WHERE key = 'cursor'")
         }
 
+        migrator.registerMigration("v10-automatic-day-blocking") { db in
+            try db.alter(table: "event") { t in
+                t.add(column: "autoBlocksDay", .boolean)
+                t.add(column: "blockingReason", .text)
+            }
+            try db.alter(table: "googleAccount") { t in
+                t.add(column: "displayName", .text)
+            }
+            try db.execute(sql: "DELETE FROM syncState WHERE key = 'cursor'")
+        }
+
         return migrator
     }
 }

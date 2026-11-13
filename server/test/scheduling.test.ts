@@ -121,6 +121,8 @@ function eventRow(id: string, over: Partial<EventRow> = {}): EventRow {
     endAt: new Date('2026-11-10T19:00:00Z'),
     allDay: false,
     blocksDay: null,
+    autoBlocksDay: null,
+    blockingReason: null,
     transparency: null,
     responseStatus: 'accepted',
     htmlLink: null,
@@ -317,6 +319,27 @@ describe('buildSchedulerInput', () => {
     expect(blockingEventInterval({ ...e, blocksDay: false }, LA)).toBeUndefined()
     expect(blockingEventInterval({ ...e, blocksDay: true }, LA)).toBeDefined()
     expect(blockingEventInterval({ ...e, eventType: 'default', blocksDay: null }, LA)).toBeUndefined()
+  })
+
+  it.each([
+    [null, null, 'outOfOffice', true],
+    [null, null, 'default', false],
+    [null, true, 'default', true],
+    [null, false, 'outOfOffice', false],
+    [false, true, 'outOfOffice', false],
+    [true, false, 'default', true],
+  ] as const)('prioritizes manual=%s, automatic=%s, then legacy type=%s', (blocksDay, autoBlocksDay, eventType, blocks) => {
+    const row = eventRow('stored', { allDay: true, blocksDay, autoBlocksDay, eventType, transparency: 'transparent',
+      startAt: new Date('2026-11-09T00:00:00Z'), endAt: new Date('2026-11-10T00:00:00Z') })
+    expect(blockingEventInterval(row, LA) !== undefined).toBe(blocks)
+    expect(blockingEventInterval({ ...row, responseStatus: 'declined' }, LA)).toBeUndefined()
+    expect(blockingEventInterval({ ...row, status: 'cancelled' }, LA)).toBeUndefined()
+    expect(blockingEventInterval({ ...row, deletedAt: NOW }, LA)).toBeUndefined()
+  })
+
+  it('does not apply automatic day judgments to timed events', () => {
+    expect(blockingEventInterval(eventRow('timed', { autoBlocksDay: false, blocksDay: false }), LA)).toBeDefined()
+    expect(blockingEventInterval(eventRow('timed', { autoBlocksDay: true, blocksDay: true, transparency: 'transparent' }), LA)).toBeUndefined()
   })
 
   it('unions duplicate busy copies without changing placements, capacity or unscheduled work', () => {

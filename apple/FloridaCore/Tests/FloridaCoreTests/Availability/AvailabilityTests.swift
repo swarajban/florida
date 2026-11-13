@@ -190,6 +190,26 @@ import Testing
         #expect(!Availability.eventBlocksTime(event))
     }
 
+    @Test func automaticAllDayJudgmentsAndManualPrecedenceProtectSharedAvailability() {
+        for automatic in [false, true] {
+            for manual: Bool? in [nil, false, true] {
+                for outOfOffice in [false, true] {
+                    var event = Self.event()
+                    event.allDay = true
+                    event.startAt = Self.date("2026-11-12T00:00:00Z")
+                    event.endAt = Self.date("2026-11-13T00:00:00Z")
+                    event.eventType = outOfOffice ? "outOfOffice" : "default"
+                    event.transparency = "transparent"
+                    event.autoBlocksDay = automatic
+                    event.blocksDay = manual
+                    let blocks = manual ?? automatic
+                    #expect(Availability.eventBlocksTime(event) == blocks)
+                    #expect(Self.free(events: [event]) == (blocks ? [] : Self.free()))
+                }
+            }
+        }
+    }
+
     @Test func allDayBlockingUsesTheRoutineDateAcrossDaylightSavingNotTheScheduleZone() {
         var event = Self.event()
         event.allDay = true

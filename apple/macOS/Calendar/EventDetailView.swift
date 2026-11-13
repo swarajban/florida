@@ -12,7 +12,16 @@ import SwiftUI
 /// monitor, and each control shows its key.
 struct EventDetailView: View {
     @Environment(AppModel.self) private var model
-    let event: CalendarEvent
+    @State private var observedEvent: CalendarEvent?
+    private let initialEvent: CalendarEvent
+
+    init(event: CalendarEvent) {
+        initialEvent = event
+    }
+
+    private var event: CalendarEvent {
+        observedEvent ?? model.storedVersion(of: initialEvent)
+    }
 
     var body: some View {
         let resources = event.resources
@@ -25,6 +34,18 @@ struct EventDetailView: View {
         .fixedSize(horizontal: false, vertical: true)
         .background(KeyEventMonitorView(model: model, isEventPopover: true))
         .onChange(of: resources) { model.eventResourceKeys = nil }
+        .task(id: initialEvent.id) {
+            guard let database = model.database else { return }
+            do {
+                for try await row in database.observeEvent(id: initialEvent.id) {
+                    observedEvent = row
+                }
+            } catch {
+                if !Task.isCancelled {
+                    model.statusMessage = "Could not read the event: \(error.localizedDescription)"
+                }
+            }
+        }
     }
 
     private func detailContent(_ resources: [EventResource]) -> some View {
@@ -33,26 +54,27 @@ struct EventDetailView: View {
             if event.allDay {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Picker("Blocks my day", selection: Binding(
-                            get: { event.blocksDay },
-                            set: { model.setBlocksDay(event, blocksDay: $0) })) {
-                            Text("Automatic").tag(nil as Bool?)
-                            Text("Blocks").tag(true as Bool?)
-                            Text("Does not block").tag(false as Bool?)
-                        }
-                        .pickerStyle(.menu)
-                        .accessibilityIdentifier("event-blocks-day-\(event.id)")
-                        .accessibilityValue(event.blocksDay.map { $0 ? "Blocks" : "Does not block" } ?? "Automatic")
+                        Text("Blocks my day")
+                        Spacer()
                         Self.keycap(for: .cycleEventDayBlocking)
                     }
                     .help(Self.hint(for: .cycleEventDayBlocking))
+                    DayBlockingControl(
+                        blocksDay: Binding(
+                            get: { model.storedVersion(of: event).blocksDay },
+                            set: { model.setBlocksDay(event, blocksDay: $0) }),
+                        identifier: "event-blocks-day-\(event.id)")
                     let calendarBlocks = model.calendarsById[event.calendarId]?.blocksScheduling ?? true
-                    Text(calendarBlocks && event.isVisible && (event.blocksDay ?? event.isOutOfOffice)
+                    Text(AllDayBlocking.isEffective(event, calendarBlocksScheduling: calendarBlocks)
                         ? "Blocks your day" : "Does not block scheduling")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("event-blocks-day-effective-\(event.id)")
-                    Text("Automatic blocks only out-of-office events. Florida only; this occurrence only. Google Calendar is unchanged.")
+                    Text(AllDayBlocking.explanation(for: event))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("event-blocking-reason-\(event.id)")
+                    Text("Florida only; this occurrence only. Google Calendar is unchanged.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -295,13 +317,17 @@ extension View {
     /// `anchor` in this view. Each calendar surface attaches it where the event is drawn; pass nil
     /// when the open event is not drawn here.
     func eventDetailPopover(
-        _ model: AppModel, eventId: String?, anchor: PopoverAttachmentAnchor = .rect(.bounds)
+        _ model: AppModel, eventId: String?, anchor: PopoverAttachmentAnchor = .rect(.bounds), indicatorDay: Date? = nil
     ) -> some View {
         let isPresented = Binding(
-            get: { eventId != nil && model.eventDetailID == eventId },
-            set: { if !$0, model.eventDetailID == eventId { model.eventDetailID = nil } })
+            get: { eventId != nil && model.eventDetailID == eventId && model.eventDetailIndicatorDay == indicatorDay },
+            set: {
+                if !$0, model.eventDetailID == eventId, model.eventDetailIndicatorDay == indicatorDay {
+                    model.eventDetailID = nil
+                }
+            })
         return popover(isPresented: isPresented, attachmentAnchor: anchor, arrowEdge: .trailing) {
-            if let event = model.events.first(where: { $0.id == eventId }) {
+            if let eventId, let event = model.eventForDetail(id: eventId) {
                 EventDetailView(event: event)
                     .environment(model)
             }

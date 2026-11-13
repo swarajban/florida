@@ -14,13 +14,13 @@ import {
   insertEvent,
   listCalendars,
   listEvents,
-  mapEvent,
   patchEvent,
   refreshAccessToken,
   stopChannel,
   watchEvents,
 } from './client.js'
 import type { GoogleCalendarListEntry, GoogleEvent, GoogleEventWrite, ListEventsParams, OAuthConfig, Tokens } from './client.js'
+import { judgedGoogleEvent, learnAccountProfiles, refreshAllDayJudgments } from './all-day-state.js'
 
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
@@ -139,6 +139,7 @@ export class GoogleSync implements CalendarSyncService {
           accountId: account.id,
           googleId: entry.id,
           selected: selectedByDefault(entry),
+          blocksScheduling: selectedByDefault(entry),
           createdAt: now,
           ...calendarFields,
         })
@@ -191,14 +192,18 @@ export class GoogleSync implements CalendarSyncService {
     const seen = new Set<string>()
     let pageToken: string | undefined
     let nextSyncToken: string | undefined
+    const { profiles } = await learnAccountProfiles(this.db, [], new Date())
+    let learned = false
 
     do {
       const params: ListEventsParams = syncToken === null ? { timeMin, timeMax } : { syncToken }
       if (pageToken !== undefined) params.pageToken = pageToken
       const page = await listEvents(token, calendar.googleId, params)
+      const names = await learnAccountProfiles(this.db, page.items, new Date(), profiles)
+      learned ||= names.learned
       for (const item of page.items) {
         seen.add(item.id)
-        const row = mapEvent(calendar.id, item)
+        const row = judgedGoogleEvent(calendar, item, profiles, new Date())
         await this.db
           .insert(events)
           .values({ id: randomUUID(), ...row })
@@ -226,6 +231,10 @@ export class GoogleSync implements CalendarSyncService {
       .update(calendars)
       .set({ syncToken: nextSyncToken ?? syncToken, lastSyncedAt: completedAt, updatedAt: completedAt })
       .where(eq(calendars.id, calendar.id))
+    const latest = await learnAccountProfiles(this.db, [], new Date())
+    if (learned || latest.profiles.some((p) => p.displayName !== profiles.find((cached) => cached.id === p.id)?.displayName)) {
+      await refreshAllDayJudgments(this.db, new Date())
+    }
   }
 
   /** Creates a push channel when the calendar has none or the current one expires within 24 h. */

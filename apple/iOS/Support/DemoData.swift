@@ -50,12 +50,13 @@ enum DemoData {
         func event(
             _ id: String, _ calendarId: String, _ summary: String, _ start: Date, _ end: Date,
             allDay: Bool = false, location: String? = nil, meet: String? = nil, series: String? = nil,
-            eventType: String? = nil
+            eventType: String? = nil, autoBlocksDay: Bool? = nil, blockingReason: String? = nil
         ) -> CalendarEvent {
             var event = CalendarEvent(
                 id: id, calendarId: calendarId, googleId: "g-\(id)", summary: summary, location: location,
                 startAt: start, endAt: end, allDay: allDay, responseStatus: "accepted",
-                htmlLink: "https://calendar.google.com/calendar/event?eid=\(id)", eventType: eventType, updatedAt: now)
+                htmlLink: "https://calendar.google.com/calendar/event?eid=\(id)", eventType: eventType, updatedAt: now,
+                autoBlocksDay: autoBlocksDay, blockingReason: blockingReason)
             event.conferenceUrl = meet
             event.recurringEventId = series
             return event
@@ -141,10 +142,15 @@ enum DemoData {
                                             location: "Room 4 / Meet", meet: "https://meet.google.com/abc-defg-hij")),
                 event("demo-event-lunch", personal, "Lunch with Priya", at(0, 12, 30), at(0, 13, 30), location: "Souvla"),
                 event("demo-event-1on1", work, "1:1 with Sam", at(0, 14, 30), at(0, 15)),
-                event("demo-event-ooo", ooo, "Marcus out of office", utcDay(0), utcDay(1), allDay: true, eventType: "outOfOffice"),
+                event("demo-event-ooo", ooo, "Marcus out of office", utcDay(0), utcDay(1), allDay: true, eventType: "outOfOffice",
+                      autoBlocksDay: false, blockingReason: "A teammate is out of office, not you."),
                 DemoData.designReview(event("demo-event-offsite", work, "Infra offsite", utcDay(-1), utcDay(2), allDay: true,
                                             location: "Half Moon Bay", meet: "https://meet.google.com/abc-defg-hij")),
-                event("demo-event-birthday", birthdays, "Mom's birthday", utcDay(0), utcDay(1), allDay: true),
+                event("demo-event-birthday", birthdays, "Mom's birthday", utcDay(0), utcDay(1), allDay: true,
+                      autoBlocksDay: false, blockingReason: "Birthdays are informational."),
+                event("demo-event-holiday", "demo-cal-us-holidays", "Public holiday", utcDay(0), utcDay(1), allDay: true,
+                      location: "https://example.com/holiday-details",
+                      autoBlocksDay: true, blockingReason: "US public holiday on your calendar."),
                 event("demo-event-arch", work, "Architecture sync", at(1, 13), at(1, 14)),
             ],
             placements: [
@@ -171,9 +177,11 @@ enum DemoData {
             ],
             accounts: [
                 GoogleAccount(id: "demo-work", email: "demo@sempre-health.com", label: "work", updatedAt: now),
-                GoogleAccount(id: "demo-personal", email: "demo@personal.example", label: "personal", updatedAt: now),
+                GoogleAccount(id: "demo-personal", email: "demo@personal.example", label: "personal", updatedAt: now, displayName: "Demo Person"),
             ],
             calendars: [
+                CalendarInfo(id: "demo-cal-us-holidays", accountId: "demo-personal", googleId: "en.usa#holiday@group.v.calendar.google.com",
+                    summary: "US Holidays", accessRole: "reader", selected: false, blocksScheduling: true, updatedAt: now),
                 CalendarInfo(id: work, accountId: "demo-work", googleId: "demo@sempre-health.com", summary: "demo@sempre-health.com", color: "#3B82F6", accessRole: "owner", selected: true, updatedAt: now),
                 CalendarInfo(id: ooo, accountId: "demo-work", googleId: "g-ooo", summary: "Team OOO", color: "#F59E0B", accessRole: "reader", selected: true, updatedAt: now),
                 CalendarInfo(id: personal, accountId: "demo-personal", googleId: "demo@personal.example", summary: "demo@personal.example", color: "#10B981", accessRole: "owner", selected: true, updatedAt: now),

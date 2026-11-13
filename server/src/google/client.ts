@@ -1,4 +1,4 @@
-import type { AttendeeResponseStatus, EventAttendee, EventOrganizer, NewEventRow } from '../db/schema.js'
+import type { AttendeeResponseStatus, EventAttendee, EventOrganizer, EventRow } from '../db/schema.js'
 
 export const SCOPES = ['https://www.googleapis.com/auth/calendar']
 
@@ -358,7 +358,7 @@ export async function deleteEvent(accessToken: string, calendarId: string, event
  * Maps a Google event to our events row. Cancelled events become tombstones. `updatedAt` is the
  * server's write time rather than Google's `updated`, so `/api/sync?since=` cursors see every change.
  */
-export function mapEvent(calendarId: string, e: GoogleEvent, now: Date = new Date()): Omit<NewEventRow, 'id' | 'blocksDay'> {
+export function mapEvent(calendarId: string, e: GoogleEvent, now: Date = new Date()): Omit<EventRow, 'id' | 'blocksDay' | 'autoBlocksDay' | 'blockingReason'> {
   const allDay = e.start?.date !== undefined
   const status = e.status ?? 'confirmed'
   const cancelled = status === 'cancelled'

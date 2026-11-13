@@ -119,7 +119,7 @@ describe('Florida-only event annotation API', () => {
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       })
       await db.insert(googleAccounts).values({ id: 'account', email: 'me@example.com', label: 'me', refreshTokenEnc: 'unused' })
-      await db.insert(calendars).values({ id: 'cal', accountId: 'account', googleId: 'cal', summary: 'Holidays', accessRole: 'reader', selected: false })
+      await db.insert(calendars).values({ id: 'cal', accountId: 'account', googleId: 'me@example.com', summary: 'Holidays', accessRole: 'reader', selected: false })
       const occurrence = { calendarId: 'cal', status: 'confirmed', allDay: true, recurringEventId: 'annual',
         startAt: new Date('2026-11-09T00:00:00Z'), endAt: new Date('2026-11-10T00:00:00Z') }
       await db.insert(events).values([

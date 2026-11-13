@@ -20,7 +20,7 @@ public enum Availability {
     public static func eventBlocksTime(_ event: CalendarEvent) -> Bool {
         guard event.isVisible, let start = event.startAt, let end = event.endAt, start < end
         else { return false }
-        if event.allDay { return event.blocksDay ?? event.isOutOfOffice }
+        if event.allDay { return AllDayBlocking.isEffective(event, calendarBlocksScheduling: true) }
         if event.eventType == "focusTime" || event.eventType == "workingLocation" { return false }
         return event.isOutOfOffice || event.transparency != "transparent"
     }

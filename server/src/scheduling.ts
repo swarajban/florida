@@ -114,7 +114,7 @@ export interface SchedulerSources {
 export function blockingEventInterval(event: EventRow, timeZone: string): Interval | undefined {
   if (event.deletedAt !== null || event.status === 'cancelled' || event.responseStatus === 'declined') return undefined
   if (event.allDay) {
-    if (!(event.blocksDay ?? event.eventType === 'outOfOffice')) return undefined
+    if (!(event.blocksDay ?? event.autoBlocksDay ?? event.eventType === 'outOfOffice')) return undefined
   } else {
     if (event.eventType === 'focusTime' || event.eventType === 'workingLocation') return undefined
     if (event.eventType !== 'outOfOffice' && event.transparency === 'transparent') return undefined
@@ -141,7 +141,7 @@ export function blockingEventInterval(event: EventRow, timeZone: string): Interv
  * the suggestions for optional blocks. Tasks that are deleted, completed, or belong to a
  * deleted category are skipped. Busy time is live, not-declined timed opaque events and
  * out-of-office, excluding focus time and working locations. All-day dates use their manual
- * override, otherwise only out-of-office blocks, in the routine's zone, from
+ * override, then their stored automatic judgment, falling back to out-of-office until backfilled, in the routine's zone, from
  * the Sunday of the current week to the horizon: the earlier days decide where this week's
  * commitments landed (a gym session that moved off a booked Tuesday morning stays moved once the
  * meeting is over).

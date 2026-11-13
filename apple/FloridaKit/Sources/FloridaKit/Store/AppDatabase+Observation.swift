@@ -87,6 +87,10 @@ extension AppDatabase {
         }
     }
 
+    public func observeEvent(id: String) -> AsyncValueObservation<CalendarEvent?> {
+        observe { try CalendarEvent.fetchOne($0, key: id) }
+    }
+
     /// The agenda for the calendar day containing `day`, as `agenda(for:calendar:)` returns it,
     /// re-yielded whenever events, placements, tasks, the routine or projects change.
     public func observeAgenda(for day: Date, calendar: Calendar) -> AsyncValueObservation<DayAgenda> {

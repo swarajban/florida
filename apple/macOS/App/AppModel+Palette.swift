@@ -41,7 +41,7 @@ extension AppModel {
         case .fit(_, let minutes):
             palette.taskResults = FuzzyMatch.filter(tasksThatFit(minutes: minutes), query: palette.query, label: \.title)
         case .eventResources(let eventId):
-            let resources = events.first { $0.id == eventId }?.resources ?? []
+            let resources = eventForDetail(id: eventId)?.resources ?? []
             palette.resourceResults = FuzzyMatch.filter(resources, query: palette.query, label: \.title)
         case .quickAdd, .command:
             break

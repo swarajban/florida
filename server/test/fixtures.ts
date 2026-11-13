@@ -56,6 +56,7 @@ export class FakeSync implements CalendarSyncService {
     return {
       id: `account-${label}`,
       email: `${label}@example.com`,
+      displayName: null,
       label,
       refreshTokenEnc: 'enc',
       accessToken: null,

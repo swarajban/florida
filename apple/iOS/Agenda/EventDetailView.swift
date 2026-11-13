@@ -15,7 +15,14 @@ struct EventDetailView: View {
     #if DEBUG
     @State private var recordedResourceURL: URL?
     #endif
+    @State private var observedEvent: CalendarEvent?
+    @State private var presentationDetent: PresentationDetent
     let event: CalendarEvent
+
+    init(event: CalendarEvent) {
+        self.event = event
+        _presentationDetent = State(initialValue: event.allDay ? .large : .medium)
+    }
 
     var body: some View {
         let event = current
@@ -49,6 +56,30 @@ struct EventDetailView: View {
                     }
                 }
 
+                if event.allDay {
+                    Section {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Blocks my day")
+                                .font(.subheadline)
+                            DayBlockingControl(
+                                blocksDay: Binding(
+                                    get: { model.storedVersion(of: event).blocksDay },
+                                    set: { model.setBlocksDay(event, blocksDay: $0) }),
+                                identifier: "event-blocks-day-\(event.id)")
+                        }
+                        let calendarBlocks = model.calendarInfo(id: event.calendarId)?.blocksScheduling ?? true
+                        Text(AllDayBlocking.isEffective(event, calendarBlocksScheduling: calendarBlocks)
+                            ? "Blocks your day" : "Does not block scheduling")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("event-blocks-day-effective-\(event.id)")
+                    } footer: {
+                        Text(AllDayBlocking.explanation(for: event))
+                            .accessibilityIdentifier("event-blocking-reason-\(event.id)")
+                        Text("Florida only; this occurrence only. Google Calendar is unchanged.")
+                    }
+                }
+
                 if !resources.isEmpty {
                     Section("Resources") {
                         ForEach(resources) { resource in
@@ -75,29 +106,6 @@ struct EventDetailView: View {
                             .accessibilityHint("Opens in your browser or the linked app")
                             .accessibilityIdentifier("event-resource-\(resource.id)")
                         }
-                    }
-                }
-
-                if event.allDay {
-                    Section {
-                        Picker("Blocks my day", selection: Binding(
-                            get: { event.blocksDay },
-                            set: { model.setBlocksDay(event, blocksDay: $0) })) {
-                            Text("Automatic").tag(nil as Bool?)
-                            Text("Blocks").tag(true as Bool?)
-                            Text("Does not block").tag(false as Bool?)
-                        }
-                        .pickerStyle(.menu)
-                        .accessibilityIdentifier("event-blocks-day-\(event.id)")
-                        .accessibilityValue(event.blocksDay.map { $0 ? "Blocks" : "Does not block" } ?? "Automatic")
-                        let calendarBlocks = model.calendarInfo(id: event.calendarId)?.blocksScheduling ?? true
-                        Text(calendarBlocks && event.isVisible && (event.blocksDay ?? event.isOutOfOffice)
-                            ? "Blocks your day" : "Does not block scheduling")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .accessibilityIdentifier("event-blocks-day-effective-\(event.id)")
-                    } footer: {
-                        Text("Automatic blocks only out-of-office events. Florida only; this occurrence only. Google Calendar is unchanged.")
                     }
                 }
 
@@ -194,13 +202,24 @@ struct EventDetailView: View {
                 EventEditorView(event: current, isNew: false)
             }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.medium, .large], selection: $presentationDetent)
+        .task(id: event.id) {
+            guard let database = model.database else { return }
+            do {
+                for try await row in database.observeEvent(id: event.id) {
+                    observedEvent = row
+                }
+            } catch {
+                if !Task.isCancelled {
+                    model.lastError = "Could not read the event: \(error.localizedDescription)"
+                }
+            }
+        }
     }
 
-    /// The live row when the agenda still has it (a sync may have changed it), else the store's
-    /// copy (a declined or moved event leaves the day while staying in the store), else the copy given.
+    /// Observed independently of visibility and blocking lists; the store supplies the first frame.
     private var current: CalendarEvent {
-        model.agenda?.events.first { $0.id == event.id } ?? model.storedVersion(of: event)
+        observedEvent ?? model.storedVersion(of: event)
     }
 
     private func openResource(_ resource: EventResource) {

@@ -31,6 +31,7 @@ final class AppModel {
     private(set) var openTasks: [TaskItem] = []
     private(set) var placements: [Placement] = []
     private(set) var events: [CalendarEvent] = []
+    private(set) var blockingAllDayEvents: [CalendarEvent] = []
     private(set) var accounts: [GoogleAccount] = []
     private(set) var calendars: [CalendarInfo] = []
     private(set) var pendingWriteCount = 0
@@ -108,9 +109,13 @@ final class AppModel {
     var editorAIText: String?
     /// The event whose detail popover is open.
     var eventDetailID: String? {
-        didSet { eventResourceKeys = nil }
+        didSet {
+            eventResourceKeys = nil
+            eventDetailIndicatorDay = nil
+        }
     }
     var eventResourceKeys: JumpLabels<String>?
+    var eventDetailIndicatorDay: Date?
     /// The event open in the editor sheet (a stored one, or the draft of a new one).
     var eventEditor: EventEditorRequest?
     /// The event whose delete is waiting for confirmation: nothing undoes an event delete.
@@ -193,6 +198,7 @@ final class AppModel {
     @ObservationIgnored var backgroundTasks: [Task<Void, Never>] = []
     @ObservationIgnored private var observers: [Task<Void, Never>] = []
     @ObservationIgnored private var eventsObserver: Task<Void, Never>?
+    @ObservationIgnored private var blockingEventsObserver: Task<Void, Never>?
     @ObservationIgnored var agendaObserver: Task<Void, Never>?
     @ObservationIgnored var clockTask: Task<Void, Never>?
     @ObservationIgnored private var localeObserver: (any NSObjectProtocol)?
@@ -302,7 +308,10 @@ final class AppModel {
             tasksById: tasksById,
             categoriesById: categoriesById, calendarsById: calendarsById, schedules: activeSchedules,
             options: layoutOptions, lineLimit: viewMode == .month ? MonthGridView.maxLinesPerCell : nil,
-            now: Date(), calendar: calendar)
+            now: Date(), calendar: calendar,
+            reservedLinesByDay: viewMode == .month ? Dictionary(uniqueKeysWithValues: visibleDays.map {
+                ($0, AllDayBlocking.events(on: $0, from: blockingAllDayEvents, calendar: calendar).count)
+            }) : [:])
         // A dropped event has arrived in its new slot: the drag's stand-in is no longer needed.
         if let drag = gridDrag, drag.isDropped, eventMove == nil,
            !gridLayout.blocksByDay.joined().contains(where: drag.applies) {
@@ -405,6 +414,7 @@ final class AppModel {
     /// keeps them current.
     private func restartEventsObserver() {
         eventsObserver?.cancel()
+        blockingEventsObserver?.cancel()
         guard let database, let range = loadedRange else { return }
         if let current = try? database.events(in: range) {
             events = current
@@ -412,6 +422,13 @@ final class AppModel {
         eventsObserver = observe(database.observeEvents(in: range)) { model, events in
             model.events = events
             model.rebuildLayout()
+        }
+        if let current = try? database.blockingAllDayEvents(in: range, calendar: calendar) {
+            blockingAllDayEvents = current
+        }
+        blockingEventsObserver = observe(database.observeBlockingAllDayEvents(in: range, calendar: calendar)) { model, events in
+            model.blockingAllDayEvents = events
+            if model.viewMode == .month { model.rebuildLayout() }
         }
     }
 

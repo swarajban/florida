@@ -11,6 +11,8 @@ struct DayGridHeader: View {
     let columnWidth: CGFloat
     let pinnedGutterX: CGFloat
     let calendar: Calendar
+    let blockingByDay: [Date: [CalendarEvent]]
+    let onSelect: (CalendarEvent) -> Void
 
     var body: some View {
         HStack(spacing: 0) {
@@ -34,11 +36,14 @@ struct DayGridHeader: View {
                                     Circle().fill(FloridaStyle.ink)
                                 }
                             }
+                        DayBlockingIndicator(
+                            events: blockingByDay[day] ?? [], day: day, calendar: calendar,
+                            compact: true, onSelect: onSelect)
                     }
                     .frame(width: columnWidth)
                     .padding(.vertical, 4)
                     .offset(x: CGFloat(days.firstIndex(of: day) ?? 0) * columnWidth)
-                    .accessibilityElement(children: .ignore)
+                    .accessibilityElement(children: .contain)
                     .accessibilityLabel(day.formatted(.dateTime.weekday(.wide).month(.wide).day()))
                     .accessibilityValue(isToday ? "Today" : "")
                 }

@@ -245,6 +245,72 @@ final class SmokeTests: XCTestCase {
     }
 
     @MainActor
+    func testHiddenProtectedDayAndStoredReason() {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-demoData", "YES", "-uiAppearance", appearance, "-uiRecordResourceOpens", "YES"]
+            app.launch()
+            let indicator = app.buttons.matching(NSPredicate(
+                format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@", "day-blocking-", "-demo-event-holiday")).firstMatch
+            XCTAssertTrue(indicator.waitForExistence(timeout: 15))
+            XCTAssertTrue(indicator.label.contains("Public holiday"))
+            XCTAssertEqual(indicator.value as? String, "Automatic: US public holiday on your calendar.")
+            capture(app, "protected-hidden-day-header-mac-\(appearance)")
+            indicator.click()
+            let choice = app.descendants(matching: .any).matching(identifier: "event-blocks-day-demo-event-holiday").firstMatch
+            let reason = app.descendants(matching: .any)
+                .matching(identifier: "event-blocking-reason-demo-event-holiday").firstMatch
+            XCTAssertTrue(choice.waitForExistence(timeout: 5))
+            XCTAssertEqual(choice.value as? String, "Automatic")
+            XCTAssertTrue((reason.value as? String ?? "").contains("Automatic: US public holiday"))
+            choice.descendants(matching: .any)["Does not block"].click()
+            XCTAssertTrue(reason.waitForExistence(timeout: 5))
+            XCTAssertTrue((reason.value as? String ?? "").contains("Manual override: Does not block"))
+            XCTAssertTrue((reason.value as? String ?? "").contains("Automatic: US public holiday"))
+            capture(app, "protected-day-manual-reason-mac-\(appearance)")
+            choice.descendants(matching: .any)["Automatic"].click()
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(indicator.waitForExistence(timeout: 5))
+            app.typeKey("f", modifierFlags: [])
+            XCTAssertFalse(app.staticTexts["event-jump-demo-event-holiday"].exists)
+            app.typeKey(.escape, modifierFlags: [])
+            app.typeKey("m", modifierFlags: .shift)
+            XCTAssertTrue(indicator.waitForExistence(timeout: 5))
+            XCTAssertTrue(indicator.isHittable)
+            capture(app, "protected-hidden-day-month-mac-\(appearance)")
+            indicator.click()
+            XCTAssertTrue(choice.waitForExistence(timeout: 5))
+            XCTAssertTrue((reason.value as? String ?? "").contains("Automatic: US public holiday"))
+            choice.descendants(matching: .any)["Does not block"].click()
+            XCTAssertTrue(reason.waitForExistence(timeout: 5))
+            XCTAssertTrue((reason.value as? String ?? "").contains("Manual override: Does not block"))
+            XCTAssertTrue((reason.value as? String ?? "").contains("Automatic: US public holiday"))
+            choice.descendants(matching: .any)["Automatic"].click()
+            XCTAssertTrue(indicator.waitForExistence(timeout: 5))
+            XCTAssertTrue((reason.value as? String ?? "").contains("Automatic: US public holiday"))
+            let resource = app.buttons["event-resource-https://example.com/holiday-details"]
+            XCTAssertTrue(resource.waitForExistence(timeout: 5))
+            XCTAssertEqual(resource.value as? String, "1")
+            app.typeKey("1", modifierFlags: [])
+            XCTAssertTrue(choice.waitForNonExistence(timeout: 5))
+            XCTAssertTrue(app.staticTexts["Opened resource: https://example.com/holiday-details"].exists)
+            indicator.click()
+            XCTAssertTrue(choice.waitForExistence(timeout: 5))
+            app.typeKey("g", modifierFlags: [])
+            app.typeKey("r", modifierFlags: [])
+            let resourceInput = app.textFields["Open an event resource…"]
+            XCTAssertTrue(resourceInput.waitForExistence(timeout: 5))
+            resourceInput.typeText("example")
+            XCTAssertTrue(app.descendants(matching: .any)["event-resource-result-https://example.com/holiday-details"].firstMatch.exists)
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(resourceInput.waitForNonExistence(timeout: 5))
+            XCTAssertTrue(app.staticTexts["Opened resource: https://example.com/holiday-details"].exists)
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testEventDayBlockingOverrides() throws {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {
@@ -275,7 +341,7 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(birthday.waitForExistence(timeout: 5))
             let keys = try XCTUnwrap(birthday.value as? String).lowercased()
             for key in keys { app.typeKey(String(key), modifierFlags: []) }
-            let choice = app.popUpButtons["event-blocks-day-demo-event-birthday"]
+            let choice = app.descendants(matching: .any).matching(identifier: "event-blocks-day-demo-event-birthday").firstMatch
             let effective = app.staticTexts["event-blocks-day-effective-demo-event-birthday"]
             XCTAssertTrue(choice.waitForExistence(timeout: 5))
             XCTAssertTrue(choice.isEnabled)
@@ -287,12 +353,34 @@ final class SmokeTests: XCTestCase {
                 app.typeKey("b", modifierFlags: [])
                 XCTAssertEqual(choice.value as? String, expected)
             }
-            choice.click()
-            app.menuItems["Blocks"].click()
+            choice.descendants(matching: .any)["Blocks"].click()
             XCTAssertEqual(effective.value as? String, "Blocks your day")
             capture(app, "event-day-blocking-read-only-mac-\(appearance)")
-            choice.click()
-            app.menuItems["Automatic"].click()
+            app.typeKey(.escape, modifierFlags: [])
+            app.typeKey(",", modifierFlags: .command)
+            XCTAssertTrue(calendars.waitForExistence(timeout: 5))
+            calendars.click()
+            showBirthdays.click()
+            XCTAssertEqual((showBirthdays.value as? NSNumber)?.boolValue, false)
+            app.typeKey("w", modifierFlags: .command)
+            let hiddenBirthday = app.buttons.matching(NSPredicate(
+                format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@", "day-blocking-", "-demo-event-birthday")).firstMatch
+            XCTAssertTrue(hiddenBirthday.waitForExistence(timeout: 5))
+            hiddenBirthday.click()
+            XCTAssertTrue(choice.waitForExistence(timeout: 5))
+            XCTAssertEqual(choice.value as? String, "Blocks")
+            choice.descendants(matching: .any)["Does not block"].click()
+            XCTAssertEqual(choice.value as? String, "Does not block")
+            XCTAssertEqual(effective.value as? String, "Does not block scheduling")
+            choice.descendants(matching: .any)["Automatic"].click()
+            XCTAssertEqual(choice.value as? String, "Automatic")
+            let birthdayReason = app.staticTexts["event-blocking-reason-demo-event-birthday"]
+            XCTAssertTrue((birthdayReason.value as? String ?? "").hasPrefix("Automatic:"))
+            capture(app, "hidden-informational-event-reset-mac-\(appearance)")
+            choice.descendants(matching: .any)["Blocks"].click()
+            XCTAssertEqual(choice.value as? String, "Blocks")
+            choice.descendants(matching: .any)["Automatic"].click()
+            XCTAssertEqual(choice.value as? String, "Automatic")
             app.typeKey(.escape, modifierFlags: [])
 
             app.typeKey("f", modifierFlags: [])
@@ -300,18 +388,19 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(ooo.waitForExistence(timeout: 5))
             let oooKeys = try XCTUnwrap(ooo.value as? String).lowercased()
             for key in oooKeys { app.typeKey(String(key), modifierFlags: []) }
-            let oooChoice = app.popUpButtons["event-blocks-day-demo-event-ooo"]
+            let oooChoice = app.descendants(matching: .any).matching(identifier: "event-blocks-day-demo-event-ooo").firstMatch
             let oooEffective = app.staticTexts["event-blocks-day-effective-demo-event-ooo"]
             XCTAssertTrue(oooChoice.waitForExistence(timeout: 5))
             XCTAssertEqual(oooChoice.value as? String, "Automatic")
+            XCTAssertEqual(oooEffective.value as? String, "Does not block scheduling")
+            XCTAssertTrue((app.staticTexts["event-blocking-reason-demo-event-ooo"].value as? String ?? "").contains("A teammate is out of office"))
+            oooChoice.descendants(matching: .any)["Blocks"].click()
             XCTAssertEqual(oooEffective.value as? String, "Blocks your day")
-            oooChoice.click()
-            app.menuItems["Does not block"].click()
+            oooChoice.descendants(matching: .any)["Does not block"].click()
             XCTAssertEqual(oooEffective.value as? String, "Does not block scheduling")
             capture(app, "event-day-blocking-ooo-override-mac-\(appearance)")
-            oooChoice.click()
-            app.menuItems["Automatic"].click()
-            XCTAssertEqual(oooEffective.value as? String, "Blocks your day")
+            oooChoice.descendants(matching: .any)["Automatic"].click()
+            XCTAssertEqual(oooEffective.value as? String, "Does not block scheduling")
             app.terminate()
         }
     }

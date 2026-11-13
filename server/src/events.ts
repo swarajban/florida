@@ -5,7 +5,8 @@ import { z } from 'zod'
 import type { Db } from './db/client.js'
 import { calendars, events } from './db/schema.js'
 import type { CalendarRow, EventRow } from './db/schema.js'
-import { GoogleApiError, mapEvent } from './google/client.js'
+import { GoogleApiError } from './google/client.js'
+import { automaticDayFields, judgedGoogleEvent, learnAccountProfiles, refreshAllDayJudgments } from './google/all-day-state.js'
 import type { GoogleEvent, GoogleEventTimeWrite, GoogleEventWrite } from './google/client.js'
 import { FULL_SYNC_FUTURE_DAYS, FULL_SYNC_PAST_DAYS } from './google/sync.js'
 import type { CalendarSyncService } from './google/sync.js'
@@ -59,7 +60,10 @@ export async function setEventBlocksDay(db: Db, id: string, blocksDay: boolean |
     const [current] = await tx.select().from(events).where(eq(events.id, id)).for('update')
     if (current === undefined || current.deletedAt !== null) throw notFound(`event ${id}`)
     if (!current.allDay) throw badRequest('Blocks my day is only available for all-day events')
-    const [event] = await tx.update(events).set({ blocksDay, updatedAt: now }).where(eq(events.id, id)).returning()
+    const [calendar] = await tx.select().from(calendars).where(eq(calendars.id, current.calendarId))
+    if (calendar === undefined) throw notFound(`calendar ${current.calendarId}`)
+    const { profiles } = await learnAccountProfiles(tx, [], now)
+    const [event] = await tx.update(events).set({ blocksDay, ...automaticDayFields(current, calendar, profiles), updatedAt: now }).where(eq(events.id, id)).returning()
     if (event === undefined) throw notFound(`event ${id}`)
     return event
   })
@@ -127,7 +131,9 @@ async function createEvent(db: Db, sync: CalendarSyncService, id: string, body: 
     new Date(Math.max(now.getTime(), new Date(body.startAt).getTime()) + 365 * 86_400_000).toISOString(),
   )
   // The instances endpoint does not promise an order, including across page boundaries.
-  const occurrences = instances.map((instance) => mapEvent(calendar.id, instance, now))
+  const { profiles, learned } = await learnAccountProfiles(db, instances, now)
+  if (learned) await refreshAllDayJudgments(db, now)
+  const occurrences = instances.map((instance) => judgedGoogleEvent(calendar, instance, profiles, now))
     .sort((a, b) => (a.startAt?.getTime() ?? Infinity) - (b.startAt?.getTime() ?? Infinity))
   const row = occurrences[0]
   if (row === undefined) throw new Error('Google returned no occurrences for the new event')
@@ -226,10 +232,12 @@ async function updateInstance(
     return tombstoneEvent(db, current.id, now)
   }
   if (updated === undefined && (body.blocksDay === undefined || body.blocksDay === current.blocksDay)) return current
+  const { profiles, learned } = await learnAccountProfiles(db, updated === undefined ? [] : [updated], now)
+  if (learned) await refreshAllDayJudgments(db, now)
   const [row] = await db
     .update(events)
     .set({
-      ...(updated === undefined ? { updatedAt: now } : mapEvent(calendar.id, updated, now)),
+      ...(updated === undefined ? { updatedAt: now, ...automaticDayFields(current, calendar, profiles) } : judgedGoogleEvent(calendar, updated, profiles, now)),
       ...(body.blocksDay === undefined ? {} : { blocksDay: body.blocksDay }),
     })
     .where(eq(events.id, current.id))
@@ -347,9 +355,11 @@ async function storeSeries(
   const renamed = listed.has(current.googleId)
     ? undefined
     : instances.find((e) => !held.has(e.id) && e.start?.dateTime !== undefined && new Date(e.start.dateTime).getTime() === target)
+  const { profiles, learned } = await learnAccountProfiles(db, instances, now)
+  if (learned) await refreshAllDayJudgments(db, now)
   return db.transaction(async (tx) => {
     for (const instance of instances) {
-      const row = mapEvent(calendar.id, instance, now)
+      const row = judgedGoogleEvent(calendar, instance, profiles, now)
       if (instance !== renamed) {
         await tx
           .insert(events)
