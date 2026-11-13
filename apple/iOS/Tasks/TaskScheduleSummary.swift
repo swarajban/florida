@@ -3,7 +3,7 @@ import Foundation
 
 /// What a task row says about when the task will happen, from the scheduler's placements and its
 /// `UnscheduledTask` entry:
-/// - overdue: the due date has passed and nothing is placed;
+/// - overdue: the saved due date has passed, whether placed or not;
 /// - late: the last block ends after the due date (the ETA is that block's end);
 /// - unscheduled: nothing is placed, with the scheduler's reason when it gave one;
 /// - scheduled: placed, possibly only in part (`unplacedMinutes` then says how much is left out).
@@ -16,6 +16,7 @@ struct TaskScheduleSummary: Hashable {
     }
 
     var state: State
+    let timing: TaskTiming
     var firstStart: Date?
     var blockCount: Int
     /// The scheduler's reason code for what it could not place, and how many minutes that is.
@@ -24,17 +25,17 @@ struct TaskScheduleSummary: Hashable {
 
     init(task: TaskItem, placements: [Placement], unscheduled: UnscheduledTask?, now: Date) {
         let sorted = placements.sorted { $0.startAt < $1.startAt }
+        timing = TaskTiming(task: task, placements: placements, now: now)
         blockCount = sorted.count
         firstStart = sorted.first?.startAt
         if let unscheduled, unscheduled.unplacedMinutes > 0 {
             unplacedReason = unscheduled.reason
             unplacedMinutes = unscheduled.unplacedMinutes
         }
-        let lastEnd = sorted.map(\.endAt).max()
-        if let dueAt = task.dueAt, let lastEnd, lastEnd > dueAt {
-            state = .late(eta: lastEnd)
-        } else if let dueAt = task.dueAt, sorted.isEmpty, dueAt <= now {
+        if timing.isOverdue, let dueAt = timing.dueAt {
             state = .overdue(dueAt: dueAt)
+        } else if let lastEnd = timing.lateEnd {
+            state = .late(eta: lastEnd)
         } else if sorted.isEmpty {
             state = .unscheduled
         } else {

@@ -16,7 +16,8 @@ struct TaskScheduleState: Hashable {
     let blockCount: Int
     let isPinned: Bool
     /// Due and already past.
-    let isOverdue: Bool
+    var isOverdue: Bool { timing.isOverdue }
+    let timing: TaskTiming
     /// The scheduler's reason code when some minutes could not be placed.
     let unplacedReason: String?
     let unplacedMinutes: Int
@@ -25,14 +26,14 @@ struct TaskScheduleState: Hashable {
         let sorted = placements.sorted { $0.startAt < $1.startAt }
         blockCount = sorted.count
         firstStart = sorted.first?.startAt
-        lastEnd = sorted.last?.endAt
+        lastEnd = sorted.map(\.endAt).max()
         isPinned = task.pinnedStart != nil
-        isOverdue = task.dueAt.map { $0 < now } ?? false
+        timing = TaskTiming(task: task, placements: placements, now: now)
         unplacedReason = unscheduled?.reason
         unplacedMinutes = unscheduled?.unplacedMinutes ?? 0
         if sorted.isEmpty {
             kind = .unscheduled
-        } else if let dueAt = task.dueAt, let last = sorted.last, last.endAt > dueAt {
+        } else if timing.lateEnd != nil {
             kind = .late
         } else {
             kind = .scheduled

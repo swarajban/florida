@@ -52,11 +52,10 @@ struct TasksView: View {
                     Section {
                         ForEach(section.tasks) { task in
                             TaskListRow(
-                                task: task, now: now, calendar: groupingCalendar,
-                                category: grouping == .dueDate && model.category(id: task.categoryId)?.isInbox == false
-                                    ? model.category(id: task.categoryId) : nil,
+                                taskID: task.id, now: now, calendar: groupingCalendar,
+                                showsCategory: grouping == .dueDate,
                                 targets: TaskActionTargets(doneForNow: $doneForNowTask, moving: $movingTask),
-                                onEdit: { editor = TaskEditorRequest(task: task, isNew: false) })
+                                onEdit: { editor = TaskEditorRequest(task: $0, isNew: false) })
                         }
                     } header: {
                         TaskSectionHeader(section: section)

@@ -66,21 +66,34 @@ extension AppModel {
     }
 
     func applyEditorTestSyncIfNeeded() {
+        let dateSync = UserDefaults.standard.bool(forKey: "uiTaskDateSyncDuringTyping")
         guard editorDiagnostics != nil, editorDiagnostics?.syncApplied == false,
-              UserDefaults.standard.bool(forKey: "uiEditorSyncDuringTyping"), let database
+              UserDefaults.standard.bool(forKey: "uiEditorSyncDuringTyping") || dateSync, let database
         else { return }
         do {
-            guard var task = try database.task(id: "demo-task-vpn") else { return }
+            guard var task = try database.task(id: dateSync ? "date-updated" : "demo-task-vpn") else { return }
             let now = Date()
-            task.title = "Remote sync VPN title"
+            if dateSync {
+                task.dueAt = ISO8601DateFormatter().date(from: "2026-11-18T07:59:59Z")
+            } else {
+                task.title = "Remote sync VPN title"
+            }
             task.updatedAt = now
             var response = DemoData.syncResponse(now: now, calendar: calendar)
             response.cursor = ISO8601DateFormatter().string(from: now.addingTimeInterval(1))
             response.tasks = [task]
-            response.placements.append(Placement(
-                id: "editor-diagnostics-vpn-placement", taskId: task.id,
-                startAt: now.addingTimeInterval(900), endAt: now.addingTimeInterval(2700),
-                pinned: false, computedAt: now))
+            if dateSync {
+                response.placements = [Placement(
+                    id: "date-placement", taskId: task.id,
+                    startAt: ISO8601DateFormatter().date(from: "2026-11-17T20:00:00Z")!,
+                    endAt: ISO8601DateFormatter().date(from: "2026-11-17T20:30:00Z")!,
+                    pinned: false, computedAt: now)]
+            } else {
+                response.placements.append(Placement(
+                    id: "editor-diagnostics-vpn-placement", taskId: task.id,
+                    startAt: now.addingTimeInterval(900), endAt: now.addingTimeInterval(2700),
+                    pinned: false, computedAt: now))
+            }
             response.unscheduled.removeAll { $0.taskId == task.id }
             try database.apply(response)
             editorDiagnostics?.syncApplied = true

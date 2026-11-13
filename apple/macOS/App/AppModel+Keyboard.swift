@@ -37,6 +37,7 @@ extension AppModel {
             return true
         }
 
+        if event.isARepeat, jump != nil { return true }
         if handleJumpKey(chord) {
             return true
         }
