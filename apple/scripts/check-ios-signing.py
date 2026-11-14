@@ -34,7 +34,7 @@ def validate(app, summary_path=None):
         require(info.get('CFBundleVersion') == build, f'{name}: wrong build; expected {build}')
         versions[name] = (version, build)
         entitlements = plistlib.loads(subprocess.check_output(
-            ['codesign', '-d', '--entitlements', '-', str(bundle)], stderr=subprocess.PIPE))
+            ['codesign', '-d', '--entitlements', '-', '--xml', str(bundle)], stderr=subprocess.PIPE))
         require(has_group(entitlements, group),
                 f'{name}: missing archive App Group {group}')
     require(len(set(versions.values())) == 1, 'Archive versions do not match')
