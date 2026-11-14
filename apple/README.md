@@ -127,8 +127,8 @@ both selectors runs one focused job per platform instead of the full gate.
 The focused iPhone job reserves 55 minutes for compilation and tests and two
 minutes for result upload, so long capture flows retain a completed result or
 an explicit timeout with native artifacts.
-The reusable full Mac UI job has a 60-minute limit, matching main's standalone Mac job;
-the iPhone shard limits are unchanged.
+Both Mac-only selector jobs and the reusable full Mac UI job have a 60-minute limit,
+matching main's standalone Mac job; the iPhone shard limits are unchanged.
 
 This explicit dispatch uses the existing iOS workflow's `ui_only` mode: it never
 starts a release or reads release secrets. It runs against the branch head, so
