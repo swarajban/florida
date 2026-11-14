@@ -125,11 +125,18 @@ final class SelectorOrigin {
         _ = view.scrollToVisible(view.bounds)
     }
 
-    static func finishDismissal(in window: NSWindow?, onDismiss: () -> Void) async {
+    static func dismissalPoint(in window: NSWindow?) -> NSPoint? {
+        guard let window, let event = NSApp.currentEvent, event.window === window,
+              [.leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp].contains(event.type) else { return nil }
+        return event.locationInWindow
+    }
+
+    static func finishDismissal(in window: NSWindow?, preservingFocusAt point: NSPoint?, onDismiss: () -> Void) async {
         await Task.yield()
-        if let editor = window?.firstResponder as? NSTextView, editor.isEditable,
+        if let point, let editor = window?.firstResponder as? NSTextView, editor.isEditable,
            !(editor.delegate is SelectorTextField) {
-            return
+            let field = (editor.delegate as? NSView) ?? editor
+            if field.visibleRect.contains(field.convert(point, from: nil)) { return }
         }
         window?.makeFirstResponder(nil)
         onDismiss()

@@ -19,6 +19,7 @@ struct MacDateField: View {
     @State private var ownsOrigin = false
     @State private var origin = SelectorOrigin()
     @State private var anchorReady = false
+    @State private var dismissalPoint: NSPoint?
     @Environment(\.calendar) private var calendar
 
     init(_ title: String, date: Binding<Date>, isOn: Binding<Bool>? = nil, hasTime: Binding<Bool>? = nil,
@@ -40,7 +41,10 @@ struct MacDateField: View {
     private var presented: Binding<Bool> { isPresented ?? $localPresented }
 
     private var popoverPresented: Binding<Bool> {
-        Binding(get: { presented.wrappedValue && anchorReady }, set: { presented.wrappedValue = $0 })
+        Binding(get: { presented.wrappedValue && anchorReady }, set: { isOpen in
+            if !isOpen && presented.wrappedValue { dismissalPoint = SelectorOrigin.dismissalPoint(in: originWindow) }
+            presented.wrappedValue = isOpen
+        })
     }
 
     var body: some View {
@@ -61,6 +65,7 @@ struct MacDateField: View {
         .onChange(of: presented.wrappedValue, initial: true) { wasOpen, isOpen in
             guard wasOpen != isOpen || isOpen else { return }
             if isOpen {
+                dismissalPoint = nil
                 originWindow = origin.window ?? originWindow ?? NSApp.keyWindow
                 if let originWindow, !ownsOrigin {
                     SelectorWindowHost.register(originWindow)
@@ -70,9 +75,11 @@ struct MacDateField: View {
                 anchorReady = true
             } else {
                 anchorReady = false
+                let point = dismissalPoint
                 releaseOrigin()
                 Task { @MainActor in
-                    await SelectorOrigin.finishDismissal(in: originWindow, onDismiss: onDismiss)
+                    await SelectorOrigin.finishDismissal(in: originWindow, preservingFocusAt: point,
+                                                         onDismiss: onDismiss)
                 }
             }
         }

@@ -28,6 +28,7 @@ struct MacChoiceField<Value: Hashable>: View {
     @State private var ownsOrigin = false
     @State private var origin = SelectorOrigin()
     @State private var anchorReady = false
+    @State private var dismissalPoint: NSPoint?
 
     init(_ title: String, selection: Binding<Value>, options: [MacChoice<Value>], key: String? = nil,
          isPresented: Binding<Bool>? = nil, identifier: String, showsLabel: Bool = true,
@@ -48,7 +49,10 @@ struct MacChoiceField<Value: Hashable>: View {
     private var presented: Binding<Bool> { isPresented ?? $localPresented }
 
     private var popoverPresented: Binding<Bool> {
-        Binding(get: { presented.wrappedValue && anchorReady }, set: { presented.wrappedValue = $0 })
+        Binding(get: { presented.wrappedValue && anchorReady }, set: { isOpen in
+            if !isOpen && presented.wrappedValue { dismissalPoint = SelectorOrigin.dismissalPoint(in: originWindow) }
+            presented.wrappedValue = isOpen
+        })
     }
 
     var body: some View {
@@ -69,6 +73,7 @@ struct MacChoiceField<Value: Hashable>: View {
         .onChange(of: presented.wrappedValue, initial: true) { wasOpen, isOpen in
             guard wasOpen != isOpen || isOpen else { return }
             if isOpen {
+                dismissalPoint = nil
                 originWindow = origin.window ?? originWindow ?? NSApp.keyWindow
                 if let originWindow, !ownsOrigin {
                     SelectorWindowHost.register(originWindow)
@@ -78,9 +83,11 @@ struct MacChoiceField<Value: Hashable>: View {
                 anchorReady = true
             } else {
                 anchorReady = false
+                let point = dismissalPoint
                 releaseOrigin()
                 Task { @MainActor in
-                    await SelectorOrigin.finishDismissal(in: originWindow, onDismiss: onDismiss)
+                    await SelectorOrigin.finishDismissal(in: originWindow, preservingFocusAt: point,
+                                                         onDismiss: onDismiss)
                 }
             }
         }
