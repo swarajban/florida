@@ -52,39 +52,10 @@ struct AgendaView: View {
                     }
                 }
                 Divider()
-                if mode != .threeDays {
-                    DayBlockingIndicator(
-                        events: model.agenda?.blockingAllDayEvents ?? [], day: model.selectedDay,
-                        calendar: model.calendar, onSelect: { selectedEvent = $0 })
-                        .padding(.horizontal, 20)
-                }
                 content
             }
             .background(FloridaStyle.paper)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(FloridaStyle.paper, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        model.selectToday()
-                    } label: {
-                        FloridaWordmark(height: 26)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Florida")
-                    .accessibilityHint("Shows today, scrolled to now")
-                }
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    calendarMenu
-                    addMenu
-                    Button("Today") {
-                        model.selectToday()
-                    }
-                    .disabled(isToday)
-                }
-            }
+            .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showsDayPicker) {
                 DayPickerSheet(selectedDay: model.selectedDay)
             }
@@ -174,7 +145,7 @@ struct AgendaView: View {
 
     /// Nothing on the day: no events, blocks or suggestions.
     private var isEmptyDay: Bool {
-        items.isEmpty && allDayEvents.isEmpty && picks.isEmpty && (model.agenda?.blockingAllDayEvents.isEmpty ?? true)
+        items.isEmpty && allDayEvents.isEmpty && picks.isEmpty
     }
 
     /// Suggestions for the day's optional routine blocks; not part of the timeline above.
@@ -204,43 +175,100 @@ struct AgendaView: View {
 
     // MARK: - Heading and toolbar
 
-    /// "Monday" over "November 9, 2026" (tap for the month grid), with the list / day / 3-day
-    /// toggle on the right and the day's kind under it, level with the date.
     private var dayHeading: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Button {
-                showsDayPicker = true
-            } label: {
-                VStack(alignment: .leading, spacing: 4) {
-                    if mode != .threeDays {
-                        Text(model.selectedDay.formatted(.dateTime.weekday(.wide)))
-                            .font(.title.weight(.medium))
-                            .foregroundStyle(FloridaStyle.ink)
-                    }
-                    HStack(spacing: 4) {
-                        Text(model.selectedDay.formatted(mode == .threeDays
-                            ? .dateTime.month(.wide).year() : .dateTime.month(.wide).day().year()))
-                            .font(.subheadline)
-                        Image(systemName: "chevron.down")
-                            .font(.caption2.weight(.bold))
-                    }
-                    .foregroundStyle(.secondary)
+        VStack(spacing: 2) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    datePickerButton
+                    Spacer(minLength: 0)
+                    headerActions
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+                VStack(alignment: .leading, spacing: 0) {
+                    datePickerButton
+                    headerActions
+                }
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Go to day")
-            .accessibilityValue(model.selectedDay.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
-            .accessibilityHint("Opens a month calendar")
-            VStack(alignment: .trailing, spacing: 0) {
-                modePicker
-                dayKindMenu
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    modePicker
+                    Spacer(minLength: 0)
+                    todayButton
+                    dayStatusMenu
+                }
+                VStack(spacing: 2) {
+                    modePicker
+                    ViewThatFits(in: .horizontal) {
+                        HStack {
+                            todayButton
+                            Spacer(minLength: 8)
+                            dayStatusMenu
+                        }
+                        VStack(alignment: .leading, spacing: 0) {
+                            todayButton
+                            dayStatusMenu
+                        }
+                    }
+                }
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 12)
-        .padding(.bottom, 8)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
+        .accessibilityIdentifier("agenda-header")
+    }
+
+    private var datePickerButton: some View {
+        Button {
+            showsDayPicker = true
+        } label: {
+            HStack(spacing: 4) {
+                Text(model.selectedDay.formatted(headingDateFormat))
+                    .font(.headline)
+                    .fixedSize(horizontal: false, vertical: true)
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.bold))
+            }
+            .foregroundStyle(FloridaStyle.ink)
+            .frame(minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Go to day")
+        .accessibilityValue(model.selectedDay.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
+        .accessibilityHint("Opens a month calendar")
+    }
+
+    private var headingDateFormat: Date.FormatStyle {
+        var format: Date.FormatStyle = mode == .threeDays
+            ? .dateTime.month(.wide) : .dateTime.weekday(.abbreviated).month(.abbreviated).day()
+        format.calendar = model.calendar
+        format.timeZone = model.calendar.timeZone
+        return model.calendar.component(.year, from: model.selectedDay) == model.calendar.component(.year, from: model.today)
+            ? format : format.year()
+    }
+
+    private var headerActions: some View {
+        HStack(spacing: 0) {
+            calendarMenu
+            addMenu
+        }
+        .labelStyle(.iconOnly)
+        .buttonStyle(.plain)
+        .foregroundStyle(FloridaStyle.ink)
+    }
+
+    private var todayButton: some View {
+        Button("Today") { model.selectToday() }
+            .font(.subheadline)
+            .fixedSize()
+            .frame(minHeight: 44)
+            .foregroundStyle(isToday ? Color.secondary : FloridaStyle.ink)
+    }
+
+    private var dayStatusMenu: some View {
+        AgendaDayStatus(day: model.selectedDay, events: model.agenda?.blockingAllDayEvents ?? []) {
+            selectedEvent = $0
+        }
+        .accessibilityIdentifier("agenda-day-kind")
     }
 
     private var modePicker: some View {
@@ -254,53 +282,6 @@ struct AgendaView: View {
         .pickerStyle(.segmented)
         .fixedSize()
         .accessibilityIdentifier("agenda-mode")
-    }
-
-    /// What the selected day is ("Home day"), drawn like the date beside it. The menu makes the day
-    /// a home, office or off day; a day that was changed can go back to its weekday's routine, and
-    /// reads in ink until it does.
-    private var dayKindMenu: some View {
-        let day = model.selectedDay
-        let kind = model.dayKind(of: day)
-        let isChanged = model.dayOverride(on: day) != nil
-        return Menu {
-            Picker("Day", selection: Binding(get: { kind }, set: { model.setDay(day, kind: $0) })) {
-                ForEach(DayKind.allCases, id: \.self) { option in
-                    Label(option.label, systemImage: option.symbolName)
-                        .tag(option)
-                }
-            }
-            if isChanged {
-                Button {
-                    model.clearDayOverride(on: day)
-                } label: {
-                    Label("Back to the routine", systemImage: "arrow.uturn.backward")
-                }
-            }
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: kind.symbolName)
-                    .accessibilityHidden(true)
-                Text(kind.label)
-                Image(systemName: "chevron.down")
-                    .font(.caption2.weight(.bold))
-                    .accessibilityHidden(true)
-            }
-            .font(.subheadline)
-            .foregroundStyle(isChanged ? FloridaStyle.ink : Color.secondary)
-            .lineLimit(1)
-            .padding(.top, 6)
-            .padding(.bottom, 8)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        // The label's bottom padding is touch area only: it lies over the heading's own.
-        .padding(.bottom, -8)
-        // The toggle above does not grow with the text size, so the heading stays one block.
-        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-        .accessibilityValue(isChanged ? "Changed for this day" : "From the routine")
-        .accessibilityHint("Changes what kind of day this is")
-        .accessibilityIdentifier("agenda-day-kind")
     }
 
     /// Which calendars show, grouped by Google account. Flipping one updates the store at once and
@@ -322,6 +303,7 @@ struct AgendaView: View {
             }
         } label: {
             Label("Calendars", systemImage: "calendar")
+                .frame(minWidth: 44, minHeight: 44)
         }
         .accessibilityIdentifier("agenda-calendars")
     }
@@ -349,6 +331,7 @@ struct AgendaView: View {
             .disabled(model.writableCalendars.isEmpty)
         } label: {
             Label("Add", systemImage: "plus")
+                .frame(minWidth: 44, minHeight: 44)
         }
         .accessibilityIdentifier("agenda-add")
     }
@@ -423,10 +406,13 @@ struct AgendaView: View {
                         Button {
                             selectedEvent = event
                         } label: {
-                            AllDayEventRow(event: event, style: model.eventStyle(event), continuation: continuation(of: event))
+                            AllDayEventRow(
+                                event: event, style: model.eventStyle(event), continuation: continuation(of: event),
+                                protectsDay: model.agenda?.blockingAllDayEvents.contains(where: { $0.id == event.id }) == true)
                                 .foregroundStyle(.primary)
                         }
                         .accessibilityHint("Shows the event")
+                        .accessibilityIdentifier("all-day-event-\(event.id)")
                         .listRowBackground(FloridaStyle.paper)
                     }
                 }

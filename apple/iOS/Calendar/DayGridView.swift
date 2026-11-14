@@ -226,9 +226,13 @@ struct DayGridView: View {
                     Divider()
                 }
                 if layout.allDayRowCount > 0 {
+                    let firstVisible = dayCount == 1 ? 0
+                        : min(days.count, max(0, Int(((horizontalOffset + 0.5) / geometry.columnWidth).rounded(.down))))
+                    let lastVisible = dayCount == 1 ? days.count
+                        : min(days.count, max(firstVisible, Int(((horizontalOffset - 0.5) / geometry.columnWidth).rounded(.up)) + dayCount))
                     DayGridAllDayStrip(
                         layout: layout, geometry: geometry, now: now,
-                        pinnedGutterX: pinnedGutterX, onSelect: onSelectEvent)
+                        pinnedGutterX: pinnedGutterX, visibleDays: Set(days[firstVisible..<lastVisible]), onSelect: onSelectEvent)
                     Divider()
                 }
                 ScrollView(.vertical) {

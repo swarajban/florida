@@ -170,6 +170,10 @@ final class SmokeTests: XCTestCase {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {
             let app = launch(appearance: appearance)
+            let status = app.buttons["agenda-day-kind"]
+            XCTAssertTrue(status.waitForExistence(timeout: 15))
+            XCTAssertTrue((status.value as? String)?.contains("Public holiday. Automatic: US public holiday on your calendar.") == true)
+            status.tap()
             let indicator = app.buttons.matching(NSPredicate(
                 format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@", "day-blocking-", "-demo-event-holiday")).firstMatch
             XCTAssertTrue(indicator.waitForExistence(timeout: 15))
@@ -192,14 +196,93 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(reason.label.hasPrefix("Automatic: US public holiday"))
             XCTAssertEqual(app.staticTexts["event-blocks-day-effective-demo-event-holiday"].label, "Blocks your day")
             app.navigationBars.buttons["Done"].tap()
-            XCTAssertTrue(indicator.waitForExistence(timeout: 5))
+            XCTAssertTrue(status.waitForExistence(timeout: 5))
+            XCTAssertTrue((status.value as? String)?.contains("Public holiday. Automatic: US public holiday on your calendar.") == true)
             app.segmentedControls["agenda-mode"].buttons["3 Days"].tap()
+            status.tap()
             XCTAssertTrue(indicator.waitForExistence(timeout: 5))
             XCTAssertTrue(indicator.isHittable)
             capture(app, "protected-hidden-day-columns-\(appearance)")
             indicator.tap()
             XCTAssertTrue(choice.waitForExistence(timeout: 5))
             XCTAssertTrue(reason.label.contains("Automatic: US public holiday"))
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testCompactAgendaWithOverlappingProtectedStays() {
+        continueAfterFailure = false
+        let calendar = Calendar.current
+        let saturday = calendar.date(from: DateComponents(year: 2026, month: 11, day: 14, hour: 11, minute: 24))!
+        let friday = calendar.date(byAdding: .day, value: -1, to: saturday)!
+        let sunday = calendar.date(byAdding: .day, value: 1, to: saturday)!
+        for appearance in ["light", "dark"] {
+            let app = launch(appearance: appearance, mode: "day", demoNow: saturday, overlappingStays: true)
+            let status = app.buttons["agenda-day-kind"]
+            XCTAssertTrue(status.waitForExistence(timeout: 15))
+            XCTAssertEqual(status.label, "Day off")
+            XCTAssertTrue((status.value as? String)?.contains("Stay at Marshall. Automatic: Your trip · last day open") == true)
+            XCTAssertFalse(app.buttons["Florida"].exists)
+            XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "day-blocking-")).firstMatch.exists)
+            XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Protected ·")).firstMatch.exists)
+            let marshall = app.buttons["all-day-event-demo-stay-marshall"]
+            let tomales = app.buttons["all-day-event-demo-stay-tomales"]
+            XCTAssertTrue(marshall.waitForExistence(timeout: 10))
+            XCTAssertEqual(marshall.value as? String, "All day, Protected. Automatic: Your trip · last day open")
+            XCTAssertEqual(tomales.value as? String, "All day, Protected. Automatic: Your trip · last day open")
+            XCTAssertEqual(app.buttons.matching(identifier: marshall.identifier).count, 1)
+            XCTAssertEqual(app.buttons.matching(identifier: tomales.identifier).count, 1)
+            XCTAssertLessThan(tomales.frame.maxY, app.frame.height * 0.35)
+            let heading = app.buttons["Go to day"]
+            XCTAssertEqual(heading.frame.minY, app.buttons["agenda-add"].frame.minY, accuracy: 3)
+            XCTAssertEqual(status.frame.midY, app.segmentedControls["agenda-mode"].frame.midY, accuracy: 3)
+            capture(app, "agenda-overlapping-stays-day-\(appearance)")
+            marshall.tap()
+            XCTAssertTrue(app.staticTexts["event-blocking-reason-demo-stay-marshall"].waitForExistence(timeout: 5))
+            XCTAssertEqual(app.staticTexts["event-blocking-reason-demo-stay-marshall"].label, "Automatic: Your trip · last day open")
+            app.navigationBars.buttons["Done"].tap()
+            app.buttons[friday.formatted(.dateTime.weekday(.wide).month(.wide).day())].tap()
+            XCTAssertEqual(status.label, "Protected")
+            capture(app, "agenda-overlapping-stays-workday-\(appearance)")
+            app.buttons["Today"].tap()
+            XCTAssertEqual(status.label, "Day off")
+            app.segmentedControls["agenda-mode"].buttons["3 Days"].tap()
+            XCTAssertTrue(marshall.waitForExistence(timeout: 5))
+            XCTAssertTrue((marshall.value as? String)?.contains("Protected. Automatic: Your trip · last day open") == true)
+            XCTAssertEqual(app.buttons.matching(identifier: marshall.identifier).count, 1)
+            XCTAssertEqual(app.buttons.matching(identifier: tomales.identifier).count, 1)
+            XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "day-blocking-")).firstMatch.exists)
+            capture(app, "agenda-overlapping-stays-three-days-\(appearance)")
+            let sundayStatus = app.buttons["agenda-day-kind-2026-11-15"]
+            XCTAssertTrue(sundayStatus.isHittable)
+            XCTAssertEqual(sundayStatus.label, "Day off")
+            XCTAssertTrue((sundayStatus.value as? String)?.contains("Hidden Sunday holiday. Automatic: US public holiday on your calendar.") == true)
+            sundayStatus.tap()
+            let hiddenHoliday = app.buttons.matching(NSPredicate(
+                format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@", "day-blocking-", "-demo-hidden-sunday")).firstMatch
+            XCTAssertTrue(hiddenHoliday.waitForExistence(timeout: 5))
+            hiddenHoliday.tap()
+            XCTAssertTrue(app.staticTexts["event-blocking-reason-demo-hidden-sunday"].waitForExistence(timeout: 5))
+            XCTAssertEqual(app.staticTexts["event-blocking-reason-demo-hidden-sunday"].label, "Automatic: US public holiday on your calendar.")
+            app.navigationBars.buttons["Done"].tap()
+            app.segmentedControls["agenda-mode"].buttons["List"].tap()
+            XCTAssertTrue(marshall.waitForExistence(timeout: 5))
+            XCTAssertTrue((marshall.value as? String)?.contains("Protected. Automatic: Your trip · last day open") == true)
+            XCTAssertEqual(app.buttons.matching(identifier: marshall.identifier).count, 1)
+            XCTAssertEqual(app.buttons.matching(identifier: tomales.identifier).count, 1)
+            XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "day-blocking-")).firstMatch.exists)
+            capture(app, "agenda-overlapping-stays-list-\(appearance)")
+            heading.tap()
+            let sundayChoice = app.datePickers.buttons.matching(NSPredicate(
+                format: "label CONTAINS %@", sunday.formatted(.dateTime.weekday(.wide).month(.wide).day()))).firstMatch
+            XCTAssertTrue(sundayChoice.waitForExistence(timeout: 5))
+            sundayChoice.tap()
+            app.segmentedControls["agenda-mode"].buttons["3 Days"].tap()
+            XCTAssertTrue(marshall.waitForExistence(timeout: 5))
+            XCTAssertEqual(marshall.value as? String, "All day")
+            XCTAssertEqual(tomales.value as? String, "All day")
+            capture(app, "agenda-overlapping-stays-last-day-open-\(appearance)")
             app.terminate()
         }
     }
@@ -231,6 +314,17 @@ final class SmokeTests: XCTestCase {
                 XCTAssertLessThanOrEqual(lastSetting.frame.maxY, app.tabBars.firstMatch.frame.minY - 8)
                 capture(app, "settings-bottom-clearance-accessibility-\(textSize)-\(appearance)")
                 app.tabBars.buttons["Agenda"].tap()
+                let status = app.buttons["agenda-day-kind"]
+                XCTAssertTrue(status.waitForExistence(timeout: 10))
+                for control in [app.buttons["Go to day"], app.buttons["agenda-add"], app.buttons["agenda-calendars"],
+                                app.buttons["Today"], status, app.segmentedControls["agenda-mode"]] {
+                    XCTAssertTrue(control.isHittable)
+                    XCTAssertGreaterThanOrEqual(control.frame.minX, 0)
+                    XCTAssertLessThanOrEqual(control.frame.maxX, app.frame.maxX)
+                    XCTAssertLessThan(control.frame.maxY, app.tabBars.firstMatch.frame.minY)
+                }
+                capture(app, "agenda-header-accessibility-\(textSize)-\(appearance)")
+                status.tap()
                 let indicator = app.buttons.matching(NSPredicate(
                     format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@", "day-blocking-", "-demo-event-holiday")).firstMatch
                 XCTAssertTrue(indicator.waitForExistence(timeout: 10))
@@ -321,6 +415,7 @@ final class SmokeTests: XCTestCase {
             app.tabBars.buttons["Agenda"].tap()
             let hiddenBirthday = app.buttons.matching(NSPredicate(
                 format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@", "day-blocking-", "-demo-event-birthday")).firstMatch
+            app.buttons["agenda-day-kind"].tap()
             XCTAssertTrue(hiddenBirthday.waitForExistence(timeout: 5))
             hiddenBirthday.tap()
             XCTAssertTrue(choice.waitForExistence(timeout: 5))
@@ -335,6 +430,7 @@ final class SmokeTests: XCTestCase {
             choice.descendants(matching: .any)["Blocks"].tap()
             XCTAssertEqual(choice.value as? String, "Blocks")
             app.navigationBars.buttons["Done"].tap()
+            app.buttons["agenda-day-kind"].tap()
             XCTAssertTrue(hiddenBirthday.waitForExistence(timeout: 5))
             hiddenBirthday.tap()
             XCTAssertTrue(choice.waitForExistence(timeout: 5))
@@ -1130,7 +1226,8 @@ final class SmokeTests: XCTestCase {
     @MainActor
     private func launch(
         appearance: String = "light", tab: String = "agenda", sheet: String? = nil, mode: String = "list", largeText: Bool = false,
-        recordResourceOpens: Bool = false, recordSourceOpens: Bool = false, demoNow: Date? = nil, accessibilityText: Bool = false
+        recordResourceOpens: Bool = false, recordSourceOpens: Bool = false, demoNow: Date? = nil, accessibilityText: Bool = false,
+        overlappingStays: Bool = false
     ) -> XCUIApplication {
         let app = XCUIApplication()
         // The agenda mode is always passed: the app remembers the last one in the App Group
@@ -1140,6 +1237,7 @@ final class SmokeTests: XCTestCase {
         if recordResourceOpens { app.launchArguments += ["-uiRecordResourceOpens", "YES"] }
         if let demoNow { app.launchArguments += ["-demoNow", ISO8601DateFormatter().string(from: demoNow)] }
         if recordSourceOpens { app.launchArguments += ["-uiRecordSourceOpens", "YES"] }
+        if overlappingStays { app.launchArguments += ["-uiOverlappingStaysDemo", "YES"] }
         app.launchArguments += [
             "-UIPreferredContentSizeCategoryName",
             accessibilityText ? "UICTContentSizeCategoryAccessibilityXL"

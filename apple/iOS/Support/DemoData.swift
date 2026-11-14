@@ -296,6 +296,21 @@ enum DemoData {
                 "<a href=\"https://example.com/interaction-resource/\($0)\">Resource \($0)</a>"
             }.joined(separator: "<br>")
         }
+        if UserDefaults.standard.bool(forKey: "uiOverlappingStaysDemo") {
+            response.events = [
+                event("demo-stay-marshall", personal, "Stay at Marshall", utcDay(-2), utcDay(2), allDay: true,
+                      autoBlocksDay: true, blockingReason: "Your trip"),
+                event("demo-stay-tomales", personal, "Stay at Tomales Bay Retreat", utcDay(-1), utcDay(2), allDay: true,
+                      autoBlocksDay: true, blockingReason: "Your trip"),
+                event("demo-hidden-sunday", "demo-cal-us-holidays", "Hidden Sunday holiday", utcDay(1), utcDay(2), allDay: true,
+                      autoBlocksDay: true, blockingReason: "US public holiday on your calendar."),
+            ]
+            response.placements = []
+            response.optionalPlacements = []
+            response.planBlocks = []
+            response.briefs = []
+            response.unscheduled = []
+        }
         return response
     }
 
