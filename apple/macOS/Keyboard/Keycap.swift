@@ -5,11 +5,9 @@ import SwiftUI
 /// button. Hidden from accessibility: the control keeps its own name.
 struct Keycap: View {
     let key: String
-    let isAccessibilityHidden: Bool
 
-    init(_ key: String, accessibilityHidden: Bool = true) {
+    init(_ key: String) {
         self.key = key
-        isAccessibilityHidden = accessibilityHidden
     }
 
     var body: some View {
@@ -23,7 +21,7 @@ struct Keycap: View {
             .frame(minWidth: 16, minHeight: 15)
             .overlay(RoundedRectangle(cornerRadius: 3.5).strokeBorder(.tertiary, lineWidth: 1))
             .fixedSize()
-            .accessibilityHidden(isAccessibilityHidden)
+            .accessibilityHidden(true)
     }
 }
 

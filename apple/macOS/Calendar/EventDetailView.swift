@@ -173,7 +173,7 @@ struct EventDetailView: View {
                                 }
                                 Spacer(minLength: 0)
                                 if let key = (model.eventResourceKeys ?? labels).remaining[resource.id] {
-                                    resourceKeycap(key, id: resource.id)
+                                    Keycap(key.map(String.init).joined(separator: " "))
                                 } else if labels.remaining[resource.id] == nil {
                                     Self.keycap(for: .openEventResources)
                                 }
@@ -190,10 +190,8 @@ struct EventDetailView: View {
                               : resource.url.absoluteString)
                         .accessibilityLabel("\(resource.title), \(resource.kindLabel)")
                         .accessibilityIdentifier("event-resource-\(resource.id)")
-                        .accessibilityValue(labels.remaining[resource.id] ?? "g r")
-                        #if DEBUG
-                        .accessibilityElement(children: showsInteractionDiagnostics ? .contain : .ignore)
-                        #endif
+                        .accessibilityValue((model.eventResourceKeys ?? labels).remaining[resource.id]
+                            ?? (labels.remaining[resource.id] == nil ? "g r" : ""))
                     }
                 }
             }
@@ -201,33 +199,6 @@ struct EventDetailView: View {
             .frame(maxHeight: 150)
             .fixedSize(horizontal: false, vertical: true)
         }
-    }
-
-    @ViewBuilder
-    private func resourceKeycap(_ key: String, id: String) -> some View {
-        #if DEBUG
-        if showsInteractionDiagnostics {
-            Keycap(key.map(String.init).joined(separator: " "), accessibilityHidden: false)
-                .accessibilityElement(children: .ignore)
-                .accessibilityHidden(false)
-                .accessibilityLabel(key)
-                .accessibilityIdentifier("mode-resource-key-\(id)")
-                .accessibilityValue(key)
-        } else {
-            Keycap(key.map(String.init).joined(separator: " "))
-        }
-        #else
-        Keycap(key.map(String.init).joined(separator: " "))
-        #endif
-    }
-
-    private var showsInteractionDiagnostics: Bool {
-        #if DEBUG
-        UserDefaults.standard.bool(forKey: "demoData")
-            && UserDefaults.standard.bool(forKey: "uiInteractionModeDiagnostics")
-        #else
-        false
-        #endif
     }
 
     /// Yes / Maybe / No for an invitation, with the current answer shown pressed.
