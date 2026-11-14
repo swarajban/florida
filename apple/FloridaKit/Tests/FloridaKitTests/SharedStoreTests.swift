@@ -215,17 +215,11 @@ import notify
         let host = try AppDatabase(path: file)
         let other = try AppDatabase.openExisting(path: file, access: .readWrite, requireSync: false)
         let counter = SignalCounter()
-        let name = SharedStoreChanges.notificationName(for: file)
-        #if canImport(Darwin)
-        var token: Int32 = 0
-        try #require(notify_register_dispatch(name, &token, .global(qos: .utility), { _ in counter.increment() }) == NOTIFY_STATUS_OK)
-        defer { notify_cancel(token) }
-        #else
-        let token = NotificationCenter.default.addObserver(forName: Notification.Name(name), object: nil, queue: nil) { _ in counter.increment() }
-        defer { NotificationCenter.default.removeObserver(token) }
-        #endif
+        for writer in [host.writer, other.writer] {
+            writer.add(transactionObserver: SharedStoreChanges.CommitSignal { counter.increment() }, extent: .databaseLifetime)
+        }
+        #expect(counter.value == 0)
         try other.saveTask(Fixtures.task(id: "committed"), original: nil)
-        try await Task.sleep(for: .milliseconds(200))
         #expect(counter.value == 1)
 
         enum Rollback: Error { case requested }
@@ -236,9 +230,54 @@ import notify
             }
         }
         #expect(throws: Rollback.self) { try rollback() }
+        try await other.writer.write { _ in }
+        try await other.writer.write { try $0.execute(sql: "DELETE FROM task WHERE id = 'missing'") }
         try await host.writer.write { try $0.notifyChanges(in: .fullDatabase) }
         host.refreshExternalChanges()
-        try await Task.sleep(for: .milliseconds(300))
+        try await host.writer.write { _ in }
+        #expect(counter.value == 1)
+        #expect(try host.task(id: "rolled-back") == nil)
+
+        try other.saveTask(Fixtures.task(id: "second-commit"), original: nil)
+        #expect(counter.value == 2)
+    }
+
+    @Test func committedChangesDeliverAndRollbacksStaySilent() async throws {
+        let file = try path()
+        defer { try? FileManager.default.removeItem(atPath: URL(fileURLWithPath: file).deletingLastPathComponent().path) }
+        let host = try AppDatabase(path: file)
+        let other = try AppDatabase.openExisting(path: file, access: .readWrite, requireSync: false)
+        let counter = SignalCounter()
+        let name = SharedStoreChanges.notificationName(for: file)
+        #if canImport(Darwin)
+        var token: Int32 = 0
+        try #require(notify_register_dispatch(name, &token, .global(qos: .utility), { _ in counter.increment() }) == NOTIFY_STATUS_OK)
+        defer { notify_cancel(token) }
+        #else
+        let token = NotificationCenter.default.addObserver(forName: Notification.Name(name), object: nil, queue: nil) { _ in counter.increment() }
+        defer { NotificationCenter.default.removeObserver(token) }
+        #endif
+        try other.saveTask(Fixtures.task(id: "committed"), original: nil)
+        let clock = ContinuousClock()
+        let deadline = clock.now + .seconds(3)
+        while counter.value < 1 && clock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(counter.value == 1)
+
+        enum Rollback: Error { case requested }
+        func rollback() throws {
+            try other.writer.write { db in
+                try Fixtures.task(id: "rolled-back").insert(db)
+                throw Rollback.requested
+            }
+        }
+        #expect(throws: Rollback.self) { try rollback() }
+        try await other.writer.write { _ in }
+        try await other.writer.write { try $0.execute(sql: "DELETE FROM task WHERE id = 'missing'") }
+        try await host.writer.write { try $0.notifyChanges(in: .fullDatabase) }
+        host.refreshExternalChanges()
+        try await Task.sleep(for: .seconds(1))
         #expect(counter.value == 1)
         #expect(try host.task(id: "rolled-back") == nil)
     }

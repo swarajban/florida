@@ -18,7 +18,13 @@ final class SharedStoreChanges: @unchecked Sendable {
         self.writer = writer
         name = Self.notificationName(for: path)
         writer.writeWithoutTransaction { db in dataVersion = try? Int.fetchOne(db, sql: "PRAGMA data_version") }
-        writer.add(transactionObserver: CommitSignal(name: name), extent: .databaseLifetime)
+        writer.add(transactionObserver: CommitSignal { [name] in
+            #if canImport(Darwin)
+            notify_post(name)
+            #else
+            NotificationCenter.default.post(name: Notification.Name(name), object: nil)
+            #endif
+        }, extent: .databaseLifetime)
         #if canImport(Darwin)
         var registered: Int32 = 0
         if notify_register_dispatch(name, &registered, .global(qos: .utility), { [weak self] _ in self?.refresh() }) == NOTIFY_STATUS_OK {
@@ -60,22 +66,18 @@ final class SharedStoreChanges: @unchecked Sendable {
         }
     }
 
-    private final class CommitSignal: TransactionObserver {
-        let name: String
-        var changed = false
+    final class CommitSignal: TransactionObserver {
+        private let publish: @Sendable () -> Void
+        private var changed = false
 
-        init(name: String) { self.name = name }
+        init(publish: @escaping @Sendable () -> Void) { self.publish = publish }
 
         func observes(eventsOfKind eventKind: DatabaseEventKind) -> Bool { true }
         func databaseDidChange(with event: DatabaseEvent) { changed = true }
         func databaseDidCommit(_ db: Database) {
             guard changed else { return }
             changed = false
-            #if canImport(Darwin)
-            notify_post(name)
-            #else
-            NotificationCenter.default.post(name: Notification.Name(name), object: nil)
-            #endif
+            publish()
         }
         func databaseDidRollback(_ db: Database) { changed = false }
     }
