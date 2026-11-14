@@ -76,6 +76,9 @@ final class EventQuickAddTests: XCTestCase {
         let app = launch(largeText: true)
         openComposer(app)
         app.textFields["event-quick-add-input"].typeText("Day off today all day #missing-calendar")
+        let keyboardIntroduction = app.buttons["Continue"]
+        if keyboardIntroduction.exists { keyboardIntroduction.tap() }
+        XCTAssertFalse(keyboardIntroduction.exists)
         app.buttons["event-quick-add-hide-keyboard"].tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
         XCTAssertFalse(app.buttons["event-quick-add-save"].isEnabled)

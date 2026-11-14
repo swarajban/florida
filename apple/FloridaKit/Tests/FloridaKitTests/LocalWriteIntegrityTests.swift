@@ -9,6 +9,35 @@ import Testing
         return try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 
+    @Test func dayOnlyDateEntryStoresTheServerSettingsZoneInstant() throws {
+        let db = try AppDatabase.inMemory()
+        try db.apply(SyncResponse(cursor: "settings", settings: UserSettings(
+            id: "default", timeZone: "America/Los_Angeles", updatedAt: Fixtures.t0)))
+        let settings = try #require(try db.userSettings())
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: settings.timeZone))
+        let now = try #require(JSONCoding.parseInstant("2026-11-13T17:00:00Z"))
+        let entry = DateEntry.parse("nov 17 2026", now: now, calendar: calendar)
+        guard case .date(let day, let hasTime) = entry else {
+            Issue.record("Expected a day-only date entry")
+            return
+        }
+        #expect(!hasTime)
+        var task = Fixtures.task(id: "day-only")
+        task.deadlineType = .soft
+        task.dueAt = TaskDay.due(on: day, calendar: calendar)
+        let mutation = try db.saveTask(task, original: nil)
+        let expected = try #require(JSONCoding.parseInstant("2026-11-17T17:00:00-08:00"))
+        #expect(expected == JSONCoding.parseInstant("2026-11-18T01:00:00Z"))
+        #expect(mutation.after.dueAt == expected)
+        let stored = try #require(try db.task(id: task.id))
+        #expect(stored.dueAt == expected)
+        #expect(!TaskDay.dueHasTime(try #require(stored.dueAt), calendar: calendar))
+        let write = try #require(try db.pendingWrites().first)
+        let dueAt = try #require(try body(write)["dueAt"] as? String)
+        #expect(JSONCoding.parseInstant(dueAt) == expected)
+    }
+
     @Test(arguments: [false, true])
     func recurringAcceptanceAdvancesNewerEditBaselineWithoutClobberingIt(_ existing: Bool) throws {
         let db = try AppDatabase.inMemory()
