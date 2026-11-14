@@ -69,7 +69,7 @@ extension AppModel {
 
     /// Re-parses the quick-add draft, re-filters commands, or re-runs the search.
     func paletteTextDidChange() {
-        palette.textDidChange(now: Date(), calendar: calendar)
+        palette.textDidChange(now: Date(), calendar: taskListCalendar)
         if palette.completedCategoryHint != palette.draft.categoryHint {
             palette.completedCategoryId = nil
             palette.completedCategoryHint = nil
@@ -107,7 +107,7 @@ extension AppModel {
     /// ⌘↩ in quick add: hands the text to the full editor, which sends it to the AI parser.
     func parsePaletteWithAI() {
         let draft = palette.draft
-        let parsed = QuickAddParser.parse(palette.text, now: Date(), calendar: calendar)
+        let parsed = QuickAddParser.parse(palette.text, now: Date(), calendar: taskListCalendar)
         var text = QuickAddParser.removingSource(from: palette.text)
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty {

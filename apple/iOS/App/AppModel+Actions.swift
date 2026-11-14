@@ -74,14 +74,16 @@ extension AppModel {
     /// Not before tomorrow 00:00 local. A pin would override the earliest start, so it is cleared.
     func pushToTomorrow(_ task: TaskItem) {
         let previous = storedVersion(of: task)
-        var updated = previous
-        updated.startAt = calendar.date(byAdding: .day, value: 1, to: today)
-        updated.pinnedStart = nil
+        let updated = TaskDay.pushedToTomorrow(previous, now: now, calendar: taskListCalendar)
         var mutation: AppDatabase.TaskMutation?
         guard write({ mutation = try $0.saveTask(updated, original: previous) }),
               let mutation, let before = mutation.before else { return }
+        var style = Date.FormatStyle.dateTime.weekday(.abbreviated).month(.abbreviated).day()
+        style.calendar = taskListCalendar
+        style.timeZone = taskListCalendar.timeZone
+        let day = (mutation.after.startAt ?? now).formatted(style)
         showToast(Toast(
-            message: "Pushed “\(task.title)” to tomorrow", systemImage: "arrow.turn.down.right", style: .info,
+            message: "Pushed “\(task.title)” to \(day)", systemImage: "arrow.turn.down.right", style: .info,
             undo: TaskUndo(from: before, to: mutation.after)))
     }
 

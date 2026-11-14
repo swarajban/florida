@@ -140,12 +140,13 @@ extension AppModel {
             statusMessage = "Select a task first"
             return
         }
-        let tomorrow = DateNavigation.shift(today, by: 1, calendar: calendar)
         let original = task
-        task.startAt = tomorrow
-        task.pinnedStart = nil
-        if save(task, original: original, undoLabel: "Pushed \(Self.quoted(task.title)) to tomorrow") {
-            showGhost("Pushed to \(tomorrow.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))")
+        task = TaskDay.pushedToTomorrow(task, now: Date(), calendar: taskListCalendar)
+        if save(task, original: original, undoLabel: "Pushed \(Self.quoted(task.title)) to tomorrow"), let start = task.startAt {
+            var style = Date.FormatStyle.dateTime.weekday(.abbreviated).month(.abbreviated).day()
+            style.calendar = taskListCalendar
+            style.timeZone = taskListCalendar.timeZone
+            showGhost("Pushed to \(start.formatted(style))")
         }
     }
 
@@ -176,7 +177,7 @@ extension AppModel {
         var task = TaskItem(
             id: UUID().uuidString.lowercased(), categoryId: category.id, title: "",
             durationMinutes: Self.defaultDurationMinutes, priority: .medium, deadlineType: .soft,
-            dueAt: TaskDay.defaultDue(now: now, calendar: calendar), createdAt: now, updatedAt: now)
+            dueAt: TaskDay.defaultDue(now: now, calendar: taskListCalendar), createdAt: now, updatedAt: now)
         task.source = source
         if let quickAdd {
             task.title = quickAdd.title

@@ -2,7 +2,7 @@ import Foundation
 
 extension CalendarInfo {
     /// New-event choices: Sempre, Personal, A&S Family Calendar, then the other calendars.
-    /// Visibility only breaks ties: hiding Sempre's events must not change the default.
+    /// Callers restrict new-event choices to selected writable calendars.
     public static func isPreferredForNewEvents(_ lhs: CalendarInfo, _ rhs: CalendarInfo, accounts: [GoogleAccount]) -> Bool {
         (lhs.eventRank(accounts: accounts), lhs.selected ? 0 : 1, lhs.summary.lowercased(), lhs.id)
             < (rhs.eventRank(accounts: accounts), rhs.selected ? 0 : 1, rhs.summary.lowercased(), rhs.id)

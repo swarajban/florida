@@ -46,10 +46,6 @@ extension AppModel {
     func deleteCategory(_ category: TaskCategory) throws {
         guard !category.isInbox else { throw LocalWriteError("Inbox can't be deleted.") }
         try perform { database in
-            for var task in try database.tasks(inCategory: category.id) {
-                task.categoryId = TaskCategory.inboxId
-                try database.saveTask(task)
-            }
             try database.deleteCategory(id: category.id)
         }
     }

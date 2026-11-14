@@ -36,6 +36,8 @@ public struct RejectedWrite: Hashable, Sendable {
 public actor SyncClient {
     let database: AppDatabase
     let api: ServerAPI
+    private var syncInProgress = false
+    private var syncWaiters: [CheckedContinuation<Void, Never>] = []
 
     /// Writes the server refused with a 4xx during the most recent push; the UI can show them.
     public private(set) var lastRejectedWrites: [RejectedWrite] = []
@@ -51,8 +53,10 @@ public actor SyncClient {
     /// - Returns: the number of writes the server accepted.
     @discardableResult
     public func sync() async throws -> Int {
+        await acquireSync()
+        defer { releaseSync() }
         let (pushed, failure) = try await pushQueue()
-        try await pull()
+        try await pullChanges()
         if let failure {
             throw failure
         }
@@ -62,11 +66,29 @@ public actor SyncClient {
     /// Pushes queued writes; see `pushQueue()`.
     /// - Returns: the number of writes the server accepted.
     public func push() async throws -> Int {
+        await acquireSync()
+        defer { releaseSync() }
         let (pushed, failure) = try await pushQueue()
         if let failure {
             throw failure
         }
         return pushed
+    }
+
+    private func acquireSync() async {
+        if syncInProgress {
+            await withCheckedContinuation { syncWaiters.append($0) }
+        } else {
+            syncInProgress = true
+        }
+    }
+
+    private func releaseSync() {
+        if syncWaiters.isEmpty {
+            syncInProgress = false
+        } else {
+            syncWaiters.removeFirst().resume()
+        }
     }
 
     /// Pushes queued writes, the rows other rows name first (`PendingWrite.pushRank`) and in `seq`
@@ -79,14 +101,29 @@ public actor SyncClient {
     /// the local row to the server's copy, drops the write into `lastRejectedWrites`, and continues.
     private func pushQueue() async throws -> (pushed: Int, failure: (any Error)?) {
         lastRejectedWrites = []
+        do {
+            try await recoverCategoryDeletions()
+        } catch SyncError.unauthorized {
+            throw SyncError.unauthorized
+        } catch {
+            return (0, error)
+        }
         var pushed = 0
         var projectsLeftQueued: Set<String> = []
         let queue = try database.pendingWrites().sorted { ($0.pushRank, $0.seq ?? .max) < ($1.pushRank, $1.seq ?? .max) }
-        for write in queue {
-            if let project = write.namedProjectId, projectsLeftQueued.contains(project) {
-                continue
-            }
+        for entry in queue {
             do {
+                if entry.entity == .task || entry.entity == .project {
+                    try await recoverCategoryDeletions()
+                    if try database.hasPendingCategoryWrites() {
+                        continue
+                    }
+                }
+                guard let seq = entry.seq, let write = try database.pendingWrite(seq: seq) else { continue }
+                if let project = write.namedProjectId, projectsLeftQueued.contains(project) {
+                    continue
+                }
+                let deletedCreation = write.op == .delete ? try database.deletedQueuedCreation(write) : false
                 let (data, response) = try await api.send(request(for: write))
                 switch response.statusCode {
                 case 200..<300:
@@ -99,6 +136,9 @@ public actor SyncClient {
                         projectsLeftQueued.insert(write.entityId)
                     }
                     continue
+                case 404 where deletedCreation:
+                    try database.resolveDroppedWrite(write, serverCopy: .missing)
+                    pushed += 1
                 case 400..<500:
                     try database.resolveDroppedWrite(write, serverCopy: try await fetchServerCopy(of: write))
                     lastRejectedWrites.append(RejectedWrite(write: write, status: response.statusCode, message: api.errorMessage(data)))
@@ -114,11 +154,24 @@ public actor SyncClient {
         return (pushed, nil)
     }
 
+    private func recoverCategoryDeletions() async throws {
+        for id in try database.categoryDeletionsNeedingRecovery() {
+            let write = PendingWrite(entity: .category, entityId: id, op: .delete, body: nil, createdAt: Date())
+            let copy = try await fetchServerCopy(of: write)
+            if case .unavailable = copy {
+                throw SyncError.http(status: 404, body: "Category \(id) must be reconciled before sending dependent changes")
+            }
+            try database.resolveDroppedWrite(write, serverCopy: copy)
+        }
+    }
+
     /// Drops `write` from the queue without pushing it, then resets the local row to the server's
     /// copy so the two stop diverging: saved when the server has it live, removed when tombstoned,
     /// left as it is when the server does not know it. Throws when the server cannot be asked; the
     /// write is gone either way.
     public func discard(_ write: PendingWrite) async throws {
+        await acquireSync()
+        defer { releaseSync() }
         if let seq = write.seq {
             try database.removePendingWrite(seq: seq)
         }
@@ -127,6 +180,12 @@ public actor SyncClient {
 
     /// `GET /api/sync?since=<cursor>` and applies the response.
     public func pull() async throws {
+        await acquireSync()
+        defer { releaseSync() }
+        try await pullChanges()
+    }
+
+    private func pullChanges() async throws {
         var queryItems: [URLQueryItem] = []
         if let cursor = try database.cursor() {
             queryItems.append(URLQueryItem(name: "since", value: cursor))
@@ -158,6 +217,7 @@ public actor SyncClient {
         case .event: "api/events"
         case .project: "api/projects"
         case .dayOverride: "api/day-overrides"
+        case .calendar: "api/calendars"
         }
     }
 
@@ -194,6 +254,9 @@ public actor SyncClient {
         case (.dayOverride, .put), (.dayOverride, .patch):
             let response = try api.decode(DayOverrideWriteResponse.self, from: data)
             try database.completePendingWrite(write, record: response.dayOverride, scheduling: response.scheduling, computedAt: now)
+        case (.calendar, .put), (.calendar, .patch):
+            let response = try api.decode(SchedulingResponse.self, from: data)
+            try database.completePendingWrite(write, record: nil as CalendarInfo?, scheduling: response.scheduling, computedAt: now)
         case (_, .delete):
             let response = try api.decode(SchedulingResponse.self, from: data)
             try database.completePendingWrite(write, record: nil as TaskItem?, scheduling: response.scheduling, computedAt: now)
@@ -205,6 +268,10 @@ public actor SyncClient {
     /// older server lacking the route. Throws when the server cannot be asked (401, 5xx, transport
     /// or decoding failure), so a caller pushing the write keeps it queued.
     private func fetchServerCopy(of write: PendingWrite) async throws -> AppDatabase.ServerCopy {
+        if write.entity == .calendar {
+            let response: SyncResponse = try await api.perform(api.makeRequest(method: "GET", path: "api/sync"))
+            return response.calendars.first(where: { $0.id == write.entityId }).map { .live($0) } ?? .missing
+        }
         let request = api.makeRequest(method: "GET", path: collection(for: write.entity), id: write.entityId)
         let (data, response) = try await api.send(request)
         switch response.statusCode {
@@ -228,6 +295,8 @@ public actor SyncClient {
             case .dayOverride:
                 let row = try api.decode(DayOverride.self, from: data)
                 return row.deletedAt == nil ? .live(row) : .tombstoned
+            case .calendar:
+                return .live(try api.decode(CalendarInfo.self, from: data))
             }
         case 404 where api.serverError(data) != nil:
             return .missing

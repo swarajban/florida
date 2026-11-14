@@ -321,7 +321,8 @@ extension AppDatabase {
         let full = try taskWriteObject(fullBody)
         let op: PendingWrite.Op
         let body: Data
-        if let previous, previous.deletedAt == nil, pending?.op != .delete {
+        let needsCreation = try String.fetchOne(db, sql: "SELECT value FROM syncState WHERE key = ?", arguments: ["task-needs-put:\(task.id)"]) != nil
+        if let previous, previous.deletedAt == nil, pending?.op != .delete, !needsCreation {
             var changes = taskChanges(from: previous, to: local, full: full)
             guard !changes.isEmpty else { return }
             // Completion/progress never edits the template and needs no recurrence precondition.
@@ -351,12 +352,27 @@ extension AppDatabase {
             local.recurrenceDate = previous.recurrenceDate
             local.recurrenceRevision = previous.recurrenceRevision
         }
+        if previous?.categoryId != local.categoryId {
+            try forgetCategoryReassignment(db, entity: .task, id: local.id)
+        }
         try local.save(db)
         try enqueue(db, entity: .task, id: task.id, op: op, body: body, now: now)
-        if local.pinnedStart != previous?.pinnedStart {
+        if previous == nil || !taskSchedulingFields.isDisjoint(with: taskChanges(from: previous ?? local, to: local, full: full).keys) {
+            try UnscheduledTask.filter(Column("taskId") == local.id).deleteAll(db)
+            try OptionalPlacement.filter(Column("taskId") == local.id).deleteAll(db)
+        }
+        if local.pinnedStart != previous?.pinnedStart || (local.pinnedStart != nil && local.remainingMinutes != previous?.remainingMinutes) || !local.isOpen {
             try placePin(of: local, in: db, now: now)
         }
+        if let start = local.startAt {
+            try Placement.filter(Column("taskId") == local.id && Column("startAt") < start && Column("pinned") == false).deleteAll(db)
+        }
+        if let id = local.projectId, let project = try Project.fetchOne(db, id: id), project.status != .active || project.deletedAt != nil {
+            try removeProjectTaskPlan(db, projectId: id)
+        }
     }
+
+    private static let taskSchedulingFields: Set<String> = ["categoryId", "durationMinutes", "minChunkMinutes", "priority", "deadlineType", "dueAt", "startAt", "scheduleId", "context", "projectId", "attention", "pinnedStart", "completedMinutes", "completedAt", "recurrence", "someday"]
 
     /// A pinned task sits at exactly its pinned start for its remaining minutes, so its block does
     /// not have to wait for the server: pinning shows it there at once, and unpinning takes it off
@@ -365,6 +381,7 @@ extension AppDatabase {
     private static func placePin(of task: TaskItem, in db: Database, now: Date) throws {
         try Placement.filter(Column("taskId") == task.id).deleteAll(db)
         guard let start = task.pinnedStart, task.isOpen, task.remainingMinutes > 0 else { return }
+        if let id = task.projectId, let project = try Project.fetchOne(db, id: id), project.status != .active || project.deletedAt != nil { return }
         try UnscheduledTask.filter(Column("taskId") == task.id).deleteAll(db)
         try Placement(
             id: UUID().uuidString.lowercased(), taskId: task.id, startAt: start,
@@ -372,7 +389,7 @@ extension AppDatabase {
         ).insert(db)
     }
 
-    private static func taskWriteObject(_ data: Data) throws -> [String: Any] {
+    static func taskWriteObject(_ data: Data) throws -> [String: Any] {
         guard let fields = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw DecodingError.typeMismatch([String: Any].self, .init(codingPath: [], debugDescription: "Task write must be a JSON object."))
         }
@@ -493,6 +510,8 @@ extension AppDatabase {
             // instances have moved here already, and only this write tells the server.
             if queued.scope == .series, queued.startAt == write.startAt, queued.endAt == write.endAt {
                 write.scope = .series
+            } else if queued.scope == .series {
+                try Self.restoreSeriesMove(db, id: event.id)
             }
         }
         let body = try JSONCoding.encoder.encode(write)
@@ -520,6 +539,7 @@ extension AppDatabase {
         else { throw WriteError.eventWithoutTimes(id: instanceId) }
         let shift = start.timeIntervalSince(oldStart)
         let length = end.timeIntervalSince(start)
+        var snapshots = try Self.seriesMoveTimes(db, id: instanceId)
         if let series = instance.recurringEventId {
             let others = try CalendarEvent
                 .filter(Column("calendarId") == instance.calendarId && Column("recurringEventId") == series)
@@ -528,6 +548,10 @@ extension AppDatabase {
             for var other in others {
                 guard let otherStart = other.startAt else { continue }
                 let moved = otherStart.addingTimeInterval(shift)
+                let previous = snapshots.first { $0.id == other.id }
+                snapshots.removeAll { $0.id == other.id }
+                snapshots.append(SeriesMoveTimes(id: other.id, start: previous?.start ?? other.startAt,
+                    end: previous?.end ?? other.endAt, movedStart: moved, movedEnd: moved.addingTimeInterval(length)))
                 other.startAt = moved
                 other.endAt = moved.addingTimeInterval(length)
                 other.updatedAt = now
@@ -540,14 +564,17 @@ extension AppDatabase {
         guard var write = EventWrite(instance) else { throw WriteError.eventWithoutTimes(id: instanceId) }
         write.scope = .series
         try instance.save(db)
+        try Self.storeSeriesMoveTimes(db, id: instanceId, times: snapshots)
         try Self.enqueue(db, entity: .event, id: instanceId, op: .put, body: try JSONCoding.encoder.encode(write), now: now)
-        return EventMutation(from: DateInterval(start: oldStart, end: oldEnd), to: DateInterval(start: start, end: end))
+        return EventMutation(from: DateInterval(start: oldStart, end: oldEnd), to: DateInterval(start: start, end: end),
+            expectedSeries: try Self.eventSeriesMembers(of: instance, in: db))
     }
 
     /// Marks the event deleted locally, so every query and observation hides it at once, and
     /// queues a `delete`, replacing any queued `put`.
     public func deleteEvent(id: String, now: Date = Date()) throws {
         try writer.write { db in
+            try Self.restoreSeriesMove(db, id: id)
             try db.execute(sql: "UPDATE event SET deletedAt = ?, updatedAt = ? WHERE id = ?", arguments: [now, now, id])
             try Self.enqueue(db, entity: .event, id: id, op: .delete, body: nil, now: now)
         }
@@ -567,6 +594,7 @@ extension AppDatabase {
         try writer.write { db in
             try db.execute(sql: "UPDATE category SET deletedAt = ?, updatedAt = ? WHERE id = ?", arguments: [now, now, id])
             try Self.enqueue(db, entity: .category, id: id, op: .delete, body: nil, now: now)
+            try Self.keepPendingCategoryReassignments(db)
         }
     }
 
@@ -582,8 +610,21 @@ extension AppDatabase {
         var project = project
         project.updatedAt = now
         let body = try JSONCoding.encoder.encode(ProjectWrite(project))
+        let previous = try Project.fetchOne(db, id: project.id)
+        if previous == nil || previous?.categoryId != project.categoryId {
+            try Self.forgetCategoryReassignment(db, entity: .project, id: project.id)
+        }
         try project.save(db)
         try Self.enqueue(db, entity: .project, id: project.id, op: .put, body: body, now: now)
+        if project.status != .active {
+            try Self.removeProjectTaskPlan(db, projectId: project.id)
+        }
+    }
+
+    private static func removeProjectTaskPlan(_ db: Database, projectId: String) throws {
+        try db.execute(sql: "DELETE FROM placement WHERE taskId IN (SELECT id FROM task WHERE projectId = ?)", arguments: [projectId])
+        try db.execute(sql: "DELETE FROM optionalPlacement WHERE taskId IN (SELECT id FROM task WHERE projectId = ?)", arguments: [projectId])
+        try db.execute(sql: "DELETE FROM unscheduled WHERE taskId IN (SELECT id FROM task WHERE projectId = ?)", arguments: [projectId])
     }
 
     /// Marks the project deleted and queues a `delete`. Its tasks stay, unfiled from it, as the
@@ -655,6 +696,12 @@ extension AppDatabase {
 
     /// Replaces any queued write for (entity, id) with a new one, so the queue holds one row per entity id.
     static func enqueue(_ db: Database, entity: PendingWrite.Entity, id: String, op: PendingWrite.Op, body: Data?, now: Date) throws {
+        if op != .delete {
+            try db.execute(sql: "DELETE FROM syncState WHERE key = ?", arguments: ["creation-delete:\(entity.rawValue):\(id)"])
+        }
+        if op == .delete, try PendingWrite.filter(Column("entity") == entity.rawValue && Column("entityId") == id && Column("op") == "put").fetchCount(db) > 0 {
+            try db.execute(sql: "INSERT OR REPLACE INTO syncState (key, value) VALUES (?, '1')", arguments: ["creation-delete:\(entity.rawValue):\(id)"])
+        }
         try db.execute(
             sql: "DELETE FROM pendingWrite WHERE entity = ? AND entityId = ?",
             arguments: [entity.rawValue, id])
@@ -700,6 +747,7 @@ extension AppDatabase {
                 }
             }
             for project in response.projects where !pending.contains(.init(entity: .project, id: project.id)) {
+                try Self.forgetCategoryReassignment(db, entity: .project, id: project.id)
                 if project.deletedAt != nil {
                     try Project.deleteOne(db, id: project.id)
                 } else {
@@ -714,6 +762,8 @@ extension AppDatabase {
                 }
             }
             for task in response.tasks where !pending.contains(.init(entity: .task, id: task.id)) {
+                try Self.forgetCategoryReassignment(db, entity: .task, id: task.id)
+                try db.execute(sql: "DELETE FROM syncState WHERE key = ?", arguments: ["task-needs-put:\(task.id)"])
                 if task.deletedAt != nil {
                     try TaskItem.deleteOne(db, id: task.id)
                 } else {
@@ -725,6 +775,14 @@ extension AppDatabase {
                     try CalendarEvent.deleteOne(db, id: event.id)
                 } else {
                     try event.save(db)
+                }
+            }
+            try Self.keepPendingCategoryReassignments(db)
+            for category in response.categories where !pending.contains(.init(entity: .category, id: category.id)) {
+                if category.deletedAt == nil {
+                    try Self.restoreCategoryReassignment(db, id: category.id)
+                } else {
+                    try Self.finishCategoryDeletion(db, id: category.id)
                 }
             }
 
@@ -741,8 +799,18 @@ extension AppDatabase {
             for account in response.accounts {
                 try account.insert(db)
             }
+            let queuedCalendars = try CalendarInfo.fetchAll(db).filter { pending.contains(.init(entity: .calendar, id: $0.id)) }
+            let calendarWrites = try PendingWrite.filter(Column("entity") == "calendar").fetchAll(db)
             _ = try CalendarInfo.deleteAll(db)
-            for calendar in response.calendars {
+            for var calendar in response.calendars {
+                if let write = calendarWrites.first(where: { $0.entityId == calendar.id }), let body = write.body {
+                    let fields = try JSONCoding.decoder.decode([String: Bool].self, from: body)
+                    if let selected = fields["selected"] { calendar.selected = selected }
+                    if let blocks = fields["blocksScheduling"] { calendar.blocksScheduling = blocks }
+                }
+                try calendar.insert(db)
+            }
+            for calendar in queuedCalendars where !response.calendars.contains(where: { $0.id == calendar.id }) {
                 try calendar.insert(db)
             }
 
@@ -765,14 +833,35 @@ extension AppDatabase {
     private static func keepQueuedPins(_ db: Database, pending: Set<PendingEntityId>) throws {
         for entry in pending where entry.entity == .task {
             guard let task = try TaskItem.fetchOne(db, id: entry.id) else { continue }
+            if let write = try PendingWrite.filter(Column("entity") == "task" && Column("entityId") == task.id).fetchOne(db), let body = write.body,
+               !taskSchedulingFields.isDisjoint(with: try taskWriteObject(body).keys) {
+                try UnscheduledTask.filter(Column("taskId") == task.id).deleteAll(db)
+                try OptionalPlacement.filter(Column("taskId") == task.id).deleteAll(db)
+            }
             let blocks = try Placement.filter(Column("taskId") == task.id).fetchAll(db)
             let agrees = if let pin = task.pinnedStart {
                 blocks.count == 1 && blocks[0].pinned && blocks[0].startAt == pin
+                    && blocks[0].endAt == pin.addingTimeInterval(TimeInterval(task.remainingMinutes) * 60) && task.isOpen
             } else {
                 !blocks.contains(where: \.pinned)
             }
             if !agrees {
                 try placePin(of: task, in: db, now: task.updatedAt)
+            }
+            if !task.isOpen {
+                try Placement.filter(Column("taskId") == task.id).deleteAll(db)
+                try OptionalPlacement.filter(Column("taskId") == task.id).deleteAll(db)
+                try UnscheduledTask.filter(Column("taskId") == task.id).deleteAll(db)
+            } else if let start = task.startAt {
+                try Placement.filter(Column("taskId") == task.id && Column("startAt") < start && Column("pinned") == false).deleteAll(db)
+            }
+            if let id = task.projectId, let project = try Project.fetchOne(db, id: id), project.status != .active || project.deletedAt != nil {
+                try removeProjectTaskPlan(db, projectId: id)
+            }
+        }
+        for entry in pending where entry.entity == .project {
+            if let project = try Project.fetchOne(db, id: entry.id), project.status != .active {
+                try removeProjectTaskPlan(db, projectId: project.id)
             }
         }
     }
@@ -789,6 +878,7 @@ extension AppDatabase {
         }
         try replaceAll(db, with: result.routineOccurrenceRows(computedAt: computedAt))
         try replaceAll(db, with: [result.planSummary])
+        try keepQueuedPins(db, pending: pendingEntityIds(db))
     }
 
     /// Replaces every row of a table the server owns outright.
@@ -842,8 +932,30 @@ extension AppDatabase {
         try writer.read { db in try PendingWrite.order(Column("seq")).fetchAll(db) }
     }
 
+    func pendingWrite(seq: Int64) throws -> PendingWrite? {
+        try writer.read { db in try PendingWrite.fetchOne(db, key: seq) }
+    }
+
+    func hasPendingCategoryWrites() throws -> Bool {
+        try writer.read { db in
+            try Bool.fetchOne(db, sql: "SELECT EXISTS (SELECT 1 FROM pendingWrite WHERE entity = ?)", arguments: [PendingWrite.Entity.category.rawValue]) == true
+        }
+    }
+
+    func deletedQueuedCreation(_ write: PendingWrite) throws -> Bool {
+        try writer.read { db in
+            try String.fetchOne(db, sql: "SELECT value FROM syncState WHERE key = ?", arguments: ["creation-delete:\(write.entity.rawValue):\(write.entityId)"]) != nil
+        }
+    }
+
     public func removePendingWrite(seq: Int64) throws {
         try writer.write { db in
+            if let write = try PendingWrite.fetchOne(db, key: seq) {
+                if write.entity == .event { try Self.restoreSeriesMove(db, id: write.entityId) }
+                if write.entity == .category, write.op == .delete {
+                    try db.execute(sql: "DELETE FROM syncState WHERE key = 'cursor'")
+                }
+            }
             _ = try PendingWrite.deleteOne(db, key: seq)
         }
     }
@@ -882,21 +994,52 @@ extension AppDatabase {
             if let seq = write.seq {
                 _ = try PendingWrite.deleteOne(db, key: seq)
             }
+            if write.entity == .category {
+                try Self.settleCategoryAction(db, id: write.entityId, serverCopy: serverCopy)
+            }
             guard !(try Self.pendingEntityIds(db).contains(.init(entity: write.entity, id: write.entityId))) else { return }
+            try db.execute(sql: "DELETE FROM syncState WHERE key = ?", arguments: ["creation-delete:\(write.entity.rawValue):\(write.entityId)"])
+            if write.entity == .event {
+                try Self.restoreSeriesMove(db, id: write.entityId)
+            }
             switch serverCopy {
             case .live(let row):
+                if write.entity == .task || write.entity == .project {
+                    try Self.forgetCategoryReassignment(db, entity: write.entity, id: write.entityId)
+                }
                 try row.save(db)
             case .tombstoned:
                 try Self.deleteRow(db, entity: write.entity, id: write.entityId)
             case .missing where write.op == .delete:
                 try Self.deleteRow(db, entity: write.entity, id: write.entityId)
+            case .missing where write.entity == .task && write.op == .put:
+                try db.execute(sql: "INSERT OR REPLACE INTO syncState (key, value) VALUES (?, '1')", arguments: ["task-needs-put:\(write.entityId)"])
             case .missing, .unavailable:
                 break
+            }
+            try Self.keepPendingCategoryReassignments(db)
+            if write.entity == .task {
+                if case .live = serverCopy, let task = try TaskItem.fetchOne(db, id: write.entityId) {
+                    let hasPin = try Placement.filter(Column("taskId") == task.id && Column("pinned") == true).fetchCount(db) > 0
+                    if hasPin || task.pinnedStart != nil {
+                        try Self.placePin(of: task, in: db, now: task.updatedAt)
+                    }
+                } else if case .unavailable = serverCopy {
+                    try Placement.filter(Column("taskId") == write.entityId && Column("pinned") == true).deleteAll(db)
+                } else {
+                    try Placement.filter(Column("taskId") == write.entityId).deleteAll(db)
+                }
             }
         }
     }
 
     private static func deleteRow(_ db: Database, entity: PendingWrite.Entity, id: String) throws {
+        if entity == .task || entity == .project {
+            try Self.forgetCategoryReassignment(db, entity: entity, id: id)
+        }
+        if entity == .task {
+            try db.execute(sql: "DELETE FROM syncState WHERE key = ?", arguments: ["task-needs-put:\(id)"])
+        }
         switch entity {
         case .task: _ = try TaskItem.deleteOne(db, id: id)
         case .category: _ = try TaskCategory.deleteOne(db, id: id)
@@ -904,6 +1047,7 @@ extension AppDatabase {
         case .event: _ = try CalendarEvent.deleteOne(db, id: id)
         case .project: _ = try Project.deleteOne(db, id: id)
         case .dayOverride: _ = try DayOverride.deleteOne(db, id: id)
+        case .calendar: _ = try CalendarInfo.deleteOne(db, id: id)
         }
     }
 
@@ -919,13 +1063,47 @@ extension AppDatabase {
                 _ = try PendingWrite.deleteOne(db, key: seq)
             }
             let superseded = try Self.pendingEntityIds(db).contains(.init(entity: write.entity, id: write.entityId))
+            if write.entity == .category {
+                if write.op == .delete {
+                    try Self.settleCategoryAction(db, id: write.entityId, serverCopy: .tombstoned)
+                } else if let category = record as? TaskCategory {
+                    try Self.settleCategoryAction(db, id: write.entityId,
+                        serverCopy: category.deletedAt == nil ? .live(category) : .tombstoned)
+                }
+            }
+            if superseded, write.entity == .event, let accepted = record as? CalendarEvent {
+                try Self.rebaseSeriesMove(db, acknowledged: write, accepted: accepted)
+            }
+            if write.entity == .task {
+                try db.execute(sql: "DELETE FROM syncState WHERE key = ?", arguments: ["task-needs-put:\(write.entityId)"])
+                if superseded, let accepted = record as? TaskItem {
+                    try db.execute(sql: "UPDATE task SET recurrenceRevision = ?, recurrenceSeriesId = ?, recurrenceDate = ? WHERE id = ?", arguments: [accepted.recurrenceRevision, accepted.recurrenceSeriesId, accepted.recurrenceDate, write.entityId])
+                    if var newer = try PendingWrite.filter(Column("entity") == "task" && Column("entityId") == write.entityId).fetchOne(db), newer.op != .delete, let body = newer.body {
+                        var fields = try Self.taskWriteObject(body)
+                        if fields["expectedRecurrenceRevision"] != nil {
+                            fields["expectedRecurrenceRevision"] = accepted.recurrenceRevision.map { $0 as Any } ?? NSNull()
+                        }
+                        if accepted.recurrenceRevision != nil { newer.op = .patch }
+                        newer.body = try JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys])
+                        try newer.update(db)
+                    }
+                }
+            }
             if !superseded {
+                try db.execute(sql: "DELETE FROM syncState WHERE key = ?", arguments: ["creation-delete:\(write.entity.rawValue):\(write.entityId)"])
+                if write.entity == .event {
+                    try Self.clearSeriesMove(db, id: write.entityId)
+                }
                 if let record {
+                    if write.entity == .task || write.entity == .project {
+                        try Self.forgetCategoryReassignment(db, entity: write.entity, id: write.entityId)
+                    }
                     try record.save(db)
                 } else if write.op == .delete {
                     try Self.deleteRow(db, entity: write.entity, id: write.entityId)
                 }
             }
+            try Self.keepPendingCategoryReassignments(db)
             try Self.replaceSchedulerOutput(db, with: scheduling, computedAt: computedAt)
         }
     }

@@ -44,7 +44,7 @@ extension AppModel {
 
     /// Writable calendars in the preferred new-event order; the first is the default.
     var writableCalendars: [CalendarInfo] {
-        calendars.filter(Self.isWritable).sorted { CalendarInfo.isPreferredForNewEvents($0, $1, accounts: accounts) }
+        calendars.filter { $0.selected && Self.isWritable($0) }.sorted { CalendarInfo.isPreferredForNewEvents($0, $1, accounts: accounts) }
     }
 
     /// The event the event keys act on: the one whose detail popover is open, else the selected one.
@@ -372,7 +372,7 @@ extension AppModel {
         pushUndo(UndoEntry(
             label: "Moved every \(Self.quoted(Self.title(of: event)))",
             restores: [.moveEventSeries(
-                eventId: event.id, from: mutation.from, to: mutation.to)],
+                eventId: event.id, from: mutation.from, to: mutation.to, expectedSeries: mutation.expectedSeries)],
             at: Date()))
         showGhost("Moved all to \(DateText.time(start)) · z to undo", for: .seconds(3))
     }

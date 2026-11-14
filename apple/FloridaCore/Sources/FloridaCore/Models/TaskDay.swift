@@ -9,6 +9,19 @@ public enum TaskDay {
     /// The hour a deadline with no clock time is stored at.
     public static let dueHour = 17
 
+    public static func pushedToTomorrow(_ task: TaskItem, now: Date, calendar: Calendar) -> TaskItem {
+        let today = calendar.startOfDay(for: now)
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) ?? today.addingTimeInterval(86_400)
+        var task = task
+        let start = max(task.startAt ?? tomorrow, tomorrow)
+        task.startAt = start
+        if let dueAt = task.dueAt {
+            task.dueAt = due(dueAt, notBefore: start, calendar: calendar)
+        }
+        task.pinnedStart = nil
+        return task
+    }
+
     /// The instant stored for "due on the day containing `date`", with no time of its own.
     public static func due(on date: Date, calendar: Calendar) -> Date {
         let day = calendar.startOfDay(for: date)

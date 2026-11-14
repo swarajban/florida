@@ -220,15 +220,7 @@ final class TaskDateRegressionTests: XCTestCase {
     }
 
     private var savedFutureDueText: String {
-        let due = Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 17, hour: 17))!
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "America/Los_Angeles")!
-        let clock = calendar.dateComponents([.hour, .minute], from: due)
-        if clock.hour == 17 && clock.minute == 0 || clock.hour == 23 && clock.minute == 59 { return "Tue" }
-        var style = Date.FormatStyle.dateTime.hour().minute()
-        style.calendar = calendar
-        style.timeZone = calendar.timeZone
-        return "Tue \(due.formatted(style))"
+        "Tue"
     }
 
     @MainActor

@@ -21,7 +21,7 @@ extension AppModel {
 
     /// Writable calendars in the preferred new-event order; the first is the default.
     var writableCalendars: [CalendarInfo] {
-        calendars.filter(Self.isWritable).sorted { CalendarInfo.isPreferredForNewEvents($0, $1, accounts: accounts) }
+        calendars.filter { $0.selected && Self.isWritable($0) }.sorted { CalendarInfo.isPreferredForNewEvents($0, $1, accounts: accounts) }
     }
 
     /// A blank 30-minute event starting at `start` (rounded to the next 15 minutes) on the first

@@ -255,6 +255,21 @@ The `g` and `r` sequence hints expire after one second and clear when an item is
 Header navigation ends jump mode. Hiding the task pane clears its selection when the
 selected item is not also shown on the calendar.
 
+Task day entry and quick add use the settings time zone, even while traveling.
+Push to tomorrow never moves a later Start backward, releases a pin, advances a
+deadline that the new Start has passed using the task-date rule, and removes
+obsolete local blocks immediately. Deleting a category moves its tasks to Inbox
+and clears its projects' category locally without sending per-occurrence edits.
+If that deletion is rejected or discarded and the category still exists on the
+server, untouched filing is restored without undoing later category choices or
+title/notes edits.
+If reconciliation fails, dependent writes wait for recovery instead of sending
+the temporary Inbox filing to the server.
+The queue conservatively defers all task/project pushes while any category
+action is pending; local editing still updates immediately.
+Calendar visibility and scheduling-block toggles stay queued offline; new events
+use a selected writable calendar so they do not disappear on save.
+
 The main keys:
 
 | Keys | Action |
@@ -413,6 +428,8 @@ and project edits/deletions, including event day blocking, stop Undo from fallin
 through to an earlier task action: `z` reports that the latest change cannot be
 undone. Declining an invitation asks first. Event drags
 remain undoable against their current local times, and saving an unchanged task does not add an undo step.
+Series undo also checks every local member's times and membership; a changed, missing or added
+member refuses the undo instead of shifting a different series state.
 Task undo uses the same full-field patch on Mac and iPhone, including editor edits committed
 with completion. Unchanged remote fields are preserved; a later completion, deletion or change
 to one of the affected fields refuses the undo.

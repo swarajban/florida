@@ -46,7 +46,7 @@ struct RootView: View {
         .background(FloridaStyle.paper)
         .background(KeyEventMonitorView(model: model))
         .sheet(item: $model.editorTask) { task in
-            TaskEditorSheet(task: task, isNew: model.tasksById[task.id] == nil)
+            TaskEditorSheet(task: task, isNew: model.tasksById[task.id] == nil, calendar: model.taskListCalendar)
         }
         .sheet(isPresented: $model.isGoToDateOpen) {
             GoToDateView()
