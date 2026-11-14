@@ -619,10 +619,14 @@ and is saved locally and queued for Florida sync without editing Google. On Mac,
 Gusto events explicitly marked as paid company holidays supply automatic days off.
 Public holiday feeds are not enabled automatically; turn on **Blocks scheduling**
 for one in Settings if you also want its public holidays to protect your day.
-Protected dates have a shield and the event title in iPhone agenda/day headers and
-Mac day/week/month headers. A hidden calendar with blocking enabled still
-shows these protected-date indicators, without showing its ordinary event cells.
-Open an indicator to see the reason or change that occurrence's override. On Mac,
+On iPhone, blocking all-day events carry a compact shield in their existing chip or
+list row, without separate Protected cards. The day-status menu beside **Today**
+shows **Protected** on a protected workday, or just **Day off** on a routine day off.
+Open that menu for protection reasons and event details, including events from
+hidden calendars with blocking enabled; their ordinary event cells stay hidden.
+Manual days off on routine workdays also read **Protected**. Mac day/week/month
+headers keep their shield and event-title indicators. Open an event chip or
+protection menu item to see the reason or change that occurrence's override. On Mac,
 the detail stays usable when **Does not block** removes the last indicator, so you
 can restore **Automatic** without reopening it. All of this reads the local store;
 the apps do not classify titles or ask AI while rendering.
@@ -638,7 +642,12 @@ and the destination footer opens the calendar chooser directly. Task capture, it
 retained draft and optional AI action are unchanged.
 
 Three tabs. **Agenda**: a week strip over the day's all-day events, timed
-events, and scheduled task blocks; swipe to change day, pull to refresh. An
+events, and scheduled task blocks; swipe to change day, pull to refresh. The
+Agenda header has two compact rows: tap the date for the month picker, with
+calendar visibility and Add beside it; below are the list/day/three-day switcher,
+Today, and the day-status menu. The current year is omitted from the heading.
+Large accessibility text can wrap these controls into additional rows without
+clipping. There is no separate brand toolbar. An
 event is a card filled in its calendar's color; a task block is the scheduler's
 suggestion, so it has no fill, a dashed bar (solid once pinned) and an unticked
 circle. The
