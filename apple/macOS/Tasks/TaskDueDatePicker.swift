@@ -49,6 +49,7 @@ struct TaskDueDatePicker: ViewModifier {
             if wasGuarded {
                 Task { @MainActor in
                     await Task.yield()
+                    guard model.interaction.kind == .browsing else { return }
                     model.mainWindow?.makeFirstResponder(nil)
                 }
             }

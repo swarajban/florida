@@ -7,15 +7,20 @@ import SwiftUI
 /// too long or loose for it.
 struct AIParseSection: View {
     @Environment(AppModel.self) private var model
+    @Binding var state: ParseState
     let apply: (TaskDraft) -> Void
     @State private var text = ""
-    @State private var state: ParseState = .idle
     @FocusState private var isTextFocused: Bool
 
     enum ParseState {
         case idle, parsing
         case parsed(TaskDraft)
         case failed(String)
+
+        var hasReview: Bool {
+            if case .parsed = self { return true }
+            return false
+        }
     }
 
     var body: some View {
@@ -54,6 +59,7 @@ struct AIParseSection: View {
                         apply(draft)
                         state = .idle
                     }
+                    .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
                 }
             case .failed(let message):

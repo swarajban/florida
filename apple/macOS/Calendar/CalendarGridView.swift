@@ -10,8 +10,10 @@ struct CalendarGridView: View {
     @Environment(AppModel.self) private var model
     @AppStorage(JoyPreference.currentProgress.key) private var showsProgress = true
     @State private var position = ScrollPosition(idType: Int.self, y: CalendarGridView.initialY)
-    /// The drag under way began on something that cannot be dragged; the rest of it is ignored.
-    @State private var ignoresDrag = false
+    private enum DragSession {
+        case idle, event, availability, cancelled
+    }
+    @State private var dragSession: DragSession = .idle
     /// What the last click in the grid selected, until the selection change it caused is handled.
     @State private var clickedItem: ItemID?
     @State private var eventStart: Date?
@@ -213,7 +215,17 @@ struct CalendarGridView: View {
     /// follows the pointer by slots and day columns. The model is told only when the slot
     /// changes, so the canvas redraws a few times per drag, not once per pointer event.
     private func dragChanged(_ value: DragGesture.Value, width: CGFloat) {
+        guard dragSession != .cancelled else { return }
+        if dragSession == .event, model.interaction.kind != .dragging {
+            dragSession = .cancelled
+            return
+        }
+        if dragSession == .availability, model.availabilityShare == nil {
+            dragSession = .cancelled
+            return
+        }
         if model.availabilityShare != nil {
+            dragSession = .availability
             let geometry = gridGeometry(width: width)
             guard let index = geometry.dayIndex(atX: value.startLocation.x) else { return }
             model.paintAvailability(
@@ -221,17 +233,18 @@ struct CalendarGridView: View {
                 endMinute: Self.grid.snappedMinute(forY: value.location.y))
             return
         }
-        guard !ignoresDrag else { return }
         let layout = model.gridLayout
         let geometry = gridGeometry(width: width)
         var drag: GridDrag
         if let current = model.gridDrag, !current.isDropped {
             drag = current
-        } else if let begun = model.beginDrag(on: geometry.block(at: value.startLocation, in: layout)) {
+        } else if dragSession == .idle, model.canBeginGridDrag,
+                  let begun = model.beginDrag(on: geometry.block(at: value.startLocation, in: layout)) {
             drag = begun
             model.gridDrag = begun
+            dragSession = .event
         } else {
-            ignoresDrag = true
+            dragSession = .cancelled
             return
         }
         let minute = BlockDrag(startMinute: drag.block.startMinute, durationMinutes: drag.durationMinutes)
@@ -245,12 +258,13 @@ struct CalendarGridView: View {
     }
 
     private func dragEnded() {
-        if model.availabilityShare != nil {
+        defer { dragSession = .idle }
+        if dragSession == .availability {
             model.availabilityShare?.paint = nil
             return
         }
-        defer { ignoresDrag = false }
-        guard let drag = model.gridDrag, !drag.isDropped else { return }
+        guard dragSession == .event, model.interaction.kind == .dragging,
+              let drag = model.gridDrag, !drag.isDropped else { return }
         model.drop(drag)
     }
 

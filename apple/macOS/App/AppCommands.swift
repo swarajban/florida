@@ -1,13 +1,25 @@
 import FloridaKit
 import SwiftUI
 
-/// The menu bar. Items mirror `MacKeymap.default`; the ⌘ shortcuts shown here are the same chords
-/// the key monitor handles, so a shortcut works whether the main window or Settings is key.
+private struct MainCalendarWindowKey: FocusedValueKey {
+    typealias Value = Bool
+}
+
+extension FocusedValues {
+    var mainCalendarWindow: Bool? {
+        get { self[MainCalendarWindowKey.self] }
+        set { self[MainCalendarWindowKey.self] = newValue }
+    }
+}
+
+/// The menu bar. Items mirror `MacKeymap.default`; task actions belong to the main calendar
+/// scene, while global commands also work with Settings in front.
 /// Single-letter keys are not menu shortcuts: a menu key equivalent would also fire while typing.
 /// Main-actor isolated (as the `Commands` conformance implies) so the items can read the model.
 @MainActor
 struct AppCommands: Commands {
     let model: AppModel
+    @FocusedValue(\.mainCalendarWindow) private var mainCalendarWindow
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -98,7 +110,7 @@ struct AppCommands: Commands {
                 Button("Copy Link") { model.perform(.copyLink) }
                     .keyboardShortcut("c", modifiers: [.command, .shift])
             }
-            .disabled(model.isSheetOpen)
+            .disabled(model.isSheetOpen || mainCalendarWindow != true)
         }
     }
 }

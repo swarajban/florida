@@ -40,6 +40,9 @@ struct InteractionModeDiagnostics: View {
                     .frame(maxWidth: 60)
                     .accessibilityIdentifier("mode-selection")
                     .accessibilityValue(model.selection.map { String(describing: $0) } ?? "none")
+                Text(model.interaction.kind.rawValue)
+                    .accessibilityIdentifier("mode-owner")
+                    .accessibilityValue(model.interaction.kind.rawValue)
             }
             .font(.caption2)
             .onDisappear { injection?.cancel() }

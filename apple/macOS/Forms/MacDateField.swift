@@ -72,9 +72,7 @@ struct MacDateField: View {
                 anchorReady = false
                 releaseOrigin()
                 Task { @MainActor in
-                    await Task.yield()
-                    originWindow?.makeFirstResponder(nil)
-                    onDismiss()
+                    await SelectorOrigin.finishDismissal(in: originWindow, onDismiss: onDismiss)
                 }
             }
         }
@@ -318,6 +316,7 @@ struct MacDateSelector: View {
     }
 
     private func command(_ name: String) -> Bool {
+        if !query.isEmpty, name == "moveLeft:" || name == "moveRight:" { return false }
         switch name {
         case "moveLeft:": move(-1)
         case "moveRight:": move(1)
