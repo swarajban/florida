@@ -344,6 +344,35 @@ final class MacModeStateTests: XCTestCase {
     }
 
     @MainActor
+    func testDueDatePopoverYieldsOwnershipAndFocusToThePalette() {
+        continueAfterFailure = false
+        let app = launch()
+        defer { app.terminate() }
+        openTask(app)
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(app.textFields["task-title"].waitForNonExistence(timeout: 5))
+        app.typeKey("b", modifierFlags: [])
+        let query = app.textFields["inbox-due-date-updated-search"]
+        XCTAssertTrue(query.waitForExistence(timeout: 5))
+        waitForValue("taskDueDate", of: app.staticTexts["mode-owner"])
+        app.typeKey("k", modifierFlags: .command)
+        let palette = app.textFields["palette-input"]
+        XCTAssertTrue(palette.waitForExistence(timeout: 5))
+        XCTAssertTrue(query.waitForNonExistence(timeout: 5))
+        waitForValue("palette", of: app.staticTexts["mode-owner"])
+        app.typeText("Ownership handoff")
+        XCTAssertEqual(palette.value as? String, "Ownership handoff")
+        capture(app, "mode-due-palette-handoff-dark")
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(palette.waitForNonExistence(timeout: 5))
+        app.typeKey("b", modifierFlags: [])
+        XCTAssertTrue(query.waitForExistence(timeout: 5))
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(query.waitForNonExistence(timeout: 5))
+        waitForValue("browsing", of: app.staticTexts["mode-owner"])
+    }
+
+    @MainActor
     func testOwnerReplacesJumpAndRestoresProjectsAfterItsEditor() {
         continueAfterFailure = false
         let app = launch()
