@@ -80,9 +80,7 @@ struct MacChoiceField<Value: Hashable>: View {
                 anchorReady = false
                 releaseOrigin()
                 Task { @MainActor in
-                    await Task.yield()
-                    originWindow?.makeFirstResponder(nil)
-                    onDismiss()
+                    await SelectorOrigin.finishDismissal(in: originWindow, onDismiss: onDismiss)
                 }
             }
         }

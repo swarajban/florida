@@ -203,19 +203,29 @@ private extension View {
     /// pane's bottom edge. The geometry is read on every scrolled frame, but the model hears only
     /// when the answer changes.
     func tracksJumpVisibility(of item: ItemID, labelStrip: ClosedRange<CGFloat>?, in model: AppModel) -> some View {
+        modifier(TaskPaneVisibility(item: item, labelStrip: labelStrip, model: model))
+    }
+}
+
+private struct TaskPaneVisibility: ViewModifier {
+    let item: ItemID
+    let labelStrip: ClosedRange<CGFloat>?
+    let model: AppModel
+    @State private var owner = UUID()
+
+    func body(content: Content) -> some View {
         let header = TaskPaneView.pinnedHeaderHeight
-        return onGeometryChange(for: Bool.self) { proxy in
+        content.onGeometryChange(for: Bool.self) { proxy in
             guard let pane = proxy.bounds(of: .scrollView) else { return false }
             let row = proxy.frame(in: .scrollView)
             let strip = labelStrip ?? 0...row.height
             return JumpViewport(top: header, bottom: pane.height)
                 .shows(top: row.minY + strip.lowerBound, bottom: row.minY + strip.upperBound)
         } action: { isOnScreen in
-            if isOnScreen {
-                model.paneItemsOnScreen.insert(item)
-            } else {
-                model.paneItemsOnScreen.remove(item)
-            }
+            model.paneVisibilityRegistrations.set(item, owner: owner, visible: isOnScreen)
+        }
+        .onDisappear {
+            model.paneVisibilityRegistrations.set(item, owner: owner, visible: false)
         }
     }
 }

@@ -4,12 +4,13 @@ import SwiftUI
 struct GoToDateView: View {
     @Environment(AppModel.self) private var model
     @State private var date = Date()
+    @State private var isDateOpen = false
 
     var body: some View {
         VStack(spacing: 16) {
             Text("Go to date")
                 .font(.headline)
-            MacDateField("Date", date: $date, identifier: "go-to-date")
+            MacDateField("Date", date: $date, isPresented: $isDateOpen, identifier: "go-to-date")
             HStack {
                 Button("Cancel") {
                     model.isGoToDateOpen = false
@@ -28,6 +29,7 @@ struct GoToDateView: View {
         .frame(width: 320)
         .onAppear {
             date = model.selectedDay
+            isDateOpen = true
         }
     }
 }

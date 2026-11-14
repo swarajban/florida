@@ -124,6 +124,16 @@ final class SelectorOrigin {
         guard let view else { return }
         _ = view.scrollToVisible(view.bounds)
     }
+
+    static func finishDismissal(in window: NSWindow?, onDismiss: () -> Void) async {
+        await Task.yield()
+        if let editor = window?.firstResponder as? NSTextView, editor.isEditable,
+           !(editor.delegate is SelectorTextField) {
+            return
+        }
+        window?.makeFirstResponder(nil)
+        onDismiss()
+    }
 }
 
 struct SelectorOriginView: NSViewRepresentable {

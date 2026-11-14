@@ -47,15 +47,7 @@ extension AppModel {
     }
 
     func cancelAvailability() {
-        let previousMode = availabilityShare?.previousViewMode
-        availabilityEventsObserver?.cancel()
-        availabilityEventsObserver = nil
         availabilityShare = nil
-        isAvailabilityZoneOpen = false
-        if let previousMode {
-            viewMode = previousMode
-            rangeDidChange()
-        }
     }
 
     @discardableResult

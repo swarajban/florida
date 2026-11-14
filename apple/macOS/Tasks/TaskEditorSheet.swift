@@ -38,6 +38,7 @@ struct TaskEditorSheet: View {
     @State private var keyboard = TaskEditorKeyboard()
     @State private var openField: TaskEditorKey?
     @State private var saveError: String?
+    @State private var aiParseState: AIParseSection.ParseState = .idle
 
     /// The text fields a key can put the keyboard in.
     private enum TextFocus {
@@ -99,7 +100,7 @@ struct TaskEditorSheet: View {
                     }
                 }
                 if isNew {
-                    AIParseSection(apply: apply)
+                    AIParseSection(state: $aiParseState, apply: apply)
                 }
                 Section(isNew ? "New task" : "Task") {
                     TextField(text: $draft.title) {
@@ -224,9 +225,13 @@ struct TaskEditorSheet: View {
                 Button {
                     save()
                 } label: {
-                    KeyLabel(isNew ? "Add Task" : "Save", key: "↩")
+                    if aiParseState.hasReview {
+                        Text(isNew ? "Add Task" : "Save")
+                    } else {
+                        KeyLabel(isNew ? "Add Task" : "Save", key: "↩")
+                    }
                 }
-                .keyboardShortcut(.defaultAction)
+                .keyboardShortcut(aiParseState.hasReview ? nil : .defaultAction)
                 .buttonStyle(.borderedProminent)
                 .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty || recurrenceValidationMessage != nil || sourceValidationMessage != nil)
             }
@@ -281,6 +286,7 @@ struct TaskEditorSheet: View {
     }
 
     private func leaveField() {
+        guard openField == nil else { return }
         focus = nil
         keyboard.dropFocus()
     }
@@ -384,6 +390,7 @@ struct TaskEditorSheet: View {
         draft.dueAt = parsed.dueAt
         draft.startAt = parsed.startAt
         draft.pinnedStart = parsed.pinnedStart
+        draft = parsed.applyingSchedulingContext(to: draft, projects: model.projects)
         if let local = model.editorQuickAddDraft {
             draft = local.applyingExplicitFields(to: draft, categoryId: model.editorQuickAddCategoryId)
         }

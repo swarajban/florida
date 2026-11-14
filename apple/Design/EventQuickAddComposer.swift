@@ -1,5 +1,8 @@
 import FloridaKit
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 struct EventQuickAddComposer: View {
     private enum Field: String, Identifiable {
@@ -23,6 +26,7 @@ struct EventQuickAddComposer: View {
     #else
     @FocusState private var inputFocused: Bool
     @FocusState private var correctionFocused: Bool
+    @State private var inputCaret = EventComposerInputCaret()
     #endif
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -96,7 +100,18 @@ struct EventQuickAddComposer: View {
         }
         .onAppear { inputFocused = true }
         .onChange(of: activeField) { _, field in
-            if field == nil { inputFocused = resumeInputAfterCorrection }
+            if field == nil {
+                inputFocused = resumeInputAfterCorrection
+                #if os(macOS)
+                if resumeInputAfterCorrection {
+                    Task { @MainActor in
+                        await Task.yield()
+                        guard activeField == nil, resumeInputAfterCorrection else { return }
+                        inputCaret.restore()
+                    }
+                }
+                #endif
+            }
         }
         #if os(macOS)
         .frame(width: 560, height: 540)
@@ -381,7 +396,12 @@ struct EventQuickAddComposer: View {
     }
 
     private func open(_ field: Field) {
-        resumeInputAfterCorrection = inputFocused
+        if activeField == nil {
+            resumeInputAfterCorrection = inputFocused
+            #if os(macOS)
+            if inputFocused { inputCaret.capture() }
+            #endif
+        }
         inputFocused = false
         activeField = field
     }
@@ -399,3 +419,28 @@ struct EventQuickAddComposer: View {
         }
     }
 }
+
+#if os(macOS)
+@MainActor
+private final class EventComposerInputCaret {
+    private weak var field: NSTextField?
+    private var selection = NSRange(location: 0, length: 0)
+
+    func capture() {
+        guard let editor = NSApp.keyWindow?.firstResponder as? NSTextView,
+              let field = editor.delegate as? NSTextField else { return }
+        self.field = field
+        selection = editor.selectedRange()
+    }
+
+    func restore() {
+        guard let field, let window = field.window else { return }
+        if let editor = window.firstResponder as? NSTextView,
+           let current = editor.delegate as? NSTextField, current !== field { return }
+        guard window.makeFirstResponder(field), let editor = field.currentEditor() as? NSTextView else { return }
+        let length = (field.stringValue as NSString).length
+        let start = min(selection.location, length)
+        editor.setSelectedRange(NSRange(location: start, length: min(selection.length, length - start)))
+    }
+}
+#endif

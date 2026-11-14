@@ -17,6 +17,7 @@ final class MacModeStateTests: XCTestCase {
         XCTAssertEqual(search.value as? String, "nov 25")
         app.typeKey(.rightArrow, modifierFlags: [])
         XCTAssertEqual(search.value as? String, "nov 25")
+        capture(app, "mode-date-query-caret-dark")
     }
 
     @MainActor
@@ -34,6 +35,7 @@ final class MacModeStateTests: XCTestCase {
         app.typeKey("a", modifierFlags: .command)
         app.typeText("Pointer focus survives")
         XCTAssertEqual(title.value as? String, "Pointer focus survives")
+        capture(app, "mode-selector-pointer-focus-dark")
     }
 
     @MainActor
@@ -124,6 +126,7 @@ final class MacModeStateTests: XCTestCase {
         XCTAssertTrue(app.buttons["event-quick-add-correction-done"].waitForNonExistence(timeout: 5))
         app.typeText(" extra")
         XCTAssertEqual(input.value as? String, sentence + " extra")
+        capture(app, "mode-composer-handoff-dark")
     }
 
     @MainActor
@@ -132,6 +135,7 @@ final class MacModeStateTests: XCTestCase {
         let app = launch(extra: ["-uiInteractionAIReply", "YES"])
         defer { app.terminate() }
         openAIReview(app)
+        capture(app, "mode-ai-review-dark")
         app.typeKey(.return, modifierFlags: [])
         let title = app.textFields["task-title"]
         XCTAssertTrue(title.waitForExistence(timeout: 5))
@@ -153,6 +157,7 @@ final class MacModeStateTests: XCTestCase {
         XCTAssertEqual(context.value as? String, "Errand")
         XCTAssertNotEqual(app.buttons["task-project"].value as? String, "None")
         XCTAssertEqual(app.buttons["task-attention"].value as? String, "Can run in parallel")
+        capture(app, "mode-ai-accepted-fields-dark")
     }
 
     @MainActor
@@ -168,6 +173,7 @@ final class MacModeStateTests: XCTestCase {
         app.sheets.buttons["Create"].click()
         XCTAssertTrue(name.exists)
         XCTAssertTrue(app.sheets.staticTexts["Nothing has synced yet — sync with the server first"].waitForExistence(timeout: 3))
+        capture(app, "mode-category-error-dark")
     }
 
     @MainActor
@@ -198,6 +204,7 @@ final class MacModeStateTests: XCTestCase {
         waitForValue("month", of: app.staticTexts["mode-calendar-view"])
         app.typeKey("w", modifierFlags: [])
         XCTAssertEqual(app.staticTexts["mode-active-drag"].value as? String, "none")
+        capture(app, "mode-drag-view-cancelled-dark")
     }
 
     @MainActor
@@ -226,8 +233,10 @@ final class MacModeStateTests: XCTestCase {
         }
         waitForLabel("Suggestion, Pay Q4 estimated taxes", of: first)
         waitForLabel("Selected suggestion, Rebalance index funds", of: second)
+        app.buttons["mode-snapshot-rows"].click()
+        XCTAssertTrue((app.staticTexts["mode-visible-rows"].value as? String)?.contains("suggestion(\"demo-pick-funds\")") == true)
         app.typeKey("f", modifierFlags: [])
-        let badge = element("suggestion-jump-demo-pick-taxes", in: app)
+        let badge = element("suggestion-jump-demo-pick-funds", in: app)
         XCTAssertTrue(badge.waitForExistence(timeout: 5))
         app.typeKey(.escape, modifierFlags: [])
         XCTAssertTrue(badge.waitForNonExistence(timeout: 5))
@@ -286,12 +295,14 @@ final class MacModeStateTests: XCTestCase {
         let app = launch(extra: ["-uiInteractionManyResources", "YES"])
         defer { app.terminate() }
         openEvent("Design review", in: app)
-        let key = element("mode-resource-key-https://example.com/interaction-resource/1", in: app)
+        let key = app.buttons["event-resource-https://example.com/interaction-resource/1"]
         XCTAssertTrue(key.waitForExistence(timeout: 5))
         let label = key.value as? String ?? ""
         XCTAssertEqual(label.count, 2)
+        capture(app, "mode-resource-before-prefix-dark")
         app.typeKey(String(label.prefix(1)), modifierFlags: [])
         XCTAssertTrue(app.buttons["Edit…"].exists)
+        capture(app, "mode-resource-after-prefix-dark")
         waitForValue(String(label.dropFirst()), of: key)
         app.typeKey(String(label.suffix(1)), modifierFlags: [])
         let opened = app.staticTexts.matching(NSPredicate(format: "value == %@", "Opened resource: https://example.com/interaction-resource/1")).firstMatch
@@ -330,6 +341,35 @@ final class MacModeStateTests: XCTestCase {
         XCTAssertTrue(minutes.waitForNonExistence(timeout: 5))
         waitForValue("taskWrites=1 queueChanges=1 sounds=0 pendingRows=1 syncApplied=false",
                      of: app.staticTexts["editor-diagnostics"])
+    }
+
+    @MainActor
+    func testOwnerReplacesJumpAndRestoresProjectsAfterItsEditor() {
+        continueAfterFailure = false
+        let app = launch()
+        defer { app.terminate() }
+        app.typeKey("f", modifierFlags: [])
+        waitForValue("jumping", of: app.staticTexts["mode-owner"])
+        app.typeKey("k", modifierFlags: .command)
+        XCTAssertTrue(app.textFields["palette-input"].waitForExistence(timeout: 5))
+        waitForValue("palette", of: app.staticTexts["mode-owner"])
+        XCTAssertFalse(app.staticTexts["task-jump-date-updated"].exists)
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(app.textFields["palette-input"].waitForNonExistence(timeout: 5))
+        waitForValue("browsing", of: app.staticTexts["mode-owner"])
+        app.buttons["open-projects"].click()
+        XCTAssertTrue(app.sheets.firstMatch.waitForExistence(timeout: 5))
+        waitForValue("sheet", of: app.staticTexts["mode-owner"])
+        app.typeKey("n", modifierFlags: [])
+        let name = app.textFields["project-editor-name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(name.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.sheets.firstMatch.exists)
+        waitForValue("sheet", of: app.staticTexts["mode-owner"])
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(app.sheets.firstMatch.waitForNonExistence(timeout: 5))
+        waitForValue("browsing", of: app.staticTexts["mode-owner"])
     }
 
     @MainActor
@@ -412,5 +452,13 @@ final class MacModeStateTests: XCTestCase {
     @MainActor
     private func waitForLabel(_ label: String, of element: XCUIElement) {
         wait(for: [expectation(for: NSPredicate(format: "label == %@", label), evaluatedWith: element)], timeout: 5)
+    }
+
+    @MainActor
+    private func capture(_ app: XCUIApplication, _ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 }
