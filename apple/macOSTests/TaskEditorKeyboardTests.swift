@@ -178,7 +178,7 @@ struct TaskEditorKeyboardTests {
             #expect(window.firstResponder is NSTextView)
             let editor = try #require(field.currentEditor() as? NSTextView)
             if let point {
-                #expect(!field.visibleRect.contains(field.convert(point, from: nil)))
+                #expect(!field.bounds.contains(field.convert(point, from: nil)))
             }
             var dismissed = false
             await SelectorOrigin.finishDismissal(in: window, preservingFocusAt: point) { dismissed = true }
