@@ -124,6 +124,26 @@ final class SelectorOrigin {
         guard let view else { return }
         _ = view.scrollToVisible(view.bounds)
     }
+
+    static func dismissalPoint(in window: NSWindow?) -> NSPoint? {
+        guard let window, let event = NSApp.currentEvent, event.window === window,
+              [.leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp].contains(event.type) else { return nil }
+        return event.locationInWindow
+    }
+
+    static func finishDismissal(in window: NSWindow?, preservingFocusAt point: NSPoint?, onDismiss: () -> Void) async {
+        await Task.yield()
+        if let point, let editor = window?.firstResponder as? NSTextView, editor.isEditable,
+           !(editor.delegate is SelectorTextField), let content = window?.contentView {
+            var hit = content.hitTest(content.superview?.convert(point, from: nil) ?? point)
+            while let view = hit {
+                if view === editor || (view as? NSTextField)?.currentEditor() === editor { return }
+                hit = view.superview
+            }
+        }
+        window?.makeFirstResponder(nil)
+        onDismiss()
+    }
 }
 
 struct SelectorOriginView: NSViewRepresentable {

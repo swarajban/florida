@@ -1450,13 +1450,17 @@ public struct TaskDraft: Codable, Hashable, Sendable {
     public var pinnedStart: Date?
     /// One of the live categories, or nil when none fits.
     public var categoryId: String?
+    public var context: TaskContext?
+    public var projectId: String?
+    public var attention: TaskAttention?
     /// One sentence on how the text was read, for the UI to show next to the draft.
     public var rationale: String
 
     public init(
         title: String, notes: String? = nil, durationMinutes: Int, minChunkMinutes: Int? = nil,
         priority: Priority = .medium, deadlineType: DeadlineType = .none, dueAt: Date? = nil, startAt: Date? = nil,
-        pinnedStart: Date? = nil, categoryId: String? = nil, rationale: String = ""
+        pinnedStart: Date? = nil, categoryId: String? = nil, rationale: String = "",
+        context: TaskContext? = nil, projectId: String? = nil, attention: TaskAttention? = nil
     ) {
         self.title = title
         self.notes = notes
@@ -1469,6 +1473,9 @@ public struct TaskDraft: Codable, Hashable, Sendable {
         self.pinnedStart = pinnedStart
         self.categoryId = categoryId
         self.rationale = rationale
+        self.context = context
+        self.projectId = projectId
+        self.attention = attention
     }
 }
 

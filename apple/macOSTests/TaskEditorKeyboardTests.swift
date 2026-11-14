@@ -143,6 +143,50 @@ struct TaskEditorKeyboardTests {
         #expect(editor.selectedRange() == NSRange(location: 6, length: 0))
     }
 
+    @Test func dismissingASelectorPreservesNewTextFocus() async throws {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 160),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        defer { window.orderOut(nil) }
+        let field = NSTextField(frame: NSRect(x: 20, y: 80, width: 300, height: 24))
+        field.stringValue = "alpha bravo charlie"
+        try #require(window.contentView).addSubview(field)
+        window.makeKeyAndOrderFront(nil)
+        #expect(window.makeFirstResponder(field))
+        let editor = try #require(field.currentEditor() as? NSTextView)
+        editor.setSelectedRange(NSRange(location: 6, length: 0))
+        var dismissed = false
+        await SelectorOrigin.finishDismissal(in: window, preservingFocusAt: NSPoint(x: 30, y: 92)) { dismissed = true }
+        #expect(!dismissed)
+        #expect(window.firstResponder === editor)
+        #expect(editor.selectedRange() == NSRange(location: 6, length: 0))
+        window.makeFirstResponder(nil)
+        await SelectorOrigin.finishDismissal(in: window, preservingFocusAt: nil) { dismissed = true }
+        #expect(dismissed)
+    }
+
+    @Test func dismissingASelectorClearsAutomaticallyRestoredTextFocus() async throws {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 160),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        defer { window.orderOut(nil) }
+        let field = NSTextField(frame: NSRect(x: 20, y: 80, width: 300, height: 24))
+        try #require(window.contentView).addSubview(field)
+        window.makeKeyAndOrderFront(nil)
+        for point in [NSPoint?.none, NSPoint(x: 350, y: 20)] {
+            #expect(window.makeFirstResponder(field))
+            #expect(window.firstResponder is NSTextView)
+            let editor = try #require(field.currentEditor() as? NSTextView)
+            if let point {
+                #expect(!field.bounds.contains(field.convert(point, from: nil)))
+            }
+            var dismissed = false
+            await SelectorOrigin.finishDismissal(in: window, preservingFocusAt: point) { dismissed = true }
+            #expect(dismissed, "point=\(String(describing: point)), field=\(field.frame), delegate=\(String(describing: editor.delegate))")
+            #expect(!(window.firstResponder is NSTextView))
+        }
+    }
+
     private func event(_ characters: String, code: UInt16, in window: NSWindow, repeats: Bool = false) throws -> NSEvent {
         try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 1,
             windowNumber: window.windowNumber, context: nil, characters: characters,

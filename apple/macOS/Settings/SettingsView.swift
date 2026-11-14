@@ -38,6 +38,7 @@ struct SettingsView: View {
                 }
                 .tag(SettingsTab.feel)
         }
+        .accessibilityIdentifier("settings-tabs")
         .frame(width: 680, height: 520)
         .onAppear {
             model.start()

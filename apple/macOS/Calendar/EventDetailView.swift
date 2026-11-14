@@ -190,7 +190,8 @@ struct EventDetailView: View {
                               : resource.url.absoluteString)
                         .accessibilityLabel("\(resource.title), \(resource.kindLabel)")
                         .accessibilityIdentifier("event-resource-\(resource.id)")
-                        .accessibilityValue(labels.remaining[resource.id] ?? "g r")
+                        .accessibilityValue((model.eventResourceKeys ?? labels).remaining[resource.id]
+                            ?? (labels.remaining[resource.id] == nil ? "g r" : ""))
                     }
                 }
             }

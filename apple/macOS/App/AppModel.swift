@@ -101,40 +101,17 @@ final class AppModel {
 
     // MARK: Overlays and transient UI
 
-    var isPaletteOpen = false
+    var interaction: MacInteraction = .browsing
     var palette = PaletteState()
-    var isHelpOpen = false
-    /// The task open in the editor sheet; nil when the sheet is closed.
-    var editorTask: TaskItem?
-    var dueDateTaskId: String?
-    /// Recurring deletes always explain the series-wide effect, including keyboard deletes.
-    var recurringTaskToDelete: TaskItem?
     /// Text the new-task editor should send to the AI parser when it opens (quick add's ⌘↩).
     var editorAIText: String?
     var editorQuickAddDraft: QuickAddDraft?
     var editorQuickAddCategoryId: String?
-    /// The event whose detail popover is open.
-    var eventDetailID: String? {
-        didSet {
-            eventResourceKeys = nil
-            eventDetailIndicatorDay = nil
-        }
-    }
     var eventResourceKeys: JumpLabels<String>?
     var eventDetailIndicatorDay: Date?
-    /// The event open in the editor sheet (a stored one, or the draft of a new one).
-    var eventEditor: EventEditorRequest?
-    /// The event whose delete is waiting for confirmation: nothing undoes an event delete.
-    var eventToDelete: CalendarEvent?
-    /// The event being dragged in the time grid, or just dropped and not yet in the layout.
-    var gridDrag: GridDrag?
-    /// A dropped event with guests, waiting for a yes: Google emails them the new time.
-    var eventMove: EventMoveRequest?
-    var isGoToDateOpen = false
+    var droppedGridDrag: GridDrag?
     /// Display form of a multi-key sequence in progress, e.g. "g …".
     var pendingKeys = ""
-    /// Jump mode (`f`): the labels on screen, narrowed by the keys typed so far; nil when off.
-    var jump: JumpLabels<ItemID>?
     /// The stretch of the time grid that was on screen when the labels went up, so a block cut
     /// off at the top carries its label where it comes into view. Read only while `jump` is set.
     var jumpGridViewport: JumpViewport?
@@ -147,10 +124,9 @@ final class AppModel {
     @ObservationIgnored var gridScrollTarget: CGFloat?
     /// The task-pane rows whose jump label would be on screen; each row keeps its own entry
     /// (`tracksJumpVisibility`). Not observed, for the same reason.
-    @ObservationIgnored var paneItemsOnScreen: Set<ItemID> = []
+    @ObservationIgnored var paneVisibilityRegistrations = JumpVisibilityRegistrations<ItemID>()
+    var paneItemsOnScreen: Set<ItemID> { paneVisibilityRegistrations.items }
     var statusMessage: String?
-    var availabilityShare: AvailabilityShareState?
-    var isAvailabilityZoneOpen = false
     @ObservationIgnored var availabilityEventsObserver: Task<Void, Never>?
     var ghost: Ghost?
     /// Writes `z` can revert, oldest first.
@@ -159,22 +135,11 @@ final class AppModel {
     var layoutTransition: LayoutTransition?
     /// What `.` repeats.
     var lastAction: RepeatableAction?
-    /// The Done for now sheet, when open.
-    var doneForNow: DoneForNowRequest?
     /// Tasks just completed, whose rows leave with the bloom instead of a plain fade.
     var completingTaskIds: Set<String> = []
     /// Bumped to ask the time grid to scroll; the grid owns its scroll position.
     var gridScrollRequest: GridScrollRequest?
     var taskPaneScrollRequest = 0
-    var isNewCategoryOpen = false
-    /// The projects overlay (`g p`).
-    var isProjectsOpen = false
-    /// The project open in the editor sheet (a stored one, or the draft of a new one).
-    var projectEditor: Project?
-    /// The brief and weekly review panel (`g b`).
-    var isBriefOpen = false
-    /// The answer to "Why here?" for one task, while its sheet is open.
-    var explanation: PlacementExplanation?
     /// The Settings tab to show, and a counter `RootView` watches to open the Settings window.
     var settingsTab: SettingsTab = .server
     var settingsRequest = 0
@@ -294,6 +259,7 @@ final class AppModel {
     /// it and rebuilds the grid layout.
     func rangeDidChange() {
         endJump()
+        gridDrag = nil
         resetKeySequence()
         let visible = visibleRange
         let covered = loadedRange.map { $0.lowerBound <= visible.lowerBound && visible.upperBound <= $0.upperBound } ?? false

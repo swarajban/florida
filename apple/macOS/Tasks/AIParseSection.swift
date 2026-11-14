@@ -7,15 +7,20 @@ import SwiftUI
 /// too long or loose for it.
 struct AIParseSection: View {
     @Environment(AppModel.self) private var model
+    @Binding var state: ParseState
     let apply: (TaskDraft) -> Void
     @State private var text = ""
-    @State private var state: ParseState = .idle
     @FocusState private var isTextFocused: Bool
 
     enum ParseState {
         case idle, parsing
         case parsed(TaskDraft)
         case failed(String)
+
+        var hasReview: Bool {
+            if case .parsed = self { return true }
+            return false
+        }
     }
 
     var body: some View {
@@ -54,6 +59,7 @@ struct AIParseSection: View {
                         apply(draft)
                         state = .idle
                     }
+                    .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
                 }
             case .failed(let message):
@@ -87,6 +93,20 @@ struct AIParseSection: View {
     private func parse() {
         let input = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !input.isEmpty else { return }
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "demoData"),
+           UserDefaults.standard.bool(forKey: "uiInteractionAIReply") {
+            state = .parsing
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(250))
+                state = .parsed(TaskDraft(
+                    title: "Parsed audit review", notes: "Synthetic review", durationMinutes: 90,
+                    priority: .high, rationale: "Synthetic UI proposal", context: .errand,
+                    projectId: model.projects.first?.id, attention: .shared))
+            }
+            return
+        }
+        #endif
         guard let client = model.aiClient else {
             state = .failed("Connect to the server in Settings first")
             return

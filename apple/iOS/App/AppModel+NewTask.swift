@@ -46,6 +46,7 @@ extension AppModel {
         if let id = draft.categoryId, category(id: id) != nil {
             task.categoryId = id
         }
+        task = draft.applyingSchedulingContext(to: task, projects: projects)
         return TaskEditorRequest(task: task, isNew: true, rationale: draft.rationale)
     }
 }

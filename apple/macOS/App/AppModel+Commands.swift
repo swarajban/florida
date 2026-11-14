@@ -2,15 +2,6 @@ import AppKit
 import FloridaKit
 
 extension AppModel {
-    /// True while a sheet owns the window. Commands do nothing then (except Escape and sync):
-    /// a sheet holds a draft, and a menu shortcut such as ⌘1 writing underneath it would be
-    /// overwritten by the stale draft when the sheet saves.
-    var isSheetOpen: Bool {
-        editorTask != nil || isGoToDateOpen || isNewCategoryOpen || doneForNow != nil || recurringTaskToDelete != nil
-            || eventEditor != nil || eventToDelete != nil || eventMove != nil
-            || isProjectsOpen || projectEditor != nil || isBriefOpen || explanation != nil
-    }
-
     /// Asks `RootView` to open the Settings window on `tab`.
     func openSettings(_ tab: SettingsTab) {
         settingsTab = tab
@@ -21,7 +12,7 @@ extension AppModel {
     func run(_ command: MacCommand) {
         resetKeySequence()
         if availabilityShare != nil {
-            if command == .core(.cancel) { cancelAvailability() }
+            if command == .core(.cancel) { cancel() }
             return
         }
         switch command {
@@ -83,6 +74,10 @@ extension AppModel {
     /// that needs the network is started in the background.
     func perform(_ command: AppCommand) {
         resetKeySequence()
+        if command == .cancel {
+            cancel()
+            return
+        }
         if availabilityShare != nil {
             if command == .cancel { cancelAvailability() }
             return
@@ -141,43 +136,25 @@ extension AppModel {
 
     /// Escape: closes the topmost overlay, else clears the selection and any pending key sequence.
     func cancel() {
-        if availabilityShare != nil {
-            cancelAvailability()
-            return
-        }
         resetKeySequence()
-        jump = nil
-        if isPaletteOpen {
+        switch interaction {
+        case .availability(_, let zoneOpen):
+            if zoneOpen { isAvailabilityZoneOpen = false }
+            else { cancelAvailability() }
+        case .jumping:
+            endJump()
+        case .dragging:
+            gridDrag = nil
+        case .palette:
             closePalette()
-        } else if dueDateTaskId != nil {
-            dueDateTaskId = nil
-        } else if isHelpOpen {
-            isHelpOpen = false
-        } else if eventDetailID != nil {
-            eventDetailID = nil
-        } else if explanation != nil {
-            explanation = nil
-        } else if projectEditor != nil {
-            projectEditor = nil
-        } else if isProjectsOpen {
-            isProjectsOpen = false
-        } else if isBriefOpen {
-            isBriefOpen = false
-        } else if recurringTaskToDelete != nil {
-            recurringTaskToDelete = nil
-        } else if eventToDelete != nil {
-            eventToDelete = nil
-        } else if eventEditor != nil {
-            eventEditor = nil
-        } else if editorTask != nil {
-            editorTask = nil
-        } else if isGoToDateOpen {
-            isGoToDateOpen = false
-        } else if isNewCategoryOpen {
-            isNewCategoryOpen = false
-        } else if doneForNow != nil {
-            doneForNow = nil
-        } else {
+        case .sheet(.projects(let editor)):
+            if editor != nil { projectEditor = nil }
+            else { isProjectsOpen = false }
+        case .sheet(.eventMove):
+            cancelEventMove()
+        case .help, .eventPopover, .taskDueDate, .sheet:
+            transitionInteraction(to: .browsing)
+        case .browsing:
             selection = nil
         }
     }

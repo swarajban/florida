@@ -41,6 +41,8 @@ struct OptionalPickRowView: View {
         HStack(alignment: .center, spacing: 8) {
             if let jumpLabel {
                 JumpBadge(label: jumpLabel)
+                    .accessibilityIdentifier("suggestion-jump-\(pick.id)")
+                    .accessibilityValue(jumpLabel.uppercased())
             }
             VStack(alignment: .leading, spacing: 3) {
                 Text(pick.task.title)
@@ -71,5 +73,8 @@ struct OptionalPickRowView: View {
         }
         .padding(.horizontal, 6)
         .contentShape(Rectangle())
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("suggestion-row-\(pick.id)")
+        .accessibilityLabel(isSelected ? "Selected suggestion, \(pick.task.title)" : "Suggestion, \(pick.task.title)")
     }
 }

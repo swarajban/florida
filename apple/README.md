@@ -131,8 +131,8 @@ both selectors runs one focused job per platform instead of the full gate.
 The focused iPhone job reserves 55 minutes for compilation and tests and two
 minutes for result upload, so long capture flows retain a completed result or
 an explicit timeout with native artifacts.
-The reusable full Mac UI job has a 60-minute limit, matching main's standalone Mac job;
-the iPhone shard limits are unchanged.
+Both Mac-only selector jobs and the reusable full Mac UI job have a 60-minute limit,
+matching main's standalone Mac job; the iPhone shard limits are unchanged.
 
 This explicit dispatch uses the existing iOS workflow's `ui_only` mode: it never
 starts a release or reads release secrets. It runs against the branch head, so
@@ -411,6 +411,8 @@ you type until **Reset corrections**. **Details** (`⌘E`) opens the full event 
 with the preview’s fields and recurrence prefilled. No guests are parsed or added,
 so creating an event this way cannot send invitations. Typing and saving use no AI
 or network request; ordinary background sync sends the queued write later.
+Switching between correction chips keeps the sentence's original focus and caret,
+so closing the last correction lets you continue typing without replacing it.
 
 Paste or type a source URL into quick add on either platform to keep it with the
 task, separate from its title. GitHub PRs/issues and Linear issues get a readable
@@ -437,10 +439,19 @@ stepping; `⌘1`–`⌘4` still set priority directly. `z` does nothing in the e
 New tasks also open unfocused; `t` focuses Title and `n` Notes.
 Selector keys reveal their controls before opening them, so
 lower fields remain reachable when the editor fits a smaller window.
+Clicking another text field while a selector closes keeps focus in that field.
+Task-menu actions are disabled while Settings is in front, so its shortcuts cannot
+change the selected background task.
+
+When an AI task proposal is shown, Return chooses **Use this**, not **Add Task**.
+Acceptance keeps the proposal's context, current project and explicit attention;
+explicit local quick-add fields still win. The task remains open for review before saving.
 
 Date selectors preview words such as `tomorrow`, `fri`, `nov 20`, `in 2 weeks`
-and `next mon 3pm` as you type; `none` clears an optional date. Arrows move the
-highlighted day in the compact month grid and Return picks it. Quick choices
+and `next mon 3pm` as you type; `none` clears an optional date. With an empty query,
+Left/Right move the highlighted day; with typed text they move its caret without clearing it.
+Up/Down move a week and Return picks the date. `g d` opens its date query focused.
+Quick choices
 are Today, Tomorrow, This weekend, Next week and No date. Tab focuses the grid,
 where single keys `1`–`5` pick those choices without interfering with dates
 typed as numbers. “Add a time” remains optional, and typing a clock time enables
@@ -461,7 +472,8 @@ or all of them. All Events is offered only for a drop on the event's own day:
 the series takes the new time of day and every instance keeps its day
 (`moveEventSeries` in FloridaKit shifts the stored instances at once and queues
 one write with `scope: "series"`, which the server needs to move the series on
-Google). Tasks do not drag, because the scheduler places them.
+Google). Escape or changing the calendar range/view cancels the active drag through
+mouse-up. Tasks do not drag, because the scheduler places them.
 
 Space in an unfocused task editor commits any edits and completion as one local
 write and one undo step; completion feedback plays only after that write succeeds.

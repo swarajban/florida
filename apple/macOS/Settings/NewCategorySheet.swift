@@ -7,6 +7,7 @@ struct NewCategorySheet: View {
     @State private var name = ""
     @State private var color: String?
     @State private var area: CategoryArea?
+    @State private var error: String?
     @FocusState private var isNameFocused: Bool
 
     var body: some View {
@@ -16,6 +17,7 @@ struct NewCategorySheet: View {
             HStack(spacing: 10) {
                 CategoryColorButton(hex: color ?? nextColor) { color = $0 }
                 TextField("Name", text: $name)
+                    .accessibilityIdentifier("new-category-name")
                     .focused($isNameFocused)
                     .onSubmit(create)
             }
@@ -29,6 +31,11 @@ struct NewCategorySheet: View {
                 Text(CategoryArea.footnote)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+            if let error {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                    .accessibilityIdentifier("new-category-error")
             }
             HStack {
                 Button("Cancel") {
@@ -62,6 +69,8 @@ struct NewCategorySheet: View {
         let created = model.createCategory(name: name, color: color ?? nextColor, area: area)
         if created != nil {
             model.isNewCategoryOpen = false
+        } else {
+            error = model.statusMessage ?? "The category could not be created."
         }
     }
 }

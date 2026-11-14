@@ -287,6 +287,7 @@ final class AppModel {
     var selection: Item?
     var selectedTask: TaskItem?
     var categoriesById: [String: TaskCategory] = [:]
+    var projects: [Project] = []
     var editorQuickAddDraft: QuickAddDraft?
     var editorQuickAddCategoryId: String?
     var selectedSuggestion: Int? { nil }
@@ -546,8 +547,13 @@ for localSomeday in [false, true] {
         editor.model.editorQuickAddDraft = QuickAddParser.parse(
             "Local ^none", now: oldDate, calendar: Calendar(identifier: .gregorian))
     }
-    editor.useParsed(TaskDraft(title: "Dated AI draft", durationMinutes: 30, deadlineType: .soft, dueAt: newDate))
+    let parsedProject = Project(id: "parsed-project", name: "Parsed", createdAt: oldDate, updatedAt: oldDate)
+    editor.model.projects = [parsedProject]
+    editor.useParsed(TaskDraft(title: "Dated AI draft", durationMinutes: 30, deadlineType: .soft, dueAt: newDate,
+                               context: .errand, projectId: parsedProject.id, attention: .shared))
     let prepared = editor.saved()
+    check(prepared.context == .errand && prepared.projectId == parsedProject.id && prepared.attention == .shared,
+          "Mac Use this applies live AI scheduling fields alongside the Someday decision")
     let model = AppModel()
     _ = model.save(prepared, original: nil, somedayIntent: editor.somedayIntent, dateEdits: editor.dateEdits)
     check(editor.somedayIntent == nil && editor.dateEdits.isEmpty,
