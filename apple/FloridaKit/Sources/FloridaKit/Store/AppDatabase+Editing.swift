@@ -189,7 +189,7 @@ extension AppDatabase {
         }
     }
 
-    private static func sanitizeDestinations(of task: inout TaskItem, in db: Database) throws {
+    static func sanitizeDestinations(of task: inout TaskItem, in db: Database) throws {
         let category = try TaskCategory.fetchOne(db, id: task.categoryId)
         if category == nil || category?.deletedAt != nil {
             task.categoryId = TaskCategory.inboxId

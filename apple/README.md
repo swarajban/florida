@@ -102,10 +102,14 @@ caches SwiftPM and derived data by toolchain/architecture, but runs no UI tests.
 Superseded PR runs are cancelled. Branch pushes do not start a duplicate iPhone
 workflow, and unrelated PRs use no macOS runners.
 
-**Once before merge**, when the head is otherwise ready, request both UI suites:
+**Before merge**, require current-head TypeScript checks, both Linux Swift package
+suites and the compile-only Xcode job. A PR with no UI change needs no UI test.
+For a UI change, request one focused job with at most one to three methods that
+exercise the changed UI; do not request the full suites before merge:
 
 ```sh
-gh workflow run ios.yml --ref <PR-branch> -f ui_only=true
+gh workflow run ios.yml --ref <PR-branch> -f ui_only=true \
+  -f iphone_test_selector=Florida-iOSUITests/SmokeTests/testUnifiedTaskCapture
 gh run list --workflow ios.yml --branch <PR-branch> --event workflow_dispatch
 ```
 
@@ -120,7 +124,7 @@ The selector accepts a Mac test bundle, bundle/class, or bundle/class/method.
 Pass space-separated selectors in one quoted value to check several classes in the same job,
 for example `-f mac_test_selector='Florida-macOSUITests/MacInteractionStateTests Florida-macOSUITests/EditorRegressionTests'`.
 It runs one Mac job without retries or TestFlight uploads. An empty selector retains the
-full gate; each final PR head still needs one complete unfiltered run.
+full gate, which is not required before merge.
 `iphone_test_selector` accepts the same selector forms for `Florida-iOSUITests`
 and runs a separate iPhone job without retries or uploads to TestFlight. Supplying
 both selectors runs one focused job per platform instead of the full gate.
@@ -135,8 +139,8 @@ starts a release or reads release secrets. It runs against the branch head, so
 its **On-demand Apple UI** checks appear on that commit in the PR. Unlike a
 sticky label, it does not rerun on each subsequent push. Confirm the run's
 `headSha` matches the PR's current `headRefOid` (`gh run view <run-id> --json headSha`
-and `gh pr view <PR> --json headRefOid`) and require all UI checks to pass before
-merge. A later push invalidates that result: cancel any stale run with
+and `gh pr view <PR> --json headRefOid`) and require the focused checks to pass before
+merge. A later push invalidates that result: cancel any stale UI-only run with
 `gh run cancel <run-id>` and request a new run when ready. A new UI request on
 the same branch automatically cancels a superseded request. UI-only requests
 have a separate concurrency group, so they cannot cancel or replace a queued
@@ -843,10 +847,16 @@ use that mode, so a schema without its first successful sync is unavailable,
 not an empty agenda. The share extension can use `.readWrite` and
 `requireSync: false` to capture offline into an already initialized schema even
 before its first server sync. Keep that connection only for the capture. A
-capture calls `saveTask(draft, original: nil)`, which returns a `TaskMutation`
-and writes the task and pending write atomically. Use a fresh task ID and retain
-the returned `after` row rather than assuming the draft's destination survived
-validation. Existing-task editing passes its editor-open `original` snapshot;
+capture uses `ShareDraftParser.parse(_:now:calendar:)` with the settings time zone
+and `ShareTaskWriter.save(_:captureID:categoryID:path:now:)`. The writer opens an
+existing read-write store, writes the task and pending write atomically and closes
+its connection. Retain one UUID per share request through retries and double taps;
+a new request gets a new UUID, even for the same URL. An existing capture ID returns
+the stored row without editing or resurrecting it. Retain that returned row rather
+than assuming the draft's destination survived validation. Missing/incompatible
+stores throw `ShareTaskWriter.CaptureError.openFloridaOnce`; SQLite busy/locked
+errors remain retryable database errors. No bearer token or full-store load is used.
+Existing-task editing passes its editor-open `original` snapshot to `saveTask`;
 the extension must not use the legacy snapshot-only overload for edits, split
 the row/outbox writes, or send a network request. Concurrent writers
 serialize through SQLite with a five-second writer busy timeout. GRDB's pool

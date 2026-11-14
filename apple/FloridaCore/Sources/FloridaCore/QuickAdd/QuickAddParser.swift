@@ -87,11 +87,18 @@ public enum QuickAddParser {
     }
 
     public static func parse(_ text: String, now: Date, calendar: Calendar) -> QuickAddDraft {
+        parse(text, now: now, calendar: calendar, source: nil)
+    }
+
+    static func parse(_ text: String, now: Date, calendar: Calendar, source suppliedSource: TaskSource?) -> QuickAddDraft {
         let (body, notes) = QuickAddScanner.splitNotes(text)
         var tokens = body.split(whereSeparator: \.isWhitespace).map(String.init)
-        var source: TaskSource?
-        if let index = tokens.firstIndex(where: { TaskSource.from(url: $0) != nil }) {
-            source = TaskSource.from(url: tokens.remove(at: index))
+        var source = suppliedSource
+        if let index = tokens.firstIndex(where: { token in
+            suppliedSource.map { token == $0.url } ?? (TaskSource.from(url: token) != nil)
+        }) {
+            let extracted = TaskSource.from(url: tokens.remove(at: index))
+            source = source ?? extracted
         }
         let scanner = QuickAddScanner(tokens: tokens, now: now, calendar: calendar)
         var draft = QuickAddDraft(notes: notes, source: source)
