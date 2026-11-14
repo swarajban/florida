@@ -189,6 +189,20 @@ jobs:
             -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
             2>&1 | tee export.log
 
+      - name: Sanitize Xcode distribution logs on failure
+        if: failure()
+        working-directory: apple
+        run: python3 scripts/collect-distribution-logs.py "$RUNNER_TEMP/distribution-logs"
+
+      - name: Upload Xcode distribution diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcode-distribution-logs
+          path: ${{ runner.temp }}/distribution-logs
+          retention-days: 90
+          if-no-files-found: ignore
+
       - name: Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
