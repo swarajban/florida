@@ -1,243 +1,173 @@
 name: iOS
 
-# build:      runs the full simulator suite on main, independently of uploads by default.
-# ui:         explicit ui_only dispatch runs both PR UI suites without release credentials.
-# testflight: archives, signs and uploads to TestFlight on pushes to main and on manual runs.
-#             Needs the App Store Connect secrets described in apple/README.md.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "apple/**"
-      - ".github/workflows/ios.yml"
-      - ".github/workflows/ios-upload.yml"
-      - ".github/workflows/apple-release-policy.yml"
   workflow_dispatch:
     inputs:
       ui_only:
-        description: Run both PR UI suites only (never upload)
+        description: Compare the two event methods on the PR and main without releases
         type: boolean
+        required: true
         default: false
-      mac_test_selector:
-        description: Optional space-separated Mac test bundles, classes or methods for one focused UI-only job
-        type: string
-        default: ''
-      iphone_test_selector:
-        description: Optional space-separated iPhone test bundles, classes or methods for one focused UI-only job
-        type: string
-        default: ''
+
+permissions:
+  contents: read
+  actions: read
 
 concurrency:
-  group: ${{ inputs.ui_only && format('apple-ui-{0}', github.ref) || format('ios-run-{0}', github.run_id) }}
-  cancel-in-progress: ${{ inputs.ui_only == true }}
+  group: inbox-paired-event-diagnostic-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  policy:
-    if: inputs.ui_only != true
-    uses: ./.github/workflows/apple-release-policy.yml
-
-  ui:
-    name: On-demand Apple UI
-    if: github.event_name == 'workflow_dispatch' && inputs.ui_only && inputs.mac_test_selector == '' && inputs.iphone_test_selector == ''
-    uses: ./.github/workflows/apple-checks.yml
-    with:
-      run_ui: true
-
-  mac_focused:
-    name: Focused Mac tests
-    if: github.event_name == 'workflow_dispatch' && inputs.ui_only && inputs.mac_test_selector != ''
+  iphone:
+    name: Paired PR and main event repetitions
+    if: github.event_name == 'workflow_dispatch' && inputs.ui_only == true && github.ref == 'refs/heads/capy/inbox-event-paired-cbb'
     runs-on: macos-26
-    timeout-minutes: 45
+    timeout-minutes: 140
     env:
       RETRY_FAILED_TESTS: '0'
       HOMEBREW_NO_AUTO_UPDATE: '1'
     steps:
       - uses: actions/checkout@v5
-      - name: Validate test selector
-        env:
-          MAC_TEST_SELECTOR: ${{ inputs.mac_test_selector }}
-        run: |
-          [[ "$MAC_TEST_SELECTOR" != *$'\n'* && "$MAC_TEST_SELECTOR" != *$'\r'* ]] || exit 2
-          read -r -a selectors <<< "$MAC_TEST_SELECTOR"
-          (( ${#selectors[@]} > 0 )) || exit 2
-          for selector in "${selectors[@]}"; do
-            [[ "$selector" =~ ^Florida-macOS(KeyboardTests|UITests)(/[A-Za-z_][A-Za-z0-9_]*){0,2}$ ]] || exit 2
-          done
-      - run: brew install xcodegen
-      - name: Build and run selected Mac tests
-        env:
-          MAC_TEST_SELECTOR: ${{ inputs.mac_test_selector }}
-        run: |
-          set -o pipefail
-          read -r -a selectors <<< "$MAC_TEST_SELECTOR"
-          bash apple/scripts/check.sh macos "${selectors[@]/#/-only-testing:}" 2>&1 | tee apple/ui-test.log
-      - name: Upload focused results and log
-        if: always()
-        uses: actions/upload-artifact@v4
+        timeout-minutes: 2
         with:
-          name: ui-macos-focused
-          path: |
-            apple/build/results/
-            apple/ui-test.log
-          retention-days: 7
-          if-no-files-found: ignore
-
-  iphone_focused:
-    name: Focused iPhone tests
-    if: github.event_name == 'workflow_dispatch' && inputs.ui_only && inputs.iphone_test_selector != ''
-    runs-on: macos-26
-    timeout-minutes: 60
-    env:
-      RETRY_FAILED_TESTS: '0'
-      HOMEBREW_NO_AUTO_UPDATE: '1'
-    steps:
+          ref: cbbd590b60ddee1533489d9a5cce1d496d049e11
+          path: candidate
       - uses: actions/checkout@v5
+        timeout-minutes: 2
         with:
-          ref: ${{ github.sha }}
-      - name: Validate test selector
-        env:
-          IPHONE_TEST_SELECTOR: ${{ inputs.iphone_test_selector }}
-        run: |
-          [[ "$IPHONE_TEST_SELECTOR" != *$'\n'* && "$IPHONE_TEST_SELECTOR" != *$'\r'* ]] || exit 2
-          read -r -a selectors <<< "$IPHONE_TEST_SELECTOR"
-          (( ${#selectors[@]} > 0 )) || exit 2
-          for selector in "${selectors[@]}"; do
-            [[ "$selector" =~ ^Florida-iOSUITests(/[A-Za-z_][A-Za-z0-9_]*){0,2}$ ]] || exit 2
-          done
+          ref: 9b0c29a1611d25ff3d9daf0a7900ae566e37f1b2
+          path: baseline
       - run: brew install xcodegen
         timeout-minutes: 2
-      - name: Build and run selected iPhone tests
-        timeout-minutes: 55
-        env:
-          IPHONE_TEST_SELECTOR: ${{ inputs.iphone_test_selector }}
-        run: |
-          set -o pipefail
-          read -r -a selectors <<< "$IPHONE_TEST_SELECTOR"
-          bash apple/scripts/check.sh ios "${selectors[@]/#/-only-testing:}" 2>&1 | tee apple/ui-test.log
-      - name: Upload focused results and log
-        if: always()
-        timeout-minutes: 2
-        uses: actions/upload-artifact@v4
+      - uses: actions/download-artifact@v4
+        timeout-minutes: 3
         with:
-          name: ui-iphone-focused
-          path: |
-            apple/build/results/
-            apple/ui-test.log
-          retention-days: 7
-          if-no-files-found: ignore
-
-  build:
-    name: iPhone UI suite
-    if: inputs.ui_only != true
-    runs-on: macos-26
-    # The unsharded main suite includes simulator boot, all appearances and one retry.
-    timeout-minutes: 75
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Generate Xcode project
-        working-directory: apple
-        env:
-          DEVELOPMENT_TEAM: ""
+          name: apple-test-products
+          run-id: 43558259217
+          github-token: ${{ github.token }}
+          path: candidate-products
+      - name: Verify exact sources and restore PR test products
+        timeout-minutes: 1
         run: |
-          brew install xcodegen
-          xcodegen generate
-
-      - name: Pick simulator
+          mkdir -p evidence candidate/apple/build
+          test "$(git -C candidate rev-parse HEAD)" = cbbd590b60ddee1533489d9a5cce1d496d049e11
+          test "$(git -C baseline rev-parse HEAD)" = 9b0c29a1611d25ff3d9daf0a7900ae566e37f1b2
+          test -z "$(git -C candidate status --porcelain)"
+          test -z "$(git -C baseline status --porcelain)"
+          git -C candidate rev-parse HEAD > evidence/PR-tested-head.txt
+          git -C baseline rev-parse HEAD > evidence/main-tested-head.txt
+          tar -xzf candidate-products/apple-tests.tgz -C candidate/apple/build
+          diff candidate/apple/build/xcode-version.txt <(xcodebuild -version)
+          xcodebuild -version > evidence/xcode-version.txt
+      - name: Select and reset the PR simulator
+        timeout-minutes: 2
         run: |
-          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
           import json, sys
-          devices = json.load(sys.stdin)['devices']
-          ios = sorted((k for k in devices if 'iOS' in k), key=lambda k: [int(p) for p in k.split('iOS-')[-1].split('-')])
-          phones = [d for d in devices[ios[-1]] if d['name'].startswith('iPhone') and 'Pro' in d['name'] and 'Max' not in d['name']] or [d for d in devices[ios[-1]] if d['name'].startswith('iPhone')]
-          print(phones[0]['udid'])
-          ")
-          echo "Using simulator $UDID"
+          devices = json.load(sys.stdin)["devices"]
+          ios = sorted((k for k in devices if "iOS-" in k), key=lambda k: [int(p) for p in k.split("iOS-")[-1].split("-")])
+          phones = [d for d in devices[ios[-1]] if d["name"].startswith("iPhone")]
+          pro = [d for d in phones if "Pro" in d["name"] and "Max" not in d["name"]]
+          print((pro or phones)[0]["udid"])
+          ')
           echo "UDID=$UDID" >> "$GITHUB_ENV"
-
-      - name: Build
-        working-directory: apple
+          echo "$UDID" > evidence/simulator.txt
+          xcrun simctl shutdown "$UDID" || true
+          xcrun simctl erase "$UDID"
+      - name: Run both PR methods for three fixed iterations
+        id: candidate
+        continue-on-error: true
+        timeout-minutes: 50
+        working-directory: candidate
+        env:
+          TEST_WITHOUT_BUILDING: '1'
         run: |
           set -o pipefail
-          xcodebuild build \
-            -project Florida.xcodeproj \
-            -scheme Florida-iOS \
-            -configuration Debug \
-            -destination "id=$UDID" \
-            -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-            | tee build.log | xcbeautify --renderer github-actions
-
-      - name: UI smoke test and screenshots
-        working-directory: apple
+          date -u +%FT%TZ > ../evidence/PR-start.txt
+          bash apple/scripts/check.sh ios -test-iterations 3 \
+            -only-testing:Florida-iOSUITests/EventQuickAddTests/testPreviewCorrectionAndLocalSave \
+            -only-testing:Florida-iOSUITests/SmokeTests/testTaskShortcutAndRecurringEvent \
+            2>&1 | tee ../evidence/PR-ui-test.log
+      - name: Reset the same simulator before main
+        id: reset_main
+        if: always()
+        timeout-minutes: 2
+        run: |
+          test -n "$UDID"
+          xcrun simctl shutdown "$UDID" || true
+          xcrun simctl erase "$UDID"
+      - name: Build and run both main methods for three fixed iterations
+        id: baseline
+        if: always() && steps.reset_main.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 65
+        working-directory: baseline
         run: |
           set -o pipefail
-          xcrun simctl boot "$UDID" || true
-          xcrun simctl bootstatus "$UDID" -b
-          xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100 --cellularBars 4 || true
-          # The tests wait for visible demo content, exercise the real tab controls, then
-          # capture light/dark screens and large text. No personal data or server is involved.
-          xcodebuild test \
-            -project Florida.xcodeproj \
-            -scheme Florida-iOS \
-            -configuration Debug \
-            -destination "id=$UDID" \
-            -parallel-testing-enabled NO \
-            -retry-tests-on-failure -test-iterations 2 \
-            -derivedDataPath build \
-            -resultBundlePath ios-ui.xcresult \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-            | tee ui-test.log | xcbeautify --renderer github-actions
-
-      - name: Report retried UI failures
+          date -u +%FT%TZ > ../evidence/main-start.txt
+          bash apple/scripts/check.sh ios -test-iterations 3 \
+            -only-testing:Florida-iOSUITests/EventQuickAddTests/testPreviewCorrectionAndLocalSave \
+            -only-testing:Florida-iOSUITests/SmokeTests/testTaskShortcutAndRecurringEvent \
+            2>&1 | tee ../evidence/main-ui-test.log
+      - name: Record both outcomes
         if: always()
-        run: bash apple/scripts/report-ui-failures.sh apple/ui-test.log
-
-      - name: Upload UI results and log
+        timeout-minutes: 1
+        env:
+          PR_OUTCOME: ${{ steps.candidate.outcome }}
+          MAIN_OUTCOME: ${{ steps.baseline.outcome }}
+        run: |
+          mkdir -p evidence
+          printf 'PR=%s\nmain=%s\n' "$PR_OUTCOME" "$MAIN_OUTCOME" > evidence/outcomes.txt
+      - name: Validate three completed iterations of each exact method per head
+        id: coverage
         if: always()
+        timeout-minutes: 1
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, re, sys
+          expected = {
+              'EventQuickAddTests/testPreviewCorrectionAndLocalSave',
+              'SmokeTests/testTaskShortcutAndRecurringEvent',
+          }
+          start = re.compile(r"Test Case '-\[Florida_iOSUITests\.(\w+) (\w+)\]' started \(Iteration (\d+) of (\d+)\)\.")
+          finish = re.compile(r"Test Case '-\[Florida_iOSUITests\.(\w+) (\w+)\]' (passed|failed) \(([\d.]+) seconds\)\.")
+          errors = []
+          result = {}
+          for head in ['PR', 'main']:
+              path = pathlib.Path('evidence') / (head + '-ui-test.log')
+              text = path.read_text(errors='replace') if path.exists() else ''
+              starts = start.findall(text)
+              finishes = finish.findall(text)
+              result[head] = {}
+              if len(starts) != 6 or len(finishes) != 6:
+                  errors.append(head + ': expected six started and six completed method iterations')
+              for method in sorted(expected):
+                  begun = [(int(i), int(total)) for cls, name, i, total in starts if cls + '/' + name == method]
+                  done = [{'result': state, 'seconds': float(seconds)} for cls, name, state, seconds in finishes if cls + '/' + name == method]
+                  result[head][method] = {'started': begun, 'completed': done}
+                  if begun != [(1, 3), (2, 3), (3, 3)] or len(done) != 3:
+                      errors.append(head + ': incomplete fixed repetitions for ' + method)
+          pathlib.Path('evidence/repetition-validation.json').write_text(json.dumps({'results': result, 'errors': errors}, indent=2))
+          print(json.dumps({'results': result, 'errors': errors}, indent=2))
+          sys.exit(bool(errors))
+          PY
+      - name: Upload logs and native failure frames
+        if: always()
+        timeout-minutes: 5
         uses: actions/upload-artifact@v4
         with:
-          name: ios-release-ui-results
+          name: inbox-paired-event-evidence
           path: |
-            apple/ios-ui.xcresult/
-            apple/ui-test.log
+            evidence/
+            candidate/apple/build/results/
+            baseline/apple/build/results/
           retention-days: 7
-          if-no-files-found: ignore
-
-      - name: Export screenshots
+          if-no-files-found: error
+      - name: Preserve failure status
         if: always()
-        working-directory: apple
-        run: |
-          if [ -d ios-ui.xcresult ]; then
-            xcrun xcresulttool export attachments --path ios-ui.xcresult --output-path screenshots
-          fi
-
-      - name: Upload screenshots
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: screenshots
-          path: apple/screenshots/
-          if-no-files-found: ignore
-
-      - name: Upload build log on failure or cancellation
-        if: failure() || cancelled()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log
-          path: apple/*.log
-          if-no-files-found: ignore
-
-  testflight:
-    name: Upload to TestFlight
-    needs: policy
-    if: needs.policy.outputs.ui_gate != 'true' && (inputs.ui_only != true && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')))
-    uses: ./.github/workflows/ios-upload.yml
-    secrets: inherit
-
-  gated-testflight:
-    name: Upload to TestFlight (UI gate enabled)
-    needs: [policy, build]
-    if: needs.policy.outputs.ui_gate == 'true' && (inputs.ui_only != true && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')))
-    uses: ./.github/workflows/ios-upload.yml
-    secrets: inherit
+        timeout-minutes: 1
+        env:
+          PR_OUTCOME: ${{ steps.candidate.outcome }}
+          MAIN_OUTCOME: ${{ steps.baseline.outcome }}
+          COVERAGE_OUTCOME: ${{ steps.coverage.outcome }}
+        run: test "$COVERAGE_OUTCOME" = success && test "$PR_OUTCOME" = success && test "$MAIN_OUTCOME" = success
