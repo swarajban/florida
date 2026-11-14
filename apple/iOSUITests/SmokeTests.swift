@@ -248,17 +248,35 @@ final class SmokeTests: XCTestCase {
                 XCTAssertTrue(app.buttons["Blocks"].exists)
                 capture(app, "day-blocking-accessibility-menu-\(textSize)-\(appearance)")
                 app.buttons["Blocks"].tap()
+                XCTAssertTrue(informational.waitForNonExistence(timeout: 5))
+                wait(for: [
+                    expectation(for: NSPredicate(format: "value == %@", "Blocks"), evaluatedWith: choice),
+                    expectation(for: NSPredicate(format: "label == %@", "Blocks your day"),
+                                evaluatedWith: app.staticTexts["event-blocks-day-effective-demo-event-holiday"]),
+                ], timeout: 5)
                 XCTAssertEqual(choice.value as? String, "Blocks")
                 XCTAssertEqual(app.staticTexts["event-blocks-day-effective-demo-event-holiday"].label, "Blocks your day")
                 choice.tap()
                 XCTAssertTrue(informational.waitForExistence(timeout: 5))
                 informational.tap()
+                XCTAssertTrue(informational.waitForNonExistence(timeout: 5))
+                wait(for: [
+                    expectation(for: NSPredicate(format: "value == %@", "Does not block"), evaluatedWith: choice),
+                    expectation(for: NSPredicate(format: "label == %@", "Does not block scheduling"),
+                                evaluatedWith: app.staticTexts["event-blocks-day-effective-demo-event-holiday"]),
+                ], timeout: 5)
                 XCTAssertEqual(choice.value as? String, "Does not block")
                 XCTAssertEqual(app.staticTexts["event-blocks-day-effective-demo-event-holiday"].label, "Does not block scheduling")
                 choice.tap()
                 let automatic = app.buttons["Automatic"]
                 XCTAssertTrue(automatic.waitForExistence(timeout: 5))
                 automatic.tap()
+                XCTAssertTrue(automatic.waitForNonExistence(timeout: 5))
+                wait(for: [
+                    expectation(for: NSPredicate(format: "value == %@", "Automatic"), evaluatedWith: choice),
+                    expectation(for: NSPredicate(format: "label == %@", "Blocks your day"),
+                                evaluatedWith: app.staticTexts["event-blocks-day-effective-demo-event-holiday"]),
+                ], timeout: 5)
                 XCTAssertEqual(choice.value as? String, "Automatic")
                 XCTAssertEqual(app.staticTexts["event-blocks-day-effective-demo-event-holiday"].label, "Blocks your day")
                 capture(app, "day-blocking-accessibility-restored-\(textSize)-\(appearance)")
@@ -1032,6 +1050,8 @@ final class SmokeTests: XCTestCase {
         native.tap()
         let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", previous == "1" ? "0" : "1"), object: native)
         XCTAssertEqual(XCTWaiter.wait(for: [changed], timeout: 5), .completed)
+        wait(for: [expectation(for: NSPredicate(format: "value == %@", previous == "1" ? "0" : "1"),
+                               evaluatedWith: control)], timeout: 5)
         XCTAssertEqual(control.value as? String, previous == "1" ? "0" : "1")
     }
 
