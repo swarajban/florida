@@ -35,6 +35,11 @@ struct InteractionModeDiagnostics: View {
                 Text(model.viewMode.rawValue)
                     .accessibilityIdentifier("mode-calendar-view")
                     .accessibilityValue(model.viewMode.rawValue)
+                Text(model.selection.map { String(describing: $0) } ?? "none")
+                    .lineLimit(1)
+                    .frame(maxWidth: 60)
+                    .accessibilityIdentifier("mode-selection")
+                    .accessibilityValue(model.selection.map { String(describing: $0) } ?? "none")
             }
             .font(.caption2)
             .onDisappear { injection?.cancel() }

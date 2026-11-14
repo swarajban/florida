@@ -75,6 +75,6 @@ struct OptionalPickRowView: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("suggestion-row-\(pick.id)")
-        .accessibilityValue(isSelected ? "Selected" : "Not selected")
+        .accessibilityLabel(isSelected ? "Selected suggestion, \(pick.task.title)" : "Suggestion, \(pick.task.title)")
     }
 }
