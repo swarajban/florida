@@ -172,14 +172,13 @@ final class SmokeTests: XCTestCase {
             let app = launch(appearance: appearance)
             let status = app.buttons["agenda-day-kind"]
             XCTAssertTrue(status.waitForExistence(timeout: 15))
-            XCTAssertTrue((status.value as? String)?.contains("Public holiday. Automatic: US public holiday on your calendar.") == true)
+            XCTAssertEqual(status.value as? String, "From the routine. Public holiday. Automatic: US public holiday on your calendar.")
+            XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Public holiday")).firstMatch.exists)
             status.tap()
             let indicator = app.buttons.matching(NSPredicate(
                 format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@", "day-blocking-", "-demo-event-holiday")).firstMatch
             XCTAssertTrue(indicator.waitForExistence(timeout: 15))
             XCTAssertTrue(indicator.label.contains("Public holiday"))
-            XCTAssertEqual(indicator.value as? String, "Automatic: US public holiday on your calendar.")
-            XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Public holiday")).firstMatch.exists)
             capture(app, "protected-hidden-day-agenda-\(appearance)")
             indicator.tap()
             let choice = app.descendants(matching: .any).matching(identifier: "event-blocks-day-demo-event-holiday").firstMatch
@@ -197,7 +196,7 @@ final class SmokeTests: XCTestCase {
             XCTAssertEqual(app.staticTexts["event-blocks-day-effective-demo-event-holiday"].label, "Blocks your day")
             app.navigationBars.buttons["Done"].tap()
             XCTAssertTrue(status.waitForExistence(timeout: 5))
-            XCTAssertTrue((status.value as? String)?.contains("Public holiday. Automatic: US public holiday on your calendar.") == true)
+            XCTAssertEqual(status.value as? String, "From the routine. Public holiday. Automatic: US public holiday on your calendar.")
             app.segmentedControls["agenda-mode"].buttons["3 Days"].tap()
             status.tap()
             XCTAssertTrue(indicator.waitForExistence(timeout: 5))
