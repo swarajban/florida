@@ -16,6 +16,7 @@ struct NewCategorySheet: View {
             HStack(spacing: 10) {
                 CategoryColorButton(hex: color ?? nextColor) { color = $0 }
                 TextField("Name", text: $name)
+                    .accessibilityIdentifier("new-category-name")
                     .focused($isNameFocused)
                     .onSubmit(create)
             }

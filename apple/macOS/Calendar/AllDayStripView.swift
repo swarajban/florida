@@ -103,5 +103,8 @@ private struct AllDayBar: View {
         .overlay(shape.strokeBorder(block.tint.opacity(0.4 * opacity), lineWidth: 1))
         .overlay(shape.strokeBorder(FloridaStyle.ink, lineWidth: isSelected ? 2 : 0))
         .offset(x: frame.minX, y: frame.minY)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("all-day-row-\(block.id)")
+        .accessibilityValue(isSelected ? "Selected" : "Not selected")
     }
 }
