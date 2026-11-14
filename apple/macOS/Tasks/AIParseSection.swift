@@ -87,6 +87,20 @@ struct AIParseSection: View {
     private func parse() {
         let input = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !input.isEmpty else { return }
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "demoData"),
+           UserDefaults.standard.bool(forKey: "uiInteractionAIReply") {
+            state = .parsing
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(250))
+                state = .parsed(TaskDraft(
+                    title: "Parsed audit review", notes: "Synthetic review", durationMinutes: 90,
+                    priority: .high, rationale: "Synthetic UI proposal", context: .errand,
+                    projectId: model.projects.first?.id, attention: .shared))
+            }
+            return
+        }
+        #endif
         guard let client = model.aiClient else {
             state = .failed("Connect to the server in Settings first")
             return

@@ -30,6 +30,7 @@ struct StatusBarView: View {
             Spacer()
             #if DEBUG
             HeldKeyDiagnostics(keys: ["x", "z", "c", "/"])
+            InteractionModeDiagnostics()
             if UserDefaults.standard.bool(forKey: "demoData"),
                UserDefaults.standard.bool(forKey: "uiHeldKeyDiagnostics") {
                 Text(model.eventDetailID ?? "none")

@@ -173,7 +173,7 @@ struct EventDetailView: View {
                                 }
                                 Spacer(minLength: 0)
                                 if let key = (model.eventResourceKeys ?? labels).remaining[resource.id] {
-                                    Keycap(key.map(String.init).joined(separator: " "))
+                                    resourceKeycap(key, id: resource.id)
                                 } else if labels.remaining[resource.id] == nil {
                                     Self.keycap(for: .openEventResources)
                                 }
@@ -198,6 +198,25 @@ struct EventDetailView: View {
             .frame(maxHeight: 150)
             .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    @ViewBuilder
+    private func resourceKeycap(_ key: String, id: String) -> some View {
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "demoData"),
+           UserDefaults.standard.bool(forKey: "uiInteractionModeDiagnostics") {
+            Keycap(key.map(String.init).joined(separator: " "))
+                .accessibilityElement(children: .ignore)
+                .accessibilityHidden(false)
+                .accessibilityLabel(key)
+                .accessibilityIdentifier("mode-resource-key-\(id)")
+                .accessibilityValue(key)
+        } else {
+            Keycap(key.map(String.init).joined(separator: " "))
+        }
+        #else
+        Keycap(key.map(String.init).joined(separator: " "))
+        #endif
     }
 
     /// Yes / Maybe / No for an invitation, with the current answer shown pressed.
