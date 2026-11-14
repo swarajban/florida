@@ -43,6 +43,24 @@ struct TasksTests {
         #expect(all.tasks.map(\.listDate) == [.due(earlier), .start(now), .pinned(now.addingTimeInterval(60))])
     }
 
+    @Test func somedayIsExcludedBeforeTimelineBoundariesAndProjection() {
+        let now = JSONCoding.parseInstant("2026-11-12T20:00:00Z")!
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        let ordinary = TaskItem(id: "ordinary", categoryId: "work", title: "Ordinary", durationMinutes: 30,
+                                deadlineType: .soft, dueAt: now.addingTimeInterval(300), createdAt: now, updatedAt: now)
+        var deferred = ordinary
+        deferred.id = "deferred"
+        deferred.someday = true
+        deferred.dueAt = now.addingTimeInterval(60)
+        let snapshot = WidgetTaskTimeline(tasks: [deferred, ordinary], categories: [], placements: [:], calendar: calendar)
+        #expect(snapshot.tasks.map(\.id) == [ordinary.id])
+        #expect(snapshot.rows(limit: 1, at: now).map(\.id) == [ordinary.id])
+        #expect(snapshot.dates(at: now) == [now, ordinary.dueAt!, calendar.startOfDay(for: now.addingTimeInterval(86_400))])
+        let row = WidgetTask(task: deferred, placements: [], category: nil, at: now.addingTimeInterval(120))
+        #expect(!row.late && row.listDate == nil)
+    }
+
     @Test func displayedFallbackDatesNameTheirKind() {
         let now = JSONCoding.parseInstant("2026-11-12T20:00:00Z")!
         var calendar = Calendar(identifier: .gregorian)
