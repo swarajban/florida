@@ -58,6 +58,7 @@ targets:
     sources:
       - iOS
       - Design/FloridaStyle.swift
+      - Design/InboxUIDiagnostic.swift
       - Design/TaskRecurrenceSection.swift
       - Design/EventRecurrenceSection.swift
       - Design/EventQuickAddComposer.swift
@@ -127,6 +128,7 @@ targets:
     sources:
       - macOS
       - Design/FloridaStyle.swift
+      - Design/InboxUIDiagnostic.swift
       - Design/TaskRecurrenceSection.swift
       - Design/EventRecurrenceSection.swift
       - Design/EventQuickAddComposer.swift

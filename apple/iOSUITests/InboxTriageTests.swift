@@ -334,7 +334,8 @@ final class InboxTriageTests: XCTestCase {
     @MainActor
     private func launch(_ appearance: String) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-demoData", "YES", "-uiTab", "tasks", "-uiAppearance", appearance]
+        app.launchArguments = ["-demoData", "YES", "-uiTab", "tasks", "-uiAppearance", appearance,
+                               "-uiTraceInbox", "YES"]
         app.launch()
         let options = app.buttons["tasks-view-options"]
         XCTAssertTrue(options.waitForExistence(timeout: 15))

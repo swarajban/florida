@@ -72,16 +72,27 @@ final class KeyMonitorHostView: NSView {
 
     private func handle(_ event: NSEvent) -> Bool {
         guard let model = box.model, let window else { return false }
+        let trace = [UInt16(5), 17, 31, 53].contains(event.keyCode)
+        if trace {
+            InboxUIDiagnostic.record("monitor event=\(event.type.rawValue) code=\(event.keyCode) flags=\(event.modifierFlags.rawValue) repeat=\(event.isARepeat) ownWindow=\(event.window === window) keyWindow=\(window.isKeyWindow) popover=\(isEventPopover) responder=\(window.firstResponder.map { String(describing: type(of: $0)) } ?? "nil")")
+        }
         if event.type == .keyUp {
             model.shortcutRepeats.gate.keyUp(keyCode: event.keyCode)
             return false
         }
-        if model.shortcutRepeats.gate.keyDown(keyCode: event.keyCode, isRepeat: event.isARepeat) { return true }
+        if model.shortcutRepeats.gate.keyDown(keyCode: event.keyCode, isRepeat: event.isARepeat) {
+            if trace { InboxUIDiagnostic.record("monitor.repeat.swallowed code=\(event.keyCode)") }
+            return true
+        }
         guard event.window === window else { return false }
-        guard !SelectorInput.isEditing(in: window) else { return false }
+        guard !SelectorInput.isEditing(in: window) else {
+            if trace { InboxUIDiagnostic.record("monitor.selector.editing code=\(event.keyCode)") }
+            return false
+        }
         let chord = KeyChord(event: event)
         let allowsRepeat = model.jump == nil && chord.map(ShortcutKeyRepeat.isNavigation) == true
         let handled = model.handleKeyDown(event, inEventPopover: isEventPopover)
+        if trace { InboxUIDiagnostic.record("monitor.handled code=\(event.keyCode) result=\(handled)") }
         if handled, !allowsRepeat {
             model.shortcutRepeats.gate.didHandle(keyCode: event.keyCode)
         }

@@ -22,6 +22,9 @@ extension AppModel {
         let isCommandChord = chord.modifiers.contains(.command)
         let isEscape = chord == KeyChord("escape")
         let typing = isPaletteOpen || event.window?.firstResponder is NSTextView
+        if ["g", "t", "o", "escape"].contains(chord.key) {
+            InboxUIDiagnostic.record("key.route chord=\(chord) typing=\(typing) sheet=\(isSheetOpen) palette=\(isPaletteOpen) eventDetail=\(eventDetailID != nil) focus=\(focus) selection=\(String(describing: selection)) pending=\(pendingKeys)")
+        }
         if event.isARepeat, !typing, !ShortcutKeyRepeat.isNavigation(chord) { return true }
 
         if isAvailabilityZoneOpen {
@@ -103,11 +106,13 @@ extension AppModel {
 
         switch matcher.feed(chord, at: Date()) {
         case .matched(let command):
+            InboxUIDiagnostic.record("key.matched command=\(command) focus=\(focus) selection=\(String(describing: selection))")
             resetKeySequence()
             if inEventPopover, !command.actsOnOpenEvent {
                 return false
             }
             run(command)
+            InboxUIDiagnostic.record("key.ran command=\(command) focus=\(focus) selection=\(String(describing: selection))")
             return true
         case .pending:
             pendingKeys = MacKeymap.display(matcher.pendingSequence) + " …"

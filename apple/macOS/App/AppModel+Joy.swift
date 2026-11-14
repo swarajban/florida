@@ -41,7 +41,9 @@ extension AppModel {
             showGhost("Nothing here")
             return
         }
+        InboxUIDiagnostic.record("edge last=\(last) focus=\(focus) target=\(item) count=\(items.count) before=\(String(describing: selection)) inView=\(paneItemsOnScreen.contains(item))")
         select(item)
+        InboxUIDiagnostic.record("edge.selected target=\(item) after=\(String(describing: selection))")
     }
 
     /// After new placements: slides task blocks from their old slots and says how many moved.

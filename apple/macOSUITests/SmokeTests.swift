@@ -1432,7 +1432,7 @@ final class SmokeTests: XCTestCase {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {
             let app = XCUIApplication()
-            app.launchArguments = ["-demoData", "YES", "-uiAppearance", appearance]
+            app.launchArguments = ["-demoData", "YES", "-uiAppearance", appearance, "-uiTraceInbox", "YES"]
             app.launch()
             defer { app.terminate() }
             let window = app.windows.firstMatch

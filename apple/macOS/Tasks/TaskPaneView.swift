@@ -107,10 +107,12 @@ struct TaskPaneView: View {
                 .onChange(of: model.selection) { _, selection in
                     let clicked = clickedItem
                     clickedItem = nil
+                    InboxUIDiagnostic.record("pane.selection value=\(String(describing: selection)) clicked=\(String(describing: clicked)) focus=\(model.focus) inView=\(selection.map(model.paneItemsOnScreen.contains) ?? false)")
                     guard selection != clicked else { return }
                     if let selection, selection.isTask || selection.isSuggestion,
                        model.focus == .tasks || model.gridLayout.day(of: selection) == nil {
                         if !model.paneItemsOnScreen.contains(selection) {
+                            InboxUIDiagnostic.record("pane.scroll.selection target=\(selection)")
                             proxy.scrollTo(selection, anchor: .center)
                         }
                     }
@@ -124,6 +126,7 @@ struct TaskPaneView: View {
                         group.tasks.contains { ItemID.task($0.id) == model.selection }
                     }?.id
                 )) { previous, current in
+                    InboxUIDiagnostic.record("pane.section previous=\(previous) current=\(current)")
                     guard previous.item == current.item, current.sectionId != nil,
                           let selection = current.item, selection.isTask,
                           model.focus == .tasks || model.gridLayout.day(of: selection) == nil else { return }
@@ -133,9 +136,11 @@ struct TaskPaneView: View {
                                   group.tasks.contains { ItemID.task($0.id) == selection }
                               })?.id == current.sectionId else { return }
                         proxy.scrollTo(selection, anchor: .center)
+                        InboxUIDiagnostic.record("pane.scroll.section target=\(selection)")
                     }
                 }
                 .onChange(of: model.taskListGrouping) {
+                    InboxUIDiagnostic.record("pane.grouping value=\(model.taskListGrouping) selection=\(String(describing: model.selection)) last=\(String(describing: model.orderedTaskItems.last))")
                     if let selection = model.selection { proxy.scrollTo(selection, anchor: .center) }
                 }
             }
@@ -251,6 +256,7 @@ private extension View {
             return JumpViewport(top: header, bottom: pane.height)
                 .shows(top: row.minY + strip.lowerBound, bottom: row.minY + strip.upperBound)
         } action: { isOnScreen in
+            InboxUIDiagnostic.record("pane.visibility item=\(item) visible=\(isOnScreen) selected=\(model.selection == item)")
             if isOnScreen {
                 model.paneItemsOnScreen.insert(item)
             } else {

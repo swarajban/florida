@@ -88,9 +88,11 @@ extension AppModel {
     /// the gym, project time, and work that shares its hour. Any selection, a click included,
     /// ends jump mode.
     func select(_ item: ItemID?) {
+        InboxUIDiagnostic.record("select before=\(String(describing: selection)) requested=\(String(describing: item)) focus=\(focus)")
         endJump()
         resetKeySequence()
         selection = item
+        InboxUIDiagnostic.record("select.assigned after=\(String(describing: selection))")
         if focus == .calendar, let item, let day = gridLayout.day(of: item) {
             selectedDay = day
         }
@@ -114,6 +116,7 @@ extension AppModel {
            AllDayBlocking.protectedDays(for: event, calendar: calendar)?.overlaps(visibleRange) == true {
             return
         }
+        InboxUIDiagnostic.record("selection.hidden.clear item=\(selection) paneVisible=\(isTasksPaneVisible) orderedContains=\(orderedTaskItems.contains(selection))")
         self.selection = nil
     }
 

@@ -1,192 +1,139 @@
 name: iOS
 
-# build:      runs the full simulator suite on main, independently of uploads by default.
-# ui:         explicit ui_only dispatch runs both PR UI suites without release credentials.
-# testflight: archives, signs and uploads to TestFlight on pushes to main and on manual runs.
-#             Needs the App Store Connect secrets described in apple/README.md.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "apple/**"
-      - ".github/workflows/ios.yml"
-      - ".github/workflows/ios-upload.yml"
-      - ".github/workflows/apple-release-policy.yml"
   workflow_dispatch:
     inputs:
       ui_only:
-        description: Run both PR UI suites only (never upload)
+        description: Run the approved native diagnostics only
         type: boolean
+        required: true
         default: false
-      mac_test_selector:
-        description: Optional space-separated Mac test bundles, classes or methods for one focused UI-only job
-        type: string
-        default: ''
+
+permissions:
+  contents: read
 
 concurrency:
-  group: ${{ inputs.ui_only && format('apple-ui-{0}', github.ref) || format('ios-run-{0}', github.run_id) }}
-  cancel-in-progress: ${{ inputs.ui_only == true }}
+  group: inbox-native-diagnostic-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  policy:
-    if: inputs.ui_only != true
-    uses: ./.github/workflows/apple-release-policy.yml
-
-  ui:
-    name: On-demand Apple UI
-    if: github.event_name == 'workflow_dispatch' && inputs.ui_only && inputs.mac_test_selector == ''
-    uses: ./.github/workflows/apple-checks.yml
-    with:
-      run_ui: true
-
-  mac_focused:
-    name: Focused Mac tests
-    if: github.event_name == 'workflow_dispatch' && inputs.ui_only && inputs.mac_test_selector != ''
+  mac_diagnostic:
+    name: Focused Mac G diagnostics
+    if: github.event_name == 'workflow_dispatch' && inputs.ui_only == true && github.ref == 'refs/heads/capy/inbox-native-trace'
     runs-on: macos-26
     timeout-minutes: 45
+    env:
+      RETRY_FAILED_TESTS: '0'
+      HOMEBREW_NO_AUTO_UPDATE: '1'
     steps:
       - uses: actions/checkout@v5
-      - name: Validate test selector
+        timeout-minutes: 1
+        with:
+          ref: ${{ github.sha }}
+      - name: Verify exact source
+        timeout-minutes: 1
         env:
-          MAC_TEST_SELECTOR: ${{ inputs.mac_test_selector }}
+          EXPECTED_SHA: ${{ github.sha }}
         run: |
-          [[ "$MAC_TEST_SELECTOR" != *$'\n'* && "$MAC_TEST_SELECTOR" != *$'\r'* ]] || exit 2
-          read -r -a selectors <<< "$MAC_TEST_SELECTOR"
-          (( ${#selectors[@]} > 0 )) || exit 2
-          for selector in "${selectors[@]}"; do
-            [[ "$selector" =~ ^Florida-macOS(KeyboardTests|UITests)(/[A-Za-z_][A-Za-z0-9_]*){0,2}$ ]] || exit 2
-          done
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git log -1 --format='%H %s'
       - run: brew install xcodegen
-      - name: Build and run selected Mac tests
-        env:
-          MAC_TEST_SELECTOR: ${{ inputs.mac_test_selector }}
+        timeout-minutes: 2
+      - name: Run both unchanged G regressions
+        timeout-minutes: 36
         run: |
           set -o pipefail
-          read -r -a selectors <<< "$MAC_TEST_SELECTOR"
-          bash apple/scripts/check.sh macos "${selectors[@]/#/-only-testing:}" 2>&1 | tee apple/ui-test.log
-      - name: Upload focused results and log
+          bash apple/scripts/check.sh macos \
+            -only-testing:Florida-macOSUITests/SmokeTests/testJumpLabelsInBothAppearances \
+            -only-testing:Florida-macOSUITests/TaskGroupingTests/testTaskGroupingAndKeyboardOrderInBothAppearances \
+            2>&1 | tee apple/diagnostic-macos.log
+      - name: Retain key selection and scroll traces
         if: always()
-        uses: actions/upload-artifact@v4
+        timeout-minutes: 1
+        run: |
+          /usr/bin/log show --style compact --last 1h \
+            --predicate 'eventMessage CONTAINS "INBOX_UI_TRACE"' \
+            > apple/diagnostic-macos-trace.log 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        timeout-minutes: 2
         with:
-          name: ui-macos-focused
+          name: inbox-native-macos
           path: |
             apple/build/results/
-            apple/ui-test.log
+            apple/diagnostic-*.log
           retention-days: 7
           if-no-files-found: ignore
 
-  build:
-    name: iPhone UI suite
-    if: inputs.ui_only != true
+  iphone_diagnostic:
+    name: Focused iPhone Someday diagnostics
+    if: github.event_name == 'workflow_dispatch' && inputs.ui_only == true && github.ref == 'refs/heads/capy/inbox-native-trace'
     runs-on: macos-26
-    # The unsharded main suite includes simulator boot, all appearances and one retry.
-    timeout-minutes: 75
+    timeout-minutes: 45
+    env:
+      RETRY_FAILED_TESTS: '0'
+      HOMEBREW_NO_AUTO_UPDATE: '1'
     steps:
       - uses: actions/checkout@v5
-
-      - name: Generate Xcode project
-        working-directory: apple
-        env:
-          DEVELOPMENT_TEAM: ""
-        run: |
-          brew install xcodegen
-          xcodegen generate
-
-      - name: Pick simulator
-        run: |
-          UDID=$(xcrun simctl list devices available -j | python3 -c "
-          import json, sys
-          devices = json.load(sys.stdin)['devices']
-          ios = sorted((k for k in devices if 'iOS' in k), key=lambda k: [int(p) for p in k.split('iOS-')[-1].split('-')])
-          phones = [d for d in devices[ios[-1]] if d['name'].startswith('iPhone') and 'Pro' in d['name'] and 'Max' not in d['name']] or [d for d in devices[ios[-1]] if d['name'].startswith('iPhone')]
-          print(phones[0]['udid'])
-          ")
-          echo "Using simulator $UDID"
-          echo "UDID=$UDID" >> "$GITHUB_ENV"
-
-      - name: Build
-        working-directory: apple
-        run: |
-          set -o pipefail
-          xcodebuild build \
-            -project Florida.xcodeproj \
-            -scheme Florida-iOS \
-            -configuration Debug \
-            -destination "id=$UDID" \
-            -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-            | tee build.log | xcbeautify --renderer github-actions
-
-      - name: UI smoke test and screenshots
-        working-directory: apple
-        run: |
-          set -o pipefail
-          xcrun simctl boot "$UDID" || true
-          xcrun simctl bootstatus "$UDID" -b
-          xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100 --cellularBars 4 || true
-          # The tests wait for visible demo content, exercise the real tab controls, then
-          # capture light/dark screens and large text. No personal data or server is involved.
-          xcodebuild test \
-            -project Florida.xcodeproj \
-            -scheme Florida-iOS \
-            -configuration Debug \
-            -destination "id=$UDID" \
-            -parallel-testing-enabled NO \
-            -retry-tests-on-failure -test-iterations 2 \
-            -derivedDataPath build \
-            -resultBundlePath ios-ui.xcresult \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-            | tee ui-test.log | xcbeautify --renderer github-actions
-
-      - name: Report retried UI failures
-        if: always()
-        run: bash apple/scripts/report-ui-failures.sh apple/ui-test.log
-
-      - name: Upload UI results and log
-        if: always()
-        uses: actions/upload-artifact@v4
+        timeout-minutes: 1
         with:
-          name: ios-release-ui-results
+          ref: ${{ github.sha }}
+      - name: Verify exact source
+        timeout-minutes: 1
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git log -1 --format='%H %s'
+      - run: brew install xcodegen
+        timeout-minutes: 2
+      - name: Select the same simulator for tests and logs
+        timeout-minutes: 1
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          ios = sorted((k for k in devices if "iOS-" in k), key=lambda k: [int(p) for p in k.split("iOS-")[-1].split("-")])
+          phones = [d for d in devices[ios[-1]] if d["name"].startswith("iPhone")]
+          pro = [d for d in phones if "Pro" in d["name"] and "Max" not in d["name"]]
+          print((pro or phones)[0]["udid"])
+          ')
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+      - name: Run switch missing coverage capture and Details regressions
+        timeout-minutes: 36
+        run: |
+          set -o pipefail
+          set +e
+          bash apple/scripts/check.sh ios \
+            -only-testing:Florida-iOSUITests/InboxTriageTests/testSomedayStillRequiresCategoryAndEditorCanResetDecision \
+            -only-testing:Florida-iOSUITests/InboxTriageTests/testSomedaySuppressesStalePlacementAndUnscheduledWarning \
+            -only-testing:Florida-iOSUITests/InboxTriageTests/testSomedayToggleClearsDueAndPinButKeepsStart \
+            -only-testing:Florida-iOSUITests/TaskGroupingTests/testInboxTriageUndoAndFinalSomedayIntentPreserveSource \
+            2>&1 | tee apple/diagnostic-iphone-coverage.log
+          coverage_status=${PIPESTATUS[0]}
+          bash apple/scripts/check.sh ios \
+            -only-testing:Florida-iOSUITests/InboxTriageTests/testActualDateActionsLeaveSomeday \
+            -only-testing:Florida-iOSUITests/InboxTriageTests/testExplicitSomedayCaptureRequiresCategory \
+            2>&1 | tee apple/diagnostic-iphone-faults.log
+          faults_status=${PIPESTATUS[0]}
+          if (( coverage_status != 0 )); then exit "$coverage_status"; fi
+          exit "$faults_status"
+      - name: Retain setters first responders and active animations
+        if: always()
+        timeout-minutes: 1
+        run: |
+          if [[ -n "${UDID:-}" ]]; then
+            xcrun simctl spawn "$UDID" log show --style compact --last 1h \
+              --predicate 'eventMessage CONTAINS "INBOX_UI_TRACE"' \
+              > apple/diagnostic-iphone-trace.log 2>&1 || true
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        timeout-minutes: 2
+        with:
+          name: inbox-native-iphone
           path: |
-            apple/ios-ui.xcresult/
-            apple/ui-test.log
+            apple/build/results/
+            apple/diagnostic-*.log
           retention-days: 7
           if-no-files-found: ignore
-
-      - name: Export screenshots
-        if: always()
-        working-directory: apple
-        run: |
-          if [ -d ios-ui.xcresult ]; then
-            xcrun xcresulttool export attachments --path ios-ui.xcresult --output-path screenshots
-          fi
-
-      - name: Upload screenshots
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: screenshots
-          path: apple/screenshots/
-          if-no-files-found: ignore
-
-      - name: Upload build log on failure or cancellation
-        if: failure() || cancelled()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log
-          path: apple/*.log
-          if-no-files-found: ignore
-
-  testflight:
-    name: Upload to TestFlight
-    needs: policy
-    if: needs.policy.outputs.ui_gate != 'true' && (inputs.ui_only != true && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')))
-    uses: ./.github/workflows/ios-upload.yml
-    secrets: inherit
-
-  gated-testflight:
-    name: Upload to TestFlight (UI gate enabled)
-    needs: [policy, build]
-    if: needs.policy.outputs.ui_gate == 'true' && (inputs.ui_only != true && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')))
-    uses: ./.github/workflows/ios-upload.yml
-    secrets: inherit

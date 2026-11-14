@@ -238,7 +238,20 @@ struct TaskEditorView: View {
                 }
             }
             .onAppear {
+                InboxUIDiagnostic.record("iOS.TaskEditor.appear.enter \(inboxDiagnosticState)")
                 titleFocused = isNew && draft.title.isEmpty
+                InboxUIDiagnostic.record("iOS.TaskEditor.appear.exit \(inboxDiagnosticState)")
+                InboxUIDiagnostic.samplePresentation("iOS.TaskEditor.appear")
+            }
+            .onDisappear {
+                InboxUIDiagnostic.record("iOS.TaskEditor.disappear \(inboxDiagnosticState)")
+                InboxUIDiagnostic.samplePresentation("iOS.TaskEditor.disappear")
+            }
+            .onChange(of: titleFocused) { old, new in
+                InboxUIDiagnostic.record("iOS.TaskEditor.focus old=\(old) new=\(new) \(inboxDiagnosticState)")
+            }
+            .onChange(of: draft) { _, _ in
+                InboxUIDiagnostic.record("iOS.TaskEditor.draft.changed \(inboxDiagnosticState)")
             }
         }
     }
@@ -304,6 +317,11 @@ struct TaskEditorView: View {
         Binding(
             get: { draft.deadlineType != .none },
             set: { on in
+                InboxUIDiagnostic.record("iOS.TaskEditor.hasDue.enter on=\(on) \(inboxDiagnosticState)")
+                defer {
+                    InboxUIDiagnostic.record("iOS.TaskEditor.hasDue.exit \(inboxDiagnosticState)")
+                    InboxUIDiagnostic.samplePresentation("iOS.TaskEditor.hasDue.exit")
+                }
                 dateEdits.insert(.due)
                 somedayIntent = false
                 if on {
@@ -327,6 +345,8 @@ struct TaskEditorView: View {
         Binding(
             get: { draft.dueAt ?? defaultDueDate },
             set: { date in
+                InboxUIDiagnostic.record("iOS.TaskEditor.dueAt.enter epoch=\(date.timeIntervalSince1970) \(inboxDiagnosticState)")
+                defer { InboxUIDiagnostic.record("iOS.TaskEditor.dueAt.exit \(inboxDiagnosticState)") }
                 dateEdits.insert(.due)
                 somedayIntent = false
                 draft.someday = false
@@ -340,6 +360,11 @@ struct TaskEditorView: View {
         Binding(
             get: { draft.someday },
             set: { on in
+                InboxUIDiagnostic.record("iOS.TaskEditor.someday.enter on=\(on) \(inboxDiagnosticState)")
+                defer {
+                    InboxUIDiagnostic.record("iOS.TaskEditor.someday.exit \(inboxDiagnosticState)")
+                    InboxUIDiagnostic.samplePresentation("iOS.TaskEditor.someday.exit")
+                }
                 somedayIntent = on
                 draft.someday = on
                 if on {
@@ -357,6 +382,8 @@ struct TaskEditorView: View {
         Binding(
             get: { dueTimeChoice ?? draft.dueAt.map { TaskDay.dueHasTime($0, calendar: model.calendar) } ?? false },
             set: { on in
+                InboxUIDiagnostic.record("iOS.TaskEditor.hasDueTime.enter on=\(on) \(inboxDiagnosticState)")
+                defer { InboxUIDiagnostic.record("iOS.TaskEditor.hasDueTime.exit \(inboxDiagnosticState)") }
                 dateEdits.insert(.due)
                 somedayIntent = false
                 draft.someday = false
@@ -372,6 +399,8 @@ struct TaskEditorView: View {
         Binding(
             get: { draft.startAt != nil },
             set: { on in
+                InboxUIDiagnostic.record("iOS.TaskEditor.hasStart.enter on=\(on) \(inboxDiagnosticState)")
+                defer { InboxUIDiagnostic.record("iOS.TaskEditor.hasStart.exit \(inboxDiagnosticState)") }
                 setStart(on ? (draft.startAt ?? TaskDay.notBefore(on: Date(), calendar: model.calendar)) : nil)
                 if !on {
                     startTimeChoice = nil
@@ -383,13 +412,19 @@ struct TaskEditorView: View {
     private var startAt: Binding<Date> {
         Binding(
             get: { draft.startAt ?? Date() },
-            set: { setStart(hasStartTime.wrappedValue ? $0 : TaskDay.notBefore(on: $0, calendar: model.calendar)) })
+            set: { date in
+                InboxUIDiagnostic.record("iOS.TaskEditor.startAt.enter epoch=\(date.timeIntervalSince1970) \(inboxDiagnosticState)")
+                defer { InboxUIDiagnostic.record("iOS.TaskEditor.startAt.exit \(inboxDiagnosticState)") }
+                setStart(hasStartTime.wrappedValue ? date : TaskDay.notBefore(on: date, calendar: model.calendar))
+            })
     }
 
     private var hasStartTime: Binding<Bool> {
         Binding(
             get: { startTimeChoice ?? draft.startAt.map { TaskDay.notBeforeHasTime($0, calendar: model.calendar) } ?? false },
             set: { on in
+                InboxUIDiagnostic.record("iOS.TaskEditor.hasStartTime.enter on=\(on) \(inboxDiagnosticState)")
+                defer { InboxUIDiagnostic.record("iOS.TaskEditor.hasStartTime.exit \(inboxDiagnosticState)") }
                 dateEdits.insert(.start)
                 somedayIntent = false
                 draft.someday = false
@@ -403,6 +438,8 @@ struct TaskEditorView: View {
     /// Every change to the start date goes through here: a start that reaches or passes the due
     /// date moves the due date to the day after it, in the row right below.
     private func setStart(_ start: Date?) {
+        InboxUIDiagnostic.record("iOS.TaskEditor.setStart.enter epoch=\(String(describing: start?.timeIntervalSince1970)) \(inboxDiagnosticState)")
+        defer { InboxUIDiagnostic.record("iOS.TaskEditor.setStart.exit \(inboxDiagnosticState)") }
         dateEdits.insert(.start)
         somedayIntent = false
         draft.someday = false
@@ -420,6 +457,8 @@ struct TaskEditorView: View {
         Binding(
             get: { draft.pinnedStart != nil },
             set: { on in
+                InboxUIDiagnostic.record("iOS.TaskEditor.hasPin.enter on=\(on) \(inboxDiagnosticState)")
+                defer { InboxUIDiagnostic.record("iOS.TaskEditor.hasPin.exit \(inboxDiagnosticState)") }
                 dateEdits.insert(.pin)
                 somedayIntent = false
                 draft.someday = false
@@ -430,15 +469,26 @@ struct TaskEditorView: View {
     private var pinnedStart: Binding<Date> {
         Binding(
             get: { draft.pinnedStart ?? nextHour },
-            set: {
+            set: { date in
+                InboxUIDiagnostic.record("iOS.TaskEditor.pinnedStart.enter epoch=\(date.timeIntervalSince1970) \(inboxDiagnosticState)")
+                defer { InboxUIDiagnostic.record("iOS.TaskEditor.pinnedStart.exit \(inboxDiagnosticState)") }
                 dateEdits.insert(.pin)
                 somedayIntent = false
-                draft.pinnedStart = $0
+                draft.pinnedStart = date
                 draft.someday = false
             })
     }
 
     // MARK: - Helpers
+
+    private var inboxDiagnosticState: String {
+        "someday=\(draft.someday) intent=\(String(describing: somedayIntent)) "
+            + "due=\(String(describing: draft.dueAt?.timeIntervalSince1970)) "
+            + "start=\(String(describing: draft.startAt?.timeIntervalSince1970)) "
+            + "pin=\(String(describing: draft.pinnedStart?.timeIntervalSince1970)) noDeadline=\(draft.deadlineType == .none) "
+            + "dueTimeChoice=\(String(describing: dueTimeChoice)) startTimeChoice=\(String(describing: startTimeChoice)) "
+            + "dueEdited=\(dateEdits.contains(.due)) startEdited=\(dateEdits.contains(.start)) pinEdited=\(dateEdits.contains(.pin))"
+    }
 
     private var trimmedTitle: String {
         draft.title.trimmingCharacters(in: .whitespacesAndNewlines)

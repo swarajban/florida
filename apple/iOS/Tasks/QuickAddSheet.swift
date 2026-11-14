@@ -161,9 +161,19 @@ struct QuickAddSheet: View {
                 }
             }
             .onAppear {
+                InboxUIDiagnostic.record("iOS.QuickAdd.appear.enter focused=\(focused) editor=\(editor != nil)")
                 selection = NSRange(location: model.quickAddText.utf16.count, length: 0)
                 selectionRevision += 1
                 focused = true
+                InboxUIDiagnostic.record("iOS.QuickAdd.appear.exit focused=\(focused) editor=\(editor != nil)")
+                InboxUIDiagnostic.samplePresentation("iOS.QuickAdd.appear")
+            }
+            .onChange(of: focused) { old, new in
+                InboxUIDiagnostic.record("iOS.QuickAdd.focus old=\(old) new=\(new) editor=\(editor != nil)")
+            }
+            .onChange(of: editor != nil) { old, new in
+                InboxUIDiagnostic.record("iOS.QuickAdd.editor old=\(old) new=\(new) focused=\(focused)")
+                InboxUIDiagnostic.samplePresentation("iOS.QuickAdd.editor.changed")
             }
             .onChange(of: activeChoiceIDs) { _, _ in highlightedSuggestion = 0 }
             .onChange(of: model.quickAddText) { _, _ in
@@ -179,7 +189,12 @@ struct QuickAddSheet: View {
                     model.quickAddCategoryHint = nil
                 }
             }
-            .onDisappear { parsing?.cancel() }
+            .onDisappear {
+                InboxUIDiagnostic.record("iOS.QuickAdd.disappear.enter focused=\(focused) editor=\(editor != nil)")
+                parsing?.cancel()
+                InboxUIDiagnostic.record("iOS.QuickAdd.disappear.exit focused=\(focused) editor=\(editor != nil)")
+                InboxUIDiagnostic.samplePresentation("iOS.QuickAdd.disappear")
+            }
             .sheet(item: $editor, onDismiss: editorClosed) { request in
                 TaskEditorView(request: request)
             }
@@ -571,12 +586,21 @@ struct QuickAddSheet: View {
     }
 
     private func review(_ request: TaskEditorRequest) {
+        InboxUIDiagnostic.record("iOS.QuickAdd.review.enter focused=\(focused) editor=\(editor != nil)")
+        InboxUIDiagnostic.samplePresentation("iOS.QuickAdd.review.enter")
         reviewedTaskID = request.id
         focused = false
         editor = request
+        InboxUIDiagnostic.record("iOS.QuickAdd.review.exit focused=\(focused) editor=\(editor != nil)")
+        InboxUIDiagnostic.samplePresentation("iOS.QuickAdd.review.exit")
     }
 
     private func editorClosed() {
+        InboxUIDiagnostic.record("iOS.QuickAdd.editorClosed.enter focused=\(focused) editor=\(editor != nil)")
+        defer {
+            InboxUIDiagnostic.record("iOS.QuickAdd.editorClosed.exit focused=\(focused) editor=\(editor != nil)")
+            InboxUIDiagnostic.samplePresentation("iOS.QuickAdd.editorClosed.exit")
+        }
         if let id = reviewedTaskID, let task = try? model.database?.task(id: id) {
             finished(task)
         } else {
@@ -691,8 +715,18 @@ private struct QuickAddInput: UIViewRepresentable {
         view.onDismissSuggestions = onDismissSuggestions
         view.font = .preferredFont(forTextStyle: .body, compatibleWith: view.traitCollection)
         view.textColor = .label
-        if focused, !view.isFirstResponder { view.becomeFirstResponder() }
-        if !focused, view.isFirstResponder { view.resignFirstResponder() }
+        InboxUIDiagnostic.record("iOS.QuickAddInput.focusUpdate.enter focused=\(focused) first=\(view.isFirstResponder) updating=\(context.coordinator.isUpdating)")
+        if focused, !view.isFirstResponder {
+            InboxUIDiagnostic.record("iOS.QuickAddInput.becomeFirstResponder.enter first=\(view.isFirstResponder)")
+            view.becomeFirstResponder()
+            InboxUIDiagnostic.record("iOS.QuickAddInput.becomeFirstResponder.exit first=\(view.isFirstResponder)")
+        }
+        if !focused, view.isFirstResponder {
+            InboxUIDiagnostic.record("iOS.QuickAddInput.resignFirstResponder.enter first=\(view.isFirstResponder)")
+            view.resignFirstResponder()
+            InboxUIDiagnostic.record("iOS.QuickAddInput.resignFirstResponder.exit first=\(view.isFirstResponder)")
+        }
+        InboxUIDiagnostic.record("iOS.QuickAddInput.focusUpdate.exit focused=\(focused) first=\(view.isFirstResponder) updating=\(context.coordinator.isUpdating)")
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: QuickAddTextView, context: Context) -> CGSize? {
@@ -722,8 +756,16 @@ private struct QuickAddInput: UIViewRepresentable {
             parent.composing = textView.markedTextRange != nil
             parent.selection = textView.selectedRange
         }
-        func textViewDidBeginEditing(_ textView: UITextView) { parent.focused = true }
-        func textViewDidEndEditing(_ textView: UITextView) { parent.focused = false }
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            InboxUIDiagnostic.record("iOS.QuickAddInput.didBeginEditing.enter focused=\(parent.focused) first=\(textView.isFirstResponder) updating=\(isUpdating)")
+            parent.focused = true
+            InboxUIDiagnostic.record("iOS.QuickAddInput.didBeginEditing.exit focused=\(parent.focused) first=\(textView.isFirstResponder) updating=\(isUpdating)")
+        }
+        func textViewDidEndEditing(_ textView: UITextView) {
+            InboxUIDiagnostic.record("iOS.QuickAddInput.didEndEditing.enter focused=\(parent.focused) first=\(textView.isFirstResponder) updating=\(isUpdating)")
+            parent.focused = false
+            InboxUIDiagnostic.record("iOS.QuickAddInput.didEndEditing.exit focused=\(parent.focused) first=\(textView.isFirstResponder) updating=\(isUpdating)")
+        }
 
         func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
             guard textView.markedTextRange == nil else { return true }

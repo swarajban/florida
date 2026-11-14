@@ -9,6 +9,7 @@ final class TaskGroupingTests: XCTestCase {
             app.launchArguments = [
                 "-demoData", "YES", "-uiAppearance", appearance, "-uiTaskGroupingDemo", "YES",
                 "-uiRecordSourceOpens", "YES",
+                "-uiTraceInbox", "YES",
                 "-demoNow", "2026-11-18T12:00:00Z",
             ]
             app.launch()
