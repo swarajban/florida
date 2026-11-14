@@ -13,9 +13,21 @@ struct FloridaApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
-                .environment(model)
-                .preferredColorScheme(FloridaStyle.captureColorScheme)
+            #if DEBUG
+            if LaunchOptions.demoData && UserDefaults.standard.bool(forKey: "uiShareCapture") {
+                ShareCaptureTestHost()
+            } else {
+                root
+            }
+            #else
+            root
+            #endif
         }
+    }
+
+    private var root: some View {
+        RootView()
+            .environment(model)
+            .preferredColorScheme(FloridaStyle.captureColorScheme)
     }
 }

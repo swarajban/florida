@@ -195,6 +195,33 @@ Uploads do not use PR test artifacts and retain
 `run_number * 10 + run_attempt` build numbering. A change under `apple/`, even a
 README or script, still triggers both releases on main.
 
+## Add to Florida from another app (iPhone)
+
+Share one link, plain text, or a link with its title, then choose **Add to Florida**.
+The sheet shows the input and the task preview together, its source link, category,
+and whether it **Goes to Inbox**. Host-supplied page titles are literal until you
+edit the field; editing enables the same Smart Add grammar and suggestions as quick
+add (`#work`, `^fri`, `^someday`, `=30m`, `// notes`). An unresolved category needs
+an explicit choice. Cancel writes nothing; Add saves once to the shared local store
+and closes without opening Florida or contacting the server. Florida pushes the
+queued write on its next normal sync. If asked, open Florida once to prepare the
+shared store. Images, files, and multiple shared items are not supported.
+
+The app, widget and share extension ship together with aligned build numbers and
+the same App Group. A simulator test host drives the actual share controller and
+sheet; only a TestFlight install on an iPhone can prove provisioning and real host
+sharing. Focused check:
+
+```sh
+gh workflow run ios.yml --ref <PR-branch> -f ui_only=true \
+  -f iphone_test_selector=Florida-iOSUITests/ShareCaptureTests
+```
+
+Signing can also be checked without uploading or reserving a release build number:
+`gh workflow run ios-upload.yml --ref <PR-branch> -f export_only=true`. This manual-only
+run uses build 1, automatic provisioning and a local signed export, verifies all three
+bundles' App Groups, and never uploads to TestFlight.
+
 ## Layout
 
 | Path | What it is |
@@ -207,9 +234,10 @@ README or script, still triggers both releases on main.
 | `macOS/` | macOS app target (`Florida-macOS`) |
 | `macOSUITests/` | Native keyboard smoke test and light/dark screenshots, using the iOS demo fixture |
 | `Widgets/` | iOS WidgetKit extension (`FloridaWidgets`) |
+| `Share/` | iPhone share extension (`FloridaShare`), with the shared capture builder |
 
 XcodeGen writes `Info.plist` and `.entitlements` files into `iOS/`, `macOS/`,
-and `Widgets/` on every generate; edit their contents in `project.yml`, not on
+`Widgets/` and `Share/` on every generate; edit their contents in `project.yml`, not on
 disk.
 
 ## Identifiers

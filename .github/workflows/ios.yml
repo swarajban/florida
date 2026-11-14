@@ -126,6 +126,20 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+      - name: Export share-sheet screenshots
+        if: success() && contains(inputs.iphone_test_selector, 'ShareCaptureTests')
+        run: |
+          for result in apple/build/results/*.xcresult; do
+            xcrun xcresulttool export attachments --path "$result" --output-path apple/build/share-screenshots
+          done
+      - name: Upload share-sheet screenshots
+        if: success() && contains(inputs.iphone_test_selector, 'ShareCaptureTests')
+        uses: actions/upload-artifact@v4
+        with:
+          name: share-screenshots
+          path: apple/build/share-screenshots
+          retention-days: 7
+
   build:
     name: iPhone UI suite
     if: inputs.ui_only != true
