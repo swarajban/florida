@@ -155,11 +155,18 @@ struct AllDayEventRow: View {
     let event: CalendarEvent
     let style: EventStyle
     let continuation: String?
+    let protectsDay: Bool
 
     var body: some View {
         HStack(spacing: 10) {
             EventBar(style: style)
                 .frame(height: 18)
+            if protectsDay {
+                Image(systemName: "shield.lefthalf.filled")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
             Text(AgendaItem.event(event).title)
             if let continuation {
                 Text(continuation)
@@ -176,7 +183,7 @@ struct AllDayEventRow: View {
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
-        .accessibilityValue("All day, \(style.accessibilityDescription)")
+        .accessibilityValue("All day, \(style.accessibilityDescription)\(protectsDay ? ", Protected. " + AllDayBlocking.explanation(for: event) : "")")
     }
 }
 

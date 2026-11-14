@@ -126,19 +126,21 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-      - name: Export share-sheet screenshots
-        if: success() && contains(inputs.iphone_test_selector, 'ShareCaptureTests')
+      - name: Export focused iPhone screenshots
+        if: always()
         run: |
           for result in apple/build/results/*.xcresult; do
-            xcrun xcresulttool export attachments --path "$result" --output-path apple/build/share-screenshots
+            [ -d "$result" ] || continue
+            xcrun xcresulttool export attachments --path "$result" --output-path apple/build/focused-screenshots
           done
-      - name: Upload share-sheet screenshots
-        if: success() && contains(inputs.iphone_test_selector, 'ShareCaptureTests')
+      - name: Upload focused iPhone screenshots
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: share-screenshots
-          path: apple/build/share-screenshots
+          name: iphone-focused-screenshots
+          path: apple/build/focused-screenshots
           retention-days: 7
+          if-no-files-found: ignore
 
   build:
     name: iPhone UI suite

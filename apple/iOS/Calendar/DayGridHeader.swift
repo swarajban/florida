@@ -5,6 +5,7 @@ import SwiftUI
 /// Only the three-day grid shows it: a single day is already named by the heading and the week
 /// strip above the grid.
 struct DayGridHeader: View {
+    @Environment(AppModel.self) private var model
     let days: [Date]
     let today: Date
     let gutterWidth: CGFloat
@@ -25,20 +26,23 @@ struct DayGridHeader: View {
                         Text(day.formatted(.dateTime.weekday(.abbreviated)))
                             .font(.caption2)
                             .foregroundStyle(isToday ? FloridaStyle.ink : Color.secondary)
-                        Text("\(calendar.component(.day, from: day))")
-                            .font(.body.weight(isToday ? .bold : .regular))
-                            .foregroundStyle(isToday ? FloridaStyle.paper : FloridaStyle.ink)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.5)
-                            .frame(width: 30, height: 30)
-                            .background {
-                                if isToday {
-                                    Circle().fill(FloridaStyle.ink)
+                        HStack(spacing: 0) {
+                            Text("\(calendar.component(.day, from: day))")
+                                .font(.body.weight(isToday ? .bold : .regular))
+                                .foregroundStyle(isToday ? FloridaStyle.paper : FloridaStyle.ink)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.5)
+                                .frame(width: 30, height: 30)
+                                .background {
+                                    if isToday {
+                                        Circle().fill(FloridaStyle.ink)
+                                    }
                                 }
+                            if !(blockingByDay[day] ?? []).isEmpty {
+                                AgendaDayStatus(day: day, events: blockingByDay[day] ?? [], compact: true, onSelect: onSelect)
+                                    .accessibilityIdentifier("agenda-day-kind-\(DayOverride.key(for: day, calendar: calendar))")
                             }
-                        DayBlockingIndicator(
-                            events: blockingByDay[day] ?? [], day: day, calendar: calendar,
-                            compact: true, onSelect: onSelect)
+                        }
                     }
                     .frame(width: columnWidth)
                     .padding(.vertical, 4)
@@ -58,10 +62,12 @@ struct DayGridHeader: View {
 /// All-day events as bars spanning their day columns, one row per `AllDayLayout` row. The
 /// parent leaves it out when the visible days have none.
 struct DayGridAllDayStrip: View {
+    @Environment(AppModel.self) private var model
     let layout: DayGridLayout
     let geometry: DayGridGeometry
     let now: Date
     let pinnedGutterX: CGFloat
+    let visibleDays: Set<Date>
     let onSelect: (CalendarEvent) -> Void
 
     @ScaledMetric(relativeTo: .caption) private var rowHeight: CGFloat = 22
@@ -71,7 +77,11 @@ struct DayGridAllDayStrip: View {
             ForEach(layout.allDayBlocks) { block in
                 let frame = frame(for: block)
                 if frame.width > 0 {
-                    AllDayBar(block: block, isPast: block.localEnd <= now)
+                    AllDayBar(
+                        block: block, isPast: block.localEnd <= now,
+                        protectsDay: model.gridDays.contains { agenda in
+                            visibleDays.contains(agenda.day) && agenda.blockingAllDayEvents.contains { $0.id == block.event.id }
+                        })
                         .frame(width: frame.width, height: frame.height)
                         .offset(x: frame.minX, y: frame.minY)
                         .onTapGesture {
@@ -105,11 +115,18 @@ private struct AllDayBar: View {
     let block: DayGridLayout.AllDayBlock
     /// The event's last local day has ended (its stored UTC start would dim it a day early).
     let isPast: Bool
+    let protectsDay: Bool
 
     var body: some View {
         let opacity: Double = isPast ? 0.6 : 1
         let shape = RoundedRectangle(cornerRadius: 4)
-        Text(block.title)
+        HStack(spacing: 4) {
+            if protectsDay {
+                Image(systemName: "shield.lefthalf.filled")
+                    .font(.caption2)
+            }
+            Text(block.title)
+        }
             .font(.caption)
             .lineLimit(1)
             .foregroundStyle(FloridaStyle.ink.opacity(opacity))
@@ -120,7 +137,8 @@ private struct AllDayBar: View {
             .contentShape(shape)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(block.title)
-            .accessibilityValue("All day")
+            .accessibilityValue(protectsDay ? "All day, Protected. \(AllDayBlocking.explanation(for: block.event))" : "All day")
+            .accessibilityIdentifier("all-day-event-\(block.event.id)")
             .accessibilityAddTraits(.isButton)
     }
 }
