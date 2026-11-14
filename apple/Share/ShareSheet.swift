@@ -19,7 +19,7 @@ struct ShareSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    TextField("Task", text: Binding(get: { model.text }, set: model.edit), selection: $selection, axis: .vertical)
+                    TextField("Task", text: Binding(get: { model.text }, set: { model.edit($0) }), selection: $selection, axis: .vertical)
                         .focused($focused)
                         .lineLimit(2...5)
                         .textFieldStyle(.roundedBorder)
