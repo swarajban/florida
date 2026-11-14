@@ -68,14 +68,23 @@ struct DayGridAllDayStrip: View {
     let now: Date
     let pinnedGutterX: CGFloat
     let visibleDays: Set<Date>
+    let compactsVisibleRows: Bool
     let onSelect: (CalendarEvent) -> Void
 
     @ScaledMetric(relativeTo: .caption) private var rowHeight: CGFloat = 22
 
+    private var visibleRows: [Int] {
+        guard compactsVisibleRows else { return Array(0..<layout.allDayRowCount) }
+        return Set(layout.allDayBlocks.filter { block in
+            layout.days[block.startDayIndex...block.endDayIndex].contains { visibleDays.contains($0) }
+        }.map(\.row)).sorted()
+    }
+
     var body: some View {
+        let rows = visibleRows
         ZStack(alignment: .topLeading) {
             ForEach(layout.allDayBlocks) { block in
-                let frame = frame(for: block)
+                let frame = frame(for: block, rows: rows)
                 if frame.width > 0 {
                     AllDayBar(
                         block: block, isPast: block.localEnd <= now,
@@ -89,24 +98,25 @@ struct DayGridAllDayStrip: View {
                         }
                 }
             }
-            Text("all-day")
+            Text(rows.isEmpty ? "" : "all-day")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .padding(.trailing, 8)
-                .frame(width: geometry.gutterWidth, height: CGFloat(layout.allDayRowCount) * rowHeight + 2, alignment: .topTrailing)
+                .frame(width: geometry.gutterWidth, height: CGFloat(rows.count) * rowHeight + 2, alignment: .topTrailing)
                 .background(FloridaStyle.paper)
                 .offset(x: pinnedGutterX)
         }
-        .frame(width: geometry.width, height: CGFloat(layout.allDayRowCount) * rowHeight + 2, alignment: .topLeading)
+        .frame(width: geometry.width, height: CGFloat(rows.count) * rowHeight + 2, alignment: .topLeading)
+        .clipped()
     }
 
     /// Where the bar sits in the strip; plain `let`s so the type checker does not have to fold
     /// the chain inside the `ForEach`.
-    private func frame(for block: DayGridLayout.AllDayBlock) -> CGRect {
+    private func frame(for block: DayGridLayout.AllDayBlock, rows: [Int]) -> CGRect {
         // A spanning event keeps its title visible when its starting day scrolls off screen.
         let x = max(geometry.x(forDay: block.startDayIndex), pinnedGutterX + geometry.gutterWidth) + 2
         let width = max(0, geometry.x(forDay: block.endDayIndex + 1) - x - 2)
-        let y: CGFloat = CGFloat(block.row) * rowHeight + 2
+        let y: CGFloat = CGFloat(rows.firstIndex(of: block.row) ?? block.row) * rowHeight + 2
         return CGRect(x: x, y: y, width: width, height: rowHeight - 4)
     }
 }

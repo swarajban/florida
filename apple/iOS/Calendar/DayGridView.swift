@@ -8,8 +8,8 @@ import UIKit
 /// the chrome with one small view per block on top. Frames come from `DayGridLayout`, rebuilt
 /// only when the data changes; points from `DayGridGeometry`. Tap a block to open it, tap empty
 /// grid to create there, hold a block for a moment and drag to move it (`BlockMoveGesture`); a
-/// horizontal swipe pages the single day; three-day mode scrolls continuously with native
-/// momentum. Plan blocks stay where the scheduler put them: no hold, no drag.
+/// horizontal scrolling tracks the finger and snaps by day in both grid modes.
+/// Plan blocks stay where the scheduler put them: no hold, no drag.
 struct DayGridView: View {
     let dayCount: Int
     let onSelectEvent: (CalendarEvent) -> Void
@@ -29,18 +29,10 @@ struct DayGridView: View {
     @State private var drag: BlockDrag?
     /// The suggestion whose block was tapped; its dialog offers to take it.
     @State private var takingSuggestion: OptionalPicks.Pick?
-    /// Set once a horizontal swipe is seen while a block is lifted, so that drag's finger does
-    /// not also turn the page when it ends.
-    @State private var swipeBlocked = false
     @State private var position = ScrollPosition(idType: Int.self, y: DayGridView.initialY)
     /// Height of the scrolling part; 0 until the first layout pass of the current day's grid.
     @State private var visibleHeight: CGFloat = 0
-    /// Carried across single-day pages; the three-day carousel keeps its scroll view alive.
-    /// Nil until the user or `scrollToStart` has scrolled once.
     @State private var scrollY: CGFloat?
-    /// The first day on screen; trails `model.selectedDay` by the slide, like `AgendaView`.
-    @State private var shownDay: Date?
-    @State private var slideDirection: CGFloat = 1
     @State private var carouselStart: Date?
     @State private var horizontalPosition = ScrollPosition(idType: Int.self)
     @State private var horizontalOffset: CGFloat = 0
@@ -66,65 +58,32 @@ struct DayGridView: View {
         TimeGrid(hourHeight: Double(hourHeight), slotMinutes: Self.slotMinutes)
     }
 
-    /// Three-day mode also loads its runway before a gesture, so scrolling never waits on I/O.
     private var days: [Date] {
-        if dayCount > 1 {
-            let start = carouselStart ?? DateNavigation.shift(model.selectedDay, by: -Self.carouselPadding, calendar: model.calendar)
-            return AppModel.gridDays(from: start, dayCount: dayCount + 2 * Self.carouselPadding, calendar: model.calendar)
-        }
-        return AppModel.gridDays(from: shownDay ?? model.selectedDay, dayCount: dayCount, calendar: model.calendar)
+        let start = carouselStart ?? DateNavigation.shift(model.selectedDay, by: -Self.carouselPadding, calendar: model.calendar)
+        return AppModel.gridDays(from: start, dayCount: dayCount + 2 * Self.carouselPadding, calendar: model.calendar)
     }
 
     var body: some View {
         GeometryReader { proxy in
             let geometry = DayGridGeometry(
                 width: proxy.size.width, gutterWidth: Self.gutterWidth, dayCount: dayCount, grid: grid)
-            Group {
-                if dayCount > 1 {
-                    carousel(geometry: geometry, height: proxy.size.height)
-                } else {
-                    ZStack {
-                        gridContent(geometry: geometry, days: days)
-                            .id(shownDay ?? model.selectedDay)
-                            .transition(slide(offset: 24))
-                    }
-                }
-            }
+            carousel(geometry: geometry, height: proxy.size.height)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
         }
         .background(FloridaStyle.paper)
         .onAppear {
-            if dayCount > 1 { carouselStart = days.first }
+            carouselStart = days.first
             observeDays()
         }
         .onDisappear {
             model.stopObservingGrid()
         }
-        .onChange(of: model.selectedDay) { old, new in
-            guard dayCount == 1 else { return }
-            slideDirection = new > old ? 1 : -1
-            model.setGridRange(start: new, dayCount: dayCount)
-            visibleHeight = 0
-            withAnimation(.snappy(duration: 0.2)) {
-                shownDay = new
-            }
-        }
         .onChange(of: model.todayRequests) { _, _ in
-            // Today was asked for (the wordmark, Today, a widget): land on now. Forget the carried
-            // offset so a grid recreated for a day change opens at now too; when the day did not
-            // change there is no new grid, so scroll the one on screen.
             scrollY = nil
-            guard dayCount > 1 || (shownDay ?? model.selectedDay) == model.selectedDay else { return }
             withAnimation(.snappy(duration: 0.3)) {
                 scrollToStart()
             }
-        }
-        .onChange(of: dayCount) { _, _ in
-            shownDay = model.selectedDay
-            carouselStart = nil
-            if dayCount > 1 { carouselStart = days.first }
-            observeDays()
         }
         .onChange(of: inputs, initial: true) { _, inputs in
             rebuildLayout(inputs)
@@ -132,7 +91,6 @@ struct DayGridView: View {
         .onChange(of: locale) { _, _ in
             hourLabels = HourLabels.make(calendar: model.calendar)
         }
-        .simultaneousGesture(swipe, isEnabled: dayCount == 1)
     }
 
     // MARK: - Content
@@ -148,7 +106,7 @@ struct DayGridView: View {
         .scrollIndicators(.hidden)
         .scrollPosition($horizontalPosition)
         .defaultScrollAnchor(.center)
-        .scrollTargetBehavior(DayColumnScrollTarget(columnWidth: geometry.columnWidth))
+        .scrollTargetBehavior(DayColumnScrollTarget(columnWidth: geometry.columnWidth, singleDay: dayCount == 1))
         .scrollDisabled(drag != nil)
         .onAppear {
             if let index = days.firstIndex(of: model.selectedDay), index <= days.count - dayCount {
@@ -174,6 +132,7 @@ struct DayGridView: View {
             }
         }
         .onChange(of: model.selectedDay) { _, day in
+            isPanningDays = false
             if let index = days.firstIndex(of: day), index <= days.count - dayCount {
                 let x = CGFloat(index) * geometry.columnWidth
                 guard abs(horizontalOffset - x) > 1 else { return }
@@ -186,6 +145,9 @@ struct DayGridView: View {
             if let index = days.firstIndex(of: model.selectedDay) {
                 horizontalPosition.scrollTo(x: CGFloat(index) * width)
             }
+        }
+        .onChange(of: dayCount) { _, _ in
+            recenter(on: model.selectedDay, columnWidth: geometry.columnWidth)
         }
     }
 
@@ -208,7 +170,7 @@ struct DayGridView: View {
         }
     }
 
-    private var pinnedGutterX: CGFloat { dayCount > 1 ? horizontalOffset : 0 }
+    private var pinnedGutterX: CGFloat { horizontalOffset }
 
     @ViewBuilder
     private func gridContent(geometry: DayGridGeometry, days: [Date]) -> some View {
@@ -226,13 +188,12 @@ struct DayGridView: View {
                     Divider()
                 }
                 if layout.allDayRowCount > 0 {
-                    let firstVisible = dayCount == 1 ? 0
-                        : min(days.count, max(0, Int(((horizontalOffset + 0.5) / geometry.columnWidth).rounded(.down))))
-                    let lastVisible = dayCount == 1 ? days.count
-                        : min(days.count, max(firstVisible, Int(((horizontalOffset - 0.5) / geometry.columnWidth).rounded(.up)) + dayCount))
+                    let firstVisible = min(days.count, max(0, Int(((horizontalOffset + 0.5) / geometry.columnWidth).rounded(.down))))
+                    let lastVisible = min(days.count, max(firstVisible, Int(((horizontalOffset - 0.5) / geometry.columnWidth).rounded(.up)) + dayCount))
                     DayGridAllDayStrip(
                         layout: layout, geometry: geometry, now: now,
-                        pinnedGutterX: pinnedGutterX, visibleDays: Set(days[firstVisible..<lastVisible]), onSelect: onSelectEvent)
+                        pinnedGutterX: pinnedGutterX, visibleDays: Set(days[firstVisible..<lastVisible]),
+                        compactsVisibleRows: dayCount == 1, onSelect: onSelectEvent)
                     Divider()
                 }
                 ScrollView(.vertical) {
@@ -325,7 +286,6 @@ struct DayGridView: View {
             }
         }
         .frame(width: geometry.width, height: geometry.dayHeight, alignment: .topLeading)
-        .animation(dayCount == 1 ? .snappy(duration: 0.25) : nil, value: layout.blocks)
     }
 
     /// What the layout is built from. Compared on every body evaluation (a few dozen small
@@ -393,36 +353,6 @@ struct DayGridView: View {
         let y = CGFloat(grid.y(forMinute: minute)) - visibleHeight * 0.3
         let clamped = min(max(0, y), max(0, CGFloat(grid.dayHeight) - visibleHeight))
         position.scrollTo(y: clamped)
-    }
-
-    // MARK: - Day change
-
-    /// Single-day pages slide and fade; three-day mode instead moves its persistent blocks.
-    private func slide(offset: CGFloat) -> AnyTransition {
-        .asymmetric(
-            insertion: .offset(x: offset * slideDirection).combined(with: .opacity),
-            removal: .offset(x: -offset * slideDirection).combined(with: .opacity))
-    }
-
-    /// Clear horizontal intent (the rule `AgendaView`'s list uses) moves one day, whatever the
-    /// page shows. Runs alongside the scroll view's pan and the blocks' gestures; a swipe seen
-    /// while a block is lifted belongs to that drag and is ignored when it ends.
-    private var swipe: some Gesture {
-        DragGesture(minimumDistance: 30)
-            .onChanged { _ in
-                if drag != nil, !swipeBlocked {
-                    swipeBlocked = true
-                }
-            }
-            .onEnded { value in
-                let blocked = swipeBlocked
-                swipeBlocked = false
-                guard !blocked, drag == nil else { return }
-                let dx = value.translation.width
-                let dy = value.translation.height
-                guard abs(dx) > 60, abs(dx) > abs(dy) * 1.5 else { return }
-                model.shiftDay(by: dx < 0 ? 1 : -1)
-            }
     }
 
     // MARK: - Taps
@@ -503,17 +433,21 @@ struct DayGridView: View {
         withAnimation(.snappy(duration: 0.2)) {
             drag = nil
         }
-        swipeBlocked = false
     }
 }
 
 /// Keep full day columns at rest without limiting how many days one gesture can travel.
 private struct DayColumnScrollTarget: ScrollTargetBehavior {
     let columnWidth: CGFloat
+    let singleDay: Bool
 
     func updateTarget(_ target: inout ScrollTarget, context: TargetContext) {
         guard columnWidth > 0 else { return }
-        let x = (target.rect.minX / columnWidth).rounded() * columnWidth
+        var x = (target.rect.minX / columnWidth).rounded() * columnWidth
+        if singleDay {
+            let start = (context.originalTarget.rect.minX / columnWidth).rounded() * columnWidth
+            x = min(max(x, start - columnWidth), start + columnWidth)
+        }
         target.rect.origin.x = min(max(0, x), max(0, context.contentSize.width - context.containerSize.width))
     }
 }
