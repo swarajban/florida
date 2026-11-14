@@ -213,7 +213,6 @@ struct AgendaView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 4)
-        .accessibilityIdentifier("agenda-header")
     }
 
     private var datePickerButton: some View {
