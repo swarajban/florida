@@ -76,18 +76,18 @@ struct WidgetTask: Hashable, Sendable, Identifiable {
     var priority: Priority
     var deadlineType: DeadlineType
     var dueAt: Date?
-    /// The scheduler's last block for the task ends after its due date.
     var late: Bool
     var colorHex: String?
 
-    init(task: TaskItem, placements: [Placement], category: TaskCategory?) {
+    init(task: TaskItem, placements: [Placement], category: TaskCategory?, at date: Date = Date()) {
         id = task.id
         title = task.title
         priority = task.priority
         deadlineType = task.deadlineType
         dueAt = task.dueAt
-        if let dueAt = task.dueAt, let last = placements.max(by: { $0.endAt < $1.endAt }) {
-            late = last.endAt > dueAt
+        if task.isOpen, task.deadlineType != .none, let dueAt = task.dueAt {
+            let timing = TaskTiming(task: task, placements: placements, now: date)
+            late = timing.isOverdue || timing.lateEnd != nil || dueAt == date
         } else {
             late = false
         }

@@ -10,6 +10,7 @@ struct TasksEntry: TimelineEntry {
     let tasks: [WidgetTask]
     /// False when the shared store could not be opened or read.
     let available: Bool
+    var calendar = Calendar.autoupdatingCurrent
 
     static func placeholder(at date: Date) -> TasksEntry {
         let samples: [(String, Priority)] = [("Reply to Jane", .asap), ("Draft Q4 plan", .high), ("Book flights", .medium)]
@@ -42,14 +43,24 @@ struct TasksProvider: TimelineProvider {
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<TasksEntry>) -> Void) {
         let now = Date()
-        completion(Timeline(entries: [Self.entry(at: now)], policy: .after(now.addingTimeInterval(30 * 60))))
+        let loaded = WidgetStore.taskTimeline()
+        let dates = loaded?.dates(at: now) ?? [now]
+        completion(Timeline(
+            entries: dates.map { Self.entry(at: $0, from: loaded) },
+            policy: .after(WidgetTaskTimeline.reloadDate(at: now, from: loaded))))
     }
 
     static func entry(at date: Date) -> TasksEntry {
-        guard let loaded = WidgetStore.openTasks(limit: rowLimit, at: date) else {
+        entry(at: date, from: WidgetStore.taskTimeline())
+    }
+
+    static func entry(at date: Date, from loaded: WidgetTaskTimeline?) -> TasksEntry {
+        guard let loaded else {
             return TasksEntry(date: date, openCount: 0, tasks: [], available: false)
         }
-        return TasksEntry(date: date, openCount: loaded.count, tasks: loaded.tasks, available: true)
+        return TasksEntry(
+            date: date, openCount: loaded.tasks.count, tasks: loaded.rows(limit: rowLimit, at: date),
+            available: true, calendar: loaded.calendar)
     }
 }
 
@@ -81,7 +92,7 @@ struct TasksWidgetView: View {
                 WidgetPlaceholder(available: entry.available, emptyText: "No open tasks")
             } else {
                 ForEach(entry.tasks.prefix(rowLimit)) { task in
-                    TasksWidgetRow(task: task, now: entry.date, showsDue: family != .systemSmall)
+                    TasksWidgetRow(task: task, now: entry.date, showsDue: family != .systemSmall, calendar: entry.calendar)
                 }
                 Spacer(minLength: 0)
             }
@@ -89,6 +100,7 @@ struct TasksWidgetView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .widgetURL(WidgetLinks.tasks)
         .containerBackground(.fill.tertiary, for: .widget)
+        .privacySensitive()
     }
 
     private var header: some View {
@@ -110,6 +122,7 @@ struct TasksWidgetRow: View {
     let task: WidgetTask
     let now: Date
     let showsDue: Bool
+    let calendar: Calendar
 
     var body: some View {
         HStack(spacing: 6) {
@@ -122,7 +135,7 @@ struct TasksWidgetRow: View {
                 .foregroundStyle(task.late ? Color.red : Color.primary)
             Spacer(minLength: 4)
             if showsDue, let dueAt = task.dueAt {
-                Text(WidgetFormatting.dayLabel(dueAt, now: now, calendar: WidgetStore.calendar))
+                Text(WidgetFormatting.dayLabel(dueAt, now: now, calendar: calendar))
                     .font(.caption2)
                     .foregroundStyle(task.late ? Color.red : Color.secondary)
             }

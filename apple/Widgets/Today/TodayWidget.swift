@@ -99,6 +99,7 @@ struct TodayWidgetView: View {
         TodayAgendaView(entry: entry, compact: family == .systemSmall)
             .widgetURL(WidgetLinks.agenda)
             .containerBackground(.fill.tertiary, for: .widget)
+            .privacySensitive()
     }
 }
 

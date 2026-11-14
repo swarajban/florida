@@ -22,6 +22,7 @@ let package = Package(
             dependencies: [
                 .product(name: "FloridaCore", package: "FloridaCore"),
                 .product(name: "GRDB", package: "GRDB.swift"),
+                .product(name: "GRDBSQLite", package: "GRDB.swift"),
             ]
         ),
         .testTarget(

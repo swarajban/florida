@@ -762,3 +762,64 @@ and the widgets import. It depends on `FloridaCore` (re-exported, so one
 in the App Group container, plus the sync client that talks to the server.
 
 Both packages test with `swift test` from their directory (or via Xcode).
+
+The platform-free widget loader, task timeline and date formatting also run on
+Linux: `swift build --build-tests && swift test` from `apple/`. The native widget
+tests compile the same sources. Privacy declaration tests inspect the widget
+roots; they do not prove locked-device redaction.
+
+### Shared-store extension contract
+
+Only the host app uses `AppDatabase(path:)`, which creates and migrates the
+store. Extensions use `AppDatabase.sharedURL()` and
+`AppDatabase.openExisting(path:access:requireSync:)`; they must never fall back
+to `defaultURL()` or use the migrating initializer. A missing database or any
+missing/unknown migration fails without creating, migrating or erasing data.
+An incompatible schema means “Open Florida first,” not a network retry. Opening
+can also fail while the device is locked or a writer holds the SQLite lock.
+Retry a later request; failures are not cached.
+
+The default access is `.readOnly`, with a required non-nil sync cursor. Widgets
+use that mode, so a schema without its first successful sync is unavailable,
+not an empty agenda. The share extension can use `.readWrite` and
+`requireSync: false` to capture offline into an already initialized schema even
+before its first server sync. Keep that connection only for the capture. A
+capture calls `saveTask(draft, original: nil)`, which returns a `TaskMutation`
+and writes the task and pending write atomically. Use a fresh task ID and retain
+the returned `after` row rather than assuming the draft's destination survived
+validation. Existing-task editing passes its editor-open `original` snapshot;
+the extension must not use the legacy snapshot-only overload for edits, split
+the row/outbox writes, or send a network request. Concurrent writers
+serialize through SQLite with a five-second writer busy timeout. GRDB's pool
+readers retain their own ten-second busy timeout. Surface a bounded busy error
+as retryable; do not spin, silently discard the capture, or run migrations.
+Writers enable SQLite's persistent-WAL flag so the WAL/SHM files remain
+available to read-only extensions even after the host closes its connection.
+
+Every on-disk `AppDatabase` writer posts a path-specific Darwin notification
+after a real row-changing commit. Other open writers compare SQLite's
+`data_version` and asynchronously invalidate GRDB observations locally. A
+rollback or synthetic invalidation is not rebroadcast. Both host apps also
+call `refreshExternalChanges()` when active to recover missed/coalesced
+notifications. Neither path waits on sync. Linux uses an in-process signal
+for notification tests; a separate-process test covers the active-refresh
+fallback. Darwin delivery still needs native verification.
+
+The extension must call `WidgetCenter.shared.reloadAllTimelines()` after its
+successful save, then finish the extension request. Widgets reopen a fresh
+read-only connection for each load; Darwin notification delivery alone does
+not ask WidgetKit to reload. WidgetKit decides when requested reloads run, so
+an immediate on-screen refresh is not guaranteed. The host pushes the outbox
+on its next normal sync; notifications do not authorize or require the
+extension to use credentials.
+
+On iOS, the host applies
+`FileProtectionType.completeUntilFirstUserAuthentication` to the database
+directory, database and existing WAL/SHM files. New sidecars inherit the
+directory policy. This is the file-protection policy, not a Keychain
+“ThisDeviceOnly” policy: it permits access after the first unlock following
+boot, including later locks, but does not promise access before that unlock.
+Test the installed App Group/signing and lock-screen behavior on a physical
+device. The task widget precomputes local-midnight and deadline entries in the
+settings time zone, including overdue tasks with no placement; every widget
+root marks its personal content privacy-sensitive.

@@ -1,31 +1,15 @@
 import FloridaKit
 import Foundation
 
-/// Read-only access to the shared store for the timeline providers. The database is opened once
-/// per extension process; every loader returns nil when it cannot be opened or read, and the
-/// views show a placeholder for nil (with `unavailableReason` so a blank widget can be diagnosed
-/// from the Home Screen).
 enum WidgetStore {
-    /// The extension has no App Group container (entitlement missing or a different group id):
-    /// `AppDatabase.defaultURL()` would open an empty private store and the widget would look
-    /// merely empty, so refuse instead and say why.
-    private struct NoAppGroupContainer: LocalizedError {
-        var errorDescription: String? { "No shared App Group container" }
-    }
-
-    private static let opened: Result<AppDatabase, any Error> = Result {
-        guard let url = AppDatabase.sharedURL() else { throw NoAppGroupContainer() }
-        return try AppDatabase(path: url.path(percentEncoded: false))
-    }
-    static var database: AppDatabase? { try? opened.get() }
+    private static let reader = WidgetDatabaseReader(url: AppDatabase.sharedURL())
+    static var database: AppDatabase? { try? reader.open() }
     static let calendar = Calendar.autoupdatingCurrent
 
     /// Why the store cannot be read, in a few words; nil when it opened.
     static var unavailableReason: String? {
-        if case .failure(let error) = opened {
-            return error.localizedDescription
-        }
-        return nil
+        do { _ = try reader.open(); return nil }
+        catch { return error.localizedDescription }
     }
 
     /// Timed events and task blocks overlapping `range`, by start. All-day events are left out
@@ -60,23 +44,24 @@ enum WidgetStore {
         }
     }
 
-    static func openTasks(limit: Int, at date: Date) -> (count: Int, tasks: [WidgetTask])? {
+    static func openTasks(
+        limit: Int, at date: Date, from database: AppDatabase? = WidgetStore.database
+    ) -> (count: Int, tasks: [WidgetTask])? {
+        guard let loaded = taskTimeline(from: database) else { return nil }
+        return (loaded.tasks.count, loaded.rows(limit: limit, at: date))
+    }
+
+    static func taskTimeline(from database: AppDatabase? = WidgetStore.database) -> WidgetTaskTimeline? {
         guard let database else { return nil }
         do {
             let categories = try database.categories()
-            let categoriesById = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
             let tasks = try database.openTasks()
             var calendar = Self.calendar
             if let identifier = try database.userSettings()?.timeZone, let timeZone = TimeZone(identifier: identifier) {
                 calendar.timeZone = timeZone
             }
-            let ordered = TaskListGrouping.dueDate.sections(
-                tasks: tasks, categories: categories, now: date, calendar: calendar).flatMap(\.tasks)
             let placements = try database.placementsByTask()
-            let rows = ordered.prefix(limit).map { task in
-                WidgetTask(task: task, placements: placements[task.id] ?? [], category: categoriesById[task.categoryId])
-            }
-            return (tasks.count, rows)
+            return WidgetTaskTimeline(tasks: tasks, categories: categories, placements: placements, calendar: calendar)
         } catch {
             return nil
         }
