@@ -22,6 +22,10 @@ on:
         description: Optional space-separated Mac test bundles, classes or methods for one focused UI-only job
         type: string
         default: ''
+      iphone_test_selector:
+        description: Optional space-separated iPhone test bundles, classes or methods for one focused UI-only job
+        type: string
+        default: ''
 
 concurrency:
   group: ${{ inputs.ui_only && format('apple-ui-{0}', github.ref) || format('ios-run-{0}', github.run_id) }}
@@ -34,7 +38,7 @@ jobs:
 
   ui:
     name: On-demand Apple UI
-    if: github.event_name == 'workflow_dispatch' && inputs.ui_only && inputs.mac_test_selector == ''
+    if: github.event_name == 'workflow_dispatch' && inputs.ui_only && inputs.mac_test_selector == '' && inputs.iphone_test_selector == ''
     uses: ./.github/workflows/apple-checks.yml
     with:
       run_ui: true
@@ -44,6 +48,9 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.ui_only && inputs.mac_test_selector != ''
     runs-on: macos-26
     timeout-minutes: 45
+    env:
+      RETRY_FAILED_TESTS: '0'
+      HOMEBREW_NO_AUTO_UPDATE: '1'
     steps:
       - uses: actions/checkout@v5
       - name: Validate test selector
@@ -69,6 +76,50 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ui-macos-focused
+          path: |
+            apple/build/results/
+            apple/ui-test.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+  iphone_focused:
+    name: Focused iPhone tests
+    if: github.event_name == 'workflow_dispatch' && inputs.ui_only && inputs.iphone_test_selector != ''
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      RETRY_FAILED_TESTS: '0'
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+      - name: Validate test selector
+        env:
+          IPHONE_TEST_SELECTOR: ${{ inputs.iphone_test_selector }}
+        run: |
+          [[ "$IPHONE_TEST_SELECTOR" != *$'\n'* && "$IPHONE_TEST_SELECTOR" != *$'\r'* ]] || exit 2
+          read -r -a selectors <<< "$IPHONE_TEST_SELECTOR"
+          (( ${#selectors[@]} > 0 )) || exit 2
+          for selector in "${selectors[@]}"; do
+            [[ "$selector" =~ ^Florida-iOSUITests(/[A-Za-z_][A-Za-z0-9_]*){0,2}$ ]] || exit 2
+          done
+      - run: brew install xcodegen
+        timeout-minutes: 2
+      - name: Build and run selected iPhone tests
+        timeout-minutes: 55
+        env:
+          IPHONE_TEST_SELECTOR: ${{ inputs.iphone_test_selector }}
+        run: |
+          set -o pipefail
+          read -r -a selectors <<< "$IPHONE_TEST_SELECTOR"
+          bash apple/scripts/check.sh ios "${selectors[@]/#/-only-testing:}" 2>&1 | tee apple/ui-test.log
+      - name: Upload focused results and log
+        if: always()
+        timeout-minutes: 2
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-iphone-focused
           path: |
             apple/build/results/
             apple/ui-test.log

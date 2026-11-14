@@ -488,6 +488,41 @@ import Testing
         }
     }
 
+    @Test(arguments: [ProjectStatus.active, .onHold, .done])
+    func explicitPinAndFinalSomedayRespectProjectState(_ status: ProjectStatus) throws {
+        let db = try AppDatabase.inMemory()
+        var project = Project(id: "project", name: "Project", createdAt: Fixtures.t0, updatedAt: Fixtures.t0)
+        project.status = status
+        var original = Fixtures.task(id: "project-task", categoryId: "work")
+        original.projectId = project.id
+        original.someday = true
+        original.startAt = Fixtures.t0
+        original.source = TaskSource.from(url: "https://example.com/project-task")
+        try db.apply(SyncResponse(cursor: "initial", tasks: [original], projects: [project]))
+        var pinned = original
+        pinned.someday = false
+        pinned.pinnedStart = Fixtures.t0.addingTimeInterval(600)
+        let mutation = try db.saveTask(pinned, original: original, somedayIntent: false, dateEdits: [.pin])
+        #expect(!mutation.after.someday)
+        #expect(mutation.after.startAt == original.startAt && mutation.after.source == original.source)
+        #expect(try db.placements(in: Fixtures.allTime).count == (status == .active ? 1 : 0))
+        #expect(try body(#require(try db.pendingWrites().first))["someday"] as? Bool == false)
+        var deferred = mutation.after
+        deferred.someday = true
+        let final = try db.saveTask(deferred, original: mutation.after, somedayIntent: true)
+        #expect(final.after.someday && final.after.pinnedStart == nil && final.after.dueAt == nil)
+        #expect(final.after.startAt == original.startAt && final.after.source == original.source)
+        let stale = Placement(id: "stale", taskId: original.id, startAt: Fixtures.t0,
+                              endAt: Fixtures.t0.addingTimeInterval(3600), pinned: true, computedAt: Fixtures.t0)
+        let optional = OptionalPlacement(id: "optional", taskId: original.id, blockId: "evening",
+                                         startAt: stale.startAt, endAt: stale.endAt, computedAt: Fixtures.t0)
+        let unscheduled = UnscheduledTask(taskId: original.id, reason: "no_capacity", unplacedMinutes: 30, computedAt: Fixtures.t0)
+        try db.apply(SyncResponse(cursor: "stale", placements: [stale], optionalPlacements: [optional], unscheduled: [unscheduled]))
+        #expect(try db.placements(in: Fixtures.allTime).isEmpty)
+        #expect(try db.optionalPlacements().isEmpty && db.unscheduled().isEmpty)
+        #expect(try body(#require(try db.pendingWrites().first))["someday"] as? Bool == true)
+    }
+
     @Test func optimisticSomedayRemovesLocalBlocksAndFiltersStaleSchedulerOutput() async throws {
         let db = try AppDatabase.inMemory()
         var task = Fixtures.task(id: "paused", categoryId: "work", dueAt: Fixtures.t0)

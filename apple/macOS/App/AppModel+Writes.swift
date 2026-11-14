@@ -145,7 +145,9 @@ extension AppModel {
         let original = task
         task = TaskDay.pushedToTomorrow(task, now: Date(), calendar: taskListCalendar)
         task.someday = false
-        if save(task, original: original, somedayIntent: false, dateEdits: [.start, .pin], undoLabel: "Pushed \(Self.quoted(task.title)) to tomorrow"), let start = task.startAt {
+        var dateEdits: Set<TaskDateField> = [.start, .pin]
+        if task.dueAt != original.dueAt { dateEdits.insert(.due) }
+        if save(task, original: original, somedayIntent: false, dateEdits: dateEdits, undoLabel: "Pushed \(Self.quoted(task.title)) to tomorrow"), let start = task.startAt {
             var style = Date.FormatStyle.dateTime.weekday(.abbreviated).month(.abbreviated).day()
             style.calendar = taskListCalendar
             style.timeZone = taskListCalendar.timeZone

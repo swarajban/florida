@@ -42,6 +42,7 @@ extension AppModel {
             return
         }
         select(item)
+        if focus == .tasks { taskPaneScrollRequest += 1 }
     }
 
     /// After new placements: slides task blocks from their old slots and says how many moved.

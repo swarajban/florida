@@ -45,7 +45,7 @@ writes = source('apple/macOS/App/AppModel+Writes.swift')
 selection = source('apple/macOS/App/AppModel+Selection.swift')
 types = undo[undo.index('struct UndoEntry'):undo.index('/// A short-lived label')]
 methods = '\n'.join(method(undo, name) for name in ['recordingUndo', 'pushUndo', 'undo'])
-methods += '\n' + '\n'.join(method(writes, name) for name in ['save', 'pinSelection', 'setPriority', 'deleteTask', 'complete'])
+methods += '\n' + '\n'.join(method(writes, name) for name in ['save', 'pinSelection', 'snoozeSelection', 'setPriority', 'deleteTask', 'complete'])
 methods += '\n' + method(source('apple/macOS/App/AppModel+Events.swift'), 'save')
 methods += '\n' + method(source('apple/macOS/App/AppModel+Events.swift'), 'move')
 methods += '\n' + method(source('apple/macOS/App/AppModel+Events.swift'), 'moveSeries')
@@ -826,6 +826,40 @@ check(projectModel.database!.projectDraft?.name == "Original project"
       "iPhone new project caller still normalizes text and weekly minutes")
 exit(failed == 0 ? 0 : 1)
 '''
+
+push_concurrency_tests = r'''
+for policy in [DeadlineType.soft, .hard] {
+    for movesDue in [false, true] {
+        let model = AppModel()
+        var original = task()
+        original.dueAt = Date().addingTimeInterval(movesDue ? -86_400 : 604_800)
+        original.deadlineType = policy
+        model.database!.tasks[original.id] = original
+        __SELECT__
+        var deferred = original
+        deferred.someday = true
+        deferred.dueAt = nil
+        deferred.deadlineType = .none
+        deferred.notes = "Concurrent Someday notes"
+        model.database!.beforeSave = { model.database!.tasks[original.id] = deferred }
+        __PUSH__
+        let saved = model.database!.tasks[original.id]!
+        check(!saved.someday && saved.startAt != nil && saved.notes == deferred.notes,
+              "__PLATFORM__ tomorrow wins over concurrent Someday without clobbering notes")
+        check(movesDue ? (saved.dueAt != nil && saved.deadlineType == policy)
+                       : (saved.dueAt == nil && saved.deadlineType == .none),
+              "__PLATFORM__ tomorrow moves due with its policy only when it adjusts that date")
+    }
+}
+'''
+tests = tests.replace('exit(failed == 0 ? 0 : 1)',
+                      push_concurrency_tests.replace('__SELECT__', 'model.selectedTask = original')
+                      .replace('__PUSH__', 'model.snoozeSelection()').replace('__PLATFORM__', 'Mac')
+                      + 'exit(failed == 0 ? 0 : 1)')
+ios_tests = ios_tests.replace('exit(failed == 0 ? 0 : 1)',
+                              push_concurrency_tests.replace('__SELECT__', '')
+                              .replace('__PUSH__', 'model.pushToTomorrow(original)').replace('__PLATFORM__', 'iPhone')
+                              + 'exit(failed == 0 ? 0 : 1)')
 
 swiftc = shutil.which('swiftc') or str(Path.home() / '.local/share/swiftly/bin/swiftc')
 with tempfile.TemporaryDirectory(prefix='florida-app-writes-') as directory:

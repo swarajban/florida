@@ -351,6 +351,11 @@ struct TaskEditorView: View {
                     draft.deadlineType = .none
                     dueTimeChoice = nil
                 }
+                #if DEBUG
+                if UserDefaults.standard.bool(forKey: "demoData"), UserDefaults.standard.bool(forKey: "uiTraceSomedayTouch") {
+                    print("SOMEDAY_TOUCH_BINDING requested=\(on) value=\(draft.someday)")
+                }
+                #endif
             })
     }
 

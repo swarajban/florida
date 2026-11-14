@@ -266,7 +266,7 @@ final class InboxTriageTests: XCTestCase {
     @MainActor
     func testActualDateActionsLeaveSomeday() {
         continueAfterFailure = false
-        let app = launch("light")
+        let app = launch("light", traceSomedayTouch: true)
         defer { app.terminate() }
         add("Date action review #home someday", in: app)
         let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tasks-row-' AND label BEGINSWITH %@", "Date action review")).element
@@ -277,10 +277,10 @@ final class InboxTriageTests: XCTestCase {
         XCTAssertEqual(someday.value as? String, "1")
         app.buttons["task-start-add"].tap()
         XCTAssertEqual(someday.value as? String, "0")
-        setTaskEditorSwitch("task-someday", on: true, in: app)
+        setTaskEditorSwitch("task-someday", on: true, in: app, touches: [.nativeTap, .knobTap, .drag])
         app.buttons["task-due-add"].tap()
         XCTAssertEqual(someday.value as? String, "0")
-        setTaskEditorSwitch("task-someday", on: true, in: app)
+        setTaskEditorSwitch("task-someday", on: true, in: app, touches: [.nativeTap, .knobTap, .drag])
         setTaskEditorSwitch("task-pin", on: true, in: app)
         revealTaskEditorControl(app.switches["task-someday"], in: app, upwards: true)
         XCTAssertEqual(someday.value as? String, "0")
@@ -332,9 +332,10 @@ final class InboxTriageTests: XCTestCase {
     }
 
     @MainActor
-    private func launch(_ appearance: String) -> XCUIApplication {
+    private func launch(_ appearance: String, traceSomedayTouch: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-demoData", "YES", "-uiTab", "tasks", "-uiAppearance", appearance]
+        if traceSomedayTouch { app.launchArguments += ["-uiTraceSomedayTouch", "YES"] }
         app.launch()
         let options = app.buttons["tasks-view-options"]
         XCTAssertTrue(options.waitForExistence(timeout: 15))

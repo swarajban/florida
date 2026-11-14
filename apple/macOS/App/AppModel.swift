@@ -165,6 +165,7 @@ final class AppModel {
     var completingTaskIds: Set<String> = []
     /// Bumped to ask the time grid to scroll; the grid owns its scroll position.
     var gridScrollRequest: GridScrollRequest?
+    var taskPaneScrollRequest = 0
     var isNewCategoryOpen = false
     /// The projects overlay (`g p`).
     var isProjectsOpen = false

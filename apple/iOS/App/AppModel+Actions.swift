@@ -79,8 +79,10 @@ extension AppModel {
         let previous = storedVersion(of: task)
         var updated = TaskDay.pushedToTomorrow(previous, now: now, calendar: taskListCalendar)
         updated.someday = false
+        var dateEdits: Set<TaskDateField> = [.start, .pin]
+        if updated.dueAt != previous.dueAt { dateEdits.insert(.due) }
         var mutation: AppDatabase.TaskMutation?
-        guard write({ mutation = try $0.saveTask(updated, original: previous, somedayIntent: false, dateEdits: [.start, .pin]) }),
+        guard write({ mutation = try $0.saveTask(updated, original: previous, somedayIntent: false, dateEdits: dateEdits) }),
               let mutation, let before = mutation.before else { return }
         refreshTaskDateState(mutation.after)
         var style = Date.FormatStyle.dateTime.weekday(.abbreviated).month(.abbreviated).day()

@@ -1,17 +1,48 @@
 import XCTest
 
 extension XCTestCase {
+    enum TaskEditorSwitchTouch: String {
+        case nativeTap
+        case knobTap
+        case drag
+    }
+
     @MainActor
     func setTaskEditorSwitch(
         _ identifier: String, on: Bool, in app: XCUIApplication, upwards: Bool = false,
+        touches: [TaskEditorSwitchTouch] = [.nativeTap],
         file: StaticString = #filePath, line: UInt = #line
     ) {
         let control = revealTaskEditorControl(app.switches[identifier], in: app, upwards: upwards, file: file, line: line)
         XCTAssertEqual(control.value as? String, on ? "0" : "1", file: file, line: line)
-        control.tap()
-        let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", on ? "1" : "0"), object: control)
-        XCTAssertEqual(XCTWaiter.wait(for: [changed], timeout: 5), .completed,
+        var result: XCTWaiter.Result = .timedOut
+        for touch in touches {
+            if control.value as? String == (on ? "1" : "0") {
+                result = .completed
+                break
+            }
+            XCTAssertEqual(control.value as? String, on ? "0" : "1", file: file, line: line)
+            XCTContext.runActivity(named: "\(identifier) off/on check using \(touch.rawValue)") { activity in
+                switch touch {
+                case .nativeTap:
+                    control.tap()
+                case .knobTap:
+                    control.coordinate(withNormalizedOffset: CGVector(dx: on ? 0.2 : 0.8, dy: 0.5)).tap()
+                case .drag:
+                    control.coordinate(withNormalizedOffset: CGVector(dx: on ? 0.2 : 0.8, dy: 0.5))
+                        .press(forDuration: 0.05, thenDragTo: control.coordinate(withNormalizedOffset: CGVector(dx: on ? 0.8 : 0.2, dy: 0.5)))
+                }
+                let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", on ? "1" : "0"), object: control)
+                result = XCTWaiter.wait(for: [changed], timeout: 5)
+                let evidence = XCTAttachment(string: "Touch: \(touch.rawValue), requested: \(on), result: \(result.rawValue)\n\(control.debugDescription)")
+                evidence.lifetime = .keepAlways
+                activity.add(evidence)
+            }
+            if result == .completed { break }
+        }
+        XCTAssertEqual(result, .completed,
                        "The editor switch must change to \(on ? "on" : "off")", file: file, line: line)
+        XCTAssertEqual(control.value as? String, on ? "1" : "0", file: file, line: line)
     }
 
     @MainActor

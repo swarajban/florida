@@ -65,7 +65,7 @@ final class TaskGroupingTests: XCTestCase {
     }
 
     @MainActor
-    func testInboxTriageUndoAndFinalSomedayIntentPreserveSource() {
+    func testInboxTriageUndoAndFinalSomedayIntentPreserveSource() throws {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {
             let app = launch(appearance: appearance)
@@ -101,7 +101,9 @@ final class TaskGroupingTests: XCTestCase {
             XCTAssertTrue(someday.waitForExistence(timeout: 5))
             XCTAssertEqual(app.textFields["task-source-url"].value as? String, "https://example.com/inbox")
             app.buttons["task-start-add"].tap()
-            let start = app.datePickers["task-start-date"].value as? String
+            let startControl = app.datePickers["task-start-date"].buttons.firstMatch
+            XCTAssertTrue(startControl.waitForExistence(timeout: 5))
+            let start = try XCTUnwrap(startControl.value as? String)
             setTaskEditorSwitch("task-someday", on: true, in: app)
             XCTAssertEqual(someday.value as? String, "1")
             setTaskEditorSwitch("task-someday", on: false, in: app)
@@ -119,14 +121,16 @@ final class TaskGroupingTests: XCTestCase {
             row.tap()
             XCTAssertTrue(someday.waitForExistence(timeout: 5))
             XCTAssertEqual(someday.value as? String, "1")
-            XCTAssertEqual(app.datePickers["task-start-date"].value as? String, start)
+            XCTAssertEqual(try XCTUnwrap(startControl.value as? String), start)
             app.buttons["task-start-options"].tap()
             app.buttons["Add a time"].tap()
+            XCTAssertEqual(someday.value as? String, "0", "Adding a time must explicitly leave Someday")
+            setTaskEditorSwitch("task-someday", on: true, in: app)
             XCTAssertEqual(someday.value as? String, "1")
             app.buttons["task-start-options"].tap()
             app.buttons["Remove the time"].tap()
             XCTAssertEqual(someday.value as? String, "0", "A same-date action must explicitly leave Someday")
-            XCTAssertEqual(app.datePickers["task-start-date"].value as? String, start)
+            XCTAssertEqual(try XCTUnwrap(startControl.value as? String), start)
             XCTAssertEqual(app.textFields["task-source-url"].value as? String, "https://example.com/inbox")
             capture(app, "task-grouping-same-date-leaves-someday-\(appearance)")
             app.buttons["Save"].tap()

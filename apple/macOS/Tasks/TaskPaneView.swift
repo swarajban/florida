@@ -118,6 +118,12 @@ struct TaskPaneView: View {
                 .onChange(of: model.dueDateTaskId) { _, taskId in
                     if let taskId { proxy.scrollTo(ItemID.task(taskId)) }
                 }
+                .onChange(of: model.taskPaneScrollRequest) {
+                    guard model.focus == .tasks, let selection = model.selection,
+                          selection.isTask || selection.isSuggestion,
+                          model.orderedTaskItems.contains(selection) else { return }
+                    proxy.scrollTo(selection, anchor: .center)
+                }
                 .onChange(of: SelectionSection(
                     item: model.selection,
                     sectionId: model.taskGroups.first { group in

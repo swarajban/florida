@@ -121,6 +121,12 @@ Pass space-separated selectors in one quoted value to check several classes in t
 for example `-f mac_test_selector='Florida-macOSUITests/MacInteractionStateTests Florida-macOSUITests/EditorRegressionTests'`.
 It runs one Mac job without retries or TestFlight uploads. An empty selector retains the
 full gate; each final PR head still needs one complete unfiltered run.
+`iphone_test_selector` accepts the same selector forms for `Florida-iOSUITests`
+and runs a separate iPhone job without retries or uploads to TestFlight. Supplying
+both selectors runs one focused job per platform instead of the full gate.
+The focused iPhone job reserves 55 minutes for compilation and tests and two
+minutes for result upload, so long capture flows retain a completed result or
+an explicit timeout with native artifacts.
 The reusable full Mac UI job has a 60-minute limit, matching main's standalone Mac job;
 the iPhone shard limits are unchanged.
 
@@ -485,6 +491,11 @@ with real FloridaCore models and a synchronous test row adapter, keeping the obs
 task snapshot deliberately stale. Use `--ref <commit>` to reproduce against an older
 app implementation. SQLite merge/restore behavior is covered separately by FloridaKit
 tests; SwiftUI presentation still requires the native app checks.
+
+`python3 apple/scripts/test-app-jumps.py` checks the actual Mac edge-jump method,
+including repeated `G`/`gg` selections when a retained lazy row has stale visibility.
+Task-pane edge jumps explicitly center their target rather than trusting that cache;
+ordinary click selection and calendar scrolling are unchanged.
 
 Event details show a compact resource shelf under Join, including when opened
 through a jump label. Links are extracted locally from the description and
