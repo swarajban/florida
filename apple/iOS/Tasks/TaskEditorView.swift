@@ -18,6 +18,8 @@ struct TaskEditorView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var draft: TaskItem
+    @State private var somedayIntent: Bool? = nil
+    @State private var dateEdits: Set<TaskDateField> = []
     @State private var confirmingDelete = false
     @State private var saveError: String?
     @State private var sourceURL: String
@@ -113,8 +115,30 @@ struct TaskEditorView: View {
                 Section("Dates") {
                     TaskDateRow(title: "Start", identifier: "task-start", isOn: hasStart, date: startAt, hasTime: hasStartTime)
                     TaskDateRow(title: "Due", identifier: "task-due", isOn: hasDue, date: dueAt, hasTime: hasDueTime)
+                    Toggle(isOn: someday) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Someday")
+                            Text("No due date")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                        .accessibilityIdentifier("task-someday")
+                    if draft.dueAt == nil, draft.startAt == nil, draft.pinnedStart == nil, !draft.someday {
+                        Text("Date decision pending. Choose a due date, start date, pinned time, or Someday to finish triage.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("task-date-decision-pending")
+                    }
                     if hasDue.wrappedValue {
-                        Picker("Deadline", selection: $draft.deadlineType) {
+                        Picker("Deadline", selection: Binding(
+                            get: { draft.deadlineType },
+                            set: {
+                                dateEdits.insert(.due)
+                                somedayIntent = false
+                                draft.someday = false
+                                draft.deadlineType = $0
+                            })) {
                             ForEach([DeadlineType.soft, .hard], id: \.self) { type in
                                 Text(type.displayName).tag(type)
                             }
@@ -161,8 +185,10 @@ struct TaskEditorView: View {
 
                 Section {
                     Toggle("Pin to a time", isOn: hasPin)
+                        .accessibilityIdentifier("task-pin")
                     if draft.pinnedStart != nil {
                         DatePicker("Pinned start", selection: pinnedStart, displayedComponents: [.date, .hourAndMinute])
+                            .accessibilityIdentifier("task-pin-date")
                     }
                 } footer: {
                     Text("A pinned task is placed at exactly that time as one block; otherwise the scheduler picks the time.")
@@ -196,6 +222,7 @@ struct TaskEditorView: View {
                     }
                 }
             }
+            .accessibilityIdentifier("task-editor-form")
             .navigationTitle(isNew ? "New Task" : "Edit Task")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -279,7 +306,10 @@ struct TaskEditorView: View {
         Binding(
             get: { draft.deadlineType != .none },
             set: { on in
+                dateEdits.insert(.due)
+                somedayIntent = false
                 if on {
+                    draft.someday = false
                     draft.deadlineType = .soft
                     let dueAt = draft.dueAt ?? defaultDueDate
                     // The default day may be before a start already set.
@@ -287,6 +317,7 @@ struct TaskEditorView: View {
                 } else {
                     draft.deadlineType = .none
                     draft.dueAt = nil
+                    draft.someday = false
                     dueTimeChoice = nil
                 }
             })
@@ -298,9 +329,33 @@ struct TaskEditorView: View {
         Binding(
             get: { draft.dueAt ?? defaultDueDate },
             set: { date in
+                dateEdits.insert(.due)
+                somedayIntent = false
+                draft.someday = false
                 let calendar = model.taskListCalendar
                 let keepsClock = hasDueTime.wrappedValue || !TaskDay.dueHasTime(date, calendar: calendar)
                 draft.dueAt = keepsClock ? date : TaskDay.due(on: date, calendar: calendar)
+            })
+    }
+
+    private var someday: Binding<Bool> {
+        Binding(
+            get: { draft.someday },
+            set: { on in
+                somedayIntent = on
+                draft.someday = on
+                if on {
+                    dateEdits.formUnion([.due, .pin])
+                    draft.dueAt = nil
+                    draft.pinnedStart = nil
+                    draft.deadlineType = .none
+                    dueTimeChoice = nil
+                }
+                #if DEBUG
+                if UserDefaults.standard.bool(forKey: "demoData"), UserDefaults.standard.bool(forKey: "uiTraceSomedayTouch") {
+                    print("SOMEDAY_TOUCH_BINDING requested=\(on) value=\(draft.someday)")
+                }
+                #endif
             })
     }
 
@@ -309,6 +364,9 @@ struct TaskEditorView: View {
         Binding(
             get: { dueTimeChoice ?? draft.dueAt.map { TaskDay.dueHasTime($0, calendar: model.taskListCalendar) } ?? false },
             set: { on in
+                dateEdits.insert(.due)
+                somedayIntent = false
+                draft.someday = false
                 dueTimeChoice = on
                 if !on, let dueAt = draft.dueAt {
                     draft.dueAt = TaskDay.due(on: dueAt, calendar: model.taskListCalendar)
@@ -339,6 +397,9 @@ struct TaskEditorView: View {
         Binding(
             get: { startTimeChoice ?? draft.startAt.map { TaskDay.notBeforeHasTime($0, calendar: model.taskListCalendar) } ?? false },
             set: { on in
+                dateEdits.insert(.start)
+                somedayIntent = false
+                draft.someday = false
                 startTimeChoice = on
                 if !on, let startAt = draft.startAt {
                     setStart(TaskDay.notBefore(on: startAt, calendar: model.taskListCalendar))
@@ -349,22 +410,39 @@ struct TaskEditorView: View {
     /// Every change to the start date goes through here: a start that reaches or passes the due
     /// date moves the due date to the day after it, in the row right below.
     private func setStart(_ start: Date?) {
+        dateEdits.insert(.start)
+        somedayIntent = false
+        draft.someday = false
         draft.startAt = start
         if let start, let dueAt = draft.dueAt {
-            draft.dueAt = TaskDay.due(dueAt, notBefore: start, calendar: model.taskListCalendar)
+            let adjustedDue = TaskDay.due(dueAt, notBefore: start, calendar: model.taskListCalendar)
+            if adjustedDue != dueAt {
+                dateEdits.insert(.due)
+            }
+            draft.dueAt = adjustedDue
         }
     }
 
     private var hasPin: Binding<Bool> {
         Binding(
             get: { draft.pinnedStart != nil },
-            set: { draft.pinnedStart = $0 ? (draft.pinnedStart ?? nextHour) : nil })
+            set: { on in
+                dateEdits.insert(.pin)
+                somedayIntent = false
+                draft.someday = false
+                draft.pinnedStart = on ? (draft.pinnedStart ?? nextHour) : nil
+            })
     }
 
     private var pinnedStart: Binding<Date> {
         Binding(
             get: { draft.pinnedStart ?? nextHour },
-            set: { draft.pinnedStart = $0 })
+            set: {
+                dateEdits.insert(.pin)
+                somedayIntent = false
+                draft.pinnedStart = $0
+                draft.someday = false
+            })
     }
 
     // MARK: - Helpers
@@ -404,7 +482,7 @@ struct TaskEditorView: View {
         if task.title.isEmpty {
             task.title = original.title
         }
-        guard model.complete(task, original: original) else {
+        guard model.complete(task, original: original, somedayIntent: somedayIntent, dateEdits: dateEdits) else {
             saveError = "This task could not be completed. It may have been deleted or completed elsewhere."
             return
         }
@@ -424,13 +502,18 @@ struct TaskEditorView: View {
         if original.recurrence == nil && task.recurrence != nil {
             task.prepareToEnableRecurrence()
         }
+        if task.someday {
+            task.dueAt = nil
+            task.pinnedStart = nil
+            task.deadlineType = .none
+        }
         return task
     }
 
     private func save() {
         guard recurrenceValidationMessage == nil, sourceValidationMessage == nil else { return }
         do {
-            try model.save(preparedTask, original: isNew ? nil : original)
+            try model.save(preparedTask, original: isNew ? nil : original, somedayIntent: somedayIntent, dateEdits: dateEdits)
             dismiss()
         } catch {
             saveError = error.localizedDescription

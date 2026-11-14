@@ -103,8 +103,8 @@ import Testing
         #expect(try database.pendingWrites().count == 1)
         #expect(try database.pendingWrites().first?.body == pendingBody)
         #expect(try queue.read { try String.fetchOne($0, sql: "SELECT value FROM syncState WHERE key = 'other'") } == "keep")
-        #expect(try queue.read { try AppDatabase.migrator.appliedMigrations($0).suffix(2) }
-            == ["v9-task-source", "v10-automatic-day-blocking"])
+        #expect(try queue.read { try AppDatabase.migrator.appliedMigrations($0).suffix(3) }
+            == ["v9-task-source", "v10-automatic-day-blocking", "v11-someday-date-decision"])
     }
 
     @Test func hiddenCalendarsProtectLocalDatesWithoutLeakingOrdinaryCells() throws {

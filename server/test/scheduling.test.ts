@@ -69,6 +69,7 @@ function taskRow(id: string, categoryId: string, over: Partial<TaskRow> = {}): T
     priority: 'medium',
     deadlineType: 'none',
     dueAt: null,
+    someday: false,
     startAt: null,
     scheduleId: null,
     context: 'computer',
@@ -143,6 +144,48 @@ function eventRow(id: string, over: Partial<EventRow> = {}): EventRow {
 const base = { now: NOW, horizonDays: 28, timeZone: LA, routineBlocks: [routineBlockRow('work')] }
 
 describe('buildSchedulerInput', () => {
+  it('excludes Someday before planning, removes underway artifacts, and restores normal input when reenabled', () => {
+    const source = {
+      ...base,
+      categories: [categoryRow('inbox'), categoryRow('work', { area: 'work' })],
+      tasks: [taskRow('unfiled', 'inbox'), taskRow('pending', 'work'), taskRow('deferred', 'work', { someday: true })],
+      events: [],
+      previous: [{ id: 'old', taskId: 'deferred', startAt: new Date(NOW.getTime() - 60_000), endAt: new Date(NOW.getTime() + 60_000), pinned: false, lane: null, computedAt: T0 }],
+    }
+    const input = buildSchedulerInput(source)
+    expect(input.tasks.map((t) => t.id)).toEqual(['unfiled', 'pending'])
+    expect(input.previous).toEqual([])
+    const plan = schedule(input)
+    expect(plan.placements.map((block) => block.taskId).sort()).toEqual(['pending', 'unfiled'])
+    for (const artifacts of [plan.placements, plan.optional, plan.unscheduled, plan.late]) {
+      expect(artifacts.some((artifact) => artifact.taskId === 'deferred')).toBe(false)
+    }
+    const restored = buildSchedulerInput({ ...source, previous: [], tasks: source.tasks.map((task) => ({ ...task, someday: false })) })
+    expect(restored.tasks.map((t) => t.id)).toEqual(['unfiled', 'pending', 'deferred'])
+    expect(schedule(restored).placements.some((p) => p.taskId === 'deferred')).toBe(true)
+  })
+
+  it('never counts open or completed Someday work against project budgets or optional and problem lists', () => {
+    const src = {
+      ...base,
+      categories: [categoryRow('work')],
+      projects: [projectRow('budget', { weeklyMinutes: 180 })],
+      tasks: [taskRow('deferred', 'work', { projectId: 'budget', durationMinutes: 900, someday: true, dueAt: T0, deadlineType: 'hard' as const })],
+      completedProjectTasks: [taskRow('done-someday', 'work', { projectId: 'budget', durationMinutes: 120, someday: true, completedAt: NOW })],
+      routineBlocks: [routineBlockRow('evening', { start: '19:00', end: '22:00', optional: true })],
+      events: [],
+    }
+    const input = buildSchedulerInput(src)
+    expect(input.tasks.map((t) => [t.id, t.durationMinutes])).toEqual([
+      ['project-time:2026-11-08:budget', 180], ['project-time:2026-11-15:budget', 180],
+    ])
+    const result = splitProjectTime(schedule(input), LA)
+    expect(result).toMatchObject({ placements: [], optional: [], unscheduled: [], late: [] })
+    const normal = buildSchedulerInput({ ...src, tasks: src.tasks.map((t) => ({ ...t, someday: false })) })
+    expect(normal.tasks.map((t) => t.id)).toEqual(['deferred'])
+    expect(schedule(normal).unscheduled.some((u) => u.taskId === 'deferred')).toBe(true)
+  })
+
   it('maps the routine, tasks and the horizon', () => {
     const input = buildSchedulerInput({
       ...base,

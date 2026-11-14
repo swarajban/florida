@@ -303,6 +303,298 @@ import Testing
         #expect(try db.pendingWrites().map(\.entityId) == [selected.id])
     }
 
+    @Test(arguments: [false, true])
+    func staleEditorPreservesUntouchedLatestSomeday(_ originalSomeday: Bool) throws {
+        let db = try store()
+        var original = Fixtures.task(id: "stale-someday")
+        original.someday = originalSomeday
+        var live = original
+        live.someday = !originalSomeday
+        live.notes = "Latest notes"
+        try db.apply(SyncResponse(cursor: "changed", tasks: [live]))
+        var draft = original
+        draft.title = "Editor title"
+        let mutation = try db.saveTask(draft, original: original, now: Fixtures.t0)
+        #expect(mutation.before == live)
+        #expect(mutation.after.someday == live.someday)
+        #expect(mutation.after.notes == live.notes && mutation.after.title == draft.title)
+        #expect(Set(try body(db).keys) == ["title", "expectedRecurrenceRevision"])
+    }
+
+    @Test(arguments: [false, true])
+    func explicitFinalToggleOverridesConcurrentSomedayEvenWhenEqualToOriginal(_ finalSomeday: Bool) throws {
+        let db = try store()
+        var original = Fixtures.task(id: "explicit-someday")
+        original.someday = finalSomeday
+        var live = original
+        live.someday = !finalSomeday
+        live.notes = "Latest notes"
+        try db.apply(SyncResponse(cursor: "changed", tasks: [live]))
+        var draft = original
+        draft.someday.toggle()
+        draft.someday.toggle()
+        let mutation = try db.saveTask(draft, original: original, somedayIntent: finalSomeday, now: Fixtures.t0)
+        #expect(mutation.before == live)
+        #expect(mutation.after.someday == finalSomeday && mutation.after.notes == live.notes)
+        #expect(Set(try body(db).keys) == ["someday", "expectedRecurrenceRevision"])
+        #expect(try body(db)["someday"] as? Bool == finalSomeday)
+    }
+
+    @Test(arguments: ["dueAt", "startAt", "pinnedStart", "clear"], [false, true])
+    func explicitDateOrClearIntentOverridesConcurrentSomeday(_ field: String, _ sameValue: Bool) throws {
+        let db = try store()
+        var original = Fixtures.task(id: "explicit-date")
+        if field == "clear" && !sameValue || field == "dueAt" && sameValue {
+            original.dueAt = Fixtures.t0
+            original.deadlineType = .soft
+        }
+        if field == "startAt" && sameValue { original.startAt = Fixtures.t0 }
+        if field == "pinnedStart" && sameValue { original.pinnedStart = Fixtures.t0 }
+        var live = original
+        live.someday = true
+        live.dueAt = nil
+        live.pinnedStart = nil
+        live.deadlineType = .none
+        live.startAt = Fixtures.t0.addingTimeInterval(7200)
+        live.title = "Latest title"
+        try db.apply(SyncResponse(cursor: "changed", tasks: [live]))
+        var draft = original
+        switch field {
+        case "dueAt":
+            draft.dueAt = Fixtures.t0
+            draft.deadlineType = .soft
+        case "startAt": draft.startAt = Fixtures.t0
+        case "pinnedStart": draft.pinnedStart = Fixtures.t0
+        default:
+            draft.dueAt = nil
+            draft.deadlineType = .none
+        }
+        let dateField: TaskDateField = switch field {
+        case "startAt": .start
+        case "pinnedStart": .pin
+        default: .due
+        }
+        let mutation = try db.saveTask(
+            draft, original: original, somedayIntent: false, dateEdits: [dateField], now: Fixtures.t0)
+        #expect(mutation.before == live)
+        #expect(!mutation.after.someday && mutation.after.title == live.title)
+        #expect(mutation.after.dueAt == (dateField == .due ? draft.dueAt : live.dueAt))
+        #expect(mutation.after.deadlineType == (dateField == .due ? draft.deadlineType : live.deadlineType))
+        #expect(mutation.after.startAt == (dateField == .start ? draft.startAt : live.startAt))
+        #expect(mutation.after.pinnedStart == (dateField == .pin ? draft.pinnedStart : live.pinnedStart))
+        #expect(try body(db)["someday"] as? Bool == false)
+        if field == "dueAt" {
+            #expect(try body(db)["dueAt"] as? String == JSONCoding.formatInstant(Fixtures.t0))
+            #expect(try body(db)["deadlineType"] as? String == "soft")
+        }
+        if field == "pinnedStart" {
+            #expect(try body(db)["pinnedStart"] as? String == JSONCoding.formatInstant(Fixtures.t0))
+            #expect(try db.placementsByTask()[live.id]?.first?.startAt == Fixtures.t0)
+        }
+    }
+
+    @Test(arguments: [DeadlineType.soft, .hard], [false, true])
+    func explicitDueChoiceRestoresDeadlinePolicyAfterCanonicalSomeday(
+        _ deadline: DeadlineType, _ sameValue: Bool
+    ) throws {
+        let db = try store()
+        var original = Fixtures.task(id: "reselected-due", dueAt: Fixtures.t0.addingTimeInterval(3600))
+        original.deadlineType = deadline
+        try db.apply(SyncResponse(cursor: "opened", tasks: [original]))
+        let deferred = try #require(try db.setTaskDateDecision(
+            id: original.id, decision: .someday, now: Fixtures.t0.addingTimeInterval(60)))
+        #expect(deferred.after.someday && deferred.after.dueAt == nil && deferred.after.pinnedStart == nil)
+        #expect(deferred.after.deadlineType == .none)
+        var draft = original
+        if !sameValue { draft.dueAt = Fixtures.t0.addingTimeInterval(7200) }
+        let mutation = try db.saveTask(
+            draft, original: original, somedayIntent: false, dateEdits: [.due],
+            now: Fixtures.t0.addingTimeInterval(120))
+        #expect(mutation.before == deferred.after)
+        #expect(!mutation.after.someday && mutation.after.dueAt == draft.dueAt)
+        #expect(mutation.after.deadlineType == deadline)
+        #expect(try body(db)["dueAt"] as? String == JSONCoding.formatInstant(draft.dueAt!))
+        #expect(try body(db)["deadlineType"] as? String == deadline.rawValue)
+        #expect(try body(db)["someday"] as? Bool == false)
+    }
+
+    @Test(arguments: [false, true])
+    func explicitSomedayNormalizesLiveSnapshotAndUndoRestoresExactFields(_ alreadySomeday: Bool) throws {
+        let db = try store()
+        var original = Fixtures.task(id: "normalized-someday")
+        original.someday = true
+        original.startAt = Fixtures.t0
+        var live = original
+        live.someday = alreadySomeday
+        live.dueAt = Fixtures.t0.addingTimeInterval(3600)
+        live.pinnedStart = Fixtures.t0.addingTimeInterval(7200)
+        live.deadlineType = .hard
+        live.notes = "Latest notes"
+        try db.apply(SyncResponse(cursor: "changed", tasks: [live]))
+        let mutation = try db.saveTask(original, original: original, somedayIntent: true, now: Fixtures.t0)
+        #expect(mutation.before == live)
+        #expect(mutation.after == (try db.task(id: live.id)))
+        #expect(mutation.after.someday && mutation.after.startAt == live.startAt)
+        #expect(mutation.after.dueAt == nil && mutation.after.pinnedStart == nil && mutation.after.deadlineType == .none)
+        let undo = try #require(TaskUndo(from: live, to: mutation.after))
+        #expect(undo.stillApplies(to: mutation.after))
+        #expect(undo.reverted(mutation.after) == live)
+        let fields = try body(db)
+        #expect(fields["someday"] as? Bool == true)
+        #expect(fields["dueAt"] is NSNull && fields["pinnedStart"] is NSNull)
+        #expect(fields["deadlineType"] as? String == "none")
+        #expect(fields["notes"] == nil && fields["startAt"] == nil)
+        if !alreadySomeday {
+            #expect(try db.updateTask(id: live.id, now: Fixtures.t0) { current in
+                guard undo.stillApplies(to: current) else { return false }
+                current = undo.reverted(current)
+                return true
+            })
+            #expect(try db.task(id: live.id) == live)
+            #expect(try body(db)["someday"] as? Bool == false)
+        }
+    }
+
+    @Test(arguments: [TaskDateField.due, .start, .pin])
+    func explicitNilDateOverridesConcurrentDateAndPreservesOtherLiveDates(_ field: TaskDateField) throws {
+        let db = try store()
+        let original = Fixtures.task(id: "explicit-clear")
+        var live = original
+        live.dueAt = Fixtures.t0.addingTimeInterval(3600)
+        live.startAt = Fixtures.t0.addingTimeInterval(7200)
+        live.pinnedStart = Fixtures.t0.addingTimeInterval(10800)
+        live.deadlineType = .hard
+        live.title = "Latest title"
+        try db.apply(SyncResponse(cursor: "changed", tasks: [live]))
+        let mutation = try db.saveTask(
+            original, original: original, somedayIntent: false, dateEdits: [field], now: Fixtures.t0)
+        #expect(mutation.before == live)
+        #expect(mutation.after.dueAt == (field == .due ? nil : live.dueAt))
+        #expect(mutation.after.deadlineType == (field == .due ? .none : live.deadlineType))
+        #expect(mutation.after.startAt == (field == .start ? nil : live.startAt))
+        #expect(mutation.after.pinnedStart == (field == .pin ? nil : live.pinnedStart))
+        #expect(mutation.after.title == live.title && !mutation.after.someday)
+        let fields = try body(db)
+        let key = switch field {
+        case .due: "dueAt"
+        case .start: "startAt"
+        case .pin: "pinnedStart"
+        }
+        #expect(fields[key] is NSNull)
+        #expect(Set(fields.keys) == (field == .due
+            ? ["dueAt", "deadlineType", "expectedRecurrenceRevision"]
+            : [key, "expectedRecurrenceRevision"]))
+    }
+
+    @Test(arguments: [TaskDateField.due, .start, .pin])
+    func explicitSameOriginalDatePreservesOtherLatestDates(_ field: TaskDateField) throws {
+        let db = try store()
+        var original = Fixtures.task(id: "explicit-reselect", dueAt: Fixtures.t0)
+        original.startAt = Fixtures.t0
+        original.pinnedStart = Fixtures.t0
+        var live = original
+        live.dueAt = Fixtures.t0.addingTimeInterval(3600)
+        live.startAt = Fixtures.t0.addingTimeInterval(7200)
+        live.pinnedStart = Fixtures.t0.addingTimeInterval(10800)
+        live.deadlineType = .hard
+        live.notes = "Latest notes"
+        try db.apply(SyncResponse(cursor: "changed", tasks: [live]))
+        let mutation = try db.saveTask(
+            original, original: original, somedayIntent: false, dateEdits: [field], now: Fixtures.t0)
+        #expect(mutation.before == live)
+        #expect(mutation.after.dueAt == (field == .due ? original.dueAt : live.dueAt))
+        #expect(mutation.after.deadlineType == (field == .due ? original.deadlineType : live.deadlineType))
+        #expect(mutation.after.startAt == (field == .start ? original.startAt : live.startAt))
+        #expect(mutation.after.pinnedStart == (field == .pin ? original.pinnedStart : live.pinnedStart))
+        #expect(mutation.after.notes == live.notes)
+        let fields = try body(db)
+        let key = switch field {
+        case .due: "dueAt"
+        case .start: "startAt"
+        case .pin: "pinnedStart"
+        }
+        #expect(fields[key] as? String == JSONCoding.formatInstant(Fixtures.t0))
+        #expect(Set(fields.keys) == (field == .due
+            ? ["dueAt", "deadlineType", "expectedRecurrenceRevision"]
+            : [key, "expectedRecurrenceRevision"]))
+    }
+
+    @Test func somedayToggleOnThenOffRetainsExplicitNilDueAndPinEdits() throws {
+        let db = try store()
+        let original = Fixtures.task(id: "toggle-clears")
+        var live = original
+        live.dueAt = Fixtures.t0.addingTimeInterval(3600)
+        live.pinnedStart = Fixtures.t0.addingTimeInterval(7200)
+        live.startAt = Fixtures.t0.addingTimeInterval(10800)
+        live.deadlineType = .hard
+        try db.apply(SyncResponse(cursor: "changed", tasks: [live]))
+        var draft = original
+        draft.someday = true
+        draft.dueAt = nil
+        draft.pinnedStart = nil
+        draft.deadlineType = .none
+        draft.someday = false
+        let mutation = try db.saveTask(
+            draft, original: original, somedayIntent: false, dateEdits: [.due, .pin], now: Fixtures.t0)
+        #expect(mutation.before == live)
+        #expect(!mutation.after.someday && mutation.after.dueAt == nil && mutation.after.pinnedStart == nil)
+        #expect(mutation.after.deadlineType == .none && mutation.after.startAt == live.startAt)
+        let fields = try body(db)
+        #expect(fields["dueAt"] is NSNull && fields["pinnedStart"] is NSNull)
+        #expect(fields["deadlineType"] as? String == "none")
+        #expect(fields["startAt"] == nil)
+    }
+
+    @Test func finalSomedayNormalizesExplicitDateEditsAfterMergingThem() throws {
+        let db = try store()
+        let original = Fixtures.task(id: "final-someday")
+        var live = original
+        live.notes = "Latest notes"
+        try db.apply(SyncResponse(cursor: "changed", tasks: [live]))
+        var draft = original
+        draft.dueAt = Fixtures.t0
+        draft.startAt = Fixtures.t0.addingTimeInterval(3600)
+        draft.pinnedStart = Fixtures.t0.addingTimeInterval(7200)
+        draft.deadlineType = .hard
+        let mutation = try db.saveTask(
+            draft, original: original, somedayIntent: true, dateEdits: [.due, .start, .pin], now: Fixtures.t0)
+        #expect(mutation.after.someday && mutation.after.dueAt == nil && mutation.after.pinnedStart == nil)
+        #expect(mutation.after.deadlineType == .none && mutation.after.startAt == draft.startAt)
+        #expect(mutation.after.notes == live.notes)
+        let fields = try body(db)
+        #expect(Set(fields.keys) == ["someday", "startAt", "expectedRecurrenceRevision"])
+        #expect(fields["someday"] as? Bool == true)
+    }
+
+    @Test(arguments: [false, true])
+    func explicitSomedayIntentCannotSaveClosedOrRetainedDeletedRows(_ completed: Bool) throws {
+        for intent in [false, true] {
+            let db = try store()
+            let original = Fixtures.task(id: "closed-someday")
+            var live = original
+            if completed { live.completedAt = Fixtures.t0 } else { live.deletedAt = Fixtures.t0 }
+            try db.writer.write { try live.insert($0) }
+            #expect(throws: AppDatabase.WriteError.taskNoLongerOpen) {
+                try db.saveTask(original, original: original, somedayIntent: intent)
+            }
+            #expect(try db.task(id: live.id) == live)
+            #expect(try db.pendingWrites().isEmpty)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func changedSomedayWithoutExplicitIntentStillApplies(_ finalSomeday: Bool) throws {
+        let db = try store()
+        var original = Fixtures.task(id: "changed-someday")
+        original.someday = !finalSomeday
+        try db.apply(SyncResponse(cursor: "opened", tasks: [original]))
+        var draft = original
+        draft.someday = finalSomeday
+        let mutation = try db.saveTask(draft, original: original, now: Fixtures.t0)
+        #expect(mutation.after.someday == finalSomeday)
+        #expect(try body(db)["someday"] as? Bool == finalSomeday)
+    }
+
     private func body(_ db: AppDatabase) throws -> [String: Any] {
         let data = try #require(try db.pendingWrites().first?.body)
         return try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])

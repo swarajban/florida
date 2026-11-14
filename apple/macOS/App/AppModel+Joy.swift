@@ -42,6 +42,7 @@ extension AppModel {
             return
         }
         select(item)
+        if focus == .tasks { taskPaneScrollRequest += 1 }
     }
 
     /// After new placements: slides task blocks from their old slots and says how many moved.
@@ -98,7 +99,7 @@ extension AppModel {
 
     /// Open tasks whose remaining time fits in `minutes`, in priority order.
     func tasksThatFit(minutes: Int) -> [TaskItem] {
-        openTasks.filter { $0.remainingMinutes > 0 && $0.remainingMinutes <= minutes }
+        openTasks.filter { !$0.someday && $0.remainingMinutes > 0 && $0.remainingMinutes <= minutes }
     }
 
     /// Pins `task` to start at `start` (a picked gap).
@@ -106,9 +107,10 @@ extension AppModel {
         guard let task = try? database?.task(id: task.id), task.isOpen else { return }
         var pinned = task
         pinned.pinnedStart = start
+        pinned.someday = false
         pinned.startAt = nil
         let when = DateText.dayAndTime(start, calendar: calendar)
-        if save(pinned, original: task, undoLabel: "Pinned \(Self.quoted(task.title)) to \(when)") {
+        if save(pinned, original: task, somedayIntent: false, dateEdits: [.pin], undoLabel: "Pinned \(Self.quoted(task.title)) to \(when)") {
             selection = .task(task.id)
             showGhost("Pinned to \(when)")
         }
@@ -121,7 +123,7 @@ extension AppModel {
     func optionalPicks(on day: Date, now: Date = Date()) -> [OptionalPicks] {
         guard !optionalPlacements.isEmpty else { return [] }
         return OptionalPicks.on(
-            day: day, placements: optionalPlacements, tasksById: tasksById,
+            day: day, placements: optionalPlacements.filter { tasksById[$0.taskId]?.someday == false }, tasksById: tasksById,
             blocksById: Dictionary(routineBlocks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }),
             now: now, calendar: calendar)
     }

@@ -38,7 +38,7 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(input.waitForExistence(timeout: 5))
             app.buttons["quick-add-save"].tap()
             XCTAssertTrue(input.waitForNonExistence(timeout: 5))
-            let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "PR #123 in example/florida")).firstMatch
+            let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tasks-row-' AND label BEGINSWITH %@", "PR #123 in example/florida")).element
             XCTAssertTrue(row.waitForExistence(timeout: 5))
             XCTAssertFalse(element(startingWith: "task-source-open-", in: app).exists)
             row.tap()
@@ -63,7 +63,10 @@ final class SmokeTests: XCTestCase {
         XCTAssertEqual(url.value as? String, "https://github.com/example/florida/pull/456")
         app.buttons["Add"].tap()
         XCTAssertTrue(input.waitForNonExistence(timeout: 5))
-        let sourceButton = element(startingWith: "task-source-open-", in: app)
+        let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tasks-row-' AND label BEGINSWITH %@", "Review source")).element
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        let taskID = String(row.identifier.dropFirst("tasks-row-".count))
+        let sourceButton = app.buttons["task-source-open-\(taskID)"]
         XCTAssertTrue(sourceButton.waitForExistence(timeout: 5))
         XCTAssertTrue(sourceButton.label.contains("PR #456"))
         sourceButton.tap()
@@ -72,7 +75,6 @@ final class SmokeTests: XCTestCase {
         XCTAssertEqual(opened.label, "https://github.com/example/florida/pull/456")
         XCTAssertFalse(app.navigationBars["Edit Task"].exists, "Opening the source must not also open the editor")
 
-        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Review source")).firstMatch
         row.tap()
         XCTAssertTrue(url.waitForExistence(timeout: 5))
         for _ in 0..<3 where !url.isHittable { app.swipeUp() }
@@ -666,8 +668,11 @@ final class SmokeTests: XCTestCase {
             XCTAssertEqual(unfiled.count, 1)
             unfiled.firstMatch.tap()
             XCTAssertTrue(app.buttons["task-category"].label.contains("Inbox"))
+            revealTaskEditorControl(app.buttons["task-category"], in: app)
             app.buttons["task-category"].tap()
             XCTAssertTrue(app.buttons["Home"].waitForExistence(timeout: 5))
+            wait(for: [expectation(for: NSPredicate(format: "isHittable == true"),
+                                   evaluatedWith: app.buttons["Home"])], timeout: 5)
             XCTAssertTrue(app.buttons["Home"].isHittable)
             app.buttons["Home"].tap()
             wait(for: [expectation(for: NSPredicate(format: "label CONTAINS %@", "Home"),
@@ -909,13 +914,14 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(overdue.waitForExistence(timeout: 20))
             overdue.tap()
             // Due yesterday: a start of today is past it, so the due date moves to tomorrow.
-            let addStart = element("task-start-add", in: app)
+            let form = app.collectionViews["task-editor-form"]
+            let addStart = form.buttons.matching(NSPredicate(format: "identifier == %@", "task-start-add")).element
             XCTAssertTrue(addStart.waitForExistence(timeout: 20))
             addStart.tap()
-            XCTAssertTrue(element("task-start-date", in: app).waitForExistence(timeout: 5))
+            XCTAssertTrue(form.datePickers.matching(NSPredicate(format: "identifier == %@", "task-start-date")).element.waitForExistence(timeout: 5))
             capture(app, "task-editor-start-added-\(appearance)")
 
-            element("task-category", in: app).tap()
+            form.buttons.matching(NSPredicate(format: "identifier == %@", "task-category")).element.tap()
             XCTAssertTrue(app.buttons["Personal Finance"].waitForExistence(timeout: 5))
             capture(app, "task-category-picker-\(appearance)")
             app.terminate()
@@ -997,14 +1003,35 @@ final class SmokeTests: XCTestCase {
     @MainActor
     private func tapSwitch(_ control: XCUIElement, in app: XCUIApplication) {
         let tabBar = app.tabBars.firstMatch
-        for _ in 0..<6 where control.frame.maxY > tabBar.frame.minY - 8 {
-            app.swipeUp()
+        let top = app.navigationBars.firstMatch.frame.maxY + 8
+        let bottom = tabBar.frame.minY - 8
+        let middle = app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: app.frame.midX, dy: (top + bottom) / 2))
+        for _ in 0..<20 {
+            var travel: CGFloat = -160
+            if control.exists {
+                let frame = control.frame
+                if !frame.isEmpty, [frame.minX, frame.minY, frame.maxX, frame.maxY].allSatisfy(\.isFinite) {
+                    if frame.minY >= top, frame.maxY <= bottom { break }
+                    let distance = frame.minY < top ? top - frame.minY : bottom - frame.maxY
+                    travel = distance > 0 ? min(160, max(24, distance)) : max(-160, min(-24, distance))
+                }
+            }
+            middle.press(forDuration: 0.05, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: travel)),
+                         withVelocity: .slow, thenHoldForDuration: 0)
         }
-        XCTAssertTrue(control.isHittable)
+        XCTAssertGreaterThanOrEqual(control.frame.minY, top)
         XCTAssertLessThanOrEqual(control.frame.maxY, tabBar.frame.minY - 8)
-        let previous = control.value as? String
+        let native = control.switches.firstMatch
+        XCTAssertTrue(native.waitForExistence(timeout: 5))
+        XCTAssertTrue(native.isHittable)
+        XCTAssertGreaterThanOrEqual(native.frame.minY, top)
+        XCTAssertLessThanOrEqual(native.frame.maxY, bottom)
+        let previous = native.value as? String
         XCTAssertTrue(previous == "0" || previous == "1")
-        control.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        native.tap()
+        let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", previous == "1" ? "0" : "1"), object: native)
+        XCTAssertEqual(XCTWaiter.wait(for: [changed], timeout: 5), .completed)
         XCTAssertEqual(control.value as? String, previous == "1" ? "0" : "1")
     }
 

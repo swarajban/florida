@@ -3,7 +3,7 @@ import Foundation
 extension QuickAddScanner {
     enum SymbolValue {
         case due(Moment)
-        case noDue
+        case someday
         case start(Moment)
         case duration(Int)
         case recurrence(TaskRecurrence)
@@ -22,7 +22,7 @@ extension QuickAddScanner {
         let offset = detached ? 1 : 0
         switch symbol {
         case "^":
-            if scanner.word(0) == "none" { return (.noDue, 1 + offset) }
+            if scanner.word(0) == "none" || scanner.word(0) == "someday" { return (.someday, 1 + offset) }
             guard let moment = scanner.parseMoment(at: 0, bareHourFirst: false) else { return nil }
             return (.due(moment), moment.consumed + offset)
         case "=":

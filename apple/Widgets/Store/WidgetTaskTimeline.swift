@@ -7,6 +7,13 @@ struct WidgetTaskTimeline {
     let placements: [String: [Placement]]
     let calendar: Calendar
 
+    init(tasks: [TaskItem], categories: [TaskCategory], placements: [String: [Placement]], calendar: Calendar) {
+        self.tasks = tasks.filter { !$0.someday }
+        self.categories = categories
+        self.placements = placements
+        self.calendar = calendar
+    }
+
     static func reloadDate(at now: Date, from loaded: WidgetTaskTimeline?) -> Date {
         let regular = now.addingTimeInterval(30 * 60)
         guard let calendar = loaded?.calendar else { return regular }

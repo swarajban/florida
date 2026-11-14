@@ -1,0 +1,458 @@
+{
+  "categories": [
+    {
+      "id": "category-0",
+      "deletedAt": "2026-11-09T13:56:53.066Z"
+    },
+    {
+      "id": "category-1",
+      "deletedAt": null
+    },
+    {
+      "id": "category-2",
+      "deletedAt": null
+    },
+    {
+      "id": "category-3",
+      "deletedAt": null
+    },
+    {
+      "id": "category-4",
+      "deletedAt": null
+    },
+    {
+      "id": "category-5",
+      "deletedAt": null
+    },
+    {
+      "id": "category-6",
+      "deletedAt": null
+    },
+    {
+      "id": "category-7",
+      "deletedAt": null
+    },
+    {
+      "id": "category-8",
+      "deletedAt": null
+    },
+    {
+      "id": "category-9",
+      "deletedAt": null
+    },
+    {
+      "id": "category-10",
+      "deletedAt": null
+    },
+    {
+      "id": "category-11",
+      "deletedAt": null
+    },
+    {
+      "id": "category-12",
+      "deletedAt": null
+    },
+    {
+      "id": "category-13",
+      "deletedAt": "2026-11-10T17:12:36.433Z"
+    },
+    {
+      "id": "category-14",
+      "deletedAt": null
+    },
+    {
+      "id": "category-15",
+      "deletedAt": null
+    },
+    {
+      "id": "inbox",
+      "deletedAt": null
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task-0",
+      "categoryId": "category-7",
+      "dueAt": null,
+      "deadlineType": "none",
+      "completedAt": "2026-11-12T23:02:30.508Z",
+      "deletedAt": null,
+      "updatedAt": "2026-11-12T23:02:33.895Z",
+      "recurrenceSeriesId": false,
+      "startAt": null,
+      "pinnedStart": null
+    },
+    {
+      "id": "task-1",
+      "categoryId": "category-3",
+      "dueAt": null,
+      "deadlineType": "none",
+      "completedAt": "2026-11-12T23:03:08.346Z",
+      "deletedAt": null,
+      "updatedAt": "2026-11-12T23:03:08.679Z",
+      "recurrenceSeriesId": false,
+      "startAt": "2026-10-12T07:00:00.000Z",
+      "pinnedStart": null
+    },
+    {
+      "id": "task-2",
+      "categoryId": "category-3",
+      "dueAt": null,
+      "deadlineType": "none",
+      "completedAt": null,
+      "deletedAt": "2026-11-09T13:39:52.534Z",
+      "updatedAt": "2026-11-09T13:39:52.534Z",
+      "recurrenceSeriesId": false,
+      "startAt": null,
+      "pinnedStart": null
+    },
+    {
+      "id": "task-3",
+      "categoryId": "category-4",
+      "dueAt": "2026-11-25T07:59:59.999Z",
+      "deadlineType": "soft",
+      "completedAt": null,
+      "deletedAt": null,
+      "updatedAt": "2026-11-09T13:51:34.114Z",
+      "recurrenceSeriesId": false,
+      "startAt": "2026-11-23T08:00:00.000Z",
+      "pinnedStart": null
+    },
+    {
+      "id": "task-4",
+      "categoryId": "category-3",
+      "dueAt": "2026-11-18T01:00:00.000Z",
+      "deadlineType": "soft",
+      "completedAt": null,
+      "deletedAt": null,
+      "updatedAt": "2026-11-12T23:03:51.124Z",
+      "recurrenceSeriesId": false,
+      "startAt": "2026-11-16T08:00:00.000Z",
+      "pinnedStart": null
+    },
+    {
+      "id": "task-5",
+      "categoryId": "inbox",
+      "dueAt": null,
+      "deadlineType": "none",
+      "completedAt": null,
+      "deletedAt": null,
+      "updatedAt": "2026-11-12T23:17:32.116Z",
+      "recurrenceSeriesId": false,
+      "startAt": null,
+      "pinnedStart": null
+    },
+    {
+      "id": "task-6",
+      "categoryId": "category-6",
+      "dueAt": null,
+      "deadlineType": "none",
+      "completedAt": "2026-11-12T23:17:40.542Z",
+      "deletedAt": null,
+      "updatedAt": "2026-11-12T23:17:40.874Z",
+      "recurrenceSeriesId": false,
+      "startAt": null,
+      "pinnedStart": null
+    },
+    {
+      "id": "task-7",
+      "categoryId": "category-11",
+      "dueAt": null,
+      "deadlineType": "none",
+      "completedAt": "2026-11-13T02:16:17.509Z",
+      "deletedAt": null,
+      "updatedAt": "2026-11-13T02:16:19.515Z",
+      "recurrenceSeriesId": false,
+      "startAt": null,
+      "pinnedStart": null
+    },
+    {
+      "id": "task-8",
+      "categoryId": "category-3",
+      "dueAt": "2027-05-02T06:59:59.999Z",
+      "deadlineType": "soft",
+      "completedAt": null,
+      "deletedAt": null,
+      "updatedAt": "2026-11-09T13:51:43.302Z",
+      "recurrenceSeriesId": false,
+      "startAt": "2027-04-30T07:00:00.000Z",
+      "pinnedStart": null
+    },
+    {
+      "id": "task-9",
+      "categoryId": "category-9",
+      "dueAt": "2026-11-12T07:59:59.999Z",
+      "deadlineType": "soft",
+      "completedAt": null,
+      "deletedAt": null,
+      "updatedAt": "2026-11-09T13:51:44.364Z",
+      "recurrenceSeriesId": false,
+      "startAt": "2026-11-10T08:00:00.000Z",
+      "pinnedStart": null
+    },
+    {
+      "id": "task-10",
+      "categoryId": "category-4",
+      "dueAt": "2026-11-11T07:59:59.998Z",
+      "deadlineType": "soft",
+      "completedAt": "2026-11-09T18:06:31.903Z",
+      "deletedAt": null,
+      "updatedAt": "2026-11-09T18:06:31.973Z",
+      "recurrenceSeriesId": false,
+      "startAt": "2026-11-09T08:00:00.000Z",
+      "pinnedStart": null
+    },
+    {
+      "id": "task-11",
+      "categoryId": "category-6",
+      "dueAt": "2026-11-21T01:00:00.000Z",
+      "deadlineType": "soft",
+      "completedAt": null,
+      "deletedAt": null,
+      "updatedAt": "2026-11-09T23:49:45.606Z",
+      "recurrenceSeriesId": false,
+      "startAt": "2026-11-17T08:00:00.000Z",
+      "pinnedStart": null
+    },
+    {
+      "id": "task-12",
+      "categoryId": "category-2",
+      "dueAt": null,
+      "deadlineType": "none",
+      "completedAt": null,
+      "deletedAt": "2026-11-09T23:49:54.261Z",
+      "updatedAt": "2026-11-09T23:49:54.261Z",
+      "recurrenceSeriesId": false,
+      "startAt": null,
+      "pinnedStart": null
+    },
+    {
+      "id": "task-13",
+      "categoryId": "category-11",
+      "dueAt": "2026-11-12T01:00:00.000Z",
+      "deadlineType": "hard",
+      "completedAt": null,
+      "deletedAt": null,
+      "updatedAt": "2026-11-10T05:13:44.951Z",
+      "recurrenceSeriesId": false,
+      "startAt": null,
+      "pinnedStart": null
+    },
+    {
+      "id": "task-14",
+      "categoryId": "category-4",
+      "dueAt": "2026-11-08T07:59:59.999Z",
+      "deadlineType": "soft",
+      "completedAt": "2026-11-10T06:21:44.790Z",
+      "deletedAt": null,
+      "updatedAt": "2026-11-10T06:21:46.243Z",
+      "recurrenceSeriesId": false,
+      "startAt": "2026-11-06T08:00:00.000Z",
+      "pinnedStart": null
+    },
+    {
+      "id": "task-15",
+      "categoryId": "category-4",
+      "dueAt": "2026-11-12T07:59:59.999Z",
+      "deadlineType": "soft",
+      "completedAt": "2026-11-10T06:21:48.396Z",
+      "deletedAt": null,
+      "updatedAt": "2026-11-10T06:21:49.745Z",
+      "recurrenceSeriesId": false,
+      "startAt": "2026-11-05T08:00:00.000Z",
+      "pinnedStart": null
+    },
+    {
+      "id": "task-16",
+      "categoryId": "category-6",
+      "dueAt": "2026-11-21T07:59:00.000Z",
+      "deadlineType": "soft",
+      "completedAt": null,
+      "deletedAt": null,
+      "updatedAt": "2026-11-10T07:23:07.341Z",
+      "recurrenceSeriesId": false,
+      "startAt": "2026-10-19T07:00:00.000Z",
+      "pinnedStart": null
+    },
+    {
+      "id": "task-17",
+      "categoryId": "category-10",
+      "dueAt": null,
+      "deadlineType": "none",
+      "completedAt": null,
+      "deletedAt": "2026-11-10T14:45:45.198Z",
+      "updatedAt": "2026-11-10T14:45:45.198Z",
+      "recurrenceSeriesId": false,
+      "startAt": "2026-09-09T07:00:00.000Z",
+      "pinnedStart": null
+    },
+    {
+      "id": "task-18",
+      "categoryId": "category-1",
+      "dueAt": "2026-11-21T07:59:00.000Z",
+      "deadlineType": "soft",
+      "completedAt": null,
+      "deletedAt": null,
+      "updatedAt": "2026-11-10T17:10:43.767Z",
+      "recurrenceSeriesId": false,
+      "startAt": "2026-10-29T07:00:00.000Z",
+      "pinnedStart": null
+    },
+    {
+      "id": "task-19",
+      "categoryId": "category-14",
+      "dueAt": null,
+      "deadlineType": "none",
+      "completedAt": null,
+      "deletedAt": null,
+      "updatedAt": "2026-11-10T18:23:48.977Z",
+      "recurrenceSeriesId": false,
+      "startAt": null,
+      "pinnedStart": null
+    },
+    {
+      "id": "task-20",
+      "categoryId": "category-3",
+      "dueAt": null,
+      "deadlineType": "none",
+      "completedAt": "2026-11-10T19:45:57.479Z",
+      "deletedAt": null,
+      "updatedAt": "2026-11-10T19:45:59.713Z",
+      "recurrenceSeriesId": false,
+      "startAt": null,
+      "pinnedStart": null
+    },
+    {
+      "id": "task-21",
+      "categoryId": "category-1",
+      "dueAt": null,
+      "deadlineType": "none",
+      "completedAt": "2026-11-10T23:52:21.299Z",
+      "deletedAt": null,
+      "updatedAt": "2026-11-10T23:52:23.876Z",
+      "recurrenceSeriesId": false,
+      "startAt": null,
+      "pinnedStart": null
+    },
+    {
+      "id": "task-22",
+      "categoryId": "category-4",
+      "dueAt": "2026-11-07T07:59:59.999Z",
+      "deadlineType": "soft",
+      "completedAt": "2026-11-11T03:29:05.377Z",
+      "deletedAt": null,
+      "updatedAt": "2026-11-11T03:29:07.907Z",
+      "recurrenceSeriesId": false,
+      "startAt": "2026-11-05T08:00:00.000Z",
+      "pinnedStart": null
+    },
+    {
+      "id": "task-23",
+      "categoryId": "category-6",
+      "dueAt": "2026-11-18T07:59:59.000Z",
+      "deadlineType": "soft",
+      "completedAt": null,
+      "deletedAt": null,
+      "updatedAt": "2026-11-12T07:13:57.051Z",
+      "recurrenceSeriesId": false,
+      "startAt": "2026-11-16T08:00:00.000Z",
+      "pinnedStart": null
+    },
+    {
+      "id": "task-24",
+      "categoryId": "inbox",
+      "dueAt": "2026-11-13T01:00:00.000Z",
+      "deadlineType": "soft",
+      "completedAt": null,
+      "deletedAt": "2026-11-12T07:14:11.531Z",
+      "updatedAt": "2026-11-12T07:14:11.531Z",
+      "recurrenceSeriesId": false,
+      "startAt": null,
+      "pinnedStart": null
+    },
+    {
+      "id": "task-25",
+      "categoryId": "category-9",
+      "dueAt": null,
+      "deadlineType": "none",
+      "completedAt": "2026-11-12T17:17:33.268Z",
+      "deletedAt": null,
+      "updatedAt": "2026-11-12T17:17:36.069Z",
+      "recurrenceSeriesId": false,
+      "startAt": null,
+      "pinnedStart": null
+    },
+    {
+      "id": "task-26",
+      "categoryId": "category-6",
+      "dueAt": null,
+      "deadlineType": "none",
+      "completedAt": "2026-11-12T17:29:13.164Z",
+      "deletedAt": null,
+      "updatedAt": "2026-11-12T17:29:15.877Z",
+      "recurrenceSeriesId": false,
+      "startAt": null,
+      "pinnedStart": null
+    },
+    {
+      "id": "task-27",
+      "categoryId": "category-2",
+      "dueAt": "2026-11-12T01:00:00.000Z",
+      "deadlineType": "soft",
+      "completedAt": null,
+      "deletedAt": null,
+      "updatedAt": "2026-11-12T17:34:15.275Z",
+      "recurrenceSeriesId": false,
+      "startAt": null,
+      "pinnedStart": null
+    },
+    {
+      "id": "task-28",
+      "categoryId": "category-9",
+      "dueAt": "2026-11-19T07:59:00.000Z",
+      "deadlineType": "soft",
+      "completedAt": "2026-11-12T18:23:47.853Z",
+      "deletedAt": null,
+      "updatedAt": "2026-11-12T18:23:50.950Z",
+      "recurrenceSeriesId": false,
+      "startAt": "2026-11-17T08:00:00.000Z",
+      "pinnedStart": null
+    },
+    {
+      "id": "task-29",
+      "categoryId": "category-6",
+      "dueAt": "2026-11-07T07:59:59.999Z",
+      "deadlineType": "soft",
+      "completedAt": "2026-11-12T18:24:21.543Z",
+      "deletedAt": null,
+      "updatedAt": "2026-11-12T18:24:23.892Z",
+      "recurrenceSeriesId": false,
+      "startAt": "2026-11-05T08:00:00.000Z",
+      "pinnedStart": null
+    },
+    {
+      "id": "task-30",
+      "categoryId": "inbox",
+      "dueAt": "2026-11-13T01:00:00.000Z",
+      "deadlineType": "soft",
+      "completedAt": null,
+      "deletedAt": "2026-11-12T18:30:02.887Z",
+      "updatedAt": "2026-11-12T18:30:02.887Z",
+      "recurrenceSeriesId": false,
+      "startAt": null,
+      "pinnedStart": null
+    },
+    {
+      "id": "task-31",
+      "categoryId": "inbox",
+      "dueAt": "2026-11-13T01:00:00.000Z",
+      "deadlineType": "soft",
+      "completedAt": "2026-11-12T21:04:10.273Z",
+      "deletedAt": null,
+      "updatedAt": "2026-11-12T21:04:10.659Z",
+      "recurrenceSeriesId": false,
+      "startAt": null,
+      "pinnedStart": null
+    }
+  ]
+}

@@ -31,7 +31,7 @@ public struct OptionalPicks: Hashable, Sendable, Identifiable {
     ) -> [OptionalPicks] {
         var groups: [String: [Pick]] = [:]
         for placement in placements where calendar.isDate(placement.startAt, inSameDayAs: day) && placement.endAt > now {
-            guard let task = tasksById[placement.taskId], task.isOpen, task.pinnedStart == nil else { continue }
+            guard let task = tasksById[placement.taskId], task.isOpen, !task.someday, task.pinnedStart == nil else { continue }
             groups[placement.blockId, default: []].append(Pick(placement: placement, task: task))
         }
         return groups

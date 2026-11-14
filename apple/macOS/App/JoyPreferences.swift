@@ -25,7 +25,8 @@ enum JoyPreference: String, CaseIterable, Identifiable {
 }
 
 enum JoyPreferences {
-    static func isOn(_ preference: JoyPreference) -> Bool {
-        UserDefaults.standard.object(forKey: preference.key) as? Bool ?? true
+    static func isOn(_ preference: JoyPreference, defaults: UserDefaults = .standard) -> Bool {
+        guard defaults.object(forKey: preference.key) != nil else { return true }
+        return defaults.bool(forKey: preference.key)
     }
 }

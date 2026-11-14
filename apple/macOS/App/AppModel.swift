@@ -29,7 +29,10 @@ final class AppModel {
 
     private(set) var categories: [TaskCategory] = []
     private(set) var openTasks: [TaskItem] = []
-    private(set) var placements: [Placement] = []
+    private var storedPlacements: [Placement] = []
+    var placements: [Placement] {
+        storedPlacements.filter { tasksById[$0.taskId]?.isOpen == true && tasksById[$0.taskId]?.someday == false }
+    }
     private(set) var events: [CalendarEvent] = []
     private(set) var blockingAllDayEvents: [CalendarEvent] = []
     private(set) var accounts: [GoogleAccount] = []
@@ -103,6 +106,7 @@ final class AppModel {
     var isHelpOpen = false
     /// The task open in the editor sheet; nil when the sheet is closed.
     var editorTask: TaskItem?
+    var dueDateTaskId: String?
     /// Recurring deletes always explain the series-wide effect, including keyboard deletes.
     var recurringTaskToDelete: TaskItem?
     /// Text the new-task editor should send to the AI parser when it opens (quick add's ⌘↩).
@@ -161,6 +165,7 @@ final class AppModel {
     var completingTaskIds: Set<String> = []
     /// Bumped to ask the time grid to scroll; the grid owns its scroll position.
     var gridScrollRequest: GridScrollRequest?
+    var taskPaneScrollRequest = 0
     var isNewCategoryOpen = false
     /// The projects overlay (`g p`).
     var isProjectsOpen = false
@@ -306,6 +311,8 @@ final class AppModel {
     /// Recomputes every frame the calendar draws. Cheap (a few hundred items), so it runs on every
     /// data or navigation change rather than inside the drawing code.
     func rebuildLayout() {
+        let placements = self.placements
+        placementsByTask = Dictionary(grouping: placements, by: \.taskId)
         gridLayout = GridLayout.build(
             days: visibleDays, events: events, placements: placements,
             // A month cell has no room for work that is not on the plan.
@@ -394,8 +401,7 @@ final class AppModel {
             },
             observe(database.observePlacements()) { model, placements in
                 let before = model.gridLayout.slotFrames
-                model.placements = placements
-                model.placementsByTask = Dictionary(grouping: placements, by: \.taskId)
+                model.storedPlacements = placements
                 model.rebuildLayout()
                 model.placementsDidChange(from: before)
             },

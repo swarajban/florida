@@ -28,13 +28,36 @@ final class TaskGroupingTests: XCTestCase {
             XCTAssertTrue(inbox.exists)
             XCTAssertTrue(overdue.exists)
             XCTAssertLessThan(inbox.frame.minY, overdue.frame.minY)
-            XCTAssertLessThanOrEqual(inbox.frame.height, 56)
+            XCTAssertTrue(app.buttons["task-triage-date-group-inbox"].exists)
+            XCTAssertTrue(app.buttons["task-triage-indefinite-group-inbox"].exists)
             XCTAssertFalse(inbox.descendants(matching: .any)
                 .matching(identifier: "task-category-chip-inbox").firstMatch.exists)
             let chip = overdue.descendants(matching: .any)
                 .matching(identifier: "task-category-chip-demo-finance").firstMatch
             XCTAssertTrue(chip.waitForExistence(timeout: 5))
             XCTAssertEqual(chip.value as? String, "Category: Personal Finance")
+            let categorizedInbox = row("group-categorized-inbox", in: app)
+            let inboxChip = categorizedInbox.descendants(matching: .any)
+                .matching(identifier: "task-category-chip-demo-eng").firstMatch
+            XCTAssertTrue(inboxChip.exists)
+            XCTAssertEqual(inboxChip.value as? String, "Category: Work Engineering")
+            XCTAssertTrue(categorizedInbox.label.hasSuffix(", Inbox"))
+            XCTAssertTrue(categorizedInbox.isHittable)
+            XCTAssertTrue(overdue.isHittable)
+            let overduePosition = overdue.frame.minY
+            let editorTitle = app.textFields["task-title"]
+            categorizedInbox.click()
+            XCTAssertTrue(editorTitle.waitForExistence(timeout: 5))
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(editorTitle.waitForNonExistence(timeout: 5))
+            XCTAssertEqual(overdue.frame.minY, overduePosition, accuracy: 2)
+            XCTAssertTrue(overdue.isHittable)
+            overdue.click()
+            XCTAssertTrue(editorTitle.waitForExistence(timeout: 5))
+            XCTAssertEqual(editorTitle.value as? String, "Group overdue task")
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(editorTitle.waitForNonExistence(timeout: 5))
+            XCTAssertEqual(overdue.frame.minY, overduePosition, accuracy: 2)
             capture("task-grouping-due-\(appearance)")
 
             app.typeKey("g", modifierFlags: [])
@@ -42,16 +65,19 @@ final class TaskGroupingTests: XCTestCase {
             app.typeKey("g", modifierFlags: [])
             app.typeKey("g", modifierFlags: [])
             let expected = [
+                ("group-categorized-inbox", "Group categorized inbox task"),
                 ("group-inbox", "Group inbox task"),
                 ("group-overdue", "Group overdue task"),
                 ("group-today-early", "Group today early"),
                 ("group-today-hard", "Group today hard"),
                 ("group-today-soft", "Group today soft"),
+                ("group-pinned", "Group pinned task"),
                 ("group-tomorrow", "Group tomorrow task"),
                 ("group-this-week", "Group this week task"),
                 ("group-next-week", "Group next week task"),
                 ("group-later", "Group later task"),
                 ("group-no-due", "Group no due task"),
+                ("group-someday", "Group someday task"),
             ]
             for (index, item) in expected.enumerated() {
                 if index > 0 { app.typeKey("j", modifierFlags: []) }
@@ -78,15 +104,23 @@ final class TaskGroupingTests: XCTestCase {
                     XCTAssertTrue(app.staticTexts["Opened source: https://example.com/grouping"].waitForExistence(timeout: 5))
                     XCTAssertFalse(app.sheets.firstMatch.exists)
                 }
+                if item.0 == "group-pinned" || item.0 == "group-no-due" {
+                    let date = row(item.0, in: app).descendants(matching: .any)
+                        .matching(identifier: "task-list-date-\(item.0)").firstMatch
+                    XCTAssertTrue(date.exists)
+                    XCTAssertTrue((date.value as? String)?.hasPrefix(item.0 == "group-pinned" ? "Pinned " : "Start ") == true)
+                    XCTAssertLessThanOrEqual(row(item.0, in: app).frame.height, 56)
+                }
             }
             app.typeKey("k", modifierFlags: [])
-            assertSelected("group-later", title: "Group later task", in: app)
-            app.typeKey("g", modifierFlags: .shift)
             assertSelected("group-no-due", title: "Group no due task", in: app)
-            XCTAssertTrue(section("no-due-date", in: app).exists)
+            app.typeKey("g", modifierFlags: .shift)
+            assertSelected("group-someday", title: "Group someday task", in: app)
+            XCTAssertTrue(section("someday", in: app).exists)
+            XCTAssertFalse(section("no-due-date", in: app).exists)
 
             app.typeKey("f", modifierFlags: [])
-            let jump = app.staticTexts["task-jump-group-no-due"]
+            let jump = app.staticTexts["task-jump-group-someday"]
             XCTAssertTrue(jump.waitForExistence(timeout: 5))
             let pane = app.scrollViews["task-pane-scroll"]
             XCTAssertTrue(pane.exists)
@@ -100,7 +134,8 @@ final class TaskGroupingTests: XCTestCase {
             for key in keys { app.typeKey(String(key), modifierFlags: []) }
             let title = app.sheets.textFields.firstMatch
             XCTAssertTrue(title.waitForExistence(timeout: 5))
-            XCTAssertEqual(title.value as? String, "Group no due task")
+            XCTAssertEqual(title.value as? String, "Group someday task")
+            XCTAssertEqual((app.checkBoxes["task-someday"].value as? NSNumber)?.intValue, 1)
             app.typeKey(.escape, modifierFlags: [])
             XCTAssertTrue(title.waitForNonExistence(timeout: 5))
 
@@ -110,11 +145,19 @@ final class TaskGroupingTests: XCTestCase {
             assertSelected("group-next-week", title: "Group next week task", in: app)
             app.typeKey("g", modifierFlags: [])
             app.typeKey("g", modifierFlags: [])
-            assertSelected("group-inbox", title: "Group inbox task", in: app)
+            assertSelected("group-categorized-inbox", title: "Group categorized inbox task", in: app)
             XCTAssertTrue(section("category:demo-eng", in: app).exists)
-            XCTAssertTrue(app.descendants(matching: .any)
-                .matching(NSPredicate(format: "identifier BEGINSWITH %@", "task-category-chip-")).firstMatch
-                .waitForNonExistence(timeout: 5))
+            XCTAssertTrue(inboxChip.waitForExistence(timeout: 5))
+            XCTAssertEqual(inboxChip.value as? String, "Category: Work Engineering")
+            app.typeKey("j", modifierFlags: [])
+            assertSelected("group-inbox", title: "Group inbox task", in: app)
+            app.typeKey("j", modifierFlags: [])
+            assertSelected("group-today-soft", title: "Group today soft", in: app)
+            XCTAssertFalse(row("group-today-soft", in: app).descendants(matching: .any)
+                .matching(identifier: "task-category-chip-demo-eng").firstMatch.exists)
+            app.typeKey("g", modifierFlags: [])
+            app.typeKey("g", modifierFlags: [])
+            assertSelected("group-categorized-inbox", title: "Group categorized inbox task", in: app)
             capture("task-grouping-category-\(appearance)")
 
             app.typeKey("k", modifierFlags: .command)
@@ -152,7 +195,7 @@ final class TaskGroupingTests: XCTestCase {
     private func assertSelected(_ id: String, title: String, in app: XCUIApplication) {
         let item = row(id, in: app)
         XCTAssertTrue(item.waitForExistence(timeout: 5))
-        wait(for: [expectation(for: NSPredicate(format: "label == %@", "Selected task, \(title)"),
+        wait(for: [expectation(for: NSPredicate(format: "label IN %@", ["Selected task, \(title), Inbox", "Selected task, \(title), Categorized"] as NSArray),
                               evaluatedWith: item)], timeout: 5)
         let pane = app.scrollViews["task-pane-scroll"]
         XCTAssertGreaterThanOrEqual(item.frame.minY + 9, pane.frame.minY + 34)

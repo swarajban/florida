@@ -32,7 +32,7 @@ extension AppModel {
              .editEvent, .respondYes, .respondMaybe, .respondNo,
              .showProjects, .showBrief, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind,
              .jump, .joinMeeting, .openEventResources, .cycleEventDayBlocking, .shareAvailability,
-             .openTaskSource, .toggleTaskGrouping:
+             .setDueDate, .someday, .openTaskSource, .toggleTaskGrouping:
             guard !isSheetOpen else { return }
             statusMessage = nil
             jump = nil
@@ -68,6 +68,8 @@ extension AppModel {
             case .openEventResources: openEventResources()
             case .cycleEventDayBlocking: cycleEventDayBlocking()
             case .shareAvailability: startAvailability()
+            case .setDueDate: openDueDatePicker()
+            case .someday: markSomeday()
             case .openTaskSource: openTaskSource()
             case .toggleTaskGrouping:
                 taskListGrouping = taskListGrouping == .dueDate ? .category : .dueDate
@@ -147,6 +149,8 @@ extension AppModel {
         jump = nil
         if isPaletteOpen {
             closePalette()
+        } else if dueDateTaskId != nil {
+            dueDateTaskId = nil
         } else if isHelpOpen {
             isHelpOpen = false
         } else if eventDetailID != nil {

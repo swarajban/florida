@@ -47,10 +47,11 @@ extension AppModel {
                 colorHex: calendarsById[event.calendarId]?.color, joinURL: event.joinURL, isTask: false)
         }
         let blocks = agenda.placements.compactMap { block -> AgendaEntry? in
-            guard block.placement.endAt > now, block.task.isOpen else { return nil }
+            guard block.placement.endAt > now,
+                  let task = tasksById[block.task.id], task.isOpen, !task.someday else { return nil }
             return AgendaEntry(
-                id: block.placement.id, title: block.task.title, start: block.placement.startAt,
-                end: block.placement.endAt, colorHex: categoriesById[block.task.categoryId]?.color,
+                id: block.placement.id, title: task.title, start: block.placement.startAt,
+                end: block.placement.endAt, colorHex: categoriesById[task.categoryId]?.color,
                 joinURL: nil, isTask: true)
         }
         return (events + blocks).sorted { $0.start < $1.start }

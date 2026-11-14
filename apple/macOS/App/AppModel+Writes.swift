@@ -11,11 +11,11 @@ extension AppModel {
     /// Upserts a task locally, remembers the fields it changes for `z`, and syncs in the
     /// background. `undoLabel` is past tense ("Edited “X”"); returns false when the store refused.
     @discardableResult
-    func save(_ task: TaskItem, original: TaskItem? = nil, undoLabel: String? = nil) -> Bool {
+    func save(_ task: TaskItem, original: TaskItem? = nil, somedayIntent: Bool? = nil, dateEdits: Set<TaskDateField> = [], undoLabel: String? = nil) -> Bool {
         guard let database else { return false }
         do {
             try recordingUndo(undoLabel ?? "Edited \(Self.quoted(task.title))", taskId: task.id) {
-                try database.saveTask(task, original: original)
+                try database.saveTask(task, original: original, somedayIntent: somedayIntent, dateEdits: dateEdits)
             }
         } catch {
             statusMessage = "Could not save: \(error.localizedDescription)"
@@ -76,7 +76,7 @@ extension AppModel {
     /// Marks `task` done, with the sound and bloom, an undo entry and the "Done" ghost; when it
     /// was the selection, the selection moves to its neighbor. Also the editor's Mark done.
     @discardableResult
-    func complete(_ task: TaskItem, savingEdits: Bool = false, original: TaskItem? = nil) -> Bool {
+    func complete(_ task: TaskItem, savingEdits: Bool = false, original: TaskItem? = nil, somedayIntent: Bool? = nil, dateEdits: Set<TaskDateField> = []) -> Bool {
         guard let database else { return false }
         let item = item(for: task)
         let next = neighbor(of: item)
@@ -87,7 +87,7 @@ extension AppModel {
                     var completed = task
                     completed.completedAt = Date()
                     completed.completedMinutes = completed.durationMinutes
-                    return try database.saveTask(completed, original: original ?? stored)
+                    return try database.saveTask(completed, original: original ?? stored, somedayIntent: somedayIntent, dateEdits: dateEdits)
                 } else {
                     return try database.completeTask(id: task.id)
                 }
@@ -123,12 +123,14 @@ extension AppModel {
                 return
             }
             task.pinnedStart = start
-            if save(task, original: original, undoLabel: "Pinned \(Self.quoted(task.title))") {
+            task.someday = false
+            if save(task, original: original, somedayIntent: false, dateEdits: [.pin], undoLabel: "Pinned \(Self.quoted(task.title))") {
                 showGhost("Pinned to \(DateText.dayAndTime(start, calendar: calendar))")
             }
         } else {
             task.pinnedStart = nil
-            if save(task, original: original, undoLabel: "Unpinned \(Self.quoted(task.title))") {
+            task.someday = false
+            if save(task, original: original, somedayIntent: false, dateEdits: [.pin], undoLabel: "Unpinned \(Self.quoted(task.title))") {
                 showGhost("Unpinned")
             }
         }
@@ -142,7 +144,10 @@ extension AppModel {
         }
         let original = task
         task = TaskDay.pushedToTomorrow(task, now: Date(), calendar: taskListCalendar)
-        if save(task, original: original, undoLabel: "Pushed \(Self.quoted(task.title)) to tomorrow"), let start = task.startAt {
+        task.someday = false
+        var dateEdits: Set<TaskDateField> = [.start, .pin]
+        if task.dueAt != original.dueAt { dateEdits.insert(.due) }
+        if save(task, original: original, somedayIntent: false, dateEdits: dateEdits, undoLabel: "Pushed \(Self.quoted(task.title)) to tomorrow"), let start = task.startAt {
             var style = Date.FormatStyle.dateTime.weekday(.abbreviated).month(.abbreviated).day()
             style.calendar = taskListCalendar
             style.timeZone = taskListCalendar.timeZone
@@ -181,6 +186,8 @@ extension AppModel {
         task.source = source
         if let quickAdd {
             task.title = quickAdd.title
+            task.dueAt = quickAdd.dueAt
+            task.deadlineType = quickAdd.deadlineType ?? .none
             task = quickAdd.applyingExplicitFields(to: task, categoryId: categoryId)
         }
         editorTask = task
@@ -219,14 +226,15 @@ extension AppModel {
             pinnedStart: draft.pinnedStart,
             createdAt: now,
             updatedAt: now,
-            recurrence: draft.recurrence)
+            recurrence: draft.recurrence,
+            someday: draft.someday)
         task.source = draft.source
         if task.recurrence != nil {
             task.prepareToEnableRecurrence()
         }
         guard save(task, undoLabel: "Added \(Self.quoted(task.title))") else { return false }
         selection = .task(task.id)
-        showGhost("Added to \(category.name)")
+        showGhost(task.needsTriage && !category.isInbox ? "Added to Inbox · \(category.name)" : "Added to \(category.name)")
         return true
     }
 

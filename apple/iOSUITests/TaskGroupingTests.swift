@@ -12,12 +12,13 @@ final class TaskGroupingTests: XCTestCase {
 
             let due = scanList(app, showsCategories: true)
             XCTAssertEqual(due.sections, [
-                "inbox", "overdue", "today", "tomorrow", "this-week", "next-week", "later", "no-due-date",
+                "inbox", "overdue", "today", "tomorrow", "this-week", "next-week", "later", "someday",
             ])
             XCTAssertEqual(due.rows, [
-                "group-inbox", "group-overdue", "group-today-early", "group-today-hard", "group-today-soft",
-                "group-tomorrow", "group-this-week", "group-next-week", "group-later", "group-no-due",
+                "group-categorized-inbox", "group-inbox", "group-overdue", "group-today-early", "group-today-hard", "group-today-soft",
+                "group-pinned", "group-tomorrow", "group-this-week", "group-next-week", "group-later", "group-no-due", "group-someday",
             ])
+            capture(app, "task-grouping-someday-\(appearance)")
             XCTAssertFalse(app.buttons["tasks-row-group-completed"].exists)
             XCTAssertTrue(app.buttons["tasks-projects-link"].isHittable)
 
@@ -25,6 +26,7 @@ final class TaskGroupingTests: XCTestCase {
             scrollToTop(app)
             capture(app, "task-grouping-category-\(appearance)")
             let source = app.buttons["task-source-open-group-today-soft"]
+            reveal(source, in: app)
             XCTAssertTrue(source.waitForExistence(timeout: 5))
             XCTAssertTrue(source.isHittable)
             XCTAssertEqual(app.buttons.matching(identifier: "task-source-open-group-today-soft").count, 1)
@@ -35,13 +37,14 @@ final class TaskGroupingTests: XCTestCase {
             XCTAssertTrue(opened.waitForExistence(timeout: 5))
             XCTAssertEqual(opened.label, "https://example.com/grouping")
             XCTAssertFalse(app.navigationBars["Edit Task"].exists)
+            scrollToTop(app)
             let category = scanList(app, showsCategories: false)
             XCTAssertEqual(category.sections, [
                 "inbox", "category:demo-eng", "category:demo-infosec", "category:demo-home", "category:demo-finance",
             ])
             XCTAssertEqual(category.rows, [
-                "group-inbox", "group-today-soft", "group-tomorrow", "group-this-week", "group-no-due",
-                "group-today-hard", "group-later", "group-overdue", "group-today-early", "group-next-week",
+                "group-categorized-inbox", "group-inbox", "group-today-soft", "group-tomorrow", "group-this-week", "group-no-due", "group-someday",
+                "group-today-hard", "group-pinned", "group-later", "group-overdue", "group-today-early", "group-next-week",
             ])
             app.terminate()
 
@@ -59,6 +62,98 @@ final class TaskGroupingTests: XCTestCase {
             capture(app, "task-grouping-restored-\(appearance)")
             app.terminate()
         }
+    }
+
+    @MainActor
+    func testInboxTriageUndoAndFinalSomedayIntentPreserveSource() throws {
+        continueAfterFailure = false
+        for appearance in ["light", "dark"] {
+            let app = launch(appearance: appearance)
+            selectGrouping("Due date", in: app)
+            scrollToTop(app)
+            let row = app.buttons["tasks-row-group-categorized-inbox"]
+            XCTAssertTrue(row.waitForExistence(timeout: 5))
+            XCTAssertEqual(row.value as? String, "Inbox")
+            XCTAssertTrue(row.label.contains("Category: Work Engineering"))
+            let source = app.buttons["task-source-open-group-categorized-inbox"]
+            XCTAssertTrue(source.exists)
+            capture(app, "task-grouping-categorized-inbox-\(appearance)")
+
+            app.buttons["inbox-someday-group-categorized-inbox"].tap()
+            let undo = app.buttons["Undo"]
+            XCTAssertTrue(undo.waitForExistence(timeout: 5))
+            undo.tap()
+            XCTAssertTrue(app.buttons["inbox-set-due-group-categorized-inbox"].waitForExistence(timeout: 5))
+            XCTAssertEqual(row.value as? String, "Inbox")
+            XCTAssertTrue(source.exists)
+            app.buttons["inbox-set-due-group-categorized-inbox"].tap()
+            XCTAssertTrue(app.buttons["inbox-due-save"].waitForExistence(timeout: 5))
+            app.buttons["inbox-due-save"].tap()
+            XCTAssertTrue(app.buttons["inbox-due-save"].waitForNonExistence(timeout: 5))
+            XCTAssertTrue(undo.waitForExistence(timeout: 5))
+            undo.tap()
+            XCTAssertTrue(app.buttons["inbox-someday-group-categorized-inbox"].waitForExistence(timeout: 5))
+            XCTAssertEqual(row.value as? String, "Inbox")
+            XCTAssertTrue(source.exists)
+
+            row.tap()
+            let someday = app.switches["task-someday"]
+            XCTAssertTrue(someday.waitForExistence(timeout: 5))
+            XCTAssertEqual(app.textFields["task-source-url"].value as? String, "https://example.com/inbox")
+            app.buttons["task-start-add"].tap()
+            let startControl = app.datePickers["task-start-date"].buttons.firstMatch
+            XCTAssertTrue(startControl.waitForExistence(timeout: 5))
+            let start = try XCTUnwrap(startControl.value as? String)
+            setTaskEditorSwitch("task-someday", on: true, in: app)
+            XCTAssertEqual(someday.value as? String, "1")
+            setTaskEditorSwitch("task-someday", on: false, in: app)
+            XCTAssertEqual(someday.value as? String, "0")
+            setTaskEditorSwitch("task-someday", on: true, in: app)
+            XCTAssertEqual(someday.value as? String, "1")
+            app.buttons["Save"].tap()
+            XCTAssertTrue(app.navigationBars["Edit Task"].waitForNonExistence(timeout: 5))
+            reveal(row, in: app)
+            XCTAssertEqual(row.value as? String, "Someday")
+            XCTAssertTrue(row.label.contains("Someday"))
+            XCTAssertTrue(source.exists)
+            capture(app, "task-grouping-final-someday-source-\(appearance)")
+
+            row.tap()
+            XCTAssertTrue(someday.waitForExistence(timeout: 5))
+            XCTAssertEqual(someday.value as? String, "1")
+            XCTAssertEqual(try XCTUnwrap(startControl.value as? String), start)
+            app.buttons["task-start-options"].tap()
+            app.buttons["Add a time"].tap()
+            XCTAssertEqual(someday.value as? String, "0", "Adding a time must explicitly leave Someday")
+            setTaskEditorSwitch("task-someday", on: true, in: app)
+            XCTAssertEqual(someday.value as? String, "1")
+            app.buttons["task-start-options"].tap()
+            app.buttons["Remove the time"].tap()
+            XCTAssertEqual(someday.value as? String, "0", "A same-date action must explicitly leave Someday")
+            XCTAssertEqual(try XCTUnwrap(startControl.value as? String), start)
+            XCTAssertEqual(app.textFields["task-source-url"].value as? String, "https://example.com/inbox")
+            capture(app, "task-grouping-same-date-leaves-someday-\(appearance)")
+            app.buttons["Save"].tap()
+            XCTAssertTrue(app.navigationBars["Edit Task"].waitForNonExistence(timeout: 5))
+            reveal(row, in: app)
+            XCTAssertNotEqual(row.value as? String, "Someday")
+            XCTAssertTrue(row.label.contains("Start "))
+            XCTAssertTrue(source.exists)
+            source.tap()
+            XCTAssertEqual(app.staticTexts["source-opened-url"].label, "https://example.com/inbox")
+            XCTAssertFalse(app.navigationBars["Edit Task"].exists)
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    private func reveal(_ row: XCUIElement, in app: XCUIApplication) {
+        scrollToTop(app)
+        for _ in 0..<20 where !row.isHittable {
+            app.collectionViews["tasks-list"].swipeUp()
+        }
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        XCTAssertTrue(row.isHittable)
     }
 
     @MainActor
@@ -90,7 +185,7 @@ final class TaskGroupingTests: XCTestCase {
     @MainActor
     private func scrollToTop(_ app: XCUIApplication) {
         for _ in 0..<15 where !app.buttons["Quick add"].isHittable {
-            app.collectionViews.firstMatch.swipeDown()
+            app.collectionViews["tasks-list"].swipeDown()
         }
         XCTAssertTrue(app.buttons["Quick add"].isHittable)
     }
@@ -100,6 +195,7 @@ final class TaskGroupingTests: XCTestCase {
         var sections: [String] = []
         var rows: [String] = []
         let categories = [
+            "group-categorized-inbox": "Work Engineering",
             "group-inbox": "Inbox",
             "group-overdue": "Personal Finance",
             "group-today-early": "Personal Finance",
@@ -110,8 +206,10 @@ final class TaskGroupingTests: XCTestCase {
             "group-next-week": "Personal Finance",
             "group-later": "Work Infosec",
             "group-no-due": "Work Engineering",
+            "group-pinned": "Work Infosec",
+            "group-someday": "Work Engineering",
         ]
-        let list = app.collectionViews.firstMatch
+        let list = app.collectionViews["tasks-list"]
         XCTAssertTrue(element("tasks-list", in: app).exists)
         for _ in 0..<20 {
             let visible = CGRect(
@@ -133,7 +231,7 @@ final class TaskGroupingTests: XCTestCase {
                 let id = String(button.identifier.dropFirst("tasks-row-".count))
                 if !rows.contains(id) {
                     rows.append(id)
-                    if showsCategories, id != "group-inbox" {
+                    if id == "group-categorized-inbox" || (showsCategories && id != "group-inbox") {
                         XCTAssertTrue(button.label.contains("Category: \(categories[id] ?? "Unexpected task")"), button.label)
                     } else {
                         XCTAssertFalse(button.label.contains("Category:"), button.label)
@@ -142,11 +240,30 @@ final class TaskGroupingTests: XCTestCase {
                     if id == "group-today-soft" {
                         XCTAssertFalse(element("task-source-mark-group-today-soft", in: app).exists)
                         XCTAssertFalse(element("task-context-group-today-soft", in: app).exists)
-                        let due = button.staticTexts
-                            .matching(NSPredicate(format: "label MATCHES %@", "By Today .*[0-9]{1,2}:[0-9]{2}.*")).firstMatch
+                        let dates = button.descendants(matching: .any).matching(identifier: "task-list-date-\(id)")
+                        XCTAssertEqual(dates.count, 1, "A date caption must expose one native accessibility element")
+                        let due = dates.element
                         XCTAssertTrue(due.exists, "The due phrase must remain visible, not collapse to an icon")
+                        XCTAssertTrue(NSPredicate(format: "SELF MATCHES %@", "By Today .*[0-9]{1,2}:[0-9]{2}.*").evaluate(with: due.label))
                         XCTAssertGreaterThan(due.frame.width, 60)
                         XCTAssertLessThanOrEqual(due.frame.height, 18)
+                    }
+                    if id == "group-pinned" || id == "group-no-due" {
+                        let dates = button.descendants(matching: .any).matching(identifier: "task-list-date-\(id)")
+                        XCTAssertEqual(dates.count, 1, "A date caption must expose one native accessibility element")
+                        let date = dates.element
+                        XCTAssertTrue(date.exists)
+                        XCTAssertTrue(date.label.hasPrefix(id == "group-pinned" ? "Pinned " : "Start "), date.label)
+                        XCTAssertFalse(date.label.hasPrefix("By "))
+                        XCTAssertGreaterThan(date.frame.width, 60)
+                        XCTAssertLessThanOrEqual(date.frame.height, 18)
+                        if showsCategories { XCTAssertEqual(button.value as? String, id == "group-pinned" ? "Tomorrow" : "Later") }
+                        capture(app, "task-grouping-\(id)-\(showsCategories ? "date" : "category")")
+                    }
+                    if id == "group-someday" {
+                        XCTAssertTrue(button.label.contains("Someday"))
+                        XCTAssertFalse(button.descendants(matching: .any)["task-list-date-\(id)"].exists)
+                        if showsCategories { XCTAssertEqual(button.value as? String, "Someday") }
                     }
                 }
             }
@@ -160,7 +277,7 @@ final class TaskGroupingTests: XCTestCase {
 
     @MainActor
     private func element(_ id: String, in app: XCUIApplication) -> XCUIElement {
-        app.descendants(matching: .any).matching(identifier: id).firstMatch
+        app.descendants(matching: .any).matching(identifier: id).element
     }
 
     @MainActor

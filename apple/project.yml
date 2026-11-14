@@ -32,7 +32,7 @@ schemes:
       config: Debug
     test:
       config: Debug
-      targets: [FloridaWidgetsTests, Florida-iOSUITests]
+      targets: [FloridaWidgetsTests, Florida-iOSTests, Florida-iOSUITests]
       preferredScreenCaptureFormat: screenRecording
       deleteScreenshotsWhenEachTestSucceeds: false
     archive:
@@ -177,6 +177,20 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.swarajban.florida.widgettests
         TARGETED_DEVICE_FAMILY: "1"
 
+  Florida-iOSTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - iOSTests
+      - iOS/Support/Toast.swift
+    dependencies:
+      - package: FloridaKit
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.swarajban.florida.iostests
+        TARGETED_DEVICE_FAMILY: "1"
+
   Florida-iOSUITests:
     type: bundle.ui-testing
     platform: iOS
@@ -194,6 +208,7 @@ targets:
     platform: macOS
     sources:
       - macOSTests
+      - macOS/App/JoyPreferences.swift
       - macOS/Tasks/TaskEditorKeys.swift
       - macOS/Keyboard/ShortcutRepeatState.swift
       - macOS/Keyboard/KeyChord+NSEvent.swift

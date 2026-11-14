@@ -21,11 +21,20 @@ extension AppDatabase {
     }
 
     @discardableResult
-    public func saveTask(_ draft: TaskItem, original: TaskItem?, now: Date = Date()) throws -> TaskMutation {
+    public func saveTask(
+        _ draft: TaskItem, original: TaskItem?, somedayIntent: Bool? = nil,
+        dateEdits: Set<TaskDateField> = [], now: Date = Date()
+    ) throws -> TaskMutation {
         try writer.write { db in
             let before = try TaskItem.fetchOne(db, id: draft.id)
             guard let original else {
                 var task = draft
+                if let somedayIntent { task.someday = somedayIntent }
+                if somedayIntent == true {
+                    task.dueAt = nil
+                    task.pinnedStart = nil
+                    task.deadlineType = .none
+                }
                 try Self.sanitizeDestinations(of: &task, in: db)
                 try Self.saveTask(task, in: db, now: now)
                 guard let after = try TaskItem.fetchOne(db, id: task.id) else { throw WriteError.taskNoLongerExists }
@@ -55,6 +64,7 @@ extension AppDatabase {
             apply(\.priority)
             apply(\.deadlineType)
             applyDate(\.dueAt)
+            apply(\.someday)
             applyDate(\.startAt)
             apply(\.scheduleId)
             apply(\.context)
@@ -64,6 +74,18 @@ extension AppDatabase {
             apply(\.completedMinutes)
             applyDate(\.completedAt)
             apply(\.recurrence)
+            if dateEdits.contains(.due) {
+                live.dueAt = draft.dueAt
+                live.deadlineType = draft.deadlineType
+            }
+            if dateEdits.contains(.start) { live.startAt = draft.startAt }
+            if dateEdits.contains(.pin) { live.pinnedStart = draft.pinnedStart }
+            if let somedayIntent { live.someday = somedayIntent }
+            if somedayIntent == true {
+                live.dueAt = nil
+                live.pinnedStart = nil
+                live.deadlineType = .none
+            }
             try Self.sanitizeDestinations(of: &live, in: db)
             if draft.durationMinutes != original.durationMinutes,
                live.completedMinutes >= live.durationMinutes, live.completedAt == nil {

@@ -219,6 +219,10 @@ extension AppModel {
             statusMessage = "Select a task first"
             return
         }
+        if task.someday {
+            explanation = PlacementExplanation(id: task.id, title: task.title, text: "Someday")
+            return
+        }
         guard let aiClient else {
             statusMessage = "Connect to the server in Settings to ask why"
             return

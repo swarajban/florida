@@ -20,5 +20,5 @@ let package = Package(
             dependencies: ["FloridaWidgetLogic"],
             path: "WidgetsTests",
             exclude: ["TodayTests.swift"],
-            sources: ["WidgetIntegrityTests.swift", "WidgetPrivacyTests.swift"]),
+            sources: ["WidgetIntegrityTests.swift", "WidgetPrivacyTests.swift", "TasksTests.swift"]),
     ])

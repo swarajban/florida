@@ -12,7 +12,9 @@ extension AppModel {
     /// Completes the task: one `.success` haptic, the row blooms in its category color for
     /// ~150 ms while it folds away, then Undo (which saves the version from before).
     @discardableResult
-    func complete(_ task: TaskItem, original: TaskItem? = nil) -> Bool {
+    func complete(
+        _ task: TaskItem, original: TaskItem? = nil, somedayIntent: Bool? = nil, dateEdits: Set<TaskDateField> = []
+    ) -> Bool {
         let index = openTasks.firstIndex { $0.id == task.id }
         let now = Date()
         var mutation: AppDatabase.TaskMutation?
@@ -21,7 +23,8 @@ extension AppModel {
                 var draft = task
                 draft.completedAt = now
                 draft.completedMinutes = draft.durationMinutes
-                mutation = try database.saveTask(draft, original: original, now: now)
+                mutation = try database.saveTask(
+                    draft, original: original, somedayIntent: somedayIntent, dateEdits: dateEdits, now: now)
             } else {
                 mutation = try database.completeTask(id: task.id, at: now)
             }
@@ -74,10 +77,14 @@ extension AppModel {
     /// Not before tomorrow 00:00 local. A pin would override the earliest start, so it is cleared.
     func pushToTomorrow(_ task: TaskItem) {
         let previous = storedVersion(of: task)
-        let updated = TaskDay.pushedToTomorrow(previous, now: now, calendar: taskListCalendar)
+        var updated = TaskDay.pushedToTomorrow(previous, now: now, calendar: taskListCalendar)
+        updated.someday = false
+        var dateEdits: Set<TaskDateField> = [.start, .pin]
+        if updated.dueAt != previous.dueAt { dateEdits.insert(.due) }
         var mutation: AppDatabase.TaskMutation?
-        guard write({ mutation = try $0.saveTask(updated, original: previous) }),
+        guard write({ mutation = try $0.saveTask(updated, original: previous, somedayIntent: false, dateEdits: dateEdits) }),
               let mutation, let before = mutation.before else { return }
+        refreshTaskDateState(mutation.after)
         var style = Date.FormatStyle.dateTime.weekday(.abbreviated).month(.abbreviated).day()
         style.calendar = taskListCalendar
         style.timeZone = taskListCalendar.timeZone

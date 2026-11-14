@@ -23,12 +23,13 @@ import Testing
     static func task(
         _ id: String, due: Date? = nil, category: String = "work", title: String? = nil,
         deadline: DeadlineType = .soft, priority: Priority = .medium, start: Date? = nil,
-        completed: Date? = nil, deleted: Date? = nil
+        completed: Date? = nil, deleted: Date? = nil, someday: Bool = false, pin: Date? = nil
     ) -> TaskItem {
         TaskItem(
             id: id, categoryId: category, title: title ?? id, durationMinutes: 30,
             priority: priority, deadlineType: deadline, dueAt: due, startAt: start,
-            completedAt: completed, createdAt: now, updatedAt: now, deletedAt: deleted
+            pinnedStart: pin, completedAt: completed, createdAt: now, updatedAt: now, deletedAt: deleted,
+            someday: someday
         )
     }
 
@@ -53,9 +54,98 @@ import Testing
         #expect(TaskListGrouping.allCases.map(\.title) == ["Due date", "Category"])
     }
 
+    @Test func listDatesUseDueThenPinThenStartAndOnlyTheFlagMeansSomeday() {
+        let tomorrow = Self.date(2026, 11, 13, 12)
+        let later = Self.date(2026, 11, 25)
+        let tasks = [
+            Self.task("start", start: tomorrow),
+            Self.task("pin", start: later, pin: Self.now),
+            Self.task("due", due: Self.now.addingTimeInterval(-1), start: later, pin: tomorrow),
+            Self.task("paused", due: Self.now.addingTimeInterval(-100), start: tomorrow, someday: true, pin: Self.now),
+            Self.task("undecided"),
+        ]
+        let sections = Self.sections(tasks)
+        #expect(sections.map(\.id) == ["inbox", "overdue", "today", "tomorrow", "someday"])
+        #expect(sections.flatMap(\.tasks).map(\.id) == ["undecided", "due", "pin", "start", "paused"])
+        #expect(sections.last?.tasks.allSatisfy(\.someday) == true)
+        #expect(sections.flatMap(\.tasks).count == tasks.count)
+    }
+
+    @Test(arguments: TaskListGrouping.allCases)
+    func everySectionSortsByTheSameListDateIncludingFallbacks(grouping: TaskListGrouping) {
+        for category in ["work", TaskCategory.inboxId] {
+            let tasks = [
+                Self.task("due", due: Self.now.addingTimeInterval(3), category: category),
+                Self.task("start", category: category, start: Self.now.addingTimeInterval(1)),
+                Self.task("pin", category: category, pin: Self.now.addingTimeInterval(2)),
+                Self.task("paused", due: Self.now.addingTimeInterval(-1), category: category, someday: true),
+            ]
+            let categories = [Self.category(category, category)]
+            let sections = Self.sections(Array(tasks.reversed()), grouping: grouping, categories: categories)
+            #expect(sections.flatMap(\.tasks).map(\.id) == ["start", "pin", "due", "paused"])
+        }
+    }
+
+    @Test(arguments: TaskListGrouping.allCases)
+    func everyOpenRowAppearsExactlyOnceAndInboxIsTheTriagePartition(grouping: TaskListGrouping) {
+        var tasks: [TaskItem] = []
+        for category in [TaskCategory.inboxId, "work", "missing"] {
+            for mask in 0..<8 {
+                for someday in [false, true] {
+                    tasks.append(Self.task(
+                        "\(category)-\(mask)-\(someday)", due: mask & 1 == 0 ? nil : Self.now,
+                        category: category, start: mask & 2 == 0 ? nil : Self.now,
+                        someday: someday, pin: mask & 4 == 0 ? nil : Self.now))
+                }
+            }
+        }
+        tasks.append(Self.task("completed", completed: Self.now))
+        tasks.append(Self.task("deleted", deleted: Self.now))
+        let sections = Self.sections(tasks, grouping: grouping, categories: [Self.category("work", "Work")])
+        let listed = sections.flatMap(\.tasks)
+        #expect(listed.count == tasks.filter(\.isOpen).count)
+        #expect(Set(listed.map(\.id)) == Set(tasks.filter(\.isOpen).map(\.id)))
+        #expect(sections.first?.tasks.allSatisfy { $0.isOpen && $0.needsTriage } == true)
+        #expect(sections.dropFirst().flatMap(\.tasks).allSatisfy { !$0.needsTriage })
+        if grouping == .dueDate {
+            #expect(sections.last?.id == "someday")
+            #expect(sections.last?.tasks.allSatisfy(\.someday) == true)
+        }
+    }
+
+    @Test(arguments: TaskListGrouping.allCases)
+    func singleTaskMembershipMatchesTheCompleteList(grouping: TaskListGrouping) {
+        let categories = [
+            Self.category(TaskCategory.inboxId, "Inbox"),
+            Self.category("work", "Work"),
+            Self.category("deleted", "Deleted", deleted: Self.now),
+        ]
+        var tasks: [TaskItem] = []
+        for category in [TaskCategory.inboxId, "work", "deleted", "missing"] {
+            for mask in 0..<8 {
+                for someday in [false, true] {
+                    tasks.append(Self.task(
+                        "\(category)-\(mask)-\(someday)", due: mask & 1 == 0 ? nil : Self.now,
+                        category: category, start: mask & 2 == 0 ? nil : Self.now,
+                        someday: someday, pin: mask & 4 == 0 ? nil : Self.now))
+                }
+            }
+        }
+        tasks.append(Self.task("completed", completed: Self.now))
+        tasks.append(Self.task("deleted", deleted: Self.now))
+        let sections = Self.sections(tasks, grouping: grouping, categories: categories)
+        for task in tasks {
+            let currentCategory = categories.filter { $0.id == task.categoryId }
+            let single = Self.sections([task], grouping: grouping, categories: currentCategory)
+                .filter { !$0.tasks.isEmpty }.map(\.id)
+            let complete = sections.filter { $0.tasks.contains { $0.id == task.id } }.map(\.id)
+            #expect(single == complete)
+        }
+    }
+
     @Test func dueSectionsHaveSemanticOrderAndStableIDs() {
         let tasks = [
-            Self.task("none"),
+            Self.task("none", someday: true),
             Self.task("later", due: Self.date(2026, 11, 23)),
             Self.task("next", due: Self.date(2026, 11, 16)),
             Self.task("week", due: Self.date(2026, 11, 15, 23, 59)),
@@ -64,8 +154,8 @@ import Testing
             Self.task("past", due: Self.date(2026, 11, 11, 23, 59)),
         ]
         let sections = Self.sections(tasks)
-        #expect(sections.map(\.id) == ["overdue", "today", "tomorrow", "this-week", "next-week", "later", "no-due-date"])
-        #expect(sections.map(\.title) == ["Overdue", "Today", "Tomorrow", "This week", "Next week", "Later", "No due date"])
+        #expect(sections.map(\.id) == ["overdue", "today", "tomorrow", "this-week", "next-week", "later", "someday"])
+        #expect(sections.map(\.title) == ["Overdue", "Today", "Tomorrow", "This week", "Next week", "Later", "Someday"])
         #expect(sections.flatMap(\.tasks).map(\.id) == ["past", "today", "tomorrow", "week", "next", "later", "none"])
         #expect(sections.allSatisfy { $0.category == nil && !$0.isInbox })
         #expect(Self.sections([tasks[2]]).map(\.id) == ["next-week"])
@@ -81,6 +171,32 @@ import Testing
         #expect(sections.map(\.id) == ["overdue", "today"])
         #expect(sections[0].tasks.map(\.id) == ["earlier"])
         #expect(sections[1].tasks.map(\.id) == ["now", "later"])
+    }
+
+    @Test(arguments: ["America/Los_Angeles", "Asia/Tokyo"])
+    func pastStartsAndPinsStayTodayAndOnlyPastDueDatesAreOverdue(timeZone: String) {
+        let calendar = Self.calendar(timeZone: timeZone, firstWeekday: 2)
+        let now = Self.date(2026, 11, 12, 12, calendar: calendar)
+        let today = calendar.startOfDay(for: now)
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: today)!
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+        let earlier = now.addingTimeInterval(-1)
+        let sections = Self.sections([
+            Self.task("due-past", due: earlier),
+            Self.task("start-today", start: today),
+            Self.task("start-yesterday", start: yesterday),
+            Self.task("pin-past", pin: earlier),
+            Self.task("pin-yesterday", pin: yesterday),
+            Self.task("start-tomorrow", start: tomorrow),
+            Self.task("pin-tomorrow", pin: tomorrow),
+            Self.task("due-wins", due: tomorrow, start: yesterday, pin: earlier),
+            Self.task("someday", due: earlier, start: yesterday, someday: true, pin: earlier),
+        ], now: now, calendar: calendar)
+        #expect(sections.map(\.id) == ["overdue", "today", "tomorrow", "someday"])
+        #expect(sections[0].tasks.map(\.id) == ["due-past"])
+        #expect(Set(sections[1].tasks.map(\.id)) == ["start-today", "start-yesterday", "pin-past", "pin-yesterday"])
+        #expect(Set(sections[2].tasks.map(\.id)) == ["start-tomorrow", "pin-tomorrow", "due-wins"])
+        #expect(sections[3].tasks.map(\.id) == ["someday"])
     }
 
     @Test(arguments: ["America/Los_Angeles", "Asia/Tokyo"])
@@ -156,7 +272,7 @@ import Testing
             Self.task("unclassified", due: Self.now, deadline: .none, start: future),
             Self.task("no-due", start: future),
         ])
-        #expect(sections.map(\.id) == ["today", "no-due-date"])
+        #expect(sections.map(\.id) == ["today", "later"])
         #expect(sections[0].tasks.map(\.id) == ["hard", "soft", "unclassified"])
         #expect(sections[1].tasks.map(\.id) == ["no-due"])
     }
@@ -175,8 +291,8 @@ import Testing
                 Self.task("asap", due: Self.now, category: categoryID, deadline: .hard, priority: .asap),
                 Self.task("early", due: Self.now.addingTimeInterval(-1), category: categoryID, priority: .low),
                 Self.task("late", due: Self.now.addingTimeInterval(1), category: categoryID, priority: .asap),
-                Self.task("nil-soft", category: categoryID, deadline: .soft, priority: .asap),
-                Self.task("nil-hard", category: categoryID, deadline: .hard, priority: .low),
+                Self.task("nil-soft", category: categoryID, deadline: .soft, priority: .asap, someday: true),
+                Self.task("nil-hard", category: categoryID, deadline: .hard, priority: .low, someday: true),
             ]
             let expected = ["early", "asap", "a-high", "b-high", "z-high", "medium", "low", "soft", "none", "late", "nil-hard", "nil-soft"]
             let categories = [Self.category(categoryID, categoryID)]
@@ -212,7 +328,7 @@ import Testing
         let tasks = [
             Self.task("unknown", due: Self.now, category: "missing"),
             Self.task("deleted-category", due: Self.now.addingTimeInterval(-1), category: "deleted"),
-            Self.task("work", category: "work-a"),
+            Self.task("work", category: "work-a", someday: true),
         ]
         let sections = Self.sections(tasks, grouping: .category, categories: categories)
         #expect(sections.map(\.id) == ["inbox", "category:work-a", "category:work-z", "category:personal", "category:other", "orphans"])
@@ -239,8 +355,8 @@ import Testing
         #expect(sections.filter(\.isInbox).count == 1)
         #expect(sections.first?.category == categories[1])
         #expect(sections.first?.tasks == TaskListGrouping.inboxTasks(in: tasks))
-        #expect(sections.first?.tasks.map(\.id) == ["inbox-overdue", "inbox-no-due"])
-        #expect(Set(sections.dropFirst().flatMap(\.tasks).map(\.id)) == ["categorized-no-due", "categorized-overdue", "orphan-no-due"])
+        #expect(sections.first?.tasks.map(\.id) == ["inbox-overdue", "categorized-no-due", "inbox-no-due", "orphan-no-due"])
+        #expect(Set(sections.dropFirst().flatMap(\.tasks).map(\.id)) == ["categorized-overdue"])
         #expect(sections.flatMap(\.tasks).count == tasks.count)
         let emptyInbox = Self.sections([], grouping: grouping, categories: categories)
         #expect(emptyInbox.first?.isInbox == true)

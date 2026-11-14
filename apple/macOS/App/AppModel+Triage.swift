@@ -6,6 +6,44 @@ import Foundation
 // rows show it when it arrives and ⇥ accepts it.
 
 extension AppModel {
+    func openDueDatePicker() {
+        guard let task = selectedTask else {
+            statusMessage = "Select a task first"
+            return
+        }
+        isTasksPaneVisible = true
+        focus = .tasks
+        selection = .task(task.id)
+        dueDateTaskId = task.id
+    }
+
+    func setDueDate(_ date: Date, for taskId: String) {
+        dueDateTaskId = nil
+        saveDateDecision(.due(date), taskId: taskId, label: "Set due date", message: "Due \(DateText.due(date, calendar: calendar))")
+    }
+
+    func markSomeday() {
+        guard let selected = selectedTask else {
+            statusMessage = "Select a task first"
+            return
+        }
+        dueDateTaskId = nil
+        saveDateDecision(.someday, taskId: selected.id, label: "Marked Someday", message: "Someday")
+    }
+
+    private func saveDateDecision(_ decision: AppDatabase.TaskDateDecision, taskId: String, label: String, message: String) {
+        guard let database else { return }
+        do {
+            guard let change = try database.setTaskDateDecision(id: taskId, decision: decision) else { return }
+            let fields = UndoEntry.FieldChange.changes(from: change.before, to: change.after)
+            pushUndo(UndoEntry(label: label, restores: [.revert(taskId: taskId, changes: fields)], at: Date()))
+            scheduleSync()
+            showGhost(message)
+        } catch {
+            statusMessage = "Could not save: \(error.localizedDescription)"
+        }
+    }
+
     /// Moves a task to another category (undoable).
     func move(_ task: TaskItem, to category: TaskCategory) {
         guard let task = try? database?.task(id: task.id), task.isOpen else { return }
@@ -33,7 +71,8 @@ extension AppModel {
 
     /// The suggestion worth showing for a task: a live category other than Inbox and its own.
     func suggestedCategory(for task: TaskItem) -> TaskCategory? {
-        guard let id = aiSuggestions[task.id]?.categoryId, id != task.categoryId,
+        guard task.categoryId == TaskCategory.inboxId,
+              let id = aiSuggestions[task.id]?.categoryId, id != task.categoryId,
               let category = categoriesById[id], !category.isInbox
         else { return nil }
         return category

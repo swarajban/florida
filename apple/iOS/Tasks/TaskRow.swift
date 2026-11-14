@@ -57,12 +57,33 @@ struct TaskRow: View {
                 Text("·")
             }
             Text(Formatting.duration(minutes: task.remainingMinutes))
-            if let dueAt = summary.timing.dueAt {
+            if let listDate = task.dateForTaskList() {
                 Text("·")
-                Label(
-                    "\(task.deadlineType == .hard ? "Due" : "By") \(Formatting.due(dueAt, now: now, calendar: calendar))",
-                    systemImage: task.deadlineType == .hard ? "calendar.badge.clock" : "calendar")
-                    .layoutPriority(2)
+                switch listDate {
+                case .due(let date):
+                    let caption = "\(task.deadlineType == .hard ? "Due" : "By") \(Formatting.due(date, now: now, calendar: calendar))"
+                    Label(
+                        caption,
+                        systemImage: task.deadlineType == .hard ? "calendar.badge.clock" : "calendar")
+                        .layoutPriority(2)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(caption)
+                        .accessibilityIdentifier("task-list-date-\(task.id)")
+                case .pinned(let date):
+                    let caption = "Pinned \(Formatting.dayAndTime(date, now: now, calendar: calendar))"
+                    Label(caption, systemImage: "pin.fill")
+                        .layoutPriority(2)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(caption)
+                        .accessibilityIdentifier("task-list-date-\(task.id)")
+                case .start(let date):
+                    let caption = "Start \(Formatting.notBefore(date, now: now, calendar: calendar))"
+                    Label(caption, systemImage: "arrow.right.to.line")
+                        .layoutPriority(2)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(caption)
+                        .accessibilityIdentifier("task-list-date-\(task.id)")
+                }
             }
             if showsContext {
                 Text("·")

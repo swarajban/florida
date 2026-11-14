@@ -187,7 +187,7 @@ export function buildSchedulerInput(src: SchedulerSources): SchedulerInput {
   const openMinutes = new Map<string, number>()
   for (const t of src.tasks) {
     const category = liveCategories.get(t.categoryId)
-    if (t.deletedAt !== null || t.completedAt !== null || category === undefined) continue
+    if (t.someday || t.deletedAt !== null || t.completedAt !== null || category === undefined) continue
     const project = t.projectId === null ? undefined : liveProjects.get(t.projectId)
     if (project !== undefined && project.status !== 'active') continue
     const attention = effectiveAttention(t, project)
@@ -232,8 +232,9 @@ export function buildSchedulerInput(src: SchedulerSources): SchedulerInput {
   const overrides = (src.dayOverrides ?? []).filter((o) => o.deletedAt === null)
   if (overrides.length > 0) input.dayOverrides = overrides.map((o) => ({ date: o.date, kind: o.kind }))
   if (src.previous !== undefined) {
+    const plannedIds = new Set(openTasks.map((t) => t.id))
     input.previous = [
-      ...src.previous.filter(underway).map((p) => ({
+      ...src.previous.filter((p) => underway(p) && plannedIds.has(p.taskId)).map((p) => ({
         taskId: p.taskId,
         start: p.startAt.toISOString(),
         end: p.endAt.toISOString(),
@@ -280,7 +281,7 @@ function projectTimeTasks(
       spent += (p.endAt.getTime() - p.startAt.getTime()) / MINUTE
     }
     for (const t of src.completedProjectTasks ?? []) {
-      if (t.projectId !== project.id || t.deletedAt !== null || t.completedAt === null) continue
+      if (t.someday || t.projectId !== project.id || t.deletedAt !== null || t.completedAt === null) continue
       if (t.completedAt.getTime() >= thisWeek.start) spent += t.durationMinutes
     }
     let owed = openMinutes.get(project.id) ?? 0

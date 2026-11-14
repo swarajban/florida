@@ -37,9 +37,10 @@ extension AppModel {
         let original = task
         let now = calendar.date(bySetting: .second, value: 0, of: Date()) ?? Date()
         task.pinnedStart = now
+        task.someday = false
         task.startAt = nil
         lastAction = .doNow
-        if save(task, original: original, undoLabel: "Pinned \(Self.quoted(task.title)) to now") {
+        if save(task, original: original, somedayIntent: false, dateEdits: [.pin], undoLabel: "Pinned \(Self.quoted(task.title)) to now") {
             showGhost("Pinned to \(DateText.dayAndTime(now, calendar: calendar))")
         }
     }

@@ -28,7 +28,7 @@ public enum TaskListGrouping: String, CaseIterable, Sendable {
     }
 
     public static func inboxTasks(in tasks: [TaskItem]) -> [TaskItem] {
-        tasks.filter { $0.isOpen && $0.categoryId == TaskCategory.inboxId }.sorted(by: isListedBefore)
+        tasks.filter { $0.isOpen && $0.needsTriage }.sorted(by: isListedBefore)
     }
 
     public func sections(
@@ -69,13 +69,14 @@ public enum TaskListGrouping: String, CaseIterable, Sendable {
             let nextWeek = calendar.dateInterval(of: .weekOfYear, for: now)!.end
             let weekAfterNext = calendar.date(byAdding: .weekOfYear, value: 1, to: nextWeek)!
             let byDueDate = Dictionary(grouping: remaining) { task -> DueSection in
-                let timing = TaskTiming(task: task, now: now)
-                guard let due = timing.dueAt else { return .noDueDate }
-                if timing.isOverdue { return .overdue }
-                if due < tomorrow { return .today }
-                if due < dayAfterTomorrow { return .tomorrow }
-                if due < nextWeek { return .thisWeek }
-                if due < weekAfterNext { return .nextWeek }
+                if task.someday { return .someday }
+                guard let listDate = task.dateForTaskList() else { return .noDueDate }
+                if TaskTiming(task: task, now: now).isOverdue { return .overdue }
+                let date = listDate.date
+                if date < tomorrow { return .today }
+                if date < dayAfterTomorrow { return .tomorrow }
+                if date < nextWeek { return .thisWeek }
+                if date < weekAfterNext { return .nextWeek }
                 return .later
             }
             for section in DueSection.allCases {
@@ -90,9 +91,11 @@ public enum TaskListGrouping: String, CaseIterable, Sendable {
     }
 
     private static func isListedBefore(_ lhs: TaskItem, _ rhs: TaskItem) -> Bool {
-        if lhs.dueAt != rhs.dueAt {
-            guard let lhsDue = lhs.dueAt else { return false }
-            guard let rhsDue = rhs.dueAt else { return true }
+        let lhsDate = lhs.dateForTaskList()?.date
+        let rhsDate = rhs.dateForTaskList()?.date
+        if lhsDate != rhsDate {
+            guard let lhsDue = lhsDate else { return false }
+            guard let rhsDue = rhsDate else { return true }
             return lhsDue < rhsDue
         }
         func deadlineRank(_ type: DeadlineType) -> Int {
@@ -114,6 +117,7 @@ public enum TaskListGrouping: String, CaseIterable, Sendable {
         case nextWeek = "next-week"
         case later
         case noDueDate = "no-due-date"
+        case someday
 
         var title: String {
             switch self {
@@ -124,6 +128,7 @@ public enum TaskListGrouping: String, CaseIterable, Sendable {
             case .nextWeek: "Next week"
             case .later: "Later"
             case .noDueDate: "No due date"
+            case .someday: "Someday"
             }
         }
     }

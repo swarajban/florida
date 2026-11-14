@@ -269,9 +269,12 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
         or(eq(calendars.selected, true), eq(calendars.blocksScheduling, true), isNotNull(events.deletedAt)),
       ))
     // Small tables without tombstones: always sent in full so clients can replace them wholesale.
-    const placementRows = await db.select().from(placements)
-    const optionalPlacementRows = await db.select().from(optionalPlacements)
-    const unscheduledRows = await db.select().from(unscheduled)
+    const placementRows = await db.select(getTableColumns(placements)).from(placements)
+      .innerJoin(tasks, eq(placements.taskId, tasks.id)).where(eq(tasks.someday, false))
+    const optionalPlacementRows = await db.select(getTableColumns(optionalPlacements)).from(optionalPlacements)
+      .innerJoin(tasks, eq(optionalPlacements.taskId, tasks.id)).where(eq(tasks.someday, false))
+    const unscheduledRows = await db.select(getTableColumns(unscheduled)).from(unscheduled)
+      .innerJoin(tasks, eq(unscheduled.taskId, tasks.id)).where(eq(tasks.someday, false))
     const projectPlacementRows = await db.select().from(projectPlacements)
     const routineOccurrenceRows = await db.select().from(routineOccurrences)
     const [summary] = await db.select().from(planSummary)

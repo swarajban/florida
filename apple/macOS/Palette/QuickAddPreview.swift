@@ -41,6 +41,7 @@ struct QuickAddPreview: View {
                 HStack(spacing: 6) {
                     Label(source.title, systemImage: source.symbolName)
                         .lineLimit(1)
+                        .accessibilityIdentifier("quick-add-source-title")
                     Button {
                         model.palette.removeSource()
                     } label: {
@@ -63,7 +64,7 @@ struct QuickAddPreview: View {
                 .accessibilityIdentifier("smart-add-symbol-guide")
             DisclosureGroup("Smart Add examples and priority levels") {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("^due: ^fri, ^nov 20, ^none (no due date)")
+                    Text("^due: ^fri, ^nov 20 · ^someday, someday or ^none: Someday")
                     Text("!priority: !1 ASAP · !2 high · !3 medium · !4 low")
                     Text("#category: #work-engineering")
                     Text("@context: @computer, @errand, @home, @office — not a location")
@@ -147,8 +148,8 @@ struct QuickAddPreview: View {
         if let context = draft.context {
             chips.append(Chip(id: "context", symbol: context.symbolName, text: context.displayName, isDefault: false))
         }
-        if draft.dueDateNotNeeded {
-            chips.append(Chip(id: "due", symbol: "calendar.badge.minus", text: "No due date", isDefault: false))
+        if draft.someday {
+            chips.append(Chip(id: "due", symbol: "calendar.badge.minus", text: "Someday", isDefault: false))
         } else if let dueAt = draft.dueAt {
             let kind = draft.deadlineType == .hard ? "Due" : "By"
             chips.append(Chip(

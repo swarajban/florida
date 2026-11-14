@@ -320,11 +320,18 @@ enum DemoData {
         todaySoft.source = TaskSource(url: "https://example.com/grouping", title: "Grouping reference", kind: .web)
         var noDue = task("group-no-due", "Group no due task", category: engineering)
         noDue.startAt = at(30, 9)
+        var pinned = task("group-pinned", "Group pinned task", category: infosec)
+        pinned.pinnedStart = at(1, 10)
+        var someday = task("group-someday", "Group someday task", category: engineering)
+        someday.someday = true
+        var categorizedInbox = task("group-categorized-inbox", "Group categorized inbox task", category: engineering)
+        categorizedInbox.source = TaskSource(url: "https://example.com/inbox", title: "Inbox reference", kind: .web)
         var completed = task("group-completed", "Group completed task", category: engineering, due: at(0, 14))
         completed.completedAt = now.addingTimeInterval(-60)
         completed.completedMinutes = completed.durationMinutes
         response.tasks = [
             task("group-inbox", "Group inbox task", category: TaskCategory.inboxId),
+            categorizedInbox,
             task("group-overdue", "Group overdue task", category: finance, due: at(-1, 9), priority: .low),
             task("group-today-early", "Group today early", category: finance, due: at(0, 13), priority: .low),
             task("group-today-hard", "Group today hard", category: infosec, due: at(0, 14), hard: true),
@@ -333,7 +340,7 @@ enum DemoData {
             task("group-this-week", "Group this week task", category: engineering, due: at(2, 13)),
             task("group-next-week", "Group next week task", category: finance, due: at(7, 13)),
             task("group-later", "Group later task", category: infosec, due: at(21, 13)),
-            noDue, completed,
+            noDue, pinned, someday, completed,
         ]
         response.settings = UserSettings(id: "default", timeZone: "UTC", updatedAt: now)
         response.placements = []

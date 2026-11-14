@@ -241,6 +241,53 @@ Migration `0010_tired_vampiro.sql`, after the task-source migration 0009, only a
 Dates cross the wire as ISO 8601 strings. Events keep `updatedAt` as the server's write time so
 sync cursors never miss a change.
 
+### Task date decisions, Someday and Inbox
+
+Tasks expose `someday`, a boolean defaulting to `false` on creation. REST PUT/PATCH and MCP
+task writes accept it; `null` is invalid. Unrelated edits and identical retries that omit it
+preserve the stored value, including on PUT. A changed nonnull due/start/pinned date turns it
+off; an explicit `someday: true` clears due and pin but keeps start. Explicit same-date actions
+send `someday: false`. GET and sync return it on every task, including tombstones.
+
+Inbox is a derived view:
+`categoryId === "inbox" || (dueAt === null && startAt === null && pinnedStart === null && !someday)`.
+`deadlineType` without an actual `dueAt` does not count as a date decision. The existing `inbox`
+category still represents unfiled tasks, so even a dated or explicitly undated task stays there
+until it has a real category. MCP `list_tasks` with `categoryId: "inbox"` uses this rule; another
+category view excludes its untriaged tasks until they leave Inbox. Omitting the filter returns
+all tasks once, with their real category unchanged.
+
+Ordinary Inbox tasks still schedule. Someday tasks are excluded when building scheduler input,
+without changing the scheduler package: no placements, optional/evening suggestions, project-task
+time accounting, unscheduled/late warnings or problem counts in briefs. Their explanation is
+Someday rather than Unscheduled. Turning Someday off or setting a date re-enables scheduling on
+the next run. Recurrence templates/occurrences retain Someday without generating due/pin values
+that contradict it.
+
+The migration marks existing real-category tasks with no due/start/pin as Someday, including
+completed/deleted tasks and recurrence templates, and leaves Inbox-category tasks `false`.
+This prevents an Inbox flood but removes those tasks from the plan. Existing pins count as date
+decisions. Every existing task's `updatedAt` advances so incremental sync sends both true and
+false decisions. This is migration `0011_secret_sharon_carter.sql`, generated after
+task-source 0009 and all-day judgments 0010. The backfill uses database-time
+`clock_timestamp()` rather than a JavaScript timestamp captured before the transaction.
+For recurrence templates, any linked occurrence with a due/start/pin—including completed or
+tombstoned history—preserves the series' active date intent. This prevents raw null-date
+templates from making only future occurrences Someday. Individual task rows still use the
+row-level rule; genuinely undated templates/occurrences become Someday consistently.
+
+After merging, deploy the server with the release migration before opening the new
+clients. Verify the release command applied 0011, `/health` is successful, and the
+startup scheduler completed. A full authenticated `GET /api/sync` must return
+`someday` on every task; affected tasks retain their title/category/source and have
+no placements, optional placements or unscheduled rows. An incremental pull using a
+pre-rollout cursor must deliver the changed task decisions too. Verify stored plan
+artifacts or a completed scheduler run as well as filtered API reads. In the apps,
+check Inbox category chips, start/pin-only dated sections, the final Someday section,
+and toggle off/on with Undo and a fresh sync. Do not create or edit production tasks
+just for this check without permission. Cursor/write coordination must also account
+for a cursor issued before a transaction commits, not only its timestamp expression.
+
 ### Recurring calendar events
 
 When creating an event, `PUT /api/events/:id` also accepts optional `recurrence`:

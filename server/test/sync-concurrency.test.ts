@@ -14,6 +14,7 @@ import { syncCursor, writeTimestamp } from '../src/db/sync-clock.js'
 import { setEventBlocksDay } from '../src/events.js'
 import { learnAccountProfiles, refreshAllDayJudgments, repairLegacyJudgmentCursors } from '../src/google/all-day-state.js'
 import { seed } from '../src/seed.js'
+import { patchTask, upsertTask } from '../src/tasks.js'
 import { FakeSync, testConfig } from './fixtures.js'
 
 const url = process.env.TEST_DATABASE_URL
@@ -56,7 +57,7 @@ describe.skipIf(url === undefined)('concurrent Postgres sync cursors', () => {
       headers: { authorization: 'Bearer ' + testConfig.API_TOKEN },
     })
     expect(response.status).toBe(200)
-    return await response.json() as { cursor: string; events: { id: string; blocksDay: boolean | null; autoBlocksDay: boolean | null; blockingReason: string | null; updatedAt: string }[]; categories: { id: string; updatedAt: string }[] }
+    return await response.json() as { cursor: string; events: { id: string; blocksDay: boolean | null; autoBlocksDay: boolean | null; blockingReason: string | null; updatedAt: string }[]; categories: { id: string; updatedAt: string }[]; tasks: { id: string; someday: boolean; dueAt: string | null; startAt: string | null; pinnedStart: string | null; updatedAt: string }[] }
   }
 
   async function holiday(id = 'holiday') {
@@ -78,7 +79,7 @@ describe.skipIf(url === undefined)('concurrent Postgres sync cursors', () => {
   }
 
   async function heldWrite(write: () => Promise<void>, check: () => Promise<void>, table = 'events', operation = 'update') {
-    if (!['events', 'routine_blocks'].includes(table) || !['update', 'insert'].includes(operation)) throw new Error('Unexpected test trigger')
+    if (!['events', 'routine_blocks', 'tasks'].includes(table) || !['update', 'insert'].includes(operation)) throw new Error('Unexpected test trigger')
     await db.execute(sql.raw(`create function pause_event_write() returns trigger language plpgsql as $$
       begin perform pg_advisory_xact_lock(557901); return new; end $$;
       create trigger pause_event_write before ${operation} on ${table} for each row execute function pause_event_write()`))
@@ -116,6 +117,42 @@ describe.skipIf(url === undefined)('concurrent Postgres sync cursors', () => {
     const after = await pull(during.cursor)
     expect(after.events).toMatchObject([{ id: 'holiday', autoBlocksDay: true, blockingReason: 'Company holiday' }])
     expect(new Date(after.events[0]!.updatedAt).getTime()).toBeGreaterThan(new Date(during.cursor).getTime())
+  })
+
+  it('delivers Someday changes across an uncommitted write even with an obsolete application clock', async () => {
+    const oldClock = new Date('2000-01-01T00:00:00Z')
+    const start = new Date('2026-11-18T10:00:00Z')
+    await db.insert(schema.tasks).values({
+      id: 'someday-task', categoryId: 'work', title: 'Deferred task', durationMinutes: 30,
+      priority: 'medium', deadlineType: 'soft', dueAt: new Date('2026-11-20T18:00:00Z'),
+      startAt: start, pinnedStart: new Date('2026-11-19T10:00:00Z'), updatedAt: oldClock,
+    })
+    const before = await pull()
+    let during!: Awaited<ReturnType<typeof pull>>
+    await heldWrite(async () => { await patchTask(db, 'someday-task', { someday: true }, oldClock) }, async () => {
+      during = await pull(before.cursor)
+      expect(during.tasks).toEqual([])
+      expect((await db.select().from(schema.tasks))[0]?.someday).toBe(false)
+    }, 'tasks', 'insert')
+    const after = await pull(during.cursor)
+    expect(after.tasks).toMatchObject([{ id: 'someday-task', someday: true, dueAt: null, pinnedStart: null, startAt: start.toISOString() }])
+    expect(new Date(after.tasks[0]!.updatedAt).getTime()).toBeGreaterThan(new Date(during.cursor).getTime())
+    await patchTask(db, 'someday-task', { someday: false }, oldClock)
+    expect((await pull(after.cursor)).tasks).toMatchObject([{ id: 'someday-task', someday: false }])
+  })
+
+  it('stamps a new Someday recurrence at persistence rather than its application-clock anchor', async () => {
+    const before = await pull()
+    const task = await upsertTask(db, 'someday-series', {
+      categoryId: 'work', title: 'Deferred series', durationMinutes: 30, priority: 'medium', deadlineType: 'none', someday: true,
+      recurrence: { frequency: 'week', interval: 1, timeZone: 'UTC', startDate: '2026-11-18' },
+    }, new Date('2000-01-01T00:00:00Z'))
+    const [series] = await db.select().from(schema.taskRecurrences).where(eq(schema.taskRecurrences.id, task.recurrenceSeriesId!))
+    expect(task).toMatchObject({ someday: true, deadlineType: 'none', dueAt: null, pinnedStart: null })
+    expect(task.updatedAt.getTime()).toBeGreaterThan(new Date(before.cursor).getTime())
+    expect(series!.updatedAt.getTime()).toBeGreaterThan(new Date(before.cursor).getTime())
+    expect(series!.template).toMatchObject({ someday: true, deadlineType: 'none' })
+    expect((await pull(before.cursor)).tasks).toMatchObject([{ id: 'someday-series', someday: true }])
   })
 
   it('anchors the cursor before a writer that begins after the activity snapshot', async () => {
