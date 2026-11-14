@@ -1,6 +1,16 @@
+import FloridaKit
 import Foundation
 
 enum WidgetFormatting {
+    static func taskDateLabel(_ date: TaskListDate, now: Date, calendar: Calendar) -> String {
+        let day = dayLabel(date.date, now: now, calendar: calendar)
+        switch date {
+        case .due: return day
+        case .pinned: return "Pinned \(day)"
+        case .start: return "Start \(day)"
+        }
+    }
+
     static func dayLabel(_ date: Date, now: Date, calendar: Calendar) -> String {
         let day = calendar.startOfDay(for: date)
         let today = calendar.startOfDay(for: now)

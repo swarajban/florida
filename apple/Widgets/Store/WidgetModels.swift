@@ -75,7 +75,7 @@ struct WidgetTask: Hashable, Sendable, Identifiable {
     var title: String
     var priority: Priority
     var deadlineType: DeadlineType
-    var dueAt: Date?
+    var listDate: TaskListDate?
     var late: Bool
     var colorHex: String?
 
@@ -84,8 +84,8 @@ struct WidgetTask: Hashable, Sendable, Identifiable {
         title = task.title
         priority = task.priority
         deadlineType = task.deadlineType
-        dueAt = task.dueAt
-        if task.isOpen, task.deadlineType != .none, let dueAt = task.dueAt {
+        listDate = task.dateForTaskList()
+        if task.isOpen, !task.someday, task.deadlineType != .none, let dueAt = task.dueAt {
             let timing = TaskTiming(task: task, placements: placements, now: date)
             late = timing.isOverdue || timing.lateEnd != nil || dueAt == date
         } else {

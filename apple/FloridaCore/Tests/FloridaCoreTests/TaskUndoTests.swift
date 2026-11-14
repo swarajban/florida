@@ -92,4 +92,58 @@ import Testing
         after.recurrenceRevision = "revision"
         #expect(TaskUndo(from: before, to: after) == nil)
     }
+
+    @Test(arguments: [false, true])
+    func somedayOnlyChangeIsTrackedAndRevertedExactly(_ someday: Bool) throws {
+        var before = task()
+        before.someday = !someday
+        var after = before
+        after.someday = someday
+        let undo = try #require(TaskUndo(from: before, to: after))
+        #expect(undo.stillApplies(to: after))
+        #expect(undo.reverted(after) == before)
+        #expect(!undo.stillApplies(to: before))
+        var closed = after
+        closed.completedAt = now
+        #expect(!undo.stillApplies(to: closed))
+        closed = after
+        closed.deletedAt = now
+        #expect(!undo.stillApplies(to: closed))
+    }
+
+    @Test func normalizedSomedayUndoRestoresDatesAndPreservesUnrelatedChanges() throws {
+        var before = task()
+        before.dueAt = now
+        before.pinnedStart = now.addingTimeInterval(3600)
+        before.startAt = now.addingTimeInterval(7200)
+        before.deadlineType = .hard
+        var after = before
+        after.someday = true
+        after.dueAt = nil
+        after.pinnedStart = nil
+        after.deadlineType = .none
+        let undo = try #require(TaskUndo(from: before, to: after))
+        #expect(undo.reverted(after) == before)
+        var live = after
+        live.title = "Latest title"
+        live.notes = "Latest notes"
+        live.recurrenceRevision = "latest-revision"
+        #expect(undo.stillApplies(to: live))
+        let restored = undo.reverted(live)
+        #expect(!restored.someday && restored.dueAt == before.dueAt && restored.pinnedStart == before.pinnedStart)
+        #expect(restored.deadlineType == before.deadlineType && restored.startAt == before.startAt)
+        #expect(restored.title == live.title && restored.notes == live.notes)
+        #expect(restored.recurrenceRevision == live.recurrenceRevision)
+    }
+
+    @Test func unrelatedUndoPreservesLatestSomeday() throws {
+        let before = task()
+        var after = before
+        after.title = "Edited"
+        let undo = try #require(TaskUndo(from: before, to: after))
+        var live = after
+        live.someday = true
+        #expect(undo.stillApplies(to: live))
+        #expect(undo.reverted(live).someday)
+    }
 }

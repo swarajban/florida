@@ -38,6 +38,7 @@ export interface RecurringTaskTemplate {
   priority: Priority
   deadlineType: DeadlineType
   dueAt: string | null
+  someday: boolean
   startAt: string | null
   scheduleId: string | null
   context: TaskContext
@@ -129,8 +130,9 @@ export function occurrenceFields(template: RecurringTaskTemplate, rule: Recurren
   return {
     ...fields,
     source: template.source ?? null,
+    deadlineType: fields.someday ? 'none' as const : fields.deadlineType,
     startAt: startAt === null ? new Date(zonedToUtc(day, 0, rule.timeZone)) : shift(startAt),
-    dueAt: dueAt === null ? new Date(zonedToUtc(dateFromDayNumber(dayNumber(day) + 1), 0, rule.timeZone) - 1) : shift(dueAt),
-    pinnedStart: pinnedStart === null ? null : shift(pinnedStart),
+    dueAt: fields.someday ? null : dueAt === null ? new Date(zonedToUtc(dateFromDayNumber(dayNumber(day) + 1), 0, rule.timeZone) - 1) : shift(dueAt),
+    pinnedStart: fields.someday || pinnedStart === null ? null : shift(pinnedStart),
   }
 }

@@ -81,6 +81,7 @@ export const EXPLAIN_SYSTEM = [
   SHARED_RULES,
   'The planner places tasks by priority and deadline into the hours of the weekly routine that allow the task’s context (computer, errand, home, office), around calendar events and commitments such as the gym.',
   'Tasks of a project that is not active are not scheduled. Shared-attention work can run beside other projects’ shared work, in up to three lanes.',
+  'A task marked someday is Someday, not Unscheduled: the user deliberately kept it off the plan. Never describe it as a scheduling problem.',
   'Say when it is planned, and the one or two facts that most explain that time: its context and which routine hours allow it, what is ahead of it, its deadline, its project’s status, or that it runs in parallel. If it is not planned, say why.',
   'calendarBusyTime names events that occupy the task’s allowed routine hours before its placement or deadline. Name the relevant blocking event instead of a generic calendar conflict; the list is not proof that one event alone caused the outcome.',
 ].join('\n')

@@ -7,6 +7,11 @@ import SwiftUI
 /// selected row scrolled into view as `j` / `k`
 /// move it, and tells the model which rows are on screen, for jump mode.
 struct TaskPaneView: View {
+    private struct SelectionSection: Equatable {
+        let item: ItemID?
+        let sectionId: String?
+    }
+
     @Environment(AppModel.self) private var model
     @State private var clickedItem: ItemID?
 
@@ -82,7 +87,7 @@ struct TaskPaneView: View {
                             } else {
                                 Section {
                                     ForEach(group.tasks, id: \.paneItemID) { task in
-                                        TaskPaneRow(taskID: task.id, isInbox: group.isInbox, onClick: handleRowClick)
+                                        TaskPaneRow(taskID: task.id, sectionID: group.id, isInbox: group.isInbox, onClick: handleRowClick)
                                     }
                                 } header: {
                                     TaskGroupHeader(group: group)
@@ -108,6 +113,26 @@ struct TaskPaneView: View {
                         if !model.paneItemsOnScreen.contains(selection) {
                             proxy.scrollTo(selection, anchor: .center)
                         }
+                    }
+                }
+                .onChange(of: model.dueDateTaskId) { _, taskId in
+                    if let taskId { proxy.scrollTo(ItemID.task(taskId)) }
+                }
+                .onChange(of: SelectionSection(
+                    item: model.selection,
+                    sectionId: model.taskGroups.first { group in
+                        group.tasks.contains { ItemID.task($0.id) == model.selection }
+                    }?.id
+                )) { previous, current in
+                    guard previous.item == current.item, current.sectionId != nil,
+                          let selection = current.item, selection.isTask,
+                          model.focus == .tasks || model.gridLayout.day(of: selection) == nil else { return }
+                    DispatchQueue.main.async {
+                        guard model.selection == selection,
+                              model.taskGroups.first(where: { group in
+                                  group.tasks.contains { ItemID.task($0.id) == selection }
+                              })?.id == current.sectionId else { return }
+                        proxy.scrollTo(selection, anchor: .center)
                     }
                 }
                 .onChange(of: model.taskListGrouping) {
@@ -152,11 +177,16 @@ struct TaskPaneView: View {
 private struct TaskPaneRow: View {
     @Environment(AppModel.self) private var model
     let taskID: String
+    let sectionID: String
     let isInbox: Bool
     let onClick: @MainActor (ItemID, Bool) -> Void
 
     var body: some View {
-        if let task = model.tasksById[taskID], task.isOpen {
+        if let task = model.tasksById[taskID], task.isOpen,
+           model.taskListGrouping.sections(
+               tasks: [task], categories: model.categoriesById[task.categoryId].map { [$0] } ?? [],
+               now: model.clockNow, calendar: model.taskListCalendar
+           ).contains(where: { $0.id == sectionID && !$0.tasks.isEmpty }) {
             content(task)
         }
     }
@@ -168,12 +198,21 @@ private struct TaskPaneRow: View {
         let tint = category?.tint ?? .defaultCategory
         return TaskRowView(
             task: task, state: model.scheduleState(for: task),
-            tint: tint, category: model.taskListGrouping == .dueDate && category?.isInbox == false ? category : nil,
+            tint: tint, category: category,
+            showsCategory: model.taskListGrouping == .dueDate || isInbox,
             isSelected: model.selection == item, isFocused: model.focus == .tasks,
             isUntriaged: isInbox, suggestion: suggestion,
             jumpLabel: model.jumpLabel(for: item),
             calendar: model.taskListCalendar, now: model.clockNow,
-            onComplete: { model.complete(task) }
+            onComplete: { model.complete(task) },
+            onSetDueDate: {
+                model.select(item, in: .tasks)
+                model.run(.setDueDate)
+            },
+            onSomeday: {
+                model.select(item, in: .tasks)
+                model.run(.someday)
+            }
         ) {
             if let suggestion { model.move(task, to: suggestion) }
         }
@@ -185,6 +224,7 @@ private struct TaskPaneRow: View {
         .onClick { isDouble in
             onClick(item, isDouble)
         }
+        .modifier(TaskDueDatePicker(task: task))
     }
 }
 

@@ -292,7 +292,7 @@ struct QuickAddSheet: View {
             .popover(isPresented: $showingHelp) {
                 NavigationStack {
                     ScrollView {
-                        Text("^fri / ^nov 20 / ^none: due date or no due date\n\n!1 ASAP · !2 high · !3 medium · !4 low (names work too)\n\n#work: category · @home: context, not location\n\n*weekly / *every 2 weeks / *mon wed: repeat\n\n=45m: estimate · ~tomorrow: start\n\n// notes: everything after this stays literal\n\nArrows choose; Tab or Return completes; Esc closes suggestions. Plain “30m by fri” still works.")
+                        Text("^fri / ^nov 20: due date\n\nsomeday / ^someday / ^none: Someday, no due date and off the plan\n\n!1 ASAP · !2 high · !3 medium · !4 low (names work too)\n\n#work: category · @home: context, not location\n\n*weekly / *every 2 weeks / *mon wed: repeat\n\n=45m: estimate · ~tomorrow: start\n\n// notes: everything after this stays literal\n\nArrows choose; Tab or Return completes; Esc closes suggestions. Plain “30m by fri” still works.")
                             .font(.callout)
                             .padding(20)
                             .accessibilityIdentifier("quick-add-help-content")
@@ -413,7 +413,22 @@ struct QuickAddSheet: View {
     }
 
     private var destination: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let dateDecided = draft.dueAt != nil || draft.startAt != nil || draft.pinnedStart != nil || draft.someday
+        let explanation: String
+        if model.categories.isEmpty {
+            explanation = "Sync your categories in Settings first. Your draft stays here."
+        } else if category == nil {
+            explanation = "Choose a category for this task."
+        } else if category?.isInbox == true {
+            explanation = dateDecided
+                ? "The date decision is set. Choose a category to finish triage."
+                : "Choose a category and a due date, start date, pinned time, or Someday to finish triage."
+        } else {
+            explanation = dateDecided
+                ? "Category and date decision are set. This task skips Inbox."
+                : "Your category stays attached. Choose a due date, start date, pinned time, or Someday to leave Inbox."
+        }
+        return VStack(alignment: .leading, spacing: 6) {
             Menu {
                 ForEach(model.categories) { category in
                     Button(category.name, systemImage: category.isInbox ? "tray" : "folder") {
@@ -434,12 +449,10 @@ struct QuickAddSheet: View {
                 .contentShape(Rectangle())
             }
             .accessibilityIdentifier("quick-add-category")
-            Text(model.categories.isEmpty ? "Sync your categories in Settings first. Your draft stays here."
-                 : category == nil ? "Choose a category for this task."
-                 : category?.isInbox == true ? "Unfiled for now. Choose a category to skip Inbox."
-                 : "Goes straight here, not Inbox.")
+            Text(explanation)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .accessibilityIdentifier("quick-add-destination-explanation")
         }
     }
 
@@ -574,11 +587,12 @@ struct QuickAddSheet: View {
 
     private func finished(_ task: TaskItem) {
         let name = model.category(id: task.categoryId)?.name ?? model.quickAddCategory?.name ?? "Inbox"
+        let destination = task.needsTriage && task.categoryId != TaskCategory.inboxId ? "Inbox · \(name)" : name
         model.quickAddText = ""
         model.quickAddRemovedSourceURL = nil
         model.quickAddCategory = nil
         model.quickAddCategoryHint = nil
-        model.showToast(Toast(message: "Added to \(name)", systemImage: "checkmark.circle.fill", style: .success))
+        model.showToast(Toast(message: "Added to \(destination)", systemImage: "checkmark.circle.fill", style: .success))
         dismiss()
     }
 

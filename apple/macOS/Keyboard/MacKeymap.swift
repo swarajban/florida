@@ -52,6 +52,8 @@ struct MacKeymap: Sendable {
         ("f", .jump),
         ("v", .joinMeeting),
         ("g r", .openEventResources),
+        ("b", .setDueDate),
+        ("i", .someday),
         ("g s", .openTaskSource),
         ("g o", .toggleTaskGrouping),
     ]

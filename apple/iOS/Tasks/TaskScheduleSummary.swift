@@ -9,6 +9,7 @@ import Foundation
 /// - scheduled: placed, possibly only in part (`unplacedMinutes` then says how much is left out).
 struct TaskScheduleSummary: Hashable {
     enum State: Hashable {
+        case someday
         case scheduled
         case late(eta: Date)
         case unscheduled
@@ -24,8 +25,14 @@ struct TaskScheduleSummary: Hashable {
     var unplacedMinutes = 0
 
     init(task: TaskItem, placements: [Placement], unscheduled: UnscheduledTask?, now: Date) {
-        let sorted = placements.sorted { $0.startAt < $1.startAt }
         timing = TaskTiming(task: task, placements: placements, now: now)
+        if task.someday {
+            state = .someday
+            firstStart = nil
+            blockCount = 0
+            return
+        }
+        let sorted = placements.sorted { $0.startAt < $1.startAt }
         blockCount = sorted.count
         firstStart = sorted.first?.startAt
         if let unscheduled, unscheduled.unplacedMinutes > 0 {
@@ -47,12 +54,13 @@ struct TaskScheduleSummary: Hashable {
     var isAlarming: Bool {
         switch state {
         case .late, .overdue: true
-        case .scheduled, .unscheduled: false
+        case .scheduled, .unscheduled, .someday: false
         }
     }
 
     var symbolName: String {
         switch state {
+        case .someday: "tray"
         case .scheduled: "calendar.badge.clock"
         case .late: "exclamationmark.circle.fill"
         case .unscheduled: "calendar.badge.minus"
@@ -64,6 +72,8 @@ struct TaskScheduleSummary: Hashable {
     /// "Unscheduled".
     func headline(now: Date, calendar: Calendar) -> String {
         switch state {
+        case .someday:
+            return "Someday"
         case .scheduled:
             var text = firstStart.map { Formatting.dayAndTime($0, now: now, calendar: calendar) } ?? ""
             if blockCount > 1 {

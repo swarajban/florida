@@ -10,6 +10,7 @@ struct TaskRowView: View {
     let state: TaskScheduleState
     let tint: Color
     let category: TaskCategory?
+    let showsCategory: Bool
     let isSelected: Bool
     let isFocused: Bool
     /// In Inbox: drawn with a hollow, dashed edge until it is moved to a category.
@@ -21,6 +22,8 @@ struct TaskRowView: View {
     let calendar: Calendar
     let now: Date
     let onComplete: () -> Void
+    let onSetDueDate: () -> Void
+    let onSomeday: () -> Void
     let onAcceptSuggestion: () -> Void
     @State private var isOverDone = false
 
@@ -61,11 +64,33 @@ struct TaskRowView: View {
                     metadata(showsContext: false, showsSchedule: true).fixedSize(horizontal: true, vertical: false)
                     metadata(showsContext: false, showsSchedule: false)
                 }
+                if isUntriaged && task.dateForTaskList() == nil && !task.someday {
+                    HStack(spacing: 10) {
+                        Button(action: onSetDueDate) {
+                            HStack(spacing: 3) {
+                                Text("Set due date")
+                                Keycap("b")
+                            }
+                        }
+                        .accessibilityIdentifier("task-triage-date-\(task.id)")
+                        Button(action: onSomeday) {
+                            HStack(spacing: 3) {
+                                Text("Someday")
+                                Keycap("i")
+                            }
+                        }
+                        .accessibilityIdentifier("task-triage-indefinite-\(task.id)")
+                    }
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
                 if let problem = state.problem(calendar: calendar, now: now) {
                     Text(problem)
                         .font(.caption)
                         .foregroundStyle(state.isOverdue ? Color.red : Color.orange)
                         .lineLimit(2)
+                        .accessibilityIdentifier("task-problem-\(task.id)")
                 }
                 if let suggestion {
                     Button(action: onAcceptSuggestion) {
@@ -110,7 +135,7 @@ struct TaskRowView: View {
         .padding(.horizontal, 6)
         .contentShape(Rectangle())
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(isSelected ? "Selected task, \(task.title)" : "Task, \(task.title)")
+        .accessibilityLabel("\(isSelected ? "Selected task" : "Task"), \(task.title), \(isUntriaged ? "Inbox" : "Categorized")")
         .accessibilityIdentifier("task-row-\(task.id)")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
@@ -136,22 +161,39 @@ struct TaskRowView: View {
                     .accessibilityLabel("Source: \(source.title)")
                     .accessibilityIdentifier("task-source-\(task.id)")
             }
-            if let dueAt = state.timing.dueAt {
-                Label {
-                    Text(DateText.due(dueAt, calendar: calendar, now: now))
-                        .accessibilityIdentifier("task-due-label-\(task.id)")
-                } icon: {
-                    Image(systemName: task.deadlineType == .hard ? "calendar.badge.clock" : "calendar")
+            if let listDate = task.dateForTaskList() {
+                Group {
+                    switch listDate {
+                    case .due(let date):
+                        Label {
+                            Text(DateText.due(date, calendar: calendar, now: now))
+                                .accessibilityIdentifier("task-due-label-\(task.id)")
+                        } icon: {
+                            Image(systemName: task.deadlineType == .hard ? "calendar.badge.clock" : "calendar")
+                        }
+                        .foregroundStyle(state.isOverdue ? Color.red : Color.secondary)
+                    case .pinned(let date):
+                        Label("Pinned \(DateText.dayAndTime(date, calendar: calendar, now: now))", systemImage: "pin.fill")
+                            .accessibilityIdentifier("task-list-date-\(task.id)")
+                    case .start(let date):
+                        Label("Start \(DateText.notBefore(date, calendar: calendar, now: now))", systemImage: "arrow.right.to.line")
+                            .accessibilityIdentifier("task-list-date-\(task.id)")
+                    }
                 }
-                .foregroundStyle(state.isOverdue ? Color.red : Color.secondary)
                 .layoutPriority(1)
             }
-            if showsSchedule {
-                Text(state.label(calendar: calendar, now: now)).foregroundStyle(scheduleColor)
+            if showsSchedule || task.someday {
+                Text(state.label(calendar: calendar, now: now))
+                    .foregroundStyle(scheduleColor)
                     .accessibilityIdentifier("task-schedule-label-\(task.id)")
             }
             if state.isPinned { Image(systemName: "pin.fill") }
-            if let category { TaskCategoryChip(category: category) }
+            if showsCategory, let category, !category.isInbox {
+                TaskCategoryChip(category: category)
+            } else if isUntriaged && (category == nil || category?.isInbox == true) {
+                Label("No category", systemImage: "folder")
+                    .accessibilityIdentifier("task-inbox-category-\(task.id)")
+            }
         }
         .labelStyle(.titleAndIcon)
         .font(.caption)
@@ -162,7 +204,7 @@ struct TaskRowView: View {
 
     private var scheduleColor: Color {
         switch state.kind {
-        case .unscheduled: .secondary
+        case .someday, .unscheduled: .secondary
         case .scheduled: tint
         case .late: .orange
         }

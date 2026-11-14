@@ -45,7 +45,8 @@ enum QuickAddTaskBuilder {
             pinnedStart: draft.pinnedStart,
             createdAt: now,
             updatedAt: now,
-            recurrence: draft.recurrence)
+            recurrence: draft.recurrence,
+            someday: draft.someday)
         task.source = draft.source
         if task.recurrence != nil { task.prepareToEnableRecurrence() }
         return task

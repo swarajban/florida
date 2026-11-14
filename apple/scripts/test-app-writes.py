@@ -71,6 +71,13 @@ struct TaskEditorSheet {
     var isNew = false
     var sourceURL = ""
     var sourceTitle = ""
+    var model = AppModel()
+    var somedayIntent: Bool?
+    var dateEdits: Set<TaskDateField> = []
+    var dueTimeChoice: Bool?
+    var startTimeChoice: Bool?
+    enum Focus { case title }
+    var focus: Focus?
     var hasDue = true
     var dueAt: Date
     var hasStart = false
@@ -78,7 +85,8 @@ struct TaskEditorSheet {
     var hasPinnedStart = false
     var pinnedStart: Date
     func saved() -> TaskItem { preparedTask }
-'''+ computed(editor, 'editedSource') + '\n' + prepared + '\n}\n' + r'''
+    mutating func useParsed(_ parsed: TaskDraft) { apply(parsed) }
+'''+ computed(editor, 'editedSource') + '\n' + prepared + '\n' + method(editor, 'apply').replace('private func apply', 'mutating func apply') + '\n}\n' + r'''
 final class TaskRecurrenceSection {
     var recurrence: TaskRecurrence?
     var wasRecurring = false
@@ -126,7 +134,10 @@ final class AppDatabase {
         tasks[task.id] = task
     }
     @discardableResult
-    func saveTask(_ task: TaskItem, original: TaskItem?, now: Date = Date()) throws -> TaskMutation {
+    func saveTask(
+        _ task: TaskItem, original: TaskItem?, somedayIntent: Bool? = nil,
+        dateEdits: Set<TaskDateField> = [], now: Date = Date()
+    ) throws -> TaskMutation {
         beforeSave?()
         beforeSave = nil
         let before = tasks[task.id]
@@ -136,12 +147,21 @@ final class AppDatabase {
             let old = try JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(TaskWrite(original))) as! [String: Any]
             let new = try JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(TaskWrite(task))) as! [String: Any]
             for key in Set(old.keys).union(new.keys) where key != "expectedRecurrenceRevision" {
-                if !NSDictionary(dictionary: [key: old[key] ?? NSNull()]).isEqual(to: [key: new[key] ?? NSNull()]) {
+                let was = try JSONSerialization.data(withJSONObject: [key: old[key] ?? NSNull()], options: .sortedKeys)
+                let now = try JSONSerialization.data(withJSONObject: [key: new[key] ?? NSNull()], options: .sortedKeys)
+                if was != now {
                     fields[key] = new[key] ?? NSNull()
                 }
             }
             after = try JSONCoding.decoder.decode(TaskItem.self, from: JSONSerialization.data(withJSONObject: fields))
         }
+        if dateEdits.contains(.due) {
+            after.dueAt = task.dueAt
+            after.deadlineType = task.deadlineType
+        }
+        if dateEdits.contains(.start) { after.startAt = task.startAt }
+        if dateEdits.contains(.pin) { after.pinnedStart = task.pinnedStart }
+        if let somedayIntent { after.someday = somedayIntent }
         tasks[task.id] = after
         return TaskMutation(before: before, after: after)
     }
@@ -267,6 +287,8 @@ final class AppModel {
     var selection: Item?
     var selectedTask: TaskItem?
     var categoriesById: [String: TaskCategory] = [:]
+    var editorQuickAddDraft: QuickAddDraft?
+    var editorQuickAddCategoryId: String?
     var selectedSuggestion: Int? { nil }
     var placementsByTask: [String: [Placement]] = [:]
     var calendar = Calendar(identifier: .gregorian)
@@ -474,7 +496,66 @@ for changedSibling in [false, true] {
     }
 }
 let oldDate = Date(timeIntervalSince1970: 1_795_132_800)
+for intent in [false, true] {
+    var original = initial
+    original.someday = intent
+    var live = original
+    live.someday = !intent
+    live.notes = "Remote notes"
+    let model = AppModel()
+    model.database!.tasks[initial.id] = live
+    _ = model.save(original, original: original, somedayIntent: intent)
+    check(model.database!.tasks[initial.id]?.someday == intent
+          && model.database!.tasks[initial.id]?.notes == live.notes,
+          "Mac save forwards explicit final Someday intent without clobbering untouched fields")
+    model.database!.tasks[initial.id] = live
+    _ = model.save(original, original: original)
+    check(model.database!.tasks[initial.id]?.someday == live.someday,
+          "Mac save preserves an untouched concurrent Someday decision")
+}
 let newDate = oldDate.addingTimeInterval(4 * 86_400)
+for date in [oldDate, newDate] {
+    var original = initial
+    original.dueAt = oldDate
+    original.deadlineType = .soft
+    var live = original
+    live.someday = true
+    live.dueAt = nil
+    live.deadlineType = .none
+    live.notes = "Remote notes"
+    var draft = original
+    draft.dueAt = date
+    let model = AppModel()
+    model.database!.tasks[initial.id] = live
+    _ = model.save(draft, original: original, somedayIntent: false, dateEdits: [.due])
+    check(model.database!.tasks[initial.id]?.dueAt == date
+          && model.database!.tasks[initial.id]?.deadlineType == .soft
+          && model.database!.tasks[initial.id]?.notes == live.notes,
+          "Mac save forwards an explicit due choice and its deadline policy after concurrent Someday")
+}
+for localSomeday in [false, true] {
+    var toggled = initial
+    toggled.someday = true
+    toggled.dueAt = nil
+    toggled.pinnedStart = nil
+    toggled.deadlineType = .none
+    var editor = TaskEditorSheet(
+        draft: toggled, original: initial, isNew: true, somedayIntent: true, dateEdits: [.due, .pin],
+        hasDue: false, dueAt: oldDate, startAt: oldDate, pinnedStart: oldDate)
+    if localSomeday {
+        editor.model.editorQuickAddDraft = QuickAddParser.parse(
+            "Local ^none", now: oldDate, calendar: Calendar(identifier: .gregorian))
+    }
+    editor.useParsed(TaskDraft(title: "Dated AI draft", durationMinutes: 30, deadlineType: .soft, dueAt: newDate))
+    let prepared = editor.saved()
+    let model = AppModel()
+    _ = model.save(prepared, original: nil, somedayIntent: editor.somedayIntent, dateEdits: editor.dateEdits)
+    check(editor.somedayIntent == nil && editor.dateEdits.isEmpty,
+          "Mac draft replacement discards superseded toggle and date merge metadata")
+    check(model.database!.tasks[initial.id]?.someday == localSomeday
+          && model.database!.tasks[initial.id]?.dueAt == (localSomeday ? nil : newDate),
+          "Mac toggle-on then Use this saves the final dated/local-explicit draft, not stale intent")
+}
 let section = TaskRecurrenceSection()
 section.recurrence = TaskRecurrence(frequency: .week, timeZone: "UTC", startDate: "")
 section.recurrence!.startDate = section.recurrence!.dateString(for: oldDate)
@@ -679,6 +760,33 @@ editorCompletion.undo(editorCompletion.toasts.last!)
 check(editorCompletion.database!.tasks[initial.id]?.title == initial.title
       && editorCompletion.database!.tasks[initial.id]?.categoryId == initial.categoryId,
       "iPhone editor completion undo reverses all edited fields together")
+for intent in [false, true] {
+    var original = initial
+    original.someday = intent
+    var live = original
+    live.someday = !intent
+    live.notes = "Remote notes"
+    let model = AppModel()
+    model.database!.tasks[initial.id] = live
+    model.complete(original, original: original, somedayIntent: intent)
+    check(model.database!.tasks[initial.id]?.someday == intent
+          && model.database!.tasks[initial.id]?.notes == live.notes,
+          "iPhone editor completion forwards final Someday intent without clobbering untouched fields")
+}
+let due = Date(timeIntervalSince1970: 1_800_000_000)
+var dated = initial
+dated.dueAt = due
+dated.deadlineType = .hard
+var deferred = dated
+deferred.someday = true
+deferred.dueAt = nil
+deferred.deadlineType = .none
+let datedCompletion = AppModel()
+datedCompletion.database!.tasks[initial.id] = deferred
+datedCompletion.complete(dated, original: dated, somedayIntent: false, dateEdits: [.due])
+check(datedCompletion.database!.tasks[initial.id]?.dueAt == due
+      && datedCompletion.database!.tasks[initial.id]?.deadlineType == .hard,
+      "iPhone editor completion forwards a same-value due choice and its deadline policy")
 let actions: [(String, (AppModel, TaskItem) -> Void)] = [
     ("pin", { $0.pin($1, at: Date()) }),
     ("progress", { $0.doneForNow($1, minutes: 10) }),
@@ -732,6 +840,7 @@ with tempfile.TemporaryDirectory(prefix='florida-app-writes-') as directory:
     ios = work / 'ios.swift'
     ios.write_text(harness[:harness.index('enum Item:')] + ios_model
                    + source('apple/iOS/Support/Toast.swift')
+                   + '\nextension AppModel {\n' + method(source('apple/iOS/App/AppModel+InboxTriage.swift'), 'refreshTaskDateState') + '\n}\n'
                    + '\nextension AppModel {\n' + method(source('apple/iOS/App/AppModel+Writes.swift'), 'undo') + '\n}\n'
                    + '\nextension AppModel {\n' + method(source('apple/iOS/App/AppModel+Actions.swift'), 'complete') + '\n}\n'
                    + '\nextension AppModel {\n' + method(source('apple/iOS/App/AppModel+Actions.swift'), 'doneForNow') + '\n}\n'

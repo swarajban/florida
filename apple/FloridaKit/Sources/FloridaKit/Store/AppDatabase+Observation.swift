@@ -60,7 +60,7 @@ extension AppDatabase {
     /// task list can derive each task's scheduled time from it without a date filter.
     public func observePlacements() -> AsyncValueObservation<[Placement]> {
         observe { db in
-            try Placement.order(Column("startAt")).fetchAll(db)
+            try Self.placements(db)
         }
     }
 
@@ -74,7 +74,7 @@ extension AppDatabase {
     /// Tasks the last scheduler run could not fully place, as `unscheduled()` returns them.
     public func observeUnscheduled() -> AsyncValueObservation<[UnscheduledTask]> {
         observe { db in
-            try UnscheduledTask.order(Column("taskId")).fetchAll(db)
+            try Self.unscheduled(db)
         }
     }
 

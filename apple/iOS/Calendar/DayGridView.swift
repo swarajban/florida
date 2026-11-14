@@ -343,11 +343,12 @@ struct DayGridView: View {
     }
 
     private var inputs: Inputs {
-        Inputs(
+        let somedayIDs = model.somedayTaskIDs
+        return Inputs(
             days: days, agendas: model.gridDays,
             // Today's finished blocks, on whichever column today is (`visibleGhosts` assumes the
             // selected day is today, which a 3-day grid opened on yesterday breaks).
-            ghosts: JoySetting.ghosts.isOn ? model.ghostBlocks : [],
+            ghosts: JoySetting.ghosts.isOn ? model.ghostBlocks.filter { !somedayIDs.contains($0.taskId) } : [],
             optionalPlacements: model.optionalPlacements, openTasks: model.openTasks, routineBlocks: model.routineBlocks,
             blooming: Set(model.blooming.keys), categories: model.categories, projects: model.projects,
             calendars: model.calendars, accounts: model.accounts,

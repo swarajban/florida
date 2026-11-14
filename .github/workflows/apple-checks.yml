@@ -78,7 +78,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [macos, ios-capture, ios-events, ios-other, ios-compact]
+        suite: [macos, macos-triage, ios-capture, ios-events, ios-other, ios-smart-add, ios-triage, ios-compact]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
@@ -101,18 +101,29 @@ jobs:
             Florida-iOSUITests/SmokeTests/testCapturePasteAndDeletedCategory
             Florida-iOSUITests/SmokeTests/testPlanScreensInBothAppearances
             Florida-iOSUITests/SmokeTests/testEventResourcesInBothAppearances
+            Florida-iOSUITests/TaskGroupingTests
           )
           events=(
             Florida-iOSUITests/EventQuickAddTests
+            Florida-iOSUITests/TaskDateRegressionTests
             Florida-iOSUITests/SmokeTests/testTaskShortcutAndRecurringEvent
             Florida-iOSUITests/SmokeTests/testEventDayBlockingOverrides
             Florida-iOSUITests/SmokeTests/testCalendarVisibilityAndBlockingAreIndependent
           )
+          macos_triage=(
+            Florida-macOSUITests/InboxTriageTests
+            Florida-macOSUITests/TaskTriageTests
+          )
+          ios_triage=(Florida-iOSUITests/InboxTriageTests)
+          ios_smart_add=(Florida-iOSUITests/SmartAddTests)
           case '${{ matrix.suite }}' in
-            macos) args=(macos) ;;
+            macos) args=(macos "${macos_triage[@]/#/-skip-testing:}") ;;
+            macos-triage) args=(macos "${macos_triage[@]/#/-only-testing:}") ;;
             ios-capture) args=(ios "${capture[@]/#/-only-testing:}") ;;
             ios-events) args=(ios "${events[@]/#/-only-testing:}") ;;
-            ios-other) args=(ios "${capture[@]/#/-skip-testing:}" "${events[@]/#/-skip-testing:}") ;;
+            ios-other) args=(ios "${capture[@]/#/-skip-testing:}" "${events[@]/#/-skip-testing:}" "${ios_triage[@]/#/-skip-testing:}" "${ios_smart_add[@]/#/-skip-testing:}") ;;
+            ios-smart-add) args=(ios "${ios_smart_add[@]/#/-only-testing:}") ;;
+            ios-triage) args=(ios "${ios_triage[@]/#/-only-testing:}") ;;
             ios-compact)
               runtime=$(xcrun simctl list runtimes -j | python3 -c '
           import json, sys

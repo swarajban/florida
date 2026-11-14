@@ -4,7 +4,7 @@ import type { LocalDate, SchedulerResult } from '@florida/scheduler'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { and, asc, desc, eq, gt, inArray, isNull, lt, or } from 'drizzle-orm'
+import { and, asc, desc, eq, getTableColumns, gt, inArray, isNotNull, isNull, lt, or } from 'drizzle-orm'
 import type { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
@@ -63,6 +63,9 @@ const INSTRUCTIONS = [
   'around calendar events, and returns placements: suggested work blocks, not calendar events. Call',
   'list_categories first to learn the category ids, get_agenda to see one day of calendar events plus',
   'planned task blocks, and list_tasks for what is open. Instants are ISO 8601 strings.',
+  'Someday tasks stay off the plan and do not consume project budgets. Setting someday true clears',
+  'the due date and pin but keeps the start date; setting a changed nonnull date with an omitted',
+  'marker turns Someday off. To schedule again on the same date, explicitly send someday false.',
   'Projects are ongoing work bigger than one task, each thinking, active, on_hold or done; only tasks',
   'of active projects are scheduled, and a project with weeklyMinutes gets project time planned for',
   'what its tasks do not cover. Work that mostly runs itself (an agent does it) is shared attention:',
@@ -114,9 +117,9 @@ export function buildMcpServer(deps: McpDeps): McpServer {
     {
       title: 'List tasks',
       description:
-        'Lists open tasks (soonest due first, undated last) with their scheduled blocks. Completed tasks are excluded unless includeCompleted is true.',
+        'Lists open tasks (soonest due first, undated last) with their scheduled blocks. Inbox includes unfiled tasks and categorized tasks with no due, start, pin or Someday decision; other category lists exclude those Inbox tasks. Someday tasks stay off the plan. Completed tasks are excluded unless includeCompleted is true.',
       inputSchema: {
-        categoryId: z.string().min(1).optional().describe('Only tasks in this category'),
+        categoryId: z.string().min(1).optional().describe('Only tasks in this category view; inbox is the derived needs-triage list'),
         includeCompleted: z.boolean().default(false),
         limit: z.number().int().min(1).max(200).default(50),
       },
@@ -126,7 +129,11 @@ export function buildMcpServer(deps: McpDeps): McpServer {
       run(async () => {
         const conditions = [isNull(tasks.deletedAt)]
         if (!includeCompleted) conditions.push(isNull(tasks.completedAt))
-        if (categoryId !== undefined) conditions.push(eq(tasks.categoryId, categoryId))
+        if (categoryId === 'inbox') {
+          conditions.push(or(eq(tasks.categoryId, 'inbox'), and(isNull(tasks.dueAt), isNull(tasks.startAt), isNull(tasks.pinnedStart), eq(tasks.someday, false)))!)
+        } else if (categoryId !== undefined) {
+          conditions.push(eq(tasks.categoryId, categoryId), or(isNotNull(tasks.dueAt), isNotNull(tasks.startAt), isNotNull(tasks.pinnedStart), eq(tasks.someday, true))!)
+        }
         const rows = await db
           .select()
           .from(tasks)
@@ -422,7 +429,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
           })
           .from(placements)
           .innerJoin(tasks, eq(placements.taskId, tasks.id))
-          .where(and(lt(placements.startAt, end), gt(placements.endAt, start)))
+          .where(and(eq(tasks.someday, false), lt(placements.startAt, end), gt(placements.endAt, start)))
           .orderBy(asc(placements.startAt))
 
         const projectTime = await db
@@ -478,7 +485,10 @@ export function buildMcpServer(deps: McpDeps): McpServer {
 
   async function placementsFor(ids: string[]): Promise<PlacementRow[]> {
     if (ids.length === 0) return []
-    return db.select().from(placements).where(inArray(placements.taskId, ids)).orderBy(asc(placements.startAt))
+    return db.select(getTableColumns(placements)).from(placements)
+      .innerJoin(tasks, eq(placements.taskId, tasks.id))
+      .where(and(eq(tasks.someday, false), inArray(placements.taskId, ids)))
+      .orderBy(asc(placements.startAt))
   }
 }
 
@@ -508,7 +518,7 @@ function withPlacements(task: TaskRow, all: PlacementRow[]) {
   return {
     ...task,
     placements: all
-      .filter((p) => p.taskId === task.id)
+      .filter((p) => !task.someday && p.taskId === task.id)
       .map((p) => ({ startAt: p.startAt, endAt: p.endAt, pinned: p.pinned })),
   }
 }

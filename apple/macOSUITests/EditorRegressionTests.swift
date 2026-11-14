@@ -23,6 +23,66 @@ final class EditorRegressionTests: XCTestCase {
     }
 
     @MainActor
+    func testSomedayUndoKeepsRemoteTitleAndDoesNotResurrectClosedTasks() {
+        continueAfterFailure = false
+        for mode in ["uiEditorSyncDuringTyping", "uiEditorDeleteDuringTyping", "uiEditorCompleteDuringTyping"] {
+            let app = XCUIApplication()
+            app.launchArguments = [
+                "-demoData", "YES", "-uiAppearance", "light", "-uiEditorDiagnostics", "YES",
+                "-\(mode)", "YES", "-uiEditorAcknowledgePending", "YES", "-joy.ghosts", "NO",
+            ]
+            app.launch()
+            defer { app.terminate() }
+            let diagnostics = app.staticTexts["editor-diagnostics"]
+            XCTAssertTrue(diagnostics.waitForExistence(timeout: 15))
+            waitForValue("taskWrites=0 queueChanges=0 sounds=0 pendingRows=0 syncApplied=false", of: diagnostics)
+            app.typeKey("/", modifierFlags: [])
+            let search = app.textFields["palette-input"]
+            XCTAssertTrue(search.waitForExistence(timeout: 5))
+            search.typeText("Renew VPN certificate")
+            app.typeKey(.return, modifierFlags: [])
+            XCTAssertTrue(search.waitForNonExistence(timeout: 5))
+            app.typeKey("i", modifierFlags: [])
+            waitForValue("taskWrites=1 queueChanges=1 sounds=0 pendingRows=1 syncApplied=false", of: diagnostics)
+            app.typeKey("e", modifierFlags: [])
+            let title = app.textFields["task-title"]
+            XCTAssertTrue(title.waitForExistence(timeout: 5))
+            XCTAssertEqual((app.checkBoxes["task-someday"].value as? NSNumber)?.intValue, 1)
+            title.click()
+            app.typeKey("a", modifierFlags: .command)
+            title.typeText("Unsaved local VPN title")
+            let writes = mode == "uiEditorDeleteDuringTyping" ? 1 : 2
+            let synced = "taskWrites=\(writes) queueChanges=1 sounds=0 pendingRows=0 syncApplied=true"
+            waitForValue(synced, of: diagnostics)
+            XCTAssertEqual(title.value as? String, "Unsaved local VPN title")
+            app.typeKey(.escape, modifierFlags: [])
+            if mode != "uiEditorSyncDuringTyping" {
+                app.sheets.buttons["Save"].click()
+                XCTAssertTrue(title.exists)
+                XCTAssertEqual(diagnostics.value as? String, synced)
+                XCTAssertTrue(app.staticTexts["This task is no longer open"].waitForExistence(timeout: 5))
+            }
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(title.waitForNonExistence(timeout: 5))
+            app.typeKey("z", modifierFlags: [])
+            if mode == "uiEditorSyncDuringTyping" {
+                waitForValue("taskWrites=3 queueChanges=2 sounds=0 pendingRows=1 syncApplied=true", of: diagnostics)
+                app.typeKey("e", modifierFlags: [])
+                XCTAssertTrue(title.waitForExistence(timeout: 5))
+                XCTAssertEqual(title.value as? String, "Remote sync VPN title")
+                XCTAssertEqual((app.checkBoxes["task-someday"].value as? NSNumber)?.intValue, 0)
+                XCTAssertNotEqual(app.buttons["task-due"].value as? String, "No date")
+            } else {
+                XCTAssertTrue(app.staticTexts["Already changed"].waitForExistence(timeout: 5))
+                assertValueRemains(synced, of: diagnostics)
+                XCTAssertFalse(app.buttons["task-done-demo-task-vpn"].exists)
+                XCTAssertFalse(app.staticTexts["Remote sync VPN title"].exists)
+                XCTAssertFalse(app.staticTexts["Unsaved local VPN title"].exists)
+            }
+        }
+    }
+
+    @MainActor
     func testEditedTaskCompletesWithOneWriteAndOneSoundInBothAppearances() {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {

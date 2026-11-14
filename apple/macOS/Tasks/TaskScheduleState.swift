@@ -6,7 +6,7 @@ import Foundation
 /// ends after the due date, and why (part of) the task did not fit.
 struct TaskScheduleState: Hashable {
     enum Kind: Hashable {
-        case unscheduled, scheduled, late
+        case someday, unscheduled, scheduled, late
     }
 
     let kind: Kind
@@ -23,12 +23,22 @@ struct TaskScheduleState: Hashable {
     let unplacedMinutes: Int
 
     init(task: TaskItem, placements: [Placement], unscheduled: UnscheduledTask?, now: Date = Date()) {
+        timing = TaskTiming(task: task, placements: placements, now: now)
+        if task.someday {
+            kind = .someday
+            firstStart = nil
+            lastEnd = nil
+            blockCount = 0
+            isPinned = false
+            unplacedReason = nil
+            unplacedMinutes = 0
+            return
+        }
         let sorted = placements.sorted { $0.startAt < $1.startAt }
         blockCount = sorted.count
         firstStart = sorted.first?.startAt
         lastEnd = sorted.map(\.endAt).max()
         isPinned = task.pinnedStart != nil
-        timing = TaskTiming(task: task, placements: placements, now: now)
         unplacedReason = unscheduled?.reason
         unplacedMinutes = unscheduled?.unplacedMinutes ?? 0
         if sorted.isEmpty {
@@ -42,6 +52,7 @@ struct TaskScheduleState: Hashable {
 
     /// "Unscheduled", "Today 3:00 PM", "Fri 9:00 AM · 2 blocks".
     func label(calendar: Calendar, now: Date = Date()) -> String {
+        if kind == .someday { return "Someday" }
         guard let firstStart else { return "Unscheduled" }
         var parts = [DateText.dayAndTime(firstStart, calendar: calendar, now: now)]
         if blockCount > 1 {
@@ -53,6 +64,7 @@ struct TaskScheduleState: Hashable {
     /// The trouble line under a row, or nil when the task is on track: "Overdue", "Late · ETA
     /// Fri 5:30 PM", "No room before the hard deadline · 45m unplaced".
     func problem(calendar: Calendar, now: Date = Date()) -> String? {
+        guard kind != .someday else { return nil }
         var parts: [String] = []
         if isOverdue {
             parts.append("Overdue")

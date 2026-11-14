@@ -178,10 +178,10 @@ final class SmartAddTests: XCTestCase {
             XCTAssertTrue(input.waitForExistence(timeout: 5))
             app.buttons["quick-add-save"].tap()
             XCTAssertTrue(input.waitForNonExistence(timeout: 5))
-            let saved = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Smart capture #q4"))
-            for _ in 0..<8 where !saved.firstMatch.isHittable
-                || saved.firstMatch.frame.maxY > app.tabBars.firstMatch.frame.minY { app.swipeUp() }
-            XCTAssertTrue(saved.firstMatch.waitForExistence(timeout: 5))
+            let saved = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tasks-row-' AND label BEGINSWITH %@", "Smart capture #q4"))
+            for _ in 0..<8 where !saved.element.isHittable
+                || saved.element.frame.maxY > app.tabBars.firstMatch.frame.minY { app.swipeUp() }
+            XCTAssertTrue(saved.element.waitForExistence(timeout: 5))
             XCTAssertEqual(saved.count, 1)
             app.buttons["New task"].tap()
             XCTAssertTrue(input.waitForExistence(timeout: 5))
@@ -200,23 +200,25 @@ final class SmartAddTests: XCTestCase {
             app.buttons["quick-add-symbol-*"].tap()
             input.typeText("week")
             app.buttons["quick-add-suggestion-*weekly"].tap()
-            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Every week")).firstMatch.exists)
+            let recurrenceChip = app.descendants(matching: .any)["quick-add-chip-recurrence"]
+            XCTAssertTrue(recurrenceChip.exists)
+            XCTAssertTrue(recurrenceChip.label.hasPrefix("Every week"))
             app.buttons["Details"].tap()
             XCTAssertTrue(app.textFields["Title"].waitForExistence(timeout: 5))
             XCTAssertEqual(app.textFields["Title"].value as? String, "Weekly smart review")
-            let summary = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Every week")).firstMatch
+            let summary = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Every week")).element
             for _ in 0..<8 where !summary.isHittable { app.swipeUp() }
             XCTAssertTrue(summary.waitForExistence(timeout: 5))
             app.buttons["Add"].tap()
             XCTAssertTrue(input.waitForNonExistence(timeout: 5))
-            let saved = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Weekly smart review"))
-            for _ in 0..<8 where !saved.firstMatch.isHittable
-                || saved.firstMatch.frame.maxY > app.tabBars.firstMatch.frame.minY { app.swipeUp() }
-            XCTAssertTrue(saved.firstMatch.waitForExistence(timeout: 5))
+            let saved = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tasks-row-' AND label BEGINSWITH %@", "Weekly smart review"))
+            for _ in 0..<8 where !saved.element.isHittable
+                || saved.element.frame.maxY > app.tabBars.firstMatch.frame.minY { app.swipeUp() }
+            XCTAssertTrue(saved.element.waitForExistence(timeout: 5))
             XCTAssertEqual(saved.count, 1)
-            saved.firstMatch.tap()
+            saved.element.tap()
             XCTAssertTrue(app.textFields["Title"].waitForExistence(timeout: 5))
-            let savedSummary = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Every week")).firstMatch
+            let savedSummary = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Every week")).element
             for _ in 0..<8 where !savedSummary.isHittable { app.swipeUp() }
             XCTAssertTrue(savedSummary.waitForExistence(timeout: 5))
             capture(app, "smart-add-recurrence-saved-\(appearance)")
@@ -240,9 +242,9 @@ final class SmartAddTests: XCTestCase {
         app.buttons["quick-add-symbol-^"].tap()
         input.typeText("none")
         app.typeKey(.tab, modifierFlags: [])
-        let noDueChip = app.descendants(matching: .any)["quick-add-chip-no-due-date"]
-        XCTAssertTrue(noDueChip.exists)
-        XCTAssertEqual(noDueChip.label, "No due date")
+        let somedayChip = app.descendants(matching: .any)["quick-add-chip-someday"]
+        XCTAssertTrue(somedayChip.exists)
+        XCTAssertEqual(somedayChip.label, "Someday")
         XCTAssertEqual(app.staticTexts["quick-add-title"].label, "Plan suffix")
         app.buttons["Cancel"].tap()
         app.buttons["New task"].tap()
@@ -277,8 +279,8 @@ final class SmartAddTests: XCTestCase {
         XCTAssertEqual(input.value as? String, "Hardware capture !2 ^tomorrow ")
         input.typeText("\n")
         XCTAssertTrue(input.waitForNonExistence(timeout: 5))
-        let saved = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Hardware capture"))
-        XCTAssertTrue(saved.firstMatch.waitForExistence(timeout: 5))
+        let saved = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tasks-row-' AND label BEGINSWITH %@", "Hardware capture"))
+        XCTAssertTrue(saved.element.waitForExistence(timeout: 5))
         XCTAssertEqual(saved.count, 1)
         app.terminate()
     }

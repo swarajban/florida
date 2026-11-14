@@ -182,7 +182,7 @@ import Testing
                 let draft = QuickAddParser.parse(result.text, now: PacificTestCalendar.date(2026, 11, 12), calendar: PacificTestCalendar.calendar)
                 #expect(draft.title == "Work", "\(result.text)")
                 switch symbol {
-                case "^": #expect(draft.dueAt != nil || draft.dueDateNotNeeded)
+                case "^": #expect(draft.dueAt != nil || draft.someday)
                 case "@": #expect(draft.context != nil)
                 case "!": #expect(draft.priority != nil)
                 case "*": #expect(draft.recurrence != nil)

@@ -137,6 +137,51 @@ describe('recurring tasks through the API and real scheduler', () => {
     expect((await request(`/api/tasks/${first.id}`, 'DELETE')).status).toBe(200)
   })
 
+  it('keeps Someday recurrence off plan through edits and expansion, then generates normal dates when reenabled', async () => {
+    const first = await put('decision-series', { ...base, someday: true, recurrence: MONTHLY })
+    const initial = await series(first.recurrenceSeriesId)
+    expect(initial).toHaveLength(5)
+    expect(initial.every((task) => task.someday === true && task.deadlineType === 'none' && task.dueAt === null && task.pinnedStart === null)).toBe(true)
+    const { someday, ...oldClient } = first
+    const edited = await put(first.id, { ...oldClient, title: 'Legacy edit keeps decision' })
+    expect(edited.someday).toBe(true)
+    clock = new Date('2028-08-01T16:00:00Z')
+    const deferred = await runScheduling(db, config, clock)
+    const expanded = await series(first.recurrenceSeriesId)
+    expect(expanded.length).toBeGreaterThan(initial.length)
+    expect(expanded.every((task) => task.someday === true && task.deadlineType === 'none' && task.dueAt === null)).toBe(true)
+    const ids = new Set(expanded.map((task) => task.id))
+    for (const artifacts of [deferred.placements, deferred.optional, deferred.unscheduled, deferred.late]) {
+      expect(artifacts.some((artifact) => ids.has(artifact.taskId))).toBe(false)
+    }
+    const response = await request(`/api/tasks/${first.id}`, 'PATCH', { someday: false })
+    expect(response.status).toBe(200)
+    const changed = await series(first.recurrenceSeriesId)
+    expect(changed.every((task) => task.someday === false)).toBe(true)
+    expect(changed.every((task) => task.dueAt !== null)).toBe(true)
+    clock = new Date('2029-03-01T16:00:00Z')
+    await runScheduling(db, config, clock)
+    const later = await series(first.recurrenceSeriesId)
+    expect(later.length).toBeGreaterThan(changed.length)
+    expect(later.every((task) => task.someday === false && task.dueAt !== null)).toBe(true)
+    await request(`/api/tasks/${first.id}`, 'DELETE')
+  })
+
+  it('date edits reactivate a Someday series while toggling it on keeps release dates but clears pins and due dates', async () => {
+    const first = await put('decision-dates', { ...base, recurrence: MONTHLY, pinnedStart: '2028-01-31T18:00:00Z' })
+    const enabled = await request(`/api/tasks/${first.id}`, 'PATCH', { someday: true })
+    expect(enabled.status).toBe(200)
+    const deferred = await series(first.recurrenceSeriesId)
+    expect(deferred.every((t) => t.someday === true && t.startAt !== null && t.pinnedStart === null && t.dueAt === null)).toBe(true)
+    const renamed = await request(`/api/tasks/${first.id}`, 'PATCH', { title: 'Still deferred' })
+    expect(renamed.status).toBe(200)
+    expect((await series(first.recurrenceSeriesId)).every((t) => t.someday === true)).toBe(true)
+    const moved = await request(`/api/tasks/${first.id}`, 'PATCH', { startAt: '2028-01-31T19:00:00Z' })
+    expect(moved.status).toBe(200)
+    expect((await series(first.recurrenceSeriesId)).every((t) => t.someday === false && t.dueAt !== null)).toBe(true)
+    await request(`/api/tasks/${first.id}`, 'DELETE')
+    })
+
   it('materializes independent month-end occurrences, exposes them through sync, and never schedules before their release', async () => {
     const first = await put('monthly', { ...base, recurrence: MONTHLY })
     const occurrences = await series(first.recurrenceSeriesId)

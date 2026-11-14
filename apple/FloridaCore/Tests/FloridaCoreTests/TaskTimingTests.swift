@@ -88,4 +88,16 @@ import Testing
         #expect(!TaskTiming(task: closed, now: now).isOverdue)
         #expect(TaskTiming(task: closed, now: now).lateEnd == nil)
     }
+
+    @Test func somedaySuppressesSavedDueAndStalePlacementTiming() {
+        var paused = task(due: now.addingTimeInterval(-3600))
+        paused.someday = true
+        let timing = TaskTiming(task: paused, placements: [placement(
+            start: now, end: now.addingTimeInterval(1800))], now: now)
+        #expect(timing.dueAt == nil)
+        #expect(!timing.isOverdue)
+        #expect(timing.lateEnd == nil)
+        #expect(TaskListGrouping.dueDate.sections(tasks: [paused], categories: [], now: now,
+                                                 calendar: Calendar(identifier: .gregorian)).map(\.id) == ["someday"])
+    }
 }

@@ -229,7 +229,7 @@ final class MacInteractionStateTests: XCTestCase {
         app.typeKey("g", modifierFlags: [])
         app.typeKey("g", modifierFlags: [])
         let selected = row("date-updated", in: app)
-        wait(for: [expectation(for: NSPredicate(format: "label == %@", "Selected task, Updated account task"),
+        wait(for: [expectation(for: NSPredicate(format: "label == %@", "Selected task, Updated account task, Categorized"),
                               evaluatedWith: selected)], timeout: 5)
     }
 

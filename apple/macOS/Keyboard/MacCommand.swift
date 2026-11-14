@@ -45,6 +45,7 @@ enum MacCommand: Hashable, Sendable {
     case openEventResources
     case cycleEventDayBlocking
     case shareAvailability
+    case setDueDate, someday
     case openTaskSource
     case toggleTaskGrouping
 
@@ -53,7 +54,8 @@ enum MacCommand: Hashable, Sendable {
         switch self {
         case .core(let command): command.section
         case .undo, .move, .acceptSuggestion, .newTaskEditor, .doNow, .doneForNow, .repeatLast,
-             .editEvent, .respondYes, .respondMaybe, .respondNo, .joinMeeting, .openEventResources, .cycleEventDayBlocking, .openTaskSource:
+             .editEvent, .respondYes, .respondMaybe, .respondNo, .joinMeeting, .openEventResources, .cycleEventDayBlocking,
+             .setDueDate, .someday, .openTaskSource:
             .editing
         case .newCategory, .showRoutine, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind, .shareAvailability: .actions
         case .centerOnNow, .jumpToFirst, .jumpToLast, .jump: .navigation
@@ -93,6 +95,8 @@ enum MacCommand: Hashable, Sendable {
         case .openEventResources: "Open event resources"
         case .cycleEventDayBlocking: "Cycle day blocking"
         case .shareAvailability: "Share availability"
+        case .setDueDate: "Set due date…"
+        case .someday: "Someday"
         case .openTaskSource: "Open task source"
         case .toggleTaskGrouping: "Group by due date / category"
         }
@@ -116,7 +120,7 @@ enum MacCommand: Hashable, Sendable {
         .editEvent, .respondYes, .respondMaybe, .respondNo, .joinMeeting, .openEventResources, .cycleEventDayBlocking, .openTaskSource,
         .newCategory, .showRoutine, .centerOnNow, .jumpToFirst, .jumpToLast, .jump,
         .showProjects, .showBrief, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind,
-        .shareAvailability, .toggleTaskGrouping,
+        .shareAvailability, .setDueDate, .someday, .toggleTaskGrouping,
     ]
 
     /// The palette lists everything except Escape.
