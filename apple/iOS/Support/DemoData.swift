@@ -307,7 +307,6 @@ enum DemoData {
             ]
             response.placements = []
             response.optionalPlacements = []
-            response.planBlocks = []
             response.briefs = []
             response.unscheduled = []
         }
