@@ -49,7 +49,8 @@ final class TaskDateRegressionTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Edit Task"].waitForExistence(timeout: 5))
         let savedDue = app.descendants(matching: .any).matching(identifier: "task-due-date").firstMatch
         XCTAssertTrue(savedDue.exists)
-        let value = (savedDue.value as? String) ?? (savedDue.buttons.firstMatch.value as? String) ?? ""
+        let value = (savedDue.value as? String).flatMap { $0.isEmpty ? nil : $0 }
+            ?? (savedDue.buttons.firstMatch.value as? String) ?? ""
         XCTAssertNotNil(value.range(of: "(?:Nov(?:ember)?\\s+17,?\\s+2026|11/17/(?:2026|26)|2026-11-17)",
                                     options: .regularExpression), savedDue.debugDescription)
         XCTAssertEqual(value, "Nov 17, 2026", savedDue.debugDescription)
