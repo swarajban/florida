@@ -7,6 +7,14 @@ let package = Package(
     dependencies: [.package(path: "FloridaKit")],
     targets: [
         .target(
+            name: "FloridaShareLogic",
+            dependencies: [.product(name: "FloridaKit", package: "FloridaKit")],
+            path: "Share/Model"),
+        .testTarget(
+            name: "FloridaShareLogicTests",
+            dependencies: ["FloridaShareLogic"],
+            path: "ShareTests"),
+        .target(
             name: "FloridaWidgetLogic",
             dependencies: [.product(name: "FloridaKit", package: "FloridaKit")],
             path: "Widgets",

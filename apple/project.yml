@@ -57,6 +57,8 @@ targets:
     platform: iOS
     sources:
       - iOS
+      - path: Share
+        excludes: [Info.plist, FloridaShare.entitlements]
       - Design/FloridaStyle.swift
       - Design/TaskRecurrenceSection.swift
       - Design/EventRecurrenceSection.swift
@@ -70,6 +72,7 @@ targets:
     dependencies:
       - package: FloridaKit
       - target: FloridaWidgets
+      - target: FloridaShare
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.swarajban.florida
@@ -118,6 +121,53 @@ targets:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     entitlements:
       path: Widgets/FloridaWidgets.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.swarajban.florida]
+
+  FloridaShare:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Share
+      - Design/FloridaStyle.swift
+      - Design/TaskContext+Display.swift
+      - Design/Assets.xcassets
+      - iOS/Tasks/QuickAddChip.swift
+      - iOS/Support/Formatting.swift
+      - iOS/Support/Priority+Display.swift
+      - iOS/Support/Color+Hex.swift
+    dependencies:
+      - package: FloridaKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.swarajban.florida.share
+        TARGETED_DEVICE_FAMILY: "1"
+        APPLICATION_EXTENSION_API_ONLY: YES
+    info:
+      path: Share/Info.plist
+      properties:
+        CFBundleDisplayName: Add to Florida
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            NSExtensionActivationRule: >-
+              extensionItems.@count == 1 AND
+              SUBQUERY(extensionItems, $item,
+                $item.attachments.@count >= 1 AND $item.attachments.@count <= 2 AND
+                SUBQUERY($item.attachments, $a,
+                  (ANY $a.registeredTypeIdentifiers UTI-CONFORMS-TO "public.url" OR
+                   ANY $a.registeredTypeIdentifiers UTI-CONFORMS-TO "public.plain-text") AND
+                  NOT ANY $a.registeredTypeIdentifiers UTI-CONFORMS-TO "public.image" AND
+                  NOT ANY $a.registeredTypeIdentifiers UTI-CONFORMS-TO "public.file-url"
+                ).@count == $item.attachments.@count AND
+                SUBQUERY($item.attachments, $a, ANY $a.registeredTypeIdentifiers UTI-CONFORMS-TO "public.url").@count <= 1 AND
+                SUBQUERY($item.attachments, $a, NOT ANY $a.registeredTypeIdentifiers UTI-CONFORMS-TO "public.url").@count <= 1
+              ).@count == 1
+    entitlements:
+      path: Share/FloridaShare.entitlements
       properties:
         com.apple.security.application-groups: [group.com.swarajban.florida]
 

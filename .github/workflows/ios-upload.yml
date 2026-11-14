@@ -2,6 +2,13 @@ name: iOS upload
 
 on:
   workflow_call:
+  workflow_dispatch:
+    inputs:
+      export_only:
+        description: Verify branch signing only, with no TestFlight upload
+        type: boolean
+        required: true
+        default: true
 
 permissions:
   contents: read
@@ -11,7 +18,7 @@ env:
 
 jobs:
   testflight:
-    name: Upload to TestFlight
+    name: ${{ github.workflow == 'iOS upload' && github.event_name == 'workflow_dispatch' && 'Verify signing (no upload)' || 'Upload to TestFlight' }}
     runs-on: macos-26
     concurrency:
       group: ios-${{ github.ref }}
@@ -23,8 +30,13 @@ jobs:
       ASC_KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
       # Not secret (it is in every signed app). The default is the team virtus ships under.
       TEAM_ID: ${{ secrets.APPLE_TEAM_ID || '8G7N7547R6' }}
+      EXPORT_ONLY: ${{ github.workflow == 'iOS upload' && github.event_name == 'workflow_dispatch' && inputs.export_only }}
     steps:
       - uses: actions/checkout@v5
+
+      - name: Require export-only manual runs
+        if: github.workflow == 'iOS upload' && github.event_name == 'workflow_dispatch'
+        run: test "$EXPORT_ONLY" = true
 
       - name: Check secrets
         run: |
@@ -92,9 +104,14 @@ jobs:
           # certificate, so no development profile (which would need a registered device) or
           # local certificate is ever created. The next step seals the entitlements in, which
           # an unsigned archive would otherwise lose. The bundle ids stay as project.yml sets
-          # them: the app and the widget extension need different ones, so no command-line
+          # them: the app and its extensions need different ones, so no command-line
           # override. Monotonic build number; run_attempt keeps re-runs unique.
-          BUILD_NUMBER=$(( GITHUB_RUN_NUMBER * 10 + GITHUB_RUN_ATTEMPT ))
+          if [ "$EXPORT_ONLY" = true ]; then
+            BUILD_NUMBER=1
+          else
+            BUILD_NUMBER=$(( GITHUB_RUN_NUMBER * 10 + GITHUB_RUN_ATTEMPT ))
+          fi
+          echo "BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
           echo "Build number: $BUILD_NUMBER"
           xcodebuild archive \
             -project Florida.xcodeproj \
@@ -118,8 +135,8 @@ jobs:
           # certificate. Nested code first, then the app.
           APP="$RUNNER_TEMP/Florida.xcarchive/Products/Applications/Florida.app"
           APPEX="$APP/PlugIns/FloridaWidgets.appex"
-          APP_GROUP="group.$BUNDLE_ID"   # also in project.yml and FloridaKit.swift
-          for bundle in "$APP" "$APPEX"; do
+          SHARE="$APP/PlugIns/FloridaShare.appex"
+          for bundle in "$APP" "$APPEX" "$SHARE"; do
             if [ ! -d "$bundle" ]; then
               echo "::error::Expected $bundle in the archive"
               find "$RUNNER_TEMP/Florida.xcarchive/Products" -maxdepth 4 -type d \( -name '*.app' -o -name '*.appex' -o -name '*.framework' \)
@@ -131,18 +148,33 @@ jobs:
             codesign --force --sign - "$nested"
           done
           codesign --force --sign - --entitlements Widgets/FloridaWidgets.entitlements "$APPEX"
+          codesign --force --sign - --entitlements Share/FloridaShare.entitlements "$SHARE"
           codesign --force --sign - --entitlements iOS/Florida.entitlements "$APP"
-          for bundle in "$APPEX" "$APP"; do
-            echo "== $(basename "$bundle") entitlements"
-            entitlements=$(codesign -d --entitlements - "$bundle" 2>&1)
-            echo "$entitlements"
-            if ! grep -q "$APP_GROUP" <<<"$entitlements"; then
-              echo "::error::$(basename "$bundle") is missing the $APP_GROUP entitlement"
-              exit 1
-            fi
-          done
+          python3 scripts/check-ios-signing.py "$APP"
+
+      - name: Validate signed export before upload
+        working-directory: apple
+        run: |
+          set -o pipefail
+          OPTIONS="$RUNNER_TEMP/SigningCheckOptions.plist"
+          cp ExportOptions.plist "$OPTIONS"
+          plutil -insert teamID -string "$TEAM_ID" "$OPTIONS"
+          plutil -replace destination -string export "$OPTIONS"
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/Florida.xcarchive" \
+            -exportOptionsPlist "$OPTIONS" \
+            -exportPath "$RUNNER_TEMP/signing-check" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            2>&1 | tee signing-check.log
+          python3 scripts/check-ios-signing.py \
+            "$RUNNER_TEMP/Florida.xcarchive/Products/Applications/Florida.app" \
+            "$RUNNER_TEMP/signing-check/DistributionSummary.plist"
 
       - name: Export and upload to TestFlight
+        if: env.EXPORT_ONLY != 'true'
         working-directory: apple
         run: |
           set -o pipefail
@@ -156,35 +188,6 @@ jobs:
             -authenticationKeyID "$ASC_KEY_ID" \
             -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
             2>&1 | tee export.log
-
-      - name: Check what the export signed
-        working-directory: apple
-        run: |
-          # DistributionSummary.plist records the entitlements the export signed each bundle
-          # with. The build is already on TestFlight here; failing marks it as one to skip.
-          SUMMARY="$RUNNER_TEMP/export/DistributionSummary.plist"
-          if [ ! -f "$SUMMARY" ]; then
-            echo "::warning::No DistributionSummary.plist at $SUMMARY; could not confirm the uploaded entitlements"
-            ls -la "$RUNNER_TEMP/export" || true
-            exit 0
-          fi
-          python3 - "$SUMMARY" "group.$BUNDLE_ID" <<'PY'
-          import plistlib, sys
-          summary = plistlib.load(open(sys.argv[1], "rb"))
-          group = sys.argv[2]
-          missing = []
-          for ipa, items in summary.items():
-              for item in items if isinstance(items, list) else []:
-                  name = item.get("name", "?")
-                  entitlements = item.get("entitlements", {})
-                  print(f"{ipa} / {name}: {sorted(entitlements)}")
-                  if name.endswith((".app", ".appex")) and group not in entitlements.get("com.apple.security.application-groups", []):
-                      missing.append(name)
-          if missing:
-              print(f"::error::Uploaded without the {group} App Group: {', '.join(missing)}")
-              sys.exit(1)
-          print(f"Every app and extension carries {group}.")
-          PY
 
       - name: Upload logs on failure
         if: failure()
