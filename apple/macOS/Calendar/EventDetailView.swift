@@ -191,6 +191,9 @@ struct EventDetailView: View {
                         .accessibilityLabel("\(resource.title), \(resource.kindLabel)")
                         .accessibilityIdentifier("event-resource-\(resource.id)")
                         .accessibilityValue(labels.remaining[resource.id] ?? "g r")
+                        #if DEBUG
+                        .accessibilityElement(children: showsInteractionDiagnostics ? .contain : .ignore)
+                        #endif
                     }
                 }
             }
@@ -203,9 +206,8 @@ struct EventDetailView: View {
     @ViewBuilder
     private func resourceKeycap(_ key: String, id: String) -> some View {
         #if DEBUG
-        if UserDefaults.standard.bool(forKey: "demoData"),
-           UserDefaults.standard.bool(forKey: "uiInteractionModeDiagnostics") {
-            Keycap(key.map(String.init).joined(separator: " "))
+        if showsInteractionDiagnostics {
+            Keycap(key.map(String.init).joined(separator: " "), accessibilityHidden: false)
                 .accessibilityElement(children: .ignore)
                 .accessibilityHidden(false)
                 .accessibilityLabel(key)
@@ -216,6 +218,15 @@ struct EventDetailView: View {
         }
         #else
         Keycap(key.map(String.init).joined(separator: " "))
+        #endif
+    }
+
+    private var showsInteractionDiagnostics: Bool {
+        #if DEBUG
+        UserDefaults.standard.bool(forKey: "demoData")
+            && UserDefaults.standard.bool(forKey: "uiInteractionModeDiagnostics")
+        #else
+        false
         #endif
     }
 

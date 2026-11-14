@@ -105,6 +105,6 @@ private struct AllDayBar: View {
         .offset(x: frame.minX, y: frame.minY)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("all-day-row-\(block.id)")
-        .accessibilityValue(isSelected ? "Selected" : "Not selected")
+        .accessibilityLabel(isSelected ? "Selected event, \(block.title)" : "Event, \(block.title)")
     }
 }

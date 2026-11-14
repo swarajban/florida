@@ -210,16 +210,22 @@ final class MacModeStateTests: XCTestCase {
         XCTAssertTrue(first.waitForExistence(timeout: 5))
         XCTAssertTrue(second.exists)
         first.staticTexts.firstMatch.click()
-        XCTAssertTrue(app.textFields["task-title"].waitForExistence(timeout: 5))
-        app.typeKey(.escape, modifierFlags: [])
-        XCTAssertTrue(app.textFields["task-title"].waitForNonExistence(timeout: 5))
-        waitForValue("Selected", of: first)
+        waitForValue("suggestion(\"demo-pick-taxes\")", of: app.staticTexts["mode-selection"])
+        if app.sheets.firstMatch.exists {
+            XCTAssertTrue(app.textFields["task-title"].waitForExistence(timeout: 5))
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(app.sheets.firstMatch.waitForNonExistence(timeout: 5))
+        }
+        waitForLabel("Selected suggestion, Pay Q4 estimated taxes", of: first)
         second.staticTexts.firstMatch.click()
-        XCTAssertTrue(app.textFields["task-title"].waitForExistence(timeout: 5))
-        app.typeKey(.escape, modifierFlags: [])
-        XCTAssertTrue(app.textFields["task-title"].waitForNonExistence(timeout: 5))
-        waitForValue("Not selected", of: first)
-        waitForValue("Selected", of: second)
+        waitForValue("suggestion(\"demo-pick-funds\")", of: app.staticTexts["mode-selection"])
+        if app.sheets.firstMatch.exists {
+            XCTAssertTrue(app.textFields["task-title"].waitForExistence(timeout: 5))
+            app.typeKey(.escape, modifierFlags: [])
+            XCTAssertTrue(app.sheets.firstMatch.waitForNonExistence(timeout: 5))
+        }
+        waitForLabel("Suggestion, Pay Q4 estimated taxes", of: first)
+        waitForLabel("Selected suggestion, Rebalance index funds", of: second)
         app.typeKey("f", modifierFlags: [])
         let badge = element("suggestion-jump-demo-pick-taxes", in: app)
         XCTAssertTrue(badge.waitForExistence(timeout: 5))
@@ -237,10 +243,12 @@ final class MacModeStateTests: XCTestCase {
         XCTAssertTrue(first.waitForExistence(timeout: 5))
         XCTAssertTrue(second.exists)
         first.click()
-        waitForValue("Selected", of: first)
+        waitForValue("event(\"demo-event-offsite\")", of: app.staticTexts["mode-selection"])
+        waitForLabel("Selected event, Infra offsite", of: first)
         second.click()
-        waitForValue("Not selected", of: first)
-        waitForValue("Selected", of: second)
+        waitForValue("event(\"demo-event-ooo\")", of: app.staticTexts["mode-selection"])
+        waitForLabel("Event, Infra offsite", of: first)
+        waitForLabel("Selected event, Marcus out of office", of: second)
         app.typeKey("f", modifierFlags: [])
         let badge = element("event-jump-demo-event-offsite", in: app)
         XCTAssertTrue(badge.waitForExistence(timeout: 5))
@@ -399,5 +407,10 @@ final class MacModeStateTests: XCTestCase {
     @MainActor
     private func waitForValue(_ value: String, of element: XCUIElement) {
         wait(for: [expectation(for: NSPredicate(format: "value == %@", value), evaluatedWith: element)], timeout: 5)
+    }
+
+    @MainActor
+    private func waitForLabel(_ label: String, of element: XCUIElement) {
+        wait(for: [expectation(for: NSPredicate(format: "label == %@", label), evaluatedWith: element)], timeout: 5)
     }
 }
