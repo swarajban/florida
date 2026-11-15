@@ -71,6 +71,20 @@ describe.skipIf(url === undefined)('concurrent Postgres sync cursors', () => {
     })
   }
 
+  it('round-trips JSONB tags and waiting metadata through writes, containment filters, and incremental sync', async () => {
+    const created = await upsertTask(db, 'tagged-wait', {
+      categoryId: 'work', title: 'Waiting for approval', durationMinutes: 30, priority: 'medium', deadlineType: 'none',
+      tags: [' Client ', 'CLIENT', 'Approval'], waitingOn: ' Alice ', waitingUntil: '2026-11-20T08:00:00Z',
+    })
+    expect(created).toMatchObject({ tags: ['client', 'approval'], waitingOn: 'Alice', waitingUntil: new Date('2026-11-20T08:00:00Z') })
+    const matching = await db.select().from(schema.tasks).where(sql`${schema.tasks.tags} @> ${JSON.stringify(['approval', 'client'])}::jsonb`)
+    expect(matching.map((t) => t.id)).toEqual(['tagged-wait'])
+    const cursor = (await pull()).cursor
+    await patchTask(db, created.id, { waitingOn: null, tags: [' Revised '] })
+    const changed = await pull(cursor)
+    expect(changed.tasks.find((t) => t.id === created.id)).toMatchObject({ tags: ['revised'], waitingOn: null, waitingUntil: null })
+  })
+
   it('isolates MCP previews and batches on real Postgres and records event reasons', async () => {
     const changes = new ChangeBus()
     let notices = 0

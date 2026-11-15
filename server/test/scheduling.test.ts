@@ -64,6 +64,10 @@ function taskRow(id: string, categoryId: string, over: Partial<TaskRow> = {}): T
     categoryId,
     title: id,
     notes: null,
+    source: null,
+    tags: [],
+    waitingOn: null,
+    waitingUntil: null,
     durationMinutes: 60,
     minChunkMinutes: null,
     priority: 'medium',
@@ -144,6 +148,24 @@ function eventRow(id: string, over: Partial<EventRow> = {}): EventRow {
 const base = { now: NOW, horizonDays: 28, timeZone: LA, routineBlocks: [routineBlockRow('work')] }
 
 describe('buildSchedulerInput', () => {
+  it('parks waiting work outside the horizon without consuming budgets and passes eligible follow-ups to the scheduler', () => {
+    const src = {
+      ...base, horizonDays: 1,
+      categories: [categoryRow('work')],
+      projects: [projectRow('budget', { weeklyMinutes: 180 })],
+      tasks: [
+        taskRow('indefinite', 'work', { projectId: 'budget', durationMinutes: 900, waitingOn: 'Reply' }),
+        taskRow('outside', 'work', { projectId: 'budget', durationMinutes: 900, waitingOn: 'Reply', waitingUntil: new Date(NOW.getTime() + 86400000) }),
+        taskRow('eligible', 'work', { tags: ['client'], waitingOn: 'Reply', waitingUntil: new Date('2026-11-09T20:00:00Z') }),
+      ], events: [],
+    }
+    const input = buildSchedulerInput(src)
+    expect(input.tasks.map((t) => t.id)).toEqual(['eligible', 'project-time:2026-11-08:budget', 'project-time:2026-11-15:budget'])
+    expect(input.tasks[1]?.durationMinutes).toBe(180)
+    const result = schedule(input)
+    expect(result.placements.find((p) => p.taskId === 'eligible')?.start).toBe('2026-11-09T20:00:00.000Z')
+    expect(result.unscheduled.some((t) => t.taskId === 'indefinite' || t.taskId === 'outside')).toBe(false)
+  })
   it('excludes Someday before planning, removes underway artifacts, and restores normal input when reenabled', () => {
     const source = {
       ...base,
@@ -210,6 +232,9 @@ describe('buildSchedulerInput', () => {
     expect(input.tasks).toEqual([
       {
         id: 't1',
+        tags: [],
+        waitingOn: null,
+        waitingUntil: null,
         context: 'computer',
         attention: 'full',
         durationMinutes: 60,

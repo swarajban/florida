@@ -45,6 +45,74 @@ function spansOf(result: SchedulerResult, taskId: string): [string, string][] {
 
 const MONDAY_FULL = [busy('2026-11-09T09:00:00-08:00', '2026-11-09T17:00:00-08:00')]
 
+describe('waiting tasks', () => {
+  it('parks an indefinite wait without problems, optional suggestions, or a contradictory pin', () => {
+    const result = run([task({ id: 'waiting', waitingOn: 'Approval', pinnedStart: NOW })])
+    expect(result.placements).toEqual([])
+    expect(result.unscheduled).toEqual([])
+    expect(result.optional).toEqual([])
+  })
+
+  it('places follow-ups at the later of waitingUntil and startAt, ignoring prior active blocks and pins', () => {
+    const waitingUntil = '2026-11-09T11:00:00-08:00'
+    const waiting = task({ id: 'waiting', waitingOn: 'Approval', waitingUntil, pinnedStart: NOW })
+    const previous = [{ taskId: waiting.id, start: NOW, end: '2026-11-09T10:00:00-08:00', pinned: false }]
+    const result = run([waiting], [], { previous, now: '2026-11-09T09:15:00-08:00' })
+    expect(spansOf(result, waiting.id)).toEqual([[iso(waitingUntil), iso('2026-11-09T12:00:00-08:00')]])
+    expect(result.placements[0]?.pinned).toBe(false)
+    const later = run([{ ...waiting, startAt: '2026-11-09T14:00:00-08:00' }])
+    expect(later.placements[0]?.start).toBe(iso('2026-11-09T14:00:00-08:00'))
+    expect(result.unscheduled).toEqual([])
+  })
+
+  it('keeps follow-ups outside the horizon out of unscheduled, including the end boundary', () => {
+    for (const waitingUntil of ['2026-11-10T09:00:00-08:00', '2026-12-31T00:00:00Z']) {
+      const result = run([task({ id: 'waiting', waitingOn: 'Approval', waitingUntil })], [], { horizonDays: 1 })
+      expect(result.placements).toEqual([])
+      expect(result.unscheduled).toEqual([])
+    }
+  })
+
+  it('does not retain or credit an underway follow-up before a later effective start', () => {
+    const result = run([task({ id: 'waiting', waitingOn: 'Approval', waitingUntil: '2026-11-09T08:00:00-08:00', startAt: '2026-11-09T14:00:00-08:00' })], [], {
+      now: '2026-11-09T09:15:00-08:00',
+      previous: [{ taskId: 'waiting', start: NOW, end: '2026-11-09T10:00:00-08:00', pinned: false }],
+    })
+    expect(spansOf(result, 'waiting')).toEqual([[iso('2026-11-09T14:00:00-08:00'), iso('2026-11-09T15:00:00-08:00')]])
+    expect(result.unscheduled).toEqual([])
+  })
+
+  it('retains and credits an eligible follow-up already underway without an explicit startAt', () => {
+    const result = run([task({ id: 'waiting', waitingOn: 'Approval', waitingUntil: '2026-11-09T08:00:00-08:00' })], [], {
+      now: '2026-11-09T09:15:00-08:00',
+      previous: [{ taskId: 'waiting', start: NOW, end: '2026-11-09T10:00:00-08:00', pinned: false }],
+    })
+    expect(spansOf(result, 'waiting')).toEqual([[iso(NOW), iso('2026-11-09T10:00:00-08:00')]])
+    expect(result.unscheduled).toEqual([])
+  })
+
+  it('allows eligible follow-ups now, and clearing waitingOn ignores a stale follow-up', () => {
+    for (const fields of [
+      { waitingOn: 'Approval', waitingUntil: '2026-11-08T00:00:00Z' },
+      { waitingOn: null, waitingUntil: '2026-12-31T00:00:00Z' },
+      { waitingOn: '   ', waitingUntil: null },
+    ]) {
+      const result = run([task({ id: 'ready', ...fields })])
+      expect(result.placements[0]?.start).toBe(iso(NOW))
+    }
+  })
+
+  it('never suggests optional work before the follow-up', () => {
+    const routine: Routine = { timeZone: LA, blocks: [
+      { id: 'optional', days: WEEKDAYS, start: '09:00', end: '17:00', allows: ALL, optional: true },
+    ] }
+    const waitingUntil = '2026-11-10T13:00:00-08:00'
+    const result = run([task({ id: 'waiting', waitingOn: 'Approval', waitingUntil })], [], { routine })
+    expect(result.optional.length).toBeGreaterThan(0)
+    expect(result.optional.every((block) => block.start >= iso(waitingUntil))).toBe(true)
+  })
+})
+
 describe('placement basics', () => {
   it('places a task at the first free grid slot inside work hours', () => {
     const result = run([task({ id: 'a' })], [], { now: '2026-11-09T09:07:00-08:00' })

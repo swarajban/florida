@@ -78,6 +78,9 @@ export interface DayOverride {
 
 export interface Task {
   id: string
+  tags?: string[]
+  waitingOn?: string | null
+  waitingUntil?: string | null
   context: TaskContext
   /** Default `full`. A pinned task always takes its time alone. */
   attention?: Attention

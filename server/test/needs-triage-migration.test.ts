@@ -175,12 +175,13 @@ describe('Someday migration', () => {
       expect(open.filter((task) => task.someday)).toHaveLength(1)
       for (const row of rows) {
         const original = fixture.tasks.find((task) => task.id === row.id)!
+        expect(row).toMatchObject({ tags: [], waitingOn: null, waitingUntil: null })
         expect(row.someday).toBe(original.categoryId !== 'inbox' && original.dueAt === null && original.startAt === null && original.pinnedStart === null)
         expect(row.updatedAt.getTime()).toBeGreaterThan(Date.parse(original.updatedAt))
         expect(row.updatedAt.getTime()).toBeGreaterThan(Date.parse(cursor))
       }
       const after = (await client.query<Record<string, unknown>>('select * from tasks order by id')).rows
-      const originalFields = (row: Record<string, unknown>) => Object.fromEntries(Object.entries(row).filter(([key]) => key !== 'someday' && key !== 'updated_at'))
+      const originalFields = (row: Record<string, unknown>) => Object.fromEntries(Object.entries(row).filter(([key]) => !['someday', 'updated_at', 'tags', 'waiting_on', 'waiting_until'].includes(key)))
       expect(after.map(originalFields)).toEqual(before.map(originalFields))
       const app = createApp({ db, config, sync: new FakeSync(), reschedule: async () => ({ placements: [], unscheduled: [], late: [], optional: [], projectPlacements: [] }) })
       const response = await app.request(`/api/sync?since=${cursor}`, { headers: { authorization: `Bearer ${config.API_TOKEN}` } })

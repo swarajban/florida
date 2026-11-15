@@ -164,7 +164,15 @@ export function schedule(input: SchedulerInput): SchedulerResult {
     start: parseInstant(i.start, 'busy.start'),
     end: parseInstant(i.end, 'busy.end'),
   }))
-  const open = input.tasks.filter((t) => remainingMinutes(t) > 0)
+  const open = input.tasks.flatMap((task) => {
+    if (remainingMinutes(task) <= 0) return []
+    if (!task.waitingOn?.trim()) return [task]
+    if (task.waitingUntil == null) return []
+    const followUp = parseInstant(task.waitingUntil, 'waitingUntil')
+    if (followUp >= ctx.horizonEnd) return []
+    const { pinnedStart, ...flexible } = task
+    return [{ ...flexible, startAt: toIso(Math.max(followUp, task.startAt === undefined ? followUp : parseInstant(task.startAt, 'startAt'))) }]
+  })
   const pinned = open.flatMap((task) => {
     if (task.pinnedStart === undefined) return []
     const start = parseInstant(task.pinnedStart, 'pinnedStart')
@@ -207,6 +215,7 @@ export function schedule(input: SchedulerInput): SchedulerResult {
     prior.sort((a, b) => a.start - b.start)
     for (const block of prior) {
       if (remaining <= 0 || block.start > now || block.end <= now) continue
+      if (task.waitingOn?.trim() && task.startAt !== undefined && block.start < parseInstant(task.startAt, 'startAt')) continue
       // Time already spent in the block counts as worked unless the logged minutes cover it, so
       // logging progress mid-block never counts the same minutes twice.
       const credit = Math.max(0, now - block.start - logged)

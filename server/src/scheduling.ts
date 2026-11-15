@@ -191,11 +191,15 @@ export function buildSchedulerInput(src: SchedulerSources): SchedulerInput {
   for (const t of src.tasks) {
     const category = liveCategories.get(t.categoryId)
     if (t.someday || t.deletedAt !== null || t.completedAt !== null || category === undefined) continue
+    if (t.waitingOn != null && (t.waitingUntil == null || t.waitingUntil.getTime() >= horizonEnd)) continue
     const project = t.projectId === null ? undefined : liveProjects.get(t.projectId)
     if (project !== undefined && project.status !== 'active') continue
     const attention = effectiveAttention(t, project)
     const task: Task = {
       id: t.id,
+      tags: t.tags,
+      waitingOn: t.waitingOn,
+      waitingUntil: t.waitingUntil?.toISOString() ?? null,
       context: t.context,
       attention,
       durationMinutes: t.durationMinutes,

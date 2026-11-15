@@ -6,7 +6,7 @@ import { eq, inArray } from 'drizzle-orm'
 import { createApp } from '../src/app.js'
 import { ChangeBus } from '../src/changes.js'
 import type { Db } from '../src/db/client.js'
-import { calendars, categories, events, googleAccounts, projectPlacements, routineBlocks, settings, taskRecurrences } from '../src/db/schema.js'
+import { calendars, categories, events, googleAccounts, optionalPlacements, placements, projectPlacements, routineBlocks, settings, taskRecurrences, tasks, unscheduled } from '../src/db/schema.js'
 import type { EventBody } from '../src/events.js'
 import { GoogleApiError, GoogleGoneError, GoogleTokenError, mapEvent } from '../src/google/client.js'
 import type { GoogleEvent, GoogleEventAttendee } from '../src/google/client.js'
@@ -1882,5 +1882,77 @@ describe('task sources', () => {
     expect(await (await api(`/api/tasks/${id}`)).json()).toMatchObject({ source: null })
     expect((await api('/api/tasks/source-rejected')).status).toBe(404)
     expect((await api(`/api/tasks/${id}`, { method: 'DELETE' })).status).toBe(200)
+  })
+})
+
+describe('tags and waiting HTTP sync', () => {
+  it('filters stale scheduler artifacts while waiting, but keeps eligible flexible follow-up blocks', async () => {
+    const id = 'http-waiting-stale'
+    await api(`/api/tasks/${id}`, { method: 'PUT', json: { ...taskBody, waitingOn: 'Approval' } })
+    const now = new Date()
+    const followUp = new Date(now.getTime() + 86400000)
+    const before = new Date(followUp.getTime() - 3600000)
+    const end = new Date(followUp.getTime() + 3600000)
+    const [block] = await db.select().from(routineBlocks)
+    await db.insert(placements).values([
+      { id: `${id}-early`, taskId: id, startAt: before, endAt: followUp, pinned: false, computedAt: now },
+      { id: `${id}-ready`, taskId: id, startAt: followUp, endAt: end, pinned: false, computedAt: now },
+      { id: `${id}-pin`, taskId: id, startAt: followUp, endAt: end, pinned: true, computedAt: now },
+    ])
+    await db.insert(optionalPlacements).values([
+      { id: `${id}-early`, taskId: id, blockId: block!.id, startAt: before, endAt: followUp, computedAt: now },
+      { id: `${id}-ready`, taskId: id, blockId: block!.id, startAt: followUp, endAt: end, computedAt: now },
+    ])
+    await db.insert(unscheduled).values({ taskId: id, reason: 'no_fit_in_horizon', unplacedMinutes: 60, computedAt: now })
+    for (const waitingUntil of [null, new Date(now.getTime() + 29 * 86400000), followUp]) {
+      await db.update(tasks).set({ waitingUntil }).where(eq(tasks.id, id))
+      const synced = await (await api('/api/sync')).json() as { placements: { id: string, taskId: string }[], optionalPlacements: { id: string, taskId: string }[], unscheduled: { taskId: string }[] }
+      const ready = waitingUntil === followUp
+      expect(synced.placements.filter((p) => p.taskId === id).map((p) => p.id)).toEqual(ready ? [`${id}-ready`] : [])
+      expect(synced.optionalPlacements.filter((p) => p.taskId === id).map((p) => p.id)).toEqual(ready ? [`${id}-ready`] : [])
+      expect(synced.unscheduled.some((p) => p.taskId === id)).toBe(ready)
+    }
+    await api(`/api/tasks/${id}`, { method: 'DELETE' })
+  })
+
+  it('round-trips normalized fields, preserves omitted fields for older clients, and syncs clearing', async () => {
+    const id = 'http-waiting-tags'
+    const waitingUntil = '2026-12-01T13:30:00.000Z'
+    const response = await api(`/api/tasks/${id}`, { method: 'PUT', json: {
+      ...taskBody, tags: [' Important ', '', 'IMPORTANT', 'Client'], waitingOn: ' Alice ', waitingUntil,
+      pinnedStart: '2026-12-01T14:00:00Z',
+    } })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ task: { tags: ['important', 'client'], waitingOn: 'Alice', waitingUntil, pinnedStart: null } })
+    const initial = await (await api('/api/sync')).json() as { cursor: string, tasks: Record<string, unknown>[] }
+    expect(initial.tasks.find((t) => t.id === id)).toMatchObject({ tags: ['important', 'client'], waitingOn: 'Alice', waitingUntil })
+    expect((await api(`/api/tasks/${id}`, { method: 'PUT', json: { ...taskBody, title: 'Older client edit' } })).status).toBe(200)
+    expect(await (await api(`/api/tasks/${id}`)).json()).toMatchObject({ tags: ['important', 'client'], waitingOn: 'Alice', waitingUntil })
+    expect((await api(`/api/tasks/${id}`, { method: 'PATCH', json: { tags: [], waitingOn: null } })).status).toBe(200)
+    const changed = await (await api(`/api/sync?since=${encodeURIComponent(initial.cursor)}`)).json() as { tasks: Record<string, unknown>[] }
+    expect(changed.tasks.find((t) => t.id === id)).toMatchObject({ tags: [], waitingOn: null, waitingUntil: null })
+    await api(`/api/tasks/${id}`, { method: 'DELETE' })
+  })
+
+  it('rejects orphan follow-ups, malformed instants, and oversized tags before writing', async () => {
+    for (const extra of [
+      { waitingUntil: '2026-11-20T00:00:00Z' },
+      { waitingOn: 'Reply', waitingUntil: '2026-11-20' },
+      { tags: Array.from({ length: 31 }, (_, i) => `${i}`) },
+      { tags: ['x'.repeat(65)] },
+    ]) {
+      expect((await api('/api/tasks/wave3-invalid', { method: 'PUT', json: { ...taskBody, ...extra } })).status).toBe(400)
+    }
+    expect((await api('/api/tasks/wave3-invalid')).status).toBe(404)
+    const id = 'wave3-contradictory-followup'
+    await api(`/api/tasks/${id}`, { method: 'PUT', json: { ...taskBody, waitingOn: 'Reply', waitingUntil: '2026-11-20T00:00:00Z' } })
+    for (const method of ['PUT', 'PATCH']) {
+      const res = await api(`/api/tasks/${id}`, { method, json: { ...taskBody, waitingOn: null, waitingUntil: '2026-11-20T00:00:00Z' } })
+      expect(res.status).toBe(400)
+    }
+    expect(await (await api(`/api/tasks/${id}`)).json()).toMatchObject({ waitingOn: 'Reply', waitingUntil: '2026-11-20T00:00:00.000Z' })
+    expect((await api(`/api/tasks/${id}`, { method: 'PATCH', json: { waitingOn: null } })).status).toBe(200)
+    expect(await (await api(`/api/tasks/${id}`)).json()).toMatchObject({ waitingOn: null, waitingUntil: null })
+    await api(`/api/tasks/${id}`, { method: 'DELETE' })
   })
 })

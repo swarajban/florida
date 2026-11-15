@@ -439,4 +439,21 @@ describe('recurring tasks through the API and real scheduler', () => {
     }
     expect((await request('/api/tasks/invalid-recurrence')).status).toBe(404)
   })
+
+  it('copies tags and waiting state, shifts follow-ups by occurrence, and preserves completed history', async () => {
+    const first = await put('waiting-series', { ...base, recurrence: MONTHLY, tags: [' Client ', 'CLIENT'], waitingOn: ' Alice ', waitingUntil: '2028-02-01T08:00:00Z', pinnedStart: NOW.toISOString() })
+    const rows = await series(first.recurrenceSeriesId)
+    expect(rows.length).toBeGreaterThan(2)
+    expect(rows.every((t) => t.tags?.join() === 'client' && t.waitingOn === 'Alice' && t.pinnedStart === null)).toBe(true)
+    expect(rows.find((t) => t.recurrenceDate === '2028-02-29')?.waitingUntil).toBe('2028-03-01T08:00:00.000Z')
+    const completed = await put(first.id, { ...first, completedAt: NOW.toISOString(), completedMinutes: 30 })
+    expect(completed.waitingOn).toBe('Alice')
+    expect((await series(first.recurrenceSeriesId))[1]?.waitingOn).toBe('Alice')
+    const next = rows[1]!
+    const cleared = await put(next.id, { ...next, waitingOn: null, waitingUntil: null })
+    expect(cleared.waitingUntil).toBeNull()
+    const changed = await series(first.recurrenceSeriesId)
+    expect(changed[0]?.waitingOn).toBe('Alice')
+    expect(changed.slice(1).every((t) => t.waitingOn === null && t.waitingUntil === null && t.tags?.join() === 'client')).toBe(true)
+  })
 })

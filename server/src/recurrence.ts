@@ -33,6 +33,9 @@ export interface RecurringTaskTemplate {
   title: string
   notes: string | null
   source?: TaskSource | null
+  tags?: string[]
+  waitingOn?: string | null
+  waitingUntil?: string | null
   durationMinutes: number
   minChunkMinutes: number | null
   priority: Priority
@@ -124,15 +127,18 @@ export function shiftRecurrenceInstant(instant: string, anchor: string, occurren
 }
 
 export function occurrenceFields(template: RecurringTaskTemplate, rule: RecurrenceRule, occurrence: string) {
-  const { anchorDate, dueAt, startAt, pinnedStart, ...fields } = template
+  const { anchorDate, dueAt, startAt, pinnedStart, waitingUntil, ...fields } = template
   const day = date(occurrence)
   const shift = (instant: string) => shiftRecurrenceInstant(instant, anchorDate, occurrence, rule.timeZone)
   return {
     ...fields,
     source: template.source ?? null,
+    tags: template.tags ?? [],
+    waitingOn: template.waitingOn ?? null,
+    waitingUntil: !template.waitingOn || waitingUntil == null ? null : shift(waitingUntil),
     deadlineType: fields.someday ? 'none' as const : fields.deadlineType,
     startAt: startAt === null ? new Date(zonedToUtc(day, 0, rule.timeZone)) : shift(startAt),
     dueAt: fields.someday ? null : dueAt === null ? new Date(zonedToUtc(dateFromDayNumber(dayNumber(day) + 1), 0, rule.timeZone) - 1) : shift(dueAt),
-    pinnedStart: fields.someday || pinnedStart === null ? null : shift(pinnedStart),
+    pinnedStart: fields.someday || template.waitingOn || pinnedStart === null ? null : shift(pinnedStart),
   }
 }

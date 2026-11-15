@@ -433,6 +433,14 @@ public final class AppDatabase: Sendable {
             try db.execute(sql: "UPDATE task SET someday = 1 WHERE categoryId != ? AND dueAt IS NULL AND startAt IS NULL AND pinnedStart IS NULL", arguments: [TaskCategory.inboxId])
             try db.execute(sql: "DELETE FROM syncState WHERE key = 'cursor'")
         }
+        migrator.registerMigration("v12-task-tags-waiting") { db in
+            try db.alter(table: "task") { t in
+                t.add(column: "tags", .text).notNull().defaults(to: "[]")
+                t.add(column: "waitingOn", .text)
+                t.add(column: "waitingUntil", .datetime)
+            }
+            try db.execute(sql: "DELETE FROM syncState WHERE key = 'cursor'")
+        }
         return migrator
     }
 }

@@ -56,6 +56,8 @@ import {
   taskBody,
   taskContext,
   taskPatch,
+  taskTags,
+  taskPlacementVisible,
   upsertTask,
   lockTaskRecurrences,
 } from './tasks.js'
@@ -84,6 +86,10 @@ const INSTRUCTIONS = [
   'Someday tasks stay off the plan and do not consume project budgets. Setting someday true clears',
   'the due date and pin but keeps the start date; setting a changed nonnull date with an omitted',
   'marker turns Someday off. To schedule again on the same date, explicitly send someday false.',
+  'Tags are trimmed, lowercase, unique strings (up to 30, each up to 64 characters). waitingOn names',
+  'a blocker and clears pins. With no waitingUntil the task is parked without scheduling warnings;',
+  'a follow-up ISO instant or YYYY-MM-DD (midnight in the settings zone) allows scheduling from then.',
+  'Clearing waitingOn clears waitingUntil too. list_tasks supports tag, all-tags and waiting filters.',
   'Projects are ongoing work bigger than one task, each thinking, active, on_hold or done; only tasks',
   'of active projects are scheduled, and a project with weeklyMinutes gets project time planned for',
   'what its tasks do not cover. Work that mostly runs itself (an agent does it) is shared attention:',
@@ -107,14 +113,16 @@ const dryRunInput = z.boolean().default(false).describe('Validate and compute th
 const writeReason = (tool: string) => tool === 'set_day' || tool === 'clear_day' ? 'rescheduled due to day override' : tool.includes('project') ? 'rescheduled due to project update' : 'rescheduled due to task update'
 const createTaskInput = z.object({
   ...taskBody.shape,
+  waitingUntil: z.union([isoInstant, calendarDate]).nullish(),
   id: taskId.optional(),
   durationMinutes: z.number().int().min(1).default(30),
   priority: priority.default('medium'),
   deadlineType: deadlineType.optional(),
 })
+const updateTaskInput = taskPatch.extend({ waitingUntil: z.union([isoInstant, calendarDate]).nullish() })
 const operation = z.discriminatedUnion('tool', [
   z.object({ tool: z.literal('create_task'), arguments: createTaskInput }),
-  z.object({ tool: z.literal('update_task'), arguments: z.object({ id: taskId, ...taskPatch.shape }) }),
+  z.object({ tool: z.literal('update_task'), arguments: z.object({ id: taskId, ...updateTaskInput.shape }) }),
   z.object({ tool: z.literal('complete_task'), arguments: z.object({ id: taskId }) }),
   z.object({ tool: z.literal('delete_task'), arguments: z.object({ id: taskId }) }),
   z.object({ tool: z.literal('set_day'), arguments: z.object({ date: calendarDate, ...dayOverrideBody.shape }) }),
@@ -148,7 +156,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
 
   server.registerTool('batch_update_tasks', {
     description: 'Atomically updates 1–100 tasks in order, then schedules once. Any invalid reference rolls back the whole batch.',
-    inputSchema: { tasks: z.array(z.object({ id: taskId, ...taskPatch.shape })).min(1).max(100), dryRun: dryRunInput },
+    inputSchema: { tasks: z.array(z.object({ id: taskId, ...updateTaskInput.shape })).min(1).max(100), dryRun: dryRunInput },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   }, ({ tasks: patches, dryRun }) => run(() => write(patches.map((arguments_) => ({ tool: 'update_task', arguments: arguments_ })), dryRun)))
 
@@ -335,7 +343,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
     {
       title: 'List tasks',
       description:
-        'Lists open tasks (soonest due first, undated last) with their scheduled blocks. Inbox includes unfiled tasks and categorized tasks with no due, start, pin or Someday decision; other category lists exclude those Inbox tasks. Someday tasks stay off the plan. Completed tasks are excluded unless includeCompleted is true.',
+        'Lists open tasks (soonest due first, undated last) with their scheduled blocks. Inbox includes unfiled tasks and categorized tasks with no due, start, pin, waiting or Someday decision; other category lists exclude those Inbox tasks. Someday and indefinite waiting tasks stay off the plan. Completed tasks are excluded unless includeCompleted is true.',
       inputSchema: {
         categoryId: z.string().min(1).optional().describe('Only tasks in this category view; inbox is the derived needs-triage list'),
         includeCompleted: z.boolean().default(false),
@@ -346,6 +354,9 @@ export function buildMcpServer(deps: McpDeps): McpServer {
         projectId: z.union([z.uuid(), z.literal('none')]).nullable().optional(),
         priority: priority.optional(),
         someday: z.boolean().optional(),
+        tag: z.string().trim().toLowerCase().min(1).max(64).optional(),
+        tags: taskTags.optional(),
+        waiting: z.boolean().optional(),
         scheduledOn: calendarDate.optional(),
         hasSource: z.boolean().optional(),
         limit: z.number().int().min(1).max(200).default(50),
@@ -361,6 +372,9 @@ export function buildMcpServer(deps: McpDeps): McpServer {
         if (filters.context !== undefined) conditions.push(eq(tasks.context, filters.context))
         if (filters.priority !== undefined) conditions.push(eq(tasks.priority, filters.priority))
         if (filters.someday !== undefined) conditions.push(eq(tasks.someday, filters.someday))
+        if (filters.waiting !== undefined) conditions.push(filters.waiting ? isNotNull(tasks.waitingOn) : isNull(tasks.waitingOn))
+        const tags = [...(filters.tags ?? []), ...(filters.tag === undefined ? [] : [filters.tag])]
+        if (tags.length > 0) conditions.push(sql`${tasks.tags} @> ${JSON.stringify(tags)}::jsonb`)
         if (filters.projectId !== undefined) conditions.push(filters.projectId === null || filters.projectId === 'none' ? isNull(tasks.projectId) : eq(tasks.projectId, filters.projectId))
         if (filters.hasSource !== undefined) {
           const hasSource = sql`coalesce(${tasks.source}->>'url', '') <> ''`
@@ -377,13 +391,13 @@ export function buildMcpServer(deps: McpDeps): McpServer {
           const date = parseCalendarDate(filters.scheduledOn)!
           const start = new Date(zonedToUtc(date, 0, tz))
           const end = new Date(zonedToUtc(dateFromDayNumber(dayNumber(date) + 1), 0, tz))
-          const scheduled = db.select({ id: placements.taskId }).from(placements).where(and(lt(placements.startAt, end), gt(placements.endAt, start)))
+          const scheduled = db.select({ id: placements.taskId }).from(placements).innerJoin(tasks, eq(placements.taskId, tasks.id)).where(and(taskPlacementVisible(placements.startAt, placements.pinned), lt(placements.startAt, end), gt(placements.endAt, start)))
           conditions.push(or(inArray(tasks.id, scheduled), and(gte(tasks.pinnedStart, start), lt(tasks.pinnedStart, end)))!)
         }
         if (categoryId === 'inbox') {
-          conditions.push(or(eq(tasks.categoryId, 'inbox'), and(isNull(tasks.dueAt), isNull(tasks.startAt), isNull(tasks.pinnedStart), eq(tasks.someday, false)))!)
+          conditions.push(or(eq(tasks.categoryId, 'inbox'), and(isNull(tasks.dueAt), isNull(tasks.startAt), isNull(tasks.pinnedStart), isNull(tasks.waitingOn), eq(tasks.someday, false)))!)
         } else if (categoryId !== undefined) {
-          conditions.push(eq(tasks.categoryId, categoryId), or(isNotNull(tasks.dueAt), isNotNull(tasks.startAt), isNotNull(tasks.pinnedStart), eq(tasks.someday, true))!)
+          conditions.push(eq(tasks.categoryId, categoryId), or(isNotNull(tasks.dueAt), isNotNull(tasks.startAt), isNotNull(tasks.pinnedStart), isNotNull(tasks.waitingOn), eq(tasks.someday, true))!)
         }
         const rows = await db
           .select()
@@ -432,7 +446,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
       title: 'Update task',
       description:
         'Changes the given fields and reschedules. Omitted fields keep their value; null clears. For recurring tasks, template/rule edits apply to this and future unfinished occurrences; recurrence: null stops future repeats and keeps this task.',
-      inputSchema: { id: taskId, ...taskPatch.shape, dryRun: dryRunInput },
+      inputSchema: { id: taskId, ...updateTaskInput.shape, dryRun: dryRunInput },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     ({ dryRun, ...args }) => run(() => write([{ tool: 'update_task', arguments: args }], dryRun, true)),
@@ -647,12 +661,12 @@ export function buildMcpServer(deps: McpDeps): McpServer {
         switch (op.tool) {
           case 'create_task': {
             const { id, deadlineType: deadline, ...body } = op.arguments
-            results.push({ task: await upsertTask(store, id ?? randomUUID(), { ...body, deadlineType: deadline ?? (body.dueAt == null ? 'none' : 'soft') }) })
+            results.push({ task: await upsertTask(store, id ?? randomUUID(), { ...body, waitingUntil: await followUpInstant(store, body.waitingUntil), deadlineType: deadline ?? (body.dueAt == null ? 'none' : 'soft') }) })
             break
           }
           case 'update_task': {
             const { id, ...patch } = op.arguments
-            results.push({ task: await patchTask(store, id, patch) })
+            results.push({ task: await patchTask(store, id, { ...patch, waitingUntil: await followUpInstant(store, patch.waitingUntil) }) })
             break
           }
           case 'complete_task': results.push({ task: await completeTask(store, op.arguments.id) }); break
@@ -763,7 +777,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
       })
       .from(placements)
       .innerJoin(tasks, eq(placements.taskId, tasks.id))
-      .where(and(eq(tasks.someday, false), lt(placements.startAt, end), gt(placements.endAt, start)))
+      .where(and(taskPlacementVisible(placements.startAt, placements.pinned), lt(placements.startAt, end), gt(placements.endAt, start)))
       .orderBy(asc(placements.startAt))
 
     const projectTime = await db
@@ -813,7 +827,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
     if (ids.length === 0) return []
     return db.select(getTableColumns(placements)).from(placements)
       .innerJoin(tasks, eq(placements.taskId, tasks.id))
-      .where(and(eq(tasks.someday, false), inArray(placements.taskId, ids)))
+      .where(and(taskPlacementVisible(placements.startAt, placements.pinned), inArray(placements.taskId, ids)))
       .orderBy(asc(placements.startAt))
   }
 }
@@ -857,6 +871,12 @@ function summary(result: SchedulerResult): Pick<SchedulerResult, 'unscheduled' |
 
 function utcMidnight(date: LocalDate): number {
   return Date.UTC(date.year, date.month - 1, date.day)
+}
+
+async function followUpInstant(db: Db, value: string | null | undefined): Promise<string | null | undefined> {
+  if (value == null) return value
+  const date = parseCalendarDate(value)
+  return date === undefined ? value : new Date(zonedToUtc(date, 0, await defaultTimeZone(db))).toISOString()
 }
 
 function ok(data: Record<string, unknown>): CallToolResult {
