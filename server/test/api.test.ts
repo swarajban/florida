@@ -959,6 +959,59 @@ describe('calendar event writes', () => {
     expect(await (await api('/api/events/ev-1')).json()).toEqual(body.event)
   })
 
+  it('invites, merges live RSVP metadata, preserves self/organizer, and clears only guests', async () => {
+    const id = 'b0000000-0000-4000-8000-000000000115'
+    const put = (extra: object = {}) => api(`/api/events/${id}`, { method: 'PUT', json: { ...write, ...extra } })
+    const created = await put({ attendees: [' ALICE@acme.com ', { email: 'alice@acme.com', displayName: 'Ignored duplicate' }, 'remove@acme.com'] })
+    expect(created.status).toBe(200)
+    const { event } = await created.json() as { event: { googleId: string } }
+    expect(fake.eventWrites.at(-1)?.body?.attendees).toEqual([{ email: 'alice@acme.com' }, { email: 'remove@acme.com' }])
+    const live = fake.googleEvents.get(event.googleId)!
+    const protectedRows = [
+      { email: 'owner@acme.com', organizer: true, responseStatus: 'accepted' },
+      { email: 'ev@example.com', self: true, responseStatus: 'needsAction' },
+    ]
+    live.attendees = [
+      ...protectedRows,
+      { email: 'ALICE@acme.com', displayName: 'Alice', responseStatus: 'tentative', optional: true },
+      { email: 'remove@acme.com', responseStatus: 'declined' },
+    ]
+    fake.eventWrites = []
+    expect((await put({ attendees: [{ email: 'alice@acme.com', displayName: '' }, { email: 'new@acme.com', optional: true }] })).status).toBe(200)
+    expect(fake.eventWrites.at(-1)?.body?.attendees).toEqual([
+      ...protectedRows,
+      { email: 'ALICE@acme.com', displayName: 'Alice', responseStatus: 'tentative', optional: true },
+      { email: 'new@acme.com', optional: true },
+    ])
+    fake.googleEvents.get(event.googleId)!.attendees!.find((a) => a.self)!.responseStatus = 'declined'
+    fake.eventWrites = []
+    expect((await put({ attendees: ['alice@acme.com', { email: 'new@acme.com', optional: true }], responseStatus: 'needsAction' })).status).toBe(200)
+    expect(fake.eventWrites).toEqual([])
+    expect(fake.googleEvents.get(event.googleId)?.attendees?.find((a) => a.self)?.responseStatus).toBe('declined')
+    fake.eventWrites = []
+    expect((await put({ summary: 'Rename only' })).status).toBe(200)
+    expect(fake.eventWrites.at(-1)?.body).toEqual({ summary: 'Rename only' })
+    expect(fake.googleEvents.get(event.googleId)?.attendees).toHaveLength(4)
+    expect((await put({ attendees: [{ email: 'alice@acme.com', displayName: 'Alicia', optional: false }], responseStatus: 'accepted' })).status).toBe(200)
+    expect(fake.eventWrites.at(-1)?.body?.attendees).toEqual([
+      protectedRows[0], { ...protectedRows[1], responseStatus: 'accepted' },
+      { email: 'ALICE@acme.com', displayName: 'Alicia', responseStatus: 'tentative', optional: false },
+    ])
+    expect((await put({ attendees: [], responseStatus: 'accepted' })).status).toBe(200)
+    expect(fake.eventWrites.at(-1)?.body?.attendees).toEqual([protectedRows[0], { ...protectedRows[1], responseStatus: 'accepted' }])
+    fake.eventWrites = []
+    expect((await put({ attendees: [] })).status).toBe(200)
+    expect(fake.eventWrites).toEqual([])
+    for (const attendees of [['not-an-email'], Array(51).fill('a@acme.com')]) {
+      expect((await put({ attendees })).status).toBe(400)
+    }
+    const alone = await api('/api/events/b0000000-0000-4000-8000-000000000116', { method: 'PUT', json: { ...write, attendees: ['a@acme.com'] } })
+    expect(alone.status).toBe(200)
+    const clear = await api('/api/events/b0000000-0000-4000-8000-000000000116', { method: 'PUT', json: { ...write, attendees: [] } })
+    expect(clear.status).toBe(200)
+    expect(fake.eventWrites.at(-1)?.body?.attendees).toEqual([])
+  })
+
   it('keeps the client id when a sync already stored the Google event under its own id', async () => {
     const googleId = `g-${fake.nextGoogleId}`
     await db

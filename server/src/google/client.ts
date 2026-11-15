@@ -136,7 +136,7 @@ export interface GoogleEventWrite {
   start?: GoogleEventTimeWrite
   end?: GoogleEventTimeWrite
   recurrence?: string[]
-  /** Replaced wholesale by Google, so an RSVP re-sends every attendee. */
+  /** Replaced wholesale by Google; guest edits and RSVP merge with the live attendee list. */
   attendees?: GoogleEventAttendee[]
 }
 

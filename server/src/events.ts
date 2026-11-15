@@ -15,6 +15,21 @@ import { badRequest, forbidden, isoInstant, notFound, timeZone } from './validat
 
 export const responseStatus = z.enum(['accepted', 'declined', 'tentative', 'needsAction'])
 
+const attendeeEmail = z.string().trim().toLowerCase().pipe(z.email())
+const attendeeWrite = z.union([
+  attendeeEmail,
+  z.object({ email: attendeeEmail, displayName: z.string().nullish(), optional: z.boolean().optional() }),
+]).transform((attendee): { email: string, displayName?: string | null | undefined, optional?: boolean | undefined } =>
+  typeof attendee === 'string' ? { email: attendee } : attendee)
+const attendeeList = z.array(attendeeWrite).max(50).transform((attendees) => {
+  const seen = new Set<string>()
+  return attendees.filter(({ email }) => {
+    if (seen.has(email)) return false
+    seen.add(email)
+    return true
+  })
+})
+
 const DAY = 86_400_000
 
 /**
@@ -33,6 +48,7 @@ export const eventBody = z
     blocksDay: z.boolean().nullable().optional(),
     /** The user's own RSVP. `null` leaves it alone; it is ignored when creating. */
     responseStatus: responseStatus.nullish(),
+    attendees: attendeeList.optional(),
     /** Creation only. Google owns the series; stored rows are individual instances. */
     recurrence: z.object({
       frequency: z.enum(['daily', 'weekly', 'monthly', 'yearly']),
@@ -86,9 +102,10 @@ export async function upsertEvent(
   db: Db,
   sync: CalendarSyncService,
   id: string,
-  body: EventBody,
+  input: z.input<typeof eventBody>,
   now: Date = new Date(),
 ): Promise<EventRow> {
+  const body = eventBody.parse(input)
   const [current] = await db.select().from(events).where(eq(events.id, id)).limit(1)
   if (current === undefined) return createEvent(db, sync, id, body, now)
   if (current.deletedAt !== null) throw notFound(`event ${id}`)
@@ -111,6 +128,11 @@ async function createEvent(db: Db, sync: CalendarSyncService, id: string, body: 
     created = await sync.createEvent(calendar, {
       ...(googleId === undefined ? {} : { id: googleId }),
       summary: body.summary,
+      ...(body.attendees?.length ? { attendees: body.attendees.map((a) => ({
+        email: a.email,
+        ...('displayName' in a && a.displayName?.trim() ? { displayName: a.displayName.trim() } : {}),
+        ...('optional' in a && a.optional ? { optional: true } : {}),
+      })) } : {}),
       ...(body.location == null ? {} : { location: body.location }),
       ...(body.description == null ? {} : { description: body.description }),
       start: { ...googleTime(new Date(body.startAt), body.allDay), ...zone },
@@ -170,7 +192,7 @@ async function updateEvent(
 ): Promise<EventRow> {
   const seriesId = body.scope === 'series' ? current.recurringEventId : null
   if (body.calendarId !== current.calendarId) throw badRequest('moving an event to another calendar is not supported')
-  if (body.blocksDay !== undefined && current.allDay && seriesId === null && Object.keys(changedFields(current, body)).length === 0
+  if (body.attendees === undefined && body.blocksDay !== undefined && current.allDay && seriesId === null && Object.keys(changedFields(current, body)).length === 0
     && (body.responseStatus == null || body.responseStatus === current.responseStatus)) {
     return setEventBlocksDay(db, current.id, body.blocksDay, now)
   }
@@ -210,20 +232,37 @@ async function updateInstance(
     delete patch.start
     delete patch.end
   }
-  const rsvp = body.responseStatus ?? null
+  const rsvp = body.responseStatus != null && body.responseStatus !== current.responseStatus ? body.responseStatus : null
   let updated: GoogleEvent | undefined
   try {
-    if (rsvp !== null && rsvp !== current.responseStatus) {
+    if (body.attendees !== undefined || rsvp !== null) {
       // Google replaces the attendee array wholesale, so an RSVP re-sends every attendee. They come
       // from Google's current copy, not ours, which may be behind: a stale list would drop guests.
       const live = await sync.getEvent(calendar, current.googleId)
       const attendees = live.attendees ?? []
-      const self = attendees.find((a) => a.self === true)
-      if (self === undefined) throw badRequest('cannot respond to an event this account is not a guest of')
-      // Already answered that way from another device: nothing to send, but Google's copy brings
-      // the row (and the client that is behind) up to date.
-      if (self.responseStatus === rsvp) updated = live
-      else patch.attendees = attendees.map((a) => (a === self ? { ...a, responseStatus: rsvp } : a))
+      if (rsvp !== null && !attendees.some((a) => a.self === true)) {
+        throw badRequest('cannot respond to an event this account is not a guest of')
+      }
+      const requested = body.attendees === undefined ? undefined : new Map(body.attendees.map((a) => [a.email, a]))
+      const merged = attendees.flatMap((a) => {
+        const key = a.email?.trim().toLowerCase()
+        const desired = key === undefined ? undefined : requested?.get(key)
+        if (requested !== undefined && desired === undefined && !a.self && !a.organizer) return []
+        if (key !== undefined) requested?.delete(key)
+        return [{ ...a,
+          ...(desired?.displayName?.trim() ? { displayName: desired.displayName.trim() } : {}),
+          ...(desired !== undefined && 'optional' in desired && desired.optional !== undefined ? { optional: desired.optional } : {}),
+          ...(a.self && rsvp !== null ? { responseStatus: rsvp } : {}),
+        }]
+      })
+      for (const desired of requested?.values() ?? []) {
+        merged.push({ email: desired.email,
+          ...('displayName' in desired && desired.displayName?.trim() ? { displayName: desired.displayName.trim() } : {}),
+          ...('optional' in desired && desired.optional ? { optional: true } : {}),
+        })
+      }
+      updated = live
+      if (JSON.stringify(merged) !== JSON.stringify(attendees)) patch.attendees = merged
     }
     if (Object.keys(patch).length > 0) updated = await sync.updateEvent(calendar, current.googleId, patch)
   } catch (err) {

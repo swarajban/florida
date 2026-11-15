@@ -100,10 +100,10 @@ extension AppDatabase {
         }
     }
 
-    public func saveEvent(_ draft: CalendarEvent, original: CalendarEvent?, recurrence: EventRecurrence? = nil, now: Date = Date()) throws {
+    public func saveEvent(_ draft: CalendarEvent, original: CalendarEvent?, recurrence: EventRecurrence? = nil, attendees: [EventAttendeeWrite]? = nil, now: Date = Date()) throws {
         try writer.write { db in
             guard let original else {
-                try Self.saveEvent(draft, recurrence: recurrence, in: db, now: now)
+                try Self.saveEvent(draft, recurrence: recurrence, attendees: attendees, in: db, now: now)
                 return
             }
             guard var live = try CalendarEvent.fetchOne(db, id: original.id), live.deletedAt == nil,
@@ -132,8 +132,8 @@ extension AppDatabase {
                 attendees[index].responseStatus = response
                 live.attendees = attendees
             }
-            guard live != before else { return }
-            try Self.saveEvent(live, recurrence: recurrence, in: db, now: now)
+            guard live != before || attendees != nil else { return }
+            try Self.saveEvent(live, recurrence: recurrence, attendees: attendees, in: db, now: now)
         }
     }
 

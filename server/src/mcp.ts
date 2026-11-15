@@ -278,7 +278,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
   }))
 
   server.registerTool('upsert_event', {
-    title: 'Create or update event', description: 'Writes an event through to Google and reschedules. Omit id to generate a UUID; use the same id to retry creation.',
+    title: 'Create or update event', description: 'Writes an event through to Google and reschedules. Omit id to generate a UUID; use the same id to retry creation. Attendees sends guest invitations; omit to keep guests, or pass [] to remove guests while preserving self and organizer.',
     inputSchema: { id: z.uuid().optional(), ...eventBody.shape },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, ({ id, ...body }) => run(async () => {
