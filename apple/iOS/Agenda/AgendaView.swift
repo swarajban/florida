@@ -79,6 +79,16 @@ struct AgendaView: View {
         .sheet(isPresented: $showsDayPicker) {
             DayPickerSheet(selectedDay: model.selectedDay, isPresented: $showsDayPicker)
         }
+        .sheet(isPresented: $showsCalendars) {
+            CalendarChecklistSheet(onDone: { showsCalendars = false })
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .onDisappear {
+                    #if DEBUG
+                    model.finishCalendarActivationDemo()
+                    #endif
+                }
+        }
         .sheet(isPresented: $showsWeeklyReview) {
             WeeklyReviewSheet()
         }
@@ -233,9 +243,6 @@ struct AgendaView: View {
                 .frame(minWidth: 44, minHeight: 44)
         }
         .accessibilityIdentifier("agenda-calendars")
-        .popover(isPresented: $showsCalendars) {
-            CalendarChecklistPopover(model: model, onDone: { showsCalendars = false })
-        }
     }
 
     /// New task (the same composer as Tasks and the widget) or new event, starting at the next quarter hour
@@ -509,8 +516,8 @@ struct AgendaView: View {
     }
 }
 
-private struct CalendarChecklistPopover: View {
-    let model: AppModel
+private struct CalendarChecklistSheet: View {
+    @Environment(AppModel.self) private var model
     let onDone: () -> Void
 
     var body: some View {
@@ -554,7 +561,5 @@ private struct CalendarChecklistPopover: View {
                 }.padding(.horizontal, 12).padding(.bottom, 12)
             }.accessibilityIdentifier("calendar-checklist")
         }
-        .frame(width: 320, height: 360)
-        .presentationCompactAdaptation(.popover)
     }
 }

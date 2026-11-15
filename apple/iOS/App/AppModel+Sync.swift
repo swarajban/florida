@@ -74,17 +74,6 @@ extension AppModel {
             guard let self, self.sceneIsActive else { return }
             self.requestSync()
         }
-        #if DEBUG
-        if LaunchOptions.demoData, UserDefaults.standard.bool(forKey: "uiCalendarActivation"), selected {
-            Task { [weak self] in
-                try? await Task.sleep(for: .seconds(12))
-                guard let self, var fresh = try? database.calendars().first(where: { $0.id == id }), fresh.selected else { return }
-                fresh.lastSyncedAt = Date()
-                try? database.apply(SyncResponse(cursor: Date().ISO8601Format(), calendars: [fresh]))
-                self.calendarActivation.reconcile((try? database.calendars()) ?? [])
-            }
-        }
-        #endif
         WidgetCenter.shared.reloadAllTimelines()
         requestSync()
     }
