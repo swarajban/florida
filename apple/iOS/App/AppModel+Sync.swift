@@ -63,12 +63,28 @@ extension AppModel {
     /// Shows or hides a calendar locally and lets the regular queue push the flag.
     func setCalendarSelected(id: String, selected: Bool) {
         guard let database else { return }
+        guard let calendar = try? database.calendars().first(where: { $0.id == id }) else { return }
         do {
             try database.setCalendarSelected(id: id, selected: selected)
         } catch {
             lastError = "Could not update the calendar: \(error.localizedDescription)"
             return
         }
+        calendarActivation.setSelected(selected, calendar: calendar) { [weak self] in
+            guard let self, self.sceneIsActive else { return }
+            self.requestSync()
+        }
+        #if DEBUG
+        if LaunchOptions.demoData, UserDefaults.standard.bool(forKey: "uiCalendarActivation"), selected {
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(12))
+                guard let self, var fresh = try? database.calendars().first(where: { $0.id == id }), fresh.selected else { return }
+                fresh.lastSyncedAt = Date()
+                try? database.apply(SyncResponse(cursor: Date().ISO8601Format(), calendars: [fresh]))
+                self.calendarActivation.reconcile((try? database.calendars()) ?? [])
+            }
+        }
+        #endif
         WidgetCenter.shared.reloadAllTimelines()
         requestSync()
     }
@@ -166,6 +182,7 @@ extension AppModel {
         // A failed push still pulls and may have refused some writes before it stopped; they are
         // listed in Settings, not folded into `lastError`.
         recordRejections(await syncClient.lastRejectedWrites)
+        if let calendars = try? database?.calendars() { calendarActivation.reconcile(calendars) }
         // A failed push still pulls, so the widgets may have something new either way.
         WidgetCenter.shared.reloadAllTimelines()
     }

@@ -76,6 +76,7 @@ final class AppModel {
     }
     var accounts: [GoogleAccount] = []
     var calendars: [CalendarInfo] = []
+    let calendarActivation = CalendarActivation()
     /// Local writes not pushed yet, oldest first (`AppModel+Queue`).
     var pendingWrites: [PendingWrite] = []
 

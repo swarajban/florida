@@ -55,11 +55,16 @@ extension AppModel {
     /// Flips and queues a calendar flag locally before asking for sync.
     func setCalendarSelected(id: String, selected: Bool) {
         guard let database else { return }
+        guard let calendar = try? database.calendars().first(where: { $0.id == id }) else { return }
         do {
             try database.setCalendarSelected(id: id, selected: selected)
         } catch {
             statusMessage = "Could not update the calendar: \(error.localizedDescription)"
             return
+        }
+        calendarActivation.setSelected(selected, calendar: calendar) { [weak self] in
+            guard NSApplication.shared.isActive else { return }
+            self?.scheduleSync()
         }
         scheduleSync()
     }
@@ -86,6 +91,7 @@ extension AppModel {
         } catch {
             lastSyncError = Self.describe(error)
         }
+        if let calendars = try? database?.calendars() { calendarActivation.reconcile(calendars) }
     }
 
     private func startChangeStream(_ config: ServerConfig) {

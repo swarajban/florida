@@ -4,6 +4,36 @@ import UIKit
 /// Wait for real content before capturing; a fixed launch delay can silently save a blank screen.
 final class SmokeTests: XCTestCase {
     @MainActor
+    func testCalendarActivationChecklist() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-demoData", "YES", "-uiCalendarActivation", "YES", "-uiTab", "agenda",
+                               "-uiAppearance", "light", "-uiAgendaMode", "list"]
+        app.launch()
+        let picker = app.buttons["agenda-calendars"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 10))
+        picker.tap()
+        let holidays = app.buttons["calendar-choice-demo-cal-us-holidays"]
+        let checklist = app.descendants(matching: .any).matching(identifier: "calendar-checklist").firstMatch
+        for _ in 0..<4 where !holidays.isHittable { checklist.swipeUp() }
+        XCTAssertTrue(holidays.isHittable)
+        holidays.tap()
+        let birthdays = app.buttons["calendar-choice-demo-cal-birthdays"]
+        XCTAssertTrue(birthdays.isHittable)
+        birthdays.tap()
+        XCTAssertEqual(holidays.value as? String, "Selected")
+        XCTAssertEqual(birthdays.value as? String, "Selected")
+        app.buttons["Done"].tap()
+        let status = app.descendants(matching: .any).matching(identifier: "calendar-activation-status").firstMatch
+        let appeared = status.waitForExistence(timeout: 2)
+        captureFailure(app, "calendar-activation")
+        XCTAssertTrue(appeared)
+        XCTAssertLessThanOrEqual(status.frame.height, 24)
+        XCTAssertTrue(status.waitForNonExistence(timeout: 15))
+        app.terminate()
+    }
+
+    @MainActor
     func testDeepLinkTaskAndAgendaNavigation() throws {
         continueAfterFailure = false
         let app = XCUIApplication()

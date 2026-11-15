@@ -441,6 +441,11 @@ public final class AppDatabase: Sendable {
             }
             try db.execute(sql: "DELETE FROM syncState WHERE key = 'cursor'")
         }
+        migrator.registerMigration("v13-calendar-last-sync") { db in
+            try db.alter(table: "calendar") { t in
+                t.add(column: "lastSyncedAt", .datetime)
+            }
+        }
         return migrator
     }
 }

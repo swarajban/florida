@@ -185,6 +185,9 @@ private struct CalendarRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(calendar.summary)
                         .accessibilityIdentifier("calendar-name-\(calendar.id)")
+                    if model.calendarActivation.syncingCalendarIds.contains(calendar.id) {
+                        Label("Syncing…", systemImage: "arrow.triangle.2.circlepath").font(.caption)
+                    }
                     Text(calendar.accessRole)
                         .font(.caption)
                         .foregroundStyle(.secondary)
