@@ -523,7 +523,7 @@ final class SmokeTests: XCTestCase {
             let heading = app.buttons["Go to day"]
             let design = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Design review: scheduler v2")).firstMatch
             let architecture = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Architecture sync")).firstMatch
-            let birthday = app.buttons["all-day-event-demo-event-birthday"]
+            let teammateOOO = app.buttons["all-day-event-demo-event-ooo"]
             let offsite = app.buttons["all-day-event-demo-event-offsite"]
 
             @MainActor
@@ -547,7 +547,7 @@ final class SmokeTests: XCTestCase {
 
             positionInGrid(design, in: app)
             assertDay(today)
-            XCTAssertTrue(birthday.isHittable)
+            XCTAssertTrue(teammateOOO.isHittable)
             XCTAssertTrue(offsite.isHittable)
             let beforeVerticalScroll = design.frame.minY
             let gutter = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 26, dy: design.frame.midY))
@@ -562,7 +562,7 @@ final class SmokeTests: XCTestCase {
             assertDay(tomorrow)
             XCTAssertTrue(architecture.isHittable)
             XCTAssertFalse(design.isHittable)
-            XCTAssertFalse(birthday.isHittable)
+            XCTAssertFalse(teammateOOO.isHittable)
             XCTAssertTrue(offsite.isHittable)
             capture(app, "one-day-carousel-next-\(appearance)")
             architecture.tap()
@@ -572,12 +572,12 @@ final class SmokeTests: XCTestCase {
             swipeDay(forward: false)
             assertDay(today)
             XCTAssertTrue(design.isHittable)
-            XCTAssertTrue(birthday.isHittable)
+            XCTAssertTrue(teammateOOO.isHittable)
             XCTAssertEqual(design.frame.minY, originalY, accuracy: 2)
             swipeDay(forward: false)
             assertDay(yesterday)
             XCTAssertTrue(offsite.isHittable)
-            XCTAssertFalse(birthday.isHittable)
+            XCTAssertFalse(teammateOOO.isHittable)
             XCTAssertFalse(design.isHittable)
             swipeDay(forward: true)
             assertDay(today)
@@ -585,7 +585,7 @@ final class SmokeTests: XCTestCase {
             app.buttons[tomorrow.formatted(.dateTime.weekday(.wide).month(.wide).day())].tap()
             assertDay(tomorrow)
             XCTAssertTrue(architecture.isHittable)
-            XCTAssertFalse(birthday.isHittable)
+            XCTAssertFalse(teammateOOO.isHittable)
             swipeDay(forward: false)
             assertDay(today)
             XCTAssertTrue(design.isHittable)
@@ -594,7 +594,7 @@ final class SmokeTests: XCTestCase {
             app.buttons["Today"].tap()
             assertDay(today)
             XCTAssertTrue(design.isHittable)
-            XCTAssertTrue(birthday.isHittable)
+            XCTAssertTrue(teammateOOO.isHittable)
 
             heading.tap()
             XCTAssertTrue(app.buttons["Next Month"].waitForExistence(timeout: 5))
