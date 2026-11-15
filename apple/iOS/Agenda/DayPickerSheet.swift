@@ -4,11 +4,12 @@ import SwiftUI
 /// selects it and closes the sheet; the month arrows only browse.
 struct DayPickerSheet: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
+    @Binding private var isPresented: Bool
     @State private var day: Date
 
-    init(selectedDay: Date) {
+    init(selectedDay: Date, isPresented: Binding<Bool>) {
         _day = State(initialValue: selectedDay)
+        _isPresented = isPresented
     }
 
     var body: some View {
@@ -18,22 +19,22 @@ struct DayPickerSheet: View {
                 .environment(\.calendar, model.calendar)
                 .padding(.horizontal)
                 .onChange(of: day) { _, newValue in
+                    isPresented = false
                     model.select(day: newValue)
-                    dismiss()
                 }
                 .navigationTitle("Go to Day")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Button("Today") {
+                            isPresented = false
                             model.selectToday()
-                            dismiss()
                         }
                         .disabled(model.selectedDay == model.today)
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Done") {
-                            dismiss()
+                            isPresented = false
                         }
                     }
                 }

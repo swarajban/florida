@@ -52,22 +52,6 @@ struct AgendaView: View {
             }
             .background(FloridaStyle.paper)
             .toolbar(.hidden, for: .navigationBar)
-            .sheet(isPresented: $showsDayPicker) {
-                DayPickerSheet(selectedDay: model.selectedDay)
-            }
-            .sheet(isPresented: $showsWeeklyReview) {
-                WeeklyReviewSheet()
-            }
-            .sheet(item: $editingTask) { task in
-                TaskEditorView(task: task)
-            }
-            .sheet(item: $selectedEvent) { event in
-                EventDetailView(event: event)
-            }
-            .sheet(item: $newEvent) { event in
-                EventCaptureSheet(event: event)
-            }
-            .taskActionSheets(doneForNow: $doneForNowTask)
             .onChange(of: model.selectedDay) { old, new in
                 slideDirection = new > old ? 1 : -1
                 withAnimation(.snappy(duration: 0.22)) {
@@ -101,6 +85,22 @@ struct AgendaView: View {
             }
             .toastOverlay()
         }
+        .sheet(isPresented: $showsDayPicker) {
+            DayPickerSheet(selectedDay: model.selectedDay, isPresented: $showsDayPicker)
+        }
+        .sheet(isPresented: $showsWeeklyReview) {
+            WeeklyReviewSheet()
+        }
+        .sheet(item: $editingTask) { task in
+            TaskEditorView(task: task)
+        }
+        .sheet(item: $selectedEvent) { event in
+            EventDetailView(event: event)
+        }
+        .sheet(item: $newEvent) { event in
+            EventCaptureSheet(event: event, onDismiss: { newEvent = nil })
+        }
+        .taskActionSheets(doneForNow: $doneForNowTask)
     }
 
     private var items: [AgendaItem] {

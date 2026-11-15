@@ -20,10 +20,12 @@ struct EventEditorView: View {
     @State private var timedShape: (hour: Int, minute: Int, duration: TimeInterval)?
     @State private var titleFocused = false
     private let isNew: Bool
+    private let onDismiss: (() -> Void)?
 
-    init(event: CalendarEvent, isNew: Bool, recurrence: EventRecurrence? = nil) {
+    init(event: CalendarEvent, isNew: Bool, recurrence: EventRecurrence? = nil, onDismiss: (() -> Void)? = nil) {
         original = event
         self.isNew = isNew
+        self.onDismiss = onDismiss
         var event = event
         // Rows without times never reach the agenda, but the shape allows them; give the pickers something.
         if event.startAt == nil || event.endAt == nil {
@@ -114,7 +116,7 @@ struct EventEditorView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
-                        dismiss()
+                        close()
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
@@ -296,7 +298,11 @@ struct EventEditorView: View {
             saveError = "The event could not be saved. It may have been deleted or its calendar changed."
             return
         }
-        dismiss()
+        close()
+    }
+
+    private func close() {
+        if let onDismiss { onDismiss() } else { dismiss() }
     }
 
     /// Trimmed; nil when nothing is left.

@@ -582,6 +582,7 @@ final class SmokeTests: XCTestCase {
                     XCTAssertTrue(app.datePickers["event-start"].buttons[
                         selected.formatted(.dateTime.month(.abbreviated).day().year())].exists)
                     app.buttons["Cancel"].tap()
+                    XCTAssertTrue(app.navigationBars["New Event"].waitForNonExistence(timeout: 5))
                     assertDay(selected)
                 }
                 for _ in 0..<4 {
@@ -602,6 +603,7 @@ final class SmokeTests: XCTestCase {
                     format: "label CONTAINS %@", edgeDay.formatted(.dateTime.weekday(.wide).month(.wide).day()))).firstMatch
                 XCTAssertTrue(choice.waitForExistence(timeout: 5))
                 choice.tap()
+                XCTAssertTrue(app.datePickers.firstMatch.waitForNonExistence(timeout: 5))
                 assertDay(edgeDay)
                 swipeWeek(from: edgeDay, forward: true)
                 assertDay(calendar.date(byAdding: .day, value: 7, to: edgeDay)!)
