@@ -25,8 +25,8 @@ struct EventCaptureSheet: View {
         }
     }
 
-    private func save(_ event: CalendarEvent, recurrence: EventRecurrence?) -> Bool {
-        guard model.save(event: event, recurrence: recurrence) else { return false }
+    private func save(_ event: CalendarEvent, recurrence: EventRecurrence?, attendees: [EventAttendeeWrite]?) -> Bool {
+        guard model.save(event: event, recurrence: recurrence, attendees: attendees) else { return false }
         model.eventEditor = nil
         if let start = event.startAt {
             let day = event.allDay

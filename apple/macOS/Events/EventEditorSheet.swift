@@ -15,6 +15,7 @@ struct EventEditorSheet: View {
     private let original: CalendarEvent
     @State private var saveError: String?
     @State private var recurrence: EventRecurrence?
+    @State private var guests: EventGuestEntry
     /// The clock and length of the timed event from before All-day was switched on, so switching
     /// it off again brings them back on whatever day is chosen by then.
     @State private var timedShape: (hour: Int, minute: Int, duration: TimeInterval)?
@@ -24,6 +25,7 @@ struct EventEditorSheet: View {
 
     init(event: CalendarEvent, isNew: Bool, recurrence: EventRecurrence? = nil) {
         original = event
+        _guests = State(initialValue: EventGuestEntry(attendees: event.attendees ?? []))
         self.isNew = isNew
         _recurrence = State(initialValue: recurrence)
         var event = event
@@ -79,6 +81,9 @@ struct EventEditorSheet: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
+                }
+                Section("Guests") {
+                    EventGuestsInput(entry: $guests, existing: isNew ? [] : (original.attendees ?? []))
                 }
                 Section {
                     TextField("Location", text: location)
@@ -269,7 +274,7 @@ struct EventEditorSheet: View {
         event.allDay = draft.allDay
         event.startAt = draft.startAt
         event.endAt = draft.endAt
-        guard model.save(event: event, original: isNew ? nil : original, recurrence: isNew ? recurrence : nil) else {
+        guard model.save(event: event, original: isNew ? nil : original, recurrence: isNew ? recurrence : nil, attendees: guests.write(isNew: isNew)) else {
             saveError = model.statusMessage ?? "The event could not be saved."
             return
         }

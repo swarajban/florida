@@ -40,9 +40,9 @@ extension AppModel {
     }
 
     @discardableResult
-    func save(event: CalendarEvent, original: CalendarEvent? = nil, recurrence: EventRecurrence? = nil) -> Bool {
+    func save(event: CalendarEvent, original: CalendarEvent? = nil, recurrence: EventRecurrence? = nil, attendees: [EventAttendeeWrite]? = nil) -> Bool {
         guard requireEditable(event) else { return false }
-        return write { try $0.saveEvent(event, original: original, recurrence: recurrence) }
+        return write { try $0.saveEvent(event, original: original, recurrence: recurrence, attendees: attendees) }
     }
 
     func setBlocksDay(_ event: CalendarEvent, blocksDay: Bool?) {

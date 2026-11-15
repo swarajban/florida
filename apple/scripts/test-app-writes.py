@@ -202,7 +202,7 @@ final class AppDatabase {
     }
     func saveEvent(_ event: CalendarEvent) throws { events[event.id] = event }
     func saveEvent(_ event: CalendarEvent, recurrence: EventRecurrence?) throws {}
-    func saveEvent(_ event: CalendarEvent, original: CalendarEvent?, recurrence: EventRecurrence?) throws {
+    func saveEvent(_ event: CalendarEvent, original: CalendarEvent?, recurrence: EventRecurrence?, attendees: [EventAttendeeWrite]? = nil) throws {
         guard let original, var live = events[event.id] else { events[event.id] = event; return }
         if event.startAt != original.startAt { live.startAt = event.startAt }
         if event.endAt != original.endAt { live.endAt = event.endAt }

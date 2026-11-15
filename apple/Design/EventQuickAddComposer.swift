@@ -13,10 +13,11 @@ struct EventQuickAddComposer: View {
     let calendars: [CalendarInfo]
     let accounts: [GoogleAccount]
     let calendar: Calendar
-    let onSave: (CalendarEvent, EventRecurrence?) -> Bool
+    let onSave: (CalendarEvent, EventRecurrence?, [EventAttendeeWrite]?) -> Bool
     let onCancel: () -> Void
     let onOpenEditor: (CalendarEvent, EventRecurrence?) -> Void
     @State private var session: EventQuickAddSession
+    @State private var guests = EventGuestEntry()
     @State private var activeField: Field?
     @State private var error: String?
     @State private var resumeInputAfterCorrection = false
@@ -32,7 +33,7 @@ struct EventQuickAddComposer: View {
 
     init(
         event: CalendarEvent, calendars: [CalendarInfo], accounts: [GoogleAccount], calendar: Calendar,
-        onSave: @escaping (CalendarEvent, EventRecurrence?) -> Bool,
+        onSave: @escaping (CalendarEvent, EventRecurrence?, [EventAttendeeWrite]?) -> Bool,
         onCancel: @escaping () -> Void,
         onOpenEditor: @escaping (CalendarEvent, EventRecurrence?) -> Void
     ) {
@@ -66,7 +67,8 @@ struct EventQuickAddComposer: View {
                 VStack(alignment: .leading, spacing: 20) {
                     input
                     preview
-                    Text("No guests or invitations. Saved locally, then synced.")
+                    EventGuestsInput(entry: $guests, parsed: session.draft.attendees, compact: true)
+                    Text("Saved locally; Google sends invitations on sync.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     if let message = error ?? visibleValidation {
@@ -407,17 +409,92 @@ struct EventQuickAddComposer: View {
     }
 
     private func showEditor() {
-        guard let event = session.event(in: calendars, accounts: accounts, allowUntitled: true) else { return }
+        guard var event = session.event(in: calendars, accounts: accounts, allowUntitled: true) else { return }
+        if let attendees = guests.write(isNew: true, parsed: session.draft.attendees) {
+            event.attendees = EventAttendeeWrite.merging(attendees, into: [])
+        }
         inputFocused = false
         onOpenEditor(event, session.draft.recurrence)
     }
 
     private func save() {
         guard canSave, activeField == nil, let event = session.event(in: calendars, accounts: accounts) else { return }
-        if !onSave(event, session.draft.recurrence) {
+        if !onSave(event, session.draft.recurrence, guests.write(isNew: true, parsed: session.draft.attendees)) {
             error = "Could not save locally. Your draft is still here; check the app’s error and try again."
         }
     }
+}
+
+struct EventGuestsInput: View {
+    @Environment(AppModel.self) private var model
+    @Binding var entry: EventGuestEntry
+    var parsed: [String] = []
+    var existing: [EventAttendee] = []
+    var compact = false
+    @State private var suggestions: [GuestSuggestion] = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(entry.combined(parsed: parsed), id: \.email) { guest in
+                HStack(spacing: 8) {
+                    if let attendee = existing.first(where: { $0.email.lowercased() == guest.email }) {
+                        Image(systemName: EventTiming.responseSymbol(attendee.responseStatus))
+                            .accessibilityLabel(EventTiming.responseText(attendee.responseStatus))
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let name = guest.displayName { Text(name).font(.subheadline) }
+                        Text(guest.email).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 4)
+                    Button { entry.remove(guest.email) } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Remove \(guest.email)")
+                }
+                .padding(8)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+                .accessibilityIdentifier("event-guest-\(guest.email)")
+            }
+            HStack {
+                TextField(compact ? "Add guests" : "Add guest email or name", text: $entry.input)
+                    .textFieldStyle(.plain)
+                    .autocorrectionDisabled()
+                    #if os(iOS)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.emailAddress)
+                    #endif
+                    .onSubmit { entry.commitInput() }
+                    .accessibilityIdentifier("event-guest-input")
+                Button("Add") { entry.commitInput() }
+                    .buttonStyle(.borderless)
+                    .disabled(!GuestSuggestion.isEmail(entry.input.trimmingCharacters(in: .whitespacesAndNewlines)))
+                    .accessibilityIdentifier("event-guest-add")
+            }
+            ForEach(suggestions.filter { suggestion in
+                !entry.combined(parsed: parsed).contains { $0.email == suggestion.email }
+            }, id: \.email) { suggestion in
+                Button {
+                    entry.add(suggestion.email, displayName: suggestion.displayName)
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let name = suggestion.displayName { Text(name) }
+                        Text(suggestion.email).font(.caption).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("event-guest-suggestion-\(suggestion.email)")
+            }
+        }
+        .onChange(of: entry.input) { _, value in
+            if let last = value.last, last == "," || last.isWhitespace { entry.commitInput() }
+            let query = entry.input.trimmingCharacters(in: .whitespacesAndNewlines)
+            suggestions = query.isEmpty ? [] : ((try? model.database?.guestSuggestions(query: query, limit: 5)) ?? [])
+        }
+    }
+
 }
 
 #if os(macOS)
