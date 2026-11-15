@@ -16,8 +16,8 @@ struct EventCaptureSheet: View {
                 EventQuickAddComposer(
                     event: event, calendars: model.writableCalendars, accounts: model.accounts,
                     calendar: model.calendar,
-                    onSave: { event, recurrence in
-                        guard model.save(event: event, recurrence: recurrence) else { return false }
+                    onSave: { event, recurrence, attendees in
+                        guard model.save(event: event, recurrence: recurrence, attendees: attendees) else { return false }
                         onDismiss()
                         return true
                     },
