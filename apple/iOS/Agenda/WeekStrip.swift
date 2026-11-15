@@ -1,5 +1,6 @@
 import FloridaKit
 import SwiftUI
+import UIKit
 
 /// Seven day cells for the week containing `selectedDay`. Tap a day to select it; swipe
 /// horizontally to move a week.
@@ -9,18 +10,9 @@ struct WeekStrip: View {
     let calendar: Calendar
     let onSelect: (Date) -> Void
     let onShiftWeek: (Int) -> Void
-    @State private var runwayStart: Date?
-    @State private var position = ScrollPosition(idType: Date.self)
-    @State private var offset: CGFloat = 0
-    @State private var isPanning = false
 
     private var selectedWeek: Date {
         DateNavigation.startOfWeek(for: selectedDay, calendar: calendar)
-    }
-
-    private var weeks: [Date] {
-        let start = runwayStart ?? DateNavigation.shift(selectedWeek, by: -14, calendar: calendar)
-        return (0..<5).map { DateNavigation.shift(start, by: 7 * $0, calendar: calendar) }
     }
 
     var body: some View {
@@ -35,9 +27,8 @@ struct WeekStrip: View {
             }
             .padding(.top, 2)
             .accessibilityHidden(true)
-            GeometryReader { proxy in
-                carousel(width: proxy.size.width)
-            }
+            WeekPager(selectedWeek: selectedWeek, calendar: calendar,
+                      onShiftWeek: onShiftWeek, page: { AnyView(page($0)) })
             .frame(height: 43)
         }
         .clipped()
@@ -61,82 +52,147 @@ struct WeekStrip: View {
         }
         .accessibilityHidden(week != selectedWeek)
     }
+}
 
-    private func carousel(width: CGFloat) -> some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 0) {
-                ForEach(weeks, id: \.self) { week in
-                    page(week).frame(width: width).id(week)
-                }
-            }
-            .scrollTargetLayout()
-            .frame(width: CGFloat(weeks.count) * width, height: 43)
-        }
-        .frame(width: width, height: 43)
-        .scrollIndicators(.hidden)
-        .accessibilityIdentifier("agenda-week-strip")
-        .scrollPosition($position)
-        .defaultScrollAnchor(.center)
-        .scrollTargetBehavior(WeekScrollTarget(pageWidth: width))
-        .onAppear {
-            runwayStart = weeks.first
-            position.scrollTo(id: selectedWeek, anchor: .leading)
-            offset = 2 * width
-        }
-        .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.x } action: { _, x in
-            offset = x
-        }
-        .onScrollPhaseChange { _, phase in
-            if phase == .interacting { isPanning = true }
-            guard phase == .idle, width > 0 else { return }
-            let index = min(4, max(0, Int((offset / width).rounded())))
-            let week = weeks[index]
-            if isPanning {
-                isPanning = false
-                let delta = (calendar.dateComponents([.day], from: selectedWeek, to: week).day ?? 0) / 7
-                if delta != 0 { onShiftWeek(delta) }
-            }
-            if index == 0 || index == 4 { recenter(on: week, width: width) }
-        }
-        .onChange(of: selectedWeek) { _, week in
-            isPanning = false
-            if let index = weeks.firstIndex(of: week) {
-                let x = CGFloat(index) * width
-                guard abs(offset - x) > 1 else { return }
-                withAnimation(.snappy(duration: 0.3)) { position.scrollTo(id: week, anchor: .leading) }
-            } else {
-                recenter(on: week, width: width)
-            }
-        }
-        .onChange(of: width) { _, width in
-            position.scrollTo(id: selectedWeek, anchor: .leading)
-        }
+private struct WeekPager: UIViewControllerRepresentable {
+    let selectedWeek: Date
+    let calendar: Calendar
+    let onShiftWeek: (Int) -> Void
+    let page: (Date) -> AnyView
+
+    func makeUIViewController(context: Context) -> WeekPagerController {
+        WeekPagerController()
     }
 
-    private func recenter(on week: Date, width: CGFloat) {
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            runwayStart = DateNavigation.shift(week, by: -14, calendar: calendar)
-            offset = 2 * width
-            position.scrollTo(id: week, anchor: .leading)
-        }
+    func updateUIViewController(_ controller: WeekPagerController, context: Context) {
+        controller.update(selectedWeek: selectedWeek, calendar: calendar, onShiftWeek: onShiftWeek, page: page)
     }
 }
 
-private struct WeekScrollTarget: ScrollTargetBehavior {
-    let pageWidth: CGFloat
+private final class WeekPagerController: UIViewController, UIScrollViewDelegate {
+    private let scroll = UIScrollView()
+    private var hosts: [UIHostingController<AnyView>] = []
+    private var weeks: [Date] = []
+    private var selectedWeek: Date?
+    private var calendar = Calendar.autoupdatingCurrent
+    private var page: ((Date) -> AnyView)?
+    private var onShiftWeek: ((Int) -> Void)?
+    private var pageWidth: CGFloat = 0
+    private var dragStartIndex = 2
+    private var isUserScroll = false
 
-    func updateTarget(_ target: inout ScrollTarget, context: TargetContext) {
+    override func loadView() {
+        view = scroll
+        scroll.backgroundColor = .clear
+        scroll.isPagingEnabled = true
+        scroll.alwaysBounceHorizontal = true
+        scroll.showsHorizontalScrollIndicator = false
+        scroll.contentInsetAdjustmentBehavior = .never
+        scroll.decelerationRate = .fast
+        scroll.accessibilityIdentifier = "agenda-week-strip"
+        scroll.delegate = self
+    }
+
+    func update(selectedWeek: Date, calendar: Calendar, onShiftWeek: @escaping (Int) -> Void,
+                page: @escaping (Date) -> AnyView) {
+        loadViewIfNeeded()
+        self.calendar = calendar
+        self.onShiftWeek = onShiftWeek
+        self.page = page
+        let changedWeek = self.selectedWeek != selectedWeek
+        self.selectedWeek = selectedWeek
+        let needsRunway = !weeks.contains(selectedWeek)
+        if needsRunway { makeWeeks(around: selectedWeek) }
+        renderPages()
+        if changedWeek {
+            isUserScroll = false
+            position(on: selectedWeek, animated: !needsRunway && view.window != nil)
+        }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let resized = pageWidth != scroll.bounds.width
+        pageWidth = scroll.bounds.width
+        scroll.contentSize = CGSize(width: pageWidth * CGFloat(weeks.count), height: scroll.bounds.height)
+        for (index, host) in hosts.enumerated() {
+            host.view.frame = CGRect(x: CGFloat(index) * pageWidth, y: 0,
+                                     width: pageWidth, height: scroll.bounds.height)
+        }
+        if resized, let selectedWeek {
+            isUserScroll = false
+            position(on: selectedWeek, animated: false)
+        }
+    }
+
+    private func makeWeeks(around week: Date) {
+        weeks = (-2...2).map { DateNavigation.shift(week, by: 7 * $0, calendar: calendar) }
+    }
+
+    private func renderPages() {
+        guard let page else { return }
+        if hosts.isEmpty {
+            for week in weeks {
+                let host = UIHostingController(rootView: page(week))
+                host.safeAreaRegions = []
+                host.view.backgroundColor = .clear
+                addChild(host)
+                scroll.addSubview(host.view)
+                host.didMove(toParent: self)
+                hosts.append(host)
+            }
+        } else {
+            for (index, host) in hosts.enumerated() { host.rootView = page(weeks[index]) }
+        }
+        view.setNeedsLayout()
+    }
+
+    private func position(on week: Date, animated: Bool) {
+        guard pageWidth > 0, let index = weeks.firstIndex(of: week) else { return }
+        scroll.setContentOffset(CGPoint(x: CGFloat(index) * pageWidth, y: 0), animated: animated)
+    }
+
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        isUserScroll = true
+        dragStartIndex = pageWidth > 0 ? Int((scroll.contentOffset.x / pageWidth).rounded()) : 2
+    }
+
+    func scrollViewWillEndDragging(_ scrollView: UIScrollView, withVelocity velocity: CGPoint,
+                                  targetContentOffset: UnsafeMutablePointer<CGPoint>) {
         guard pageWidth > 0 else { return }
-        let start = (context.originalTarget.rect.minX / pageWidth).rounded() * pageWidth
-        let proposed = (target.rect.minX / pageWidth).rounded() * pageWidth
-        let x = min(max(proposed, start - pageWidth), start + pageWidth)
-        target.rect.origin.x = min(max(0, x), max(0, context.contentSize.width - context.containerSize.width))
+        let proposed = Int((targetContentOffset.pointee.x / pageWidth).rounded())
+        let index = min(4, max(0, min(dragStartIndex + 1, max(dragStartIndex - 1, proposed))))
+        targetContentOffset.pointee = CGPoint(x: CGFloat(index) * pageWidth, y: 0)
+    }
+
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if !decelerate { settle() }
+    }
+
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) { settle() }
+
+    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) { replenish() }
+
+    private func settle() {
+        guard isUserScroll, pageWidth > 0, let selectedWeek else { return }
+        isUserScroll = false
+        let index = min(4, max(0, Int((scroll.contentOffset.x / pageWidth).rounded())))
+        let week = weeks[index]
+        self.selectedWeek = week
+        let delta = (calendar.dateComponents([.day], from: selectedWeek, to: week).day ?? 0) / 7
+        if delta != 0 { onShiftWeek?(delta) }
+        replenish()
+    }
+
+    private func replenish() {
+        guard let selectedWeek, let index = weeks.firstIndex(of: selectedWeek), index == 0 || index == 4 else { return }
+        makeWeeks(around: selectedWeek)
+        renderPages()
+        position(on: selectedWeek, animated: false)
     }
 }
 
-/// Weekday initial over the day number; an ink circle marks selection and a dot marks today.
+/// An ink circle marks selection and a dot marks today.
 private struct DayCell: View {
     let day: Date
     let isSelected: Bool
