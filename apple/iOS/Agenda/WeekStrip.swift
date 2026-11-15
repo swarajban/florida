@@ -11,10 +11,6 @@ struct WeekStrip: View {
     let onSelect: (Date) -> Void
     let onShiftWeek: (Int) -> Void
 
-    private var selectedWeek: Date {
-        DateNavigation.startOfWeek(for: selectedDay, calendar: calendar)
-    }
-
     var body: some View {
         VStack(spacing: 4) {
             HStack(spacing: 0) {
@@ -27,8 +23,8 @@ struct WeekStrip: View {
             }
             .padding(.top, 2)
             .accessibilityHidden(true)
-            WeekPager(selectedWeek: selectedWeek, calendar: calendar,
-                      onShiftWeek: onShiftWeek, page: { AnyView(page($0)) })
+            WeekPager(selectedDay: selectedDay, today: today, calendar: calendar,
+                      onSelect: onSelect, onShiftWeek: onShiftWeek)
             .frame(height: 43)
         }
         .clipped()
@@ -36,46 +32,35 @@ struct WeekStrip: View {
         .padding(.vertical, 10)
         .background(FloridaStyle.paper)
     }
-
-    private func page(_ week: Date) -> some View {
-        HStack(spacing: 0) {
-            ForEach(DateNavigation.days(in: week, calendar: calendar), id: \.self) { day in
-                Button {
-                    onSelect(day)
-                } label: {
-                    DayCell(day: day, isSelected: day == selectedDay, isToday: day == today, calendar: calendar)
-                        .frame(maxWidth: .infinity)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .accessibilityHidden(week != selectedWeek)
-    }
 }
 
 private struct WeekPager: UIViewControllerRepresentable {
-    let selectedWeek: Date
+    let selectedDay: Date
+    let today: Date
     let calendar: Calendar
+    let onSelect: (Date) -> Void
     let onShiftWeek: (Int) -> Void
-    let page: (Date) -> AnyView
 
     func makeUIViewController(context: Context) -> WeekPagerController {
         WeekPagerController()
     }
 
     func updateUIViewController(_ controller: WeekPagerController, context: Context) {
-        controller.update(selectedWeek: selectedWeek, calendar: calendar, onShiftWeek: onShiftWeek, page: page)
+        controller.update(selectedDay: selectedDay, today: today, calendar: calendar,
+                          onSelect: onSelect, onShiftWeek: onShiftWeek)
     }
 }
 
 private final class WeekPagerController: UIViewController, UIScrollViewDelegate {
     private let scroll = UIScrollView()
-    private var hosts: [Date: UIHostingController<AnyView>] = [:]
+    private var pages: [Date: UIView] = [:]
+    private var buttons: [Date: WeekDateButton] = [:]
     private var weeks: [Date] = []
     private var selectedWeek: Date?
+    private var selectedDay: Date?
+    private var today: Date?
     private var calendar = Calendar.autoupdatingCurrent
-    private var page: ((Date) -> AnyView)?
+    private var onSelect: ((Date) -> Void)?
     private var onShiftWeek: ((Int) -> Void)?
     private var pageWidth: CGFloat = 0
     private var dragStartIndex = 2
@@ -93,12 +78,15 @@ private final class WeekPagerController: UIViewController, UIScrollViewDelegate 
         scroll.delegate = self
     }
 
-    func update(selectedWeek: Date, calendar: Calendar, onShiftWeek: @escaping (Int) -> Void,
-                page: @escaping (Date) -> AnyView) {
+    func update(selectedDay: Date, today: Date, calendar: Calendar, onSelect: @escaping (Date) -> Void,
+                onShiftWeek: @escaping (Int) -> Void) {
         loadViewIfNeeded()
         self.calendar = calendar
+        self.selectedDay = selectedDay
+        self.today = today
         self.onShiftWeek = onShiftWeek
-        self.page = page
+        self.onSelect = onSelect
+        let selectedWeek = DateNavigation.startOfWeek(for: selectedDay, calendar: calendar)
         let changedWeek = self.selectedWeek != selectedWeek
         self.selectedWeek = selectedWeek
         let needsRunway = !weeks.contains(selectedWeek)
@@ -117,9 +105,13 @@ private final class WeekPagerController: UIViewController, UIScrollViewDelegate 
         pageWidth = scroll.bounds.width
         scroll.contentSize = CGSize(width: pageWidth * CGFloat(weeks.count), height: scroll.bounds.height)
         for (index, week) in weeks.enumerated() {
-            guard let host = hosts[week] else { continue }
-            host.view.frame = CGRect(x: CGFloat(index) * pageWidth, y: 0,
-                                     width: pageWidth, height: scroll.bounds.height)
+            guard let page = pages[week] else { continue }
+            page.frame = CGRect(x: CGFloat(index) * pageWidth, y: 0,
+                                width: pageWidth, height: scroll.bounds.height)
+            for (column, day) in DateNavigation.days(in: week, calendar: calendar).enumerated() {
+                buttons[day]?.frame = CGRect(x: CGFloat(column) * pageWidth / 7, y: 0,
+                                            width: pageWidth / 7, height: scroll.bounds.height)
+            }
         }
         if resized, let selectedWeek {
             isUserScroll = false
@@ -132,28 +124,30 @@ private final class WeekPagerController: UIViewController, UIScrollViewDelegate 
     }
 
     private func renderPages() {
-        guard let page else { return }
-        for week in Array(hosts.keys) where !weeks.contains(week) {
-            guard let host = hosts.removeValue(forKey: week) else { continue }
-            host.willMove(toParent: nil)
-            host.view.removeFromSuperview()
-            host.removeFromParent()
+        for week in Array(pages.keys) where !weeks.contains(week) {
+            pages.removeValue(forKey: week)?.removeFromSuperview()
+            for day in DateNavigation.days(in: week, calendar: calendar) { buttons.removeValue(forKey: day) }
         }
         for week in weeks {
-            if let host = hosts[week] {
-                host.rootView = page(week)
-            } else {
-                let host = UIHostingController(rootView: page(week))
-                host.safeAreaRegions = []
-                host.view.backgroundColor = .clear
-                host.view.clipsToBounds = true
-                addChild(host)
-                scroll.addSubview(host.view)
-                host.didMove(toParent: self)
-                hosts[week] = host
+            if pages[week] == nil {
+                let page = UIView()
+                page.clipsToBounds = true
+                scroll.addSubview(page)
+                pages[week] = page
+                for day in DateNavigation.days(in: week, calendar: calendar) {
+                    let button = WeekDateButton(frame: .zero)
+                    button.addAction(UIAction { [weak self] _ in self?.onSelect?(day) }, for: .touchUpInside)
+                    page.addSubview(button)
+                    buttons[day] = button
+                }
             }
-            hosts[week]?.view.isUserInteractionEnabled = week == selectedWeek
-            hosts[week]?.view.accessibilityElementsHidden = week != selectedWeek
+            pages[week]?.isUserInteractionEnabled = week == selectedWeek
+            pages[week]?.accessibilityElementsHidden = week != selectedWeek
+        }
+        if let selectedDay, let today {
+            for (day, button) in buttons {
+                button.update(day: day, selected: day == selectedDay, today: day == today, calendar: calendar)
+            }
         }
         view.setNeedsLayout()
     }
@@ -191,6 +185,8 @@ private final class WeekPagerController: UIViewController, UIScrollViewDelegate 
         let week = weeks[index]
         self.selectedWeek = week
         let delta = (calendar.dateComponents([.day], from: selectedWeek, to: week).day ?? 0) / 7
+        if let selectedDay { self.selectedDay = DateNavigation.shift(selectedDay, by: 7 * delta, calendar: calendar) }
+        renderPages()
         if delta != 0 { onShiftWeek?(delta) }
         replenish()
     }
@@ -204,34 +200,45 @@ private final class WeekPagerController: UIViewController, UIScrollViewDelegate 
     }
 }
 
-/// An ink circle marks selection and a dot marks today.
-private struct DayCell: View {
-    let day: Date
-    let isSelected: Bool
-    let isToday: Bool
-    let calendar: Calendar
+private final class WeekDateButton: UIButton {
+    private let number = UILabel()
+    private let dot = UIView()
 
-    var body: some View {
-        VStack(spacing: 4) {
-            Text("\(calendar.component(.day, from: day))")
-                .font(.body.weight(isToday ? .bold : .regular))
-                .foregroundStyle(isSelected ? FloridaStyle.paper : FloridaStyle.ink)
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
-                .frame(width: 34, height: 34)
-                .background {
-                    if isSelected {
-                        Circle().fill(FloridaStyle.ink)
-                    }
-                }
-            Circle()
-                .fill(isToday ? FloridaStyle.ink : .clear)
-                .frame(width: 3, height: 3)
-        }
-        .padding(.bottom, 2)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(day.formatted(.dateTime.weekday(.wide).month(.wide).day()))
-        .accessibilityValue(isToday ? "Today" : "")
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        number.textAlignment = .center
+        number.adjustsFontSizeToFitWidth = true
+        number.adjustsFontForContentSizeCategory = true
+        number.minimumScaleFactor = 0.5
+        number.layer.cornerRadius = 17
+        number.clipsToBounds = true
+        number.isAccessibilityElement = false
+        dot.layer.cornerRadius = 1.5
+        dot.isAccessibilityElement = false
+        addSubview(number)
+        addSubview(dot)
+        isAccessibilityElement = true
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func update(day: Date, selected: Bool, today: Bool, calendar: Calendar) {
+        isSelected = selected
+        number.text = "\(calendar.component(.day, from: day))"
+        let font = UIFont.preferredFont(forTextStyle: .body)
+        number.font = today ? UIFont(descriptor: font.fontDescriptor.withSymbolicTraits(.traitBold) ?? font.fontDescriptor,
+                                     size: font.pointSize) : font
+        number.textColor = UIColor(selected ? FloridaStyle.paper : FloridaStyle.ink)
+        number.backgroundColor = selected ? UIColor(FloridaStyle.ink) : .clear
+        dot.backgroundColor = today ? UIColor(FloridaStyle.ink) : .clear
+        accessibilityLabel = day.formatted(.dateTime.weekday(.wide).month(.wide).day())
+        accessibilityValue = today ? "Today" : ""
+        accessibilityTraits = selected ? [.button, .selected] : .button
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        number.frame = CGRect(x: (bounds.width - 34) / 2, y: 0, width: 34, height: 34)
+        dot.frame = CGRect(x: (bounds.width - 3) / 2, y: 38, width: 3, height: 3)
     }
 }
