@@ -1,3 +1,4 @@
+import FloridaKit
 import SwiftUI
 
 /// The three tabs. Also the place where the app reacts to the scene phase (sync on becoming
@@ -6,6 +7,8 @@ import SwiftUI
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
+    @State private var linkedTask: TaskEditorRequest?
+    @State private var linkedProject: ProjectEditorRequest?
 
     var body: some View {
         TabView(selection: Bindable(model).selectedTab) {
@@ -32,20 +35,46 @@ struct RootView: View {
             model.scenePhaseChanged(to: phase)
         }
         .onOpenURL { url in
-            guard let tab = AppTab(deepLink: url) else { return }
-            if tab == .agenda {
-                model.showToday()
-            } else {
-                model.selectedTab = tab
-            }
-            if tab == .tasks, url.path() == "/new" {
-                model.showingQuickAdd = true
-            }
+            open(url)
         }
         .sheet(isPresented: Bindable(model).showingQuickAdd) {
             QuickAddSheet()
         }
+        .sheet(item: $linkedTask) { request in
+            TaskEditorView(request: request)
+        }
+        .sheet(item: $linkedProject) { request in
+            ProjectEditorView(request: request)
+        }
         .modifier(SourceOpenTestHarness())
+    }
+
+    private func open(_ url: URL) {
+        guard let link = DeepLink(url: url) else { return }
+        switch link {
+        case .agenda:
+            model.selectedTab = .agenda
+            if let date = link.agendaDate(timeZone: model.calendar.timeZone) {
+                model.select(day: date)
+            } else {
+                model.selectToday()
+            }
+        case .tasks, .newTask:
+            model.selectedTab = .tasks
+            model.showingQuickAdd = link == .newTask
+        case .task(let id):
+            model.selectedTab = .tasks
+            if let task = model.task(id: id.uuidString.lowercased()) {
+                linkedTask = TaskEditorRequest(task: task, isNew: false)
+            }
+        case .project(let id):
+            model.selectedTab = .tasks
+            if let project = try? model.database?.project(id: id.uuidString.lowercased()), project.deletedAt == nil {
+                linkedProject = ProjectEditorRequest(project: project, isNew: false)
+            }
+        case .settings:
+            model.selectedTab = .settings
+        }
     }
 }
 
@@ -61,10 +90,4 @@ private struct SystemGreenSwitchStyle: ToggleStyle {
 
 enum AppTab: String, Hashable {
     case agenda, tasks, settings
-
-    /// `florida://<tab>` as sent by the widgets' `widgetURL`.
-    init?(deepLink url: URL) {
-        guard url.scheme == "florida", let host = url.host(), let tab = AppTab(rawValue: host) else { return nil }
-        self = tab
-    }
 }
