@@ -347,7 +347,8 @@ struct AgendaView: View {
                             selectedEvent = event
                         } label: {
                             AllDayEventRow(
-                                event: event, style: model.eventStyle(event), continuation: EventTiming.continuation(of: event, on: day, calendar: model.calendar),
+                                event: event, style: model.eventStyle(event),
+                                continuation: EventTiming.continuation(of: event, on: day, calendar: model.calendar),
                                 protectsDay: agenda?.blockingAllDayEvents.contains(where: { $0.id == event.id }) == true)
                                 .foregroundStyle(.primary)
                         }
@@ -424,7 +425,7 @@ struct AgendaView: View {
             description: Text("No events or task blocks on this day."))
     }
 
-    /// A task block: tap to edit, swipe or long-press for its actions. A block of a task that is
+    /// A task block: tap to edit, long-press for its actions. A block of a task that is
     /// already done has none. `beside` names the work that shares its time, said under the block
     /// and outside its button, so the button reads to VoiceOver and UI tests as it always did.
     @ViewBuilder
@@ -488,10 +489,11 @@ struct AgendaView: View {
         Button {
             selectedEvent = event
         } label: {
-            EventRow(event: event, style: model.eventStyle(event), continuation: EventTiming.continuation(of: event, on: day, calendar: model.calendar), now: now)
+            EventRow(
+                event: event, style: model.eventStyle(event),
+                continuation: EventTiming.continuation(of: event, on: day, calendar: model.calendar), now: now)
                 .foregroundStyle(.primary)
         }
         .accessibilityHint("Shows the event")
     }
-
 }

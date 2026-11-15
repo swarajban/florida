@@ -519,6 +519,15 @@ final class SmokeTests: XCTestCase {
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
         let yesterday = calendar.date(byAdding: .day, value: -1, to: today)!
         for appearance in ["light", "dark"] {
+            let liveClockApp = launch(appearance: appearance)
+            let writtenBrief = liveClockApp.buttons["agenda-brief-text"]
+            XCTAssertTrue(writtenBrief.waitForExistence(timeout: 15))
+            XCTAssertTrue(writtenBrief.isHittable)
+            let collapsed = writtenBrief.frame.height
+            writtenBrief.tap()
+            XCTAssertGreaterThan(writtenBrief.frame.height, collapsed)
+            writtenBrief.tap()
+            liveClockApp.terminate()
             let app = launch(appearance: appearance, demoNow: demoNow)
             let heading = app.buttons["Go to day"]
             XCTAssertTrue(heading.waitForExistence(timeout: 15))
@@ -553,14 +562,10 @@ final class SmokeTests: XCTestCase {
             }
 
             assertDay(today)
-            let brief = app.buttons["agenda-brief-text"]
+            let brief = app.buttons["agenda-brief-week"]
             XCTAssertTrue(brief.isHittable)
-            XCTAssertEqual(app.buttons.matching(identifier: "agenda-brief-text").count, 1)
-            let collapsed = brief.frame.height
+            XCTAssertEqual(app.buttons.matching(identifier: "agenda-brief-week").count, 1)
             brief.tap()
-            XCTAssertGreaterThan(brief.frame.height, collapsed)
-            brief.tap()
-            app.buttons["agenda-brief-week"].tap()
             XCTAssertTrue(app.navigationBars["Weekly Review"].waitForExistence(timeout: 5))
             app.navigationBars.buttons["Done"].tap()
             capture(app, "agenda-carousel-today-\(appearance)")
