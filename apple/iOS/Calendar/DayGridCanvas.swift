@@ -31,7 +31,6 @@ struct DayGridCanvas: View {
             }
         }
         .frame(width: viewportWidth, height: geometry.dayHeight)
-        .offset(x: pinnedGutterX)
     }
 
     private var todayIndex: Int? {

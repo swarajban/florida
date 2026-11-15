@@ -245,6 +245,7 @@ struct DayGridView: View {
                 .onTapGesture(coordinateSpace: .local) { point in
                     create(at: CGPoint(x: point.x + pinnedGutterX, y: point.y), geometry: geometry, days: days)
                 }
+                .offset(x: pinnedGutterX)
             ZStack(alignment: .topLeading) {
                 ForEach(layout.blocks) { block in
                     let rect = geometry.rect(for: block)

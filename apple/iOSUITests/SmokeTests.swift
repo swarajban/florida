@@ -621,9 +621,13 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(app.buttons["Mark done"].waitForExistence(timeout: 5))
             app.buttons["Cancel"].tap()
             let empty = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
-                dx: app.frame.width - 20, dy: design.frame.minY - 15))
+                dx: app.frame.width - 20, dy: design.frame.minY - 8))
             empty.tap()
             XCTAssertTrue(app.textFields["event-quick-add-input"].waitForExistence(timeout: 5))
+            app.buttons["event-quick-add-details"].tap()
+            XCTAssertTrue(app.navigationBars["New Event"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.datePickers["event-start"].buttons[
+                today.formatted(.dateTime.month(.abbreviated).day().year())].exists)
             app.buttons["Cancel"].tap()
             capture(app, "one-day-carousel-return-\(appearance)")
             app.terminate()
