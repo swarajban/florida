@@ -67,7 +67,7 @@ export interface AppDeps {
   db: Db
   config: Config
   sync: CalendarSyncService
-  reschedule: () => Promise<SchedulerResult>
+  reschedule: (reason?: string) => Promise<SchedulerResult>
   /** Receives a notice after every scheduler run the app triggers; streamed by `/api/events`. */
   changes?: ChangeBus
   /** Natural-language task parsing (Claude). When absent, `/api/ai/parse-task` answers 503. */
@@ -187,8 +187,8 @@ export function createApp(deps: AppDeps): Hono {
   const changes = deps.changes ?? new ChangeBus()
   const webhookDebounceMs = deps.webhookDebounceMs ?? 2_000
   const sseHeartbeatMs = deps.sseHeartbeatMs ?? 25_000
-  const reschedule = async (): Promise<SchedulerResult> => {
-    const result = await deps.reschedule()
+  const reschedule = async (reason?: string): Promise<SchedulerResult> => {
+    const result = await deps.reschedule(reason)
     changes.publish()
     return result
   }
@@ -244,7 +244,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
   app.use('/mcp', requireToken)
 
   // Model Context Protocol endpoint for agents; the same token, the same store, the same scheduler.
-  mountMcp(app, { db, reschedule, sync, ...(deps.ai === undefined ? {} : { ai: deps.ai }) })
+  mountMcp(app, { db, reschedule, sync, publish: () => changes.publish(), horizonDays: config.HORIZON_DAYS, ...(deps.ai === undefined ? {} : { ai: deps.ai }) })
 
   // ---- Sync -------------------------------------------------------------------------------------
 
@@ -368,19 +368,19 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
 
   app.put('/api/tasks/:id', async (c) => {
     const task = await upsertTask(db, c.req.param('id'), taskBody.parse(await c.req.json()))
-    const scheduling = await reschedule()
+    const scheduling = await reschedule('rescheduled due to task update')
     return c.json({ task, scheduling })
   })
 
   app.patch('/api/tasks/:id', async (c) => {
     const task = await patchTask(db, c.req.param('id'), taskPatch.parse(await c.req.json()))
-    const scheduling = await reschedule()
+    const scheduling = await reschedule('rescheduled due to task update')
     return c.json({ task, scheduling })
   })
 
   app.delete('/api/tasks/:id', async (c) => {
     await softDeleteTask(db, c.req.param('id'))
-    const scheduling = await reschedule()
+    const scheduling = await reschedule('rescheduled due to task update')
     return c.json({ scheduling })
   })
 
@@ -460,20 +460,20 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
 
   app.put('/api/projects/:id', async (c) => {
     const project = await upsertProject(db, c.req.param('id'), projectBody.parse(await c.req.json()))
-    const scheduling = await reschedule()
+    const scheduling = await reschedule('rescheduled due to project update')
     return c.json({ project, scheduling })
   })
 
   app.patch('/api/projects/:id', async (c) => {
     const project = await patchProject(db, c.req.param('id'), projectPatch.parse(await c.req.json()))
-    const scheduling = await reschedule()
+    const scheduling = await reschedule('rescheduled due to project update')
     return c.json({ project, scheduling })
   })
 
   // The project's tasks stay, unfiled from it; clients see them change through `updatedAt`.
   app.delete('/api/projects/:id', async (c) => {
     await softDeleteProject(db, c.req.param('id'))
-    const scheduling = await reschedule()
+    const scheduling = await reschedule('rescheduled due to project update')
     return c.json({ scheduling })
   })
 
@@ -489,13 +489,13 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
   app.put('/api/day-overrides/:date', async (c) => {
     const date = calendarDate.parse(c.req.param('date'))
     const dayOverride = await setDayOverride(db, date, dayOverrideBody.parse(await c.req.json()))
-    const scheduling = await reschedule()
+    const scheduling = await reschedule('rescheduled due to day override')
     return c.json({ dayOverride, scheduling })
   })
 
   app.delete('/api/day-overrides/:date', async (c) => {
     await clearDayOverride(db, c.req.param('date'))
-    const scheduling = await reschedule()
+    const scheduling = await reschedule('rescheduled due to day override')
     return c.json({ scheduling })
   })
 
@@ -573,7 +573,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
     return c.json({ scheduling })
   })
 
-  app.post('/api/schedule/run', async (c) => c.json(await reschedule()))
+  app.post('/api/schedule/run', async (c) => c.json(await reschedule('manual scheduler run')))
 
   // ---- Calendar events (written through to Google) ----------------------------------------------
 
@@ -583,8 +583,9 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
   // untouched, except that an event Google has deleted since the last sync is tombstoned here, so
   // the client's refetch after the 404 finds the tombstone and drops its optimistic copy.
   app.put('/api/events/:id', async (c) => {
+    const [current] = await db.select({ id: events.id }).from(events).where(eq(events.id, c.req.param('id')))
     const event = await upsertEvent(db, sync, c.req.param('id'), eventBody.parse(await c.req.json()))
-    const scheduling = await reschedule()
+    const scheduling = await reschedule(current === undefined ? 'rescheduled due to new event' : 'rescheduled due to updated event')
     if (event.deletedAt !== null) throw notFound(`event ${event.id}`)
     return c.json({ event, scheduling })
   })
@@ -592,13 +593,13 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
   app.patch('/api/events/:id', async (c) => {
     const { blocksDay } = eventBlockingPatch.parse(await c.req.json())
     const event = await setEventBlocksDay(db, c.req.param('id'), blocksDay)
-    const scheduling = await reschedule()
+    const scheduling = await reschedule('rescheduled due to event day-block change')
     return c.json({ event, scheduling })
   })
 
   app.delete('/api/events/:id', async (c) => {
     await softDeleteEvent(db, sync, c.req.param('id'))
-    const scheduling = await reschedule()
+    const scheduling = await reschedule('rescheduled due to deleted event')
     return c.json({ scheduling })
   })
 
@@ -683,7 +684,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
 
   app.post('/api/google/sync', async (c) => {
     await sync.syncAll()
-    return c.json(await reschedule())
+    return c.json(await reschedule('rescheduled due to Google Calendar sync'))
   })
 
   // Full re-download of every visible or blocking calendar: rewrites every event row (and bumps `updatedAt`),
@@ -691,7 +692,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
   app.post('/api/google/resync', async (c) => {
     await db.update(calendars).set({ syncToken: null, updatedAt: writeTimestamp }).where(or(eq(calendars.selected, true), eq(calendars.blocksScheduling, true)))
     await sync.syncAll()
-    return c.json(await reschedule())
+    return c.json(await reschedule('rescheduled due to Google Calendar sync'))
   })
 
   // ---- OAuth (browser flow, protected by the API token in the query string) ---------------------
@@ -773,7 +774,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
       const [calendar] = await db.select().from(calendars).where(eq(calendars.id, calendarId)).limit(1)
       if (calendar === undefined || (!calendar.selected && !calendar.blocksScheduling)) return
       await sync.syncCalendar(calendar)
-      await reschedule()
+      await reschedule('rescheduled due to Google Calendar sync')
     } catch (err) {
       console.error(`[webhook] sync of calendar ${calendarId} failed:`, err)
     }
@@ -783,7 +784,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
   async function runAccountSync(account: GoogleAccountRow): Promise<void> {
     try {
       await sync.syncAccount(account)
-      await reschedule()
+      await reschedule('rescheduled due to Google Calendar sync')
     } catch (err) {
       console.error(`[google] initial sync of ${account.email} failed:`, err)
     }

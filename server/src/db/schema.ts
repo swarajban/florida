@@ -6,6 +6,19 @@ import type { TaskSource } from '../task-source.js'
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' })
 
+export const scheduleChanges = pgTable('schedule_changes', {
+  id: text('id').primaryKey(),
+  taskId: text('task_id').notNull(),
+  before: jsonb('before').$type<{ start: string; end: string; pinned: boolean; lane: number | null }[]>().notNull(),
+  after: jsonb('after').$type<{ start: string; end: string; pinned: boolean; lane: number | null }[]>().notNull(),
+  reason: text('reason').notNull(),
+  changeType: text('change_type').$type<'created' | 'moved' | 'removed' | 'unscheduled'>().notNull(),
+  beforeUnscheduled: jsonb('before_unscheduled').$type<{ reason: UnscheduledReason; unplacedMinutes: number }>(),
+  afterUnscheduled: jsonb('after_unscheduled').$type<{ reason: UnscheduledReason; unplacedMinutes: number }>(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+  deletedAt: ts('deleted_at'),
+}, (table) => [index('schedule_changes_updated_idx').on(table.updatedAt, table.id)])
+
 export type CategoryArea = 'work' | 'personal'
 
 /** The user's one row of preferences; the routine's time zone lives here. Seeded, never deleted. */
