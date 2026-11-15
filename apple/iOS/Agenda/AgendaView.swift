@@ -259,8 +259,9 @@ struct AgendaView: View {
                                             if model.calendarActivation.syncingCalendarIds.contains(info.id) {
                                                 ProgressView().controlSize(.mini)
                                             }
-                                            Image(systemName: info.selected ? "checkmark.circle.fill" : "circle")
-                                        }
+                                    Image(systemName: info.selected ? "checkmark.circle.fill" : "circle")
+                                }
+                                .contentShape(Rectangle())
                                     }
                                     .buttonStyle(.plain)
                                     .accessibilityIdentifier("calendar-choice-\(info.id)")

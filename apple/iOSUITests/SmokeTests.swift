@@ -21,6 +21,10 @@ final class SmokeTests: XCTestCase {
         let birthdays = app.buttons["calendar-choice-demo-cal-birthdays"]
         XCTAssertTrue(birthdays.isHittable)
         birthdays.tap()
+        print("Calendar checklist: holidays=\(String(describing: holidays.value)) frame=\(holidays.frame); birthdays=\(String(describing: birthdays.value)) frame=\(birthdays.frame); list=\(checklist.frame)")
+        if holidays.value as? String != "Selected" || birthdays.value as? String != "Selected" {
+            captureFailure(app, "calendar-checklist-selection-failure")
+        }
         XCTAssertEqual(holidays.value as? String, "Selected")
         XCTAssertEqual(birthdays.value as? String, "Selected")
         app.buttons["Done"].tap()
