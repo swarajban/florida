@@ -24,18 +24,21 @@ struct WeekStrip: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            ForEach(DateNavigation.days(in: selectedDay, calendar: calendar), id: \.self) { day in
-                DayCell(day: day, isSelected: day == selectedDay, isToday: day == today, calendar: calendar)
-                    .frame(maxWidth: .infinity)
+        VStack(spacing: 4) {
+            HStack(spacing: 0) {
+                ForEach(DateNavigation.days(in: selectedDay, calendar: calendar), id: \.self) { day in
+                    Text(day.formatted(.dateTime.weekday(.narrow)))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                }
             }
-        }
-        .hidden()
-        .accessibilityHidden(true)
-        .overlay {
+            .padding(.top, 2)
+            .accessibilityHidden(true)
             GeometryReader { proxy in
                 carousel(width: proxy.size.width)
             }
+            .frame(height: 43)
         }
         .clipped()
         .padding(.horizontal, 8)
@@ -139,9 +142,6 @@ private struct DayCell: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            Text(day.formatted(.dateTime.weekday(.narrow)))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
             Text("\(calendar.component(.day, from: day))")
                 .font(.body.weight(isToday ? .bold : .regular))
                 .foregroundStyle(isSelected ? FloridaStyle.paper : FloridaStyle.ink)
@@ -157,7 +157,7 @@ private struct DayCell: View {
                 .fill(isToday ? FloridaStyle.ink : .clear)
                 .frame(width: 3, height: 3)
         }
-        .padding(.vertical, 2)
+        .padding(.bottom, 2)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(day.formatted(.dateTime.weekday(.wide).month(.wide).day()))
         .accessibilityValue(isToday ? "Today" : "")

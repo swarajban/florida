@@ -560,8 +560,8 @@ final class SmokeTests: XCTestCase {
                                 thenHoldForDuration: fast ? 0 : 0.4)
                 }
 
-                assertDay(today)
                 capture(app, "week-carousel-\(mode)-today-\(appearance)")
+                assertDay(today)
                 var selected = today
                 for _ in 0..<3 {
                     swipeWeek(from: selected, forward: true, fast: true)
