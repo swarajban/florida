@@ -82,6 +82,15 @@ describe('waiting tasks', () => {
     expect(result.unscheduled).toEqual([])
   })
 
+  it('retains and credits an eligible follow-up already underway without an explicit startAt', () => {
+    const result = run([task({ id: 'waiting', waitingOn: 'Approval', waitingUntil: '2026-11-09T08:00:00-08:00' })], [], {
+      now: '2026-11-09T09:15:00-08:00',
+      previous: [{ taskId: 'waiting', start: NOW, end: '2026-11-09T10:00:00-08:00', pinned: false }],
+    })
+    expect(spansOf(result, 'waiting')).toEqual([[iso(NOW), iso('2026-11-09T10:00:00-08:00')]])
+    expect(result.unscheduled).toEqual([])
+  })
+
   it('allows eligible follow-ups now, and clearing waitingOn ignores a stale follow-up', () => {
     for (const fields of [
       { waitingOn: 'Approval', waitingUntil: '2026-11-08T00:00:00Z' },

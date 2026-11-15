@@ -171,7 +171,7 @@ export function schedule(input: SchedulerInput): SchedulerResult {
     const followUp = parseInstant(task.waitingUntil, 'waitingUntil')
     if (followUp >= ctx.horizonEnd) return []
     const { pinnedStart, ...flexible } = task
-    return [{ ...flexible, startAt: toIso(Math.max(followUp, task.startAt === undefined ? now : parseInstant(task.startAt, 'startAt'))) }]
+    return [{ ...flexible, startAt: toIso(Math.max(followUp, task.startAt === undefined ? followUp : parseInstant(task.startAt, 'startAt'))) }]
   })
   const pinned = open.flatMap((task) => {
     if (task.pinnedStart === undefined) return []
