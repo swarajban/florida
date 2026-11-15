@@ -539,7 +539,7 @@ final class SmokeTests: XCTestCase {
                 func assertDay(_ day: Date) {
                     XCTAssertEqual(heading.value as? String, day.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
                     XCTAssertEqual(app.buttons.matching(identifier: day.formatted(.dateTime.weekday(.wide).month(.wide).day())).count, 1)
-                    XCTAssertTrue(cell(day).isHittable)
+                    XCTAssertTrue(cell(day).isHittable, cell(day).debugDescription)
                     XCTAssertTrue(cell(day).isSelected)
                     let week = weekDays(day)
                     for date in week { XCTAssertTrue(cell(date).isHittable) }

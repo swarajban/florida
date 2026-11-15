@@ -71,7 +71,7 @@ private struct WeekPager: UIViewControllerRepresentable {
 
 private final class WeekPagerController: UIViewController, UIScrollViewDelegate {
     private let scroll = UIScrollView()
-    private var hosts: [UIHostingController<AnyView>] = []
+    private var hosts: [Date: UIHostingController<AnyView>] = [:]
     private var weeks: [Date] = []
     private var selectedWeek: Date?
     private var calendar = Calendar.autoupdatingCurrent
@@ -104,6 +104,7 @@ private final class WeekPagerController: UIViewController, UIScrollViewDelegate 
         let needsRunway = !weeks.contains(selectedWeek)
         if needsRunway { makeWeeks(around: selectedWeek) }
         renderPages()
+        view.layoutIfNeeded()
         if changedWeek {
             isUserScroll = false
             position(on: selectedWeek, animated: !needsRunway && view.window != nil)
@@ -115,7 +116,8 @@ private final class WeekPagerController: UIViewController, UIScrollViewDelegate 
         let resized = pageWidth != scroll.bounds.width
         pageWidth = scroll.bounds.width
         scroll.contentSize = CGSize(width: pageWidth * CGFloat(weeks.count), height: scroll.bounds.height)
-        for (index, host) in hosts.enumerated() {
+        for (index, week) in weeks.enumerated() {
+            guard let host = hosts[week] else { continue }
             host.view.frame = CGRect(x: CGFloat(index) * pageWidth, y: 0,
                                      width: pageWidth, height: scroll.bounds.height)
         }
@@ -131,18 +133,24 @@ private final class WeekPagerController: UIViewController, UIScrollViewDelegate 
 
     private func renderPages() {
         guard let page else { return }
-        if hosts.isEmpty {
-            for week in weeks {
+        for week in Array(hosts.keys) where !weeks.contains(week) {
+            guard let host = hosts.removeValue(forKey: week) else { continue }
+            host.willMove(toParent: nil)
+            host.view.removeFromSuperview()
+            host.removeFromParent()
+        }
+        for week in weeks {
+            if let host = hosts[week] {
+                host.rootView = page(week)
+            } else {
                 let host = UIHostingController(rootView: page(week))
                 host.safeAreaRegions = []
                 host.view.backgroundColor = .clear
                 addChild(host)
                 scroll.addSubview(host.view)
                 host.didMove(toParent: self)
-                hosts.append(host)
+                hosts[week] = host
             }
-        } else {
-            for (index, host) in hosts.enumerated() { host.rootView = page(weeks[index]) }
         }
         view.setNeedsLayout()
     }
@@ -188,6 +196,7 @@ private final class WeekPagerController: UIViewController, UIScrollViewDelegate 
         guard let selectedWeek, let index = weeks.firstIndex(of: selectedWeek), index == 0 || index == 4 else { return }
         makeWeeks(around: selectedWeek)
         renderPages()
+        view.layoutIfNeeded()
         position(on: selectedWeek, animated: false)
     }
 }
