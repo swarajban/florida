@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+state="$(git rev-parse --git-path florida-setup)"
+mkdir -p "$state"
+hash_inputs() {
+  git ls-files -z --cached --others --exclude-standard -- "$@" |
+    sort -zu | xargs -0 -r sha256sum | sha256sum | cut -d ' ' -f 1
+}
+runtime="$(hash_inputs .swift-version .agents/setup)"
+if [ "${1:-}" != --record ] && { [ ! -f "$state/runtime" ] || [ "$(cat "$state/runtime")" != "$runtime" ]; }; then
+  bash .agents/setup
+fi
+printf '%s' "$runtime" > "$state/runtime"
+
+node="$(hash_inputs package.json 'packages/*/package.json' server/package.json pnpm-lock.yaml pnpm-workspace.yaml '**/.npmrc' .npmrc .pnpmfile.cjs patches plugins .node-version .nvmrc .tool-versions)"
+if [ "${1:-}" != --record ] && { [ ! -d node_modules ] || [ ! -f "$state/node" ] || [ "$(cat "$state/node")" != "$node" ]; }; then
+  pnpm install --frozen-lockfile --prefer-offline
+fi
+printf '%s' "$node" > "$state/node"
+
+swift="$(hash_inputs .swift-version 'apple/FloridaCore/Package.*' 'apple/FloridaKit/Package.*')"
+if [ "${1:-}" != --record ] && { [ ! -d apple/FloridaKit/.build/checkouts ] || [ ! -f "$state/swift" ] || [ "$(cat "$state/swift")" != "$swift" ]; }; then
+  (cd apple/FloridaCore && swift package resolve)
+  (cd apple/FloridaKit && swift package resolve)
+fi
+printf '%s' "$swift" > "$state/swift"
