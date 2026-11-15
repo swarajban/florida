@@ -18,6 +18,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - run: brew install xcodegen
       - name: Identify toolchain
         id: xcode
@@ -51,14 +53,13 @@ jobs:
         run: swift test
         working-directory: apple/FloridaKit
       - name: Package reusable test products
-        if: inputs.run_ui
         run: |
           xcodebuild -version > apple/build/xcode-version.txt
-          tar -czf "$RUNNER_TEMP/apple-tests.tgz" -C apple/build ios/Build/Products macos/Build/Products xcode-version.txt
+          git rev-parse HEAD > apple/build/source-sha.txt
+          tar -czf "$RUNNER_TEMP/apple-tests.tgz" -C apple/build ios/Build/Products macos/Build/Products xcode-version.txt source-sha.txt
       - uses: actions/upload-artifact@v4
-        if: inputs.run_ui
         with:
-          name: apple-test-products
+          name: apple-test-products-${{ github.event.pull_request.head.sha || github.sha }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}
           path: ${{ runner.temp }}/apple-tests.tgz
           retention-days: 1
       - name: Upload build log on failure
@@ -81,9 +82,12 @@ jobs:
         suite: [macos, macos-triage, ios-capture, ios-events, ios-other, ios-smart-add, ios-triage, ios-compact]
     steps:
       - uses: actions/checkout@v5
+      - name: Identify toolchain
+        id: xcode
+        run: echo "version=$(xcodebuild -version | shasum -a 256 | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v4
         with:
-          name: apple-test-products
+          name: apple-test-products-${{ github.sha }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}
           path: ${{ runner.temp }}/apple-tests
       - name: Restore test products
         run: |
