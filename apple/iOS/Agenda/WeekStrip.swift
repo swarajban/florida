@@ -34,25 +34,24 @@ struct WeekStrip: View {
     }
 }
 
-private struct WeekPager: UIViewControllerRepresentable {
+private struct WeekPager: UIViewRepresentable {
     let selectedDay: Date
     let today: Date
     let calendar: Calendar
     let onSelect: (Date) -> Void
     let onShiftWeek: (Int) -> Void
 
-    func makeUIViewController(context: Context) -> WeekPagerController {
-        WeekPagerController()
+    func makeUIView(context: Context) -> WeekPagerView {
+        WeekPagerView(frame: .zero)
     }
 
-    func updateUIViewController(_ controller: WeekPagerController, context: Context) {
-        controller.update(selectedDay: selectedDay, today: today, calendar: calendar,
-                          onSelect: onSelect, onShiftWeek: onShiftWeek)
+    func updateUIView(_ view: WeekPagerView, context: Context) {
+        view.update(selectedDay: selectedDay, today: today, calendar: calendar,
+                    onSelect: onSelect, onShiftWeek: onShiftWeek)
     }
 }
 
-private final class WeekPagerController: UIViewController, UIScrollViewDelegate {
-    private let scroll = UIScrollView()
+private final class WeekPagerView: UIScrollView, UIScrollViewDelegate {
     private var pages: [Date: UIView] = [:]
     private var buttons: [Date: WeekDateButton] = [:]
     private var weeks: [Date] = []
@@ -66,21 +65,22 @@ private final class WeekPagerController: UIViewController, UIScrollViewDelegate 
     private var dragStartIndex = 2
     private var isUserScroll = false
 
-    override func loadView() {
-        view = scroll
-        scroll.backgroundColor = .clear
-        scroll.isPagingEnabled = true
-        scroll.alwaysBounceHorizontal = true
-        scroll.showsHorizontalScrollIndicator = false
-        scroll.contentInsetAdjustmentBehavior = .never
-        scroll.decelerationRate = .fast
-        scroll.accessibilityIdentifier = "agenda-week-strip"
-        scroll.delegate = self
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isPagingEnabled = true
+        alwaysBounceHorizontal = true
+        showsHorizontalScrollIndicator = false
+        contentInsetAdjustmentBehavior = .never
+        decelerationRate = .fast
+        accessibilityIdentifier = "agenda-week-strip"
+        delegate = self
     }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func update(selectedDay: Date, today: Date, calendar: Calendar, onSelect: @escaping (Date) -> Void,
                 onShiftWeek: @escaping (Int) -> Void) {
-        loadViewIfNeeded()
         self.calendar = calendar
         self.selectedDay = selectedDay
         self.today = today
@@ -92,25 +92,25 @@ private final class WeekPagerController: UIViewController, UIScrollViewDelegate 
         let needsRunway = !weeks.contains(selectedWeek)
         if needsRunway { makeWeeks(around: selectedWeek) }
         renderPages()
-        view.layoutIfNeeded()
+        layoutIfNeeded()
         if changedWeek {
             isUserScroll = false
-            position(on: selectedWeek, animated: !needsRunway && view.window != nil)
+            position(on: selectedWeek, animated: !needsRunway && window != nil)
         }
     }
 
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        let resized = pageWidth != scroll.bounds.width
-        pageWidth = scroll.bounds.width
-        scroll.contentSize = CGSize(width: pageWidth * CGFloat(weeks.count), height: scroll.bounds.height)
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let resized = pageWidth != bounds.width
+        pageWidth = bounds.width
+        contentSize = CGSize(width: pageWidth * CGFloat(weeks.count), height: bounds.height)
         for (index, week) in weeks.enumerated() {
             guard let page = pages[week] else { continue }
             page.frame = CGRect(x: CGFloat(index) * pageWidth, y: 0,
-                                width: pageWidth, height: scroll.bounds.height)
+                                width: pageWidth, height: bounds.height)
             for (column, day) in DateNavigation.days(in: week, calendar: calendar).enumerated() {
                 buttons[day]?.frame = CGRect(x: CGFloat(column) * pageWidth / 7, y: 0,
-                                            width: pageWidth / 7, height: scroll.bounds.height)
+                                            width: pageWidth / 7, height: bounds.height)
             }
         }
         if resized, let selectedWeek {
@@ -132,7 +132,7 @@ private final class WeekPagerController: UIViewController, UIScrollViewDelegate 
             if pages[week] == nil {
                 let page = UIView()
                 page.clipsToBounds = true
-                scroll.addSubview(page)
+                addSubview(page)
                 pages[week] = page
                 for day in DateNavigation.days(in: week, calendar: calendar) {
                     let button = WeekDateButton(frame: .zero)
@@ -149,17 +149,17 @@ private final class WeekPagerController: UIViewController, UIScrollViewDelegate 
                 button.update(day: day, selected: day == selectedDay, today: day == today, calendar: calendar)
             }
         }
-        view.setNeedsLayout()
+        setNeedsLayout()
     }
 
     private func position(on week: Date, animated: Bool) {
         guard pageWidth > 0, let index = weeks.firstIndex(of: week) else { return }
-        scroll.setContentOffset(CGPoint(x: CGFloat(index) * pageWidth, y: 0), animated: animated)
+        setContentOffset(CGPoint(x: CGFloat(index) * pageWidth, y: 0), animated: animated)
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         isUserScroll = true
-        dragStartIndex = pageWidth > 0 ? Int((scroll.contentOffset.x / pageWidth).rounded()) : 2
+        dragStartIndex = pageWidth > 0 ? Int((contentOffset.x / pageWidth).rounded()) : 2
     }
 
     func scrollViewWillEndDragging(_ scrollView: UIScrollView, withVelocity velocity: CGPoint,
@@ -181,7 +181,7 @@ private final class WeekPagerController: UIViewController, UIScrollViewDelegate 
     private func settle() {
         guard isUserScroll, pageWidth > 0, let selectedWeek else { return }
         isUserScroll = false
-        let index = min(4, max(0, Int((scroll.contentOffset.x / pageWidth).rounded())))
+        let index = min(4, max(0, Int((contentOffset.x / pageWidth).rounded())))
         let week = weeks[index]
         self.selectedWeek = week
         let delta = (calendar.dateComponents([.day], from: selectedWeek, to: week).day ?? 0) / 7
@@ -195,7 +195,7 @@ private final class WeekPagerController: UIViewController, UIScrollViewDelegate 
         guard let selectedWeek, let index = weeks.firstIndex(of: selectedWeek), index == 0 || index == 4 else { return }
         makeWeeks(around: selectedWeek)
         renderPages()
-        view.layoutIfNeeded()
+        layoutIfNeeded()
         position(on: selectedWeek, animated: false)
     }
 }
