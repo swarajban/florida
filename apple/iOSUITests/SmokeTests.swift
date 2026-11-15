@@ -511,6 +511,130 @@ final class SmokeTests: XCTestCase {
     }
 
     @MainActor
+    func testOneDayCarouselNavigation() {
+        continueAfterFailure = false
+        let calendar = Calendar.current
+        let demoNow = calendar.date(from: DateComponents(year: 2026, month: 11, day: 12, hour: 12))!
+        let today = calendar.startOfDay(for: demoNow)
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: today)!
+        for appearance in ["light", "dark"] {
+            let app = launch(appearance: appearance, mode: "day", demoNow: demoNow)
+            let heading = app.buttons["Go to day"]
+            let design = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Design review: scheduler v2")).firstMatch
+            let architecture = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Architecture sync")).firstMatch
+            let teammateOOO = app.buttons["all-day-event-demo-event-ooo"]
+            let offsite = app.buttons["all-day-event-demo-event-offsite"]
+
+            @MainActor
+            func assertDay(_ day: Date) {
+                XCTAssertEqual(heading.value as? String, day.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
+                let cell = app.buttons[day.formatted(.dateTime.weekday(.wide).month(.wide).day())]
+                XCTAssertTrue(cell.isHittable)
+                XCTAssertTrue(cell.isSelected)
+            }
+
+            @MainActor
+            func swipeDay(forward: Bool, fast: Bool = false) {
+                let hours = app.scrollViews["day-grid-hours"].frame.intersection(app.frame)
+                let start = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                    dx: app.frame.width * (forward ? 0.92 : 0.2), dy: hours.midY))
+                let end = start.withOffset(CGVector(dx: app.frame.width * (forward ? -0.72 : 0.72), dy: 0))
+                start.press(forDuration: 0.05, thenDragTo: end,
+                            withVelocity: fast ? .fast : XCUIGestureVelocity(rawValue: 150),
+                            thenHoldForDuration: fast ? 0 : 0.5)
+            }
+
+            positionInGrid(design, in: app)
+            assertDay(today)
+            XCTAssertTrue(teammateOOO.isHittable)
+            XCTAssertTrue(offsite.isHittable)
+            let beforeVerticalScroll = design.frame.minY
+            let gutter = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 26, dy: design.frame.midY))
+            gutter.press(forDuration: 0.05, thenDragTo: gutter.withOffset(CGVector(dx: 0, dy: -50)),
+                         withVelocity: .slow, thenHoldForDuration: 0.3)
+            XCTAssertLessThan(design.frame.minY, beforeVerticalScroll - 35)
+            assertDay(today)
+            let originalY = design.frame.minY
+            capture(app, "one-day-carousel-today-\(appearance)")
+
+            swipeDay(forward: true)
+            assertDay(tomorrow)
+            XCTAssertTrue(architecture.isHittable)
+            XCTAssertFalse(design.isHittable)
+            XCTAssertFalse(teammateOOO.isHittable)
+            XCTAssertTrue(offsite.isHittable)
+            capture(app, "one-day-carousel-next-\(appearance)")
+            architecture.tap()
+            XCTAssertTrue(app.navigationBars.buttons["Done"].waitForExistence(timeout: 5))
+            app.navigationBars.buttons["Done"].tap()
+
+            swipeDay(forward: false)
+            assertDay(today)
+            XCTAssertTrue(design.isHittable)
+            XCTAssertTrue(teammateOOO.isHittable)
+            XCTAssertEqual(design.frame.minY, originalY, accuracy: 2)
+            swipeDay(forward: false)
+            assertDay(yesterday)
+            XCTAssertTrue(offsite.isHittable)
+            XCTAssertFalse(teammateOOO.isHittable)
+            XCTAssertFalse(design.isHittable)
+            swipeDay(forward: true)
+            assertDay(today)
+
+            app.buttons[tomorrow.formatted(.dateTime.weekday(.wide).month(.wide).day())].tap()
+            assertDay(tomorrow)
+            XCTAssertTrue(architecture.isHittable)
+            XCTAssertFalse(teammateOOO.isHittable)
+            swipeDay(forward: false)
+            assertDay(today)
+            XCTAssertTrue(design.isHittable)
+            swipeDay(forward: true, fast: true)
+            assertDay(tomorrow)
+            app.buttons["Today"].tap()
+            assertDay(today)
+            XCTAssertTrue(design.isHittable)
+            XCTAssertTrue(teammateOOO.isHittable)
+
+            heading.tap()
+            XCTAssertTrue(app.buttons["Next Month"].waitForExistence(timeout: 5))
+            app.buttons["Next Month"].tap()
+            let nextMonth = calendar.date(byAdding: .month, value: 1, to: today)!
+            let distantDay = calendar.date(bySetting: .day, value: 15, of: nextMonth)!
+            let choice = app.datePickers.buttons.matching(NSPredicate(
+                format: "label CONTAINS %@", distantDay.formatted(.dateTime.weekday(.wide).month(.wide).day()))).firstMatch
+            XCTAssertTrue(choice.waitForExistence(timeout: 5))
+            choice.tap()
+            assertDay(distantDay)
+            swipeDay(forward: true)
+            assertDay(calendar.date(byAdding: .day, value: 1, to: distantDay)!)
+            app.buttons["Today"].tap()
+            assertDay(today)
+            swipeDay(forward: true)
+            assertDay(tomorrow)
+            XCTAssertTrue(architecture.isHittable)
+            app.buttons["Today"].tap()
+            assertDay(today)
+            let task = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Draft incident postmortem")).firstMatch
+            XCTAssertTrue(task.isHittable)
+            task.tap()
+            XCTAssertTrue(app.buttons["Mark done"].waitForExistence(timeout: 5))
+            app.buttons["Cancel"].tap()
+            let empty = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                dx: app.frame.width - 20, dy: design.frame.minY - 8))
+            empty.tap()
+            XCTAssertTrue(app.textFields["event-quick-add-input"].waitForExistence(timeout: 5))
+            app.buttons["event-quick-add-details"].tap()
+            XCTAssertTrue(app.navigationBars["New Event"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.datePickers["event-start"].buttons[
+                today.formatted(.dateTime.month(.abbreviated).day().year())].exists)
+            app.buttons["Cancel"].tap()
+            capture(app, "one-day-carousel-return-\(appearance)")
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testThreeDayNavigation() {
         continueAfterFailure = false
         let calendar = Calendar.current

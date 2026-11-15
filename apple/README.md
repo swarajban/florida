@@ -646,6 +646,12 @@ events, and scheduled task blocks; swipe to change day, pull to refresh. The
 Agenda header has two compact rows: tap the date for the month picker, with
 calendar visibility and Add beside it; below are the list/day/three-day switcher,
 Today, and the day-status menu. The current year is omitted from the heading.
+Both time grids use a finger-tracking horizontal carousel with adjacent days
+already loaded locally. The one-day grid snaps one day per swipe and retains
+its week strip; the three-day grid keeps its multi-day momentum. The hour gutter
+stays fixed, all-day events move with their dates, and horizontal navigation
+preserves the scrolled hour. Week-strip taps, Today and the date picker also
+position the carousel; Today brings the current time back into view.
 Large accessibility text can wrap these controls into additional rows without
 clipping. There is no separate brand toolbar. An
 event is a card filled in its calendar's color; a task block is the scheduler's
