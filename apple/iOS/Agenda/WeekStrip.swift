@@ -146,11 +146,14 @@ private final class WeekPagerController: UIViewController, UIScrollViewDelegate 
                 let host = UIHostingController(rootView: page(week))
                 host.safeAreaRegions = []
                 host.view.backgroundColor = .clear
+                host.view.clipsToBounds = true
                 addChild(host)
                 scroll.addSubview(host.view)
                 host.didMove(toParent: self)
                 hosts[week] = host
             }
+            hosts[week]?.view.isUserInteractionEnabled = week == selectedWeek
+            hosts[week]?.view.accessibilityElementsHidden = week != selectedWeek
         }
         view.setNeedsLayout()
     }
