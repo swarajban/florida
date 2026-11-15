@@ -10,7 +10,7 @@ struct WeekStrip: View {
     let onSelect: (Date) -> Void
     let onShiftWeek: (Int) -> Void
     @State private var runwayStart: Date?
-    @State private var position = ScrollPosition(idType: Int.self)
+    @State private var position = ScrollPosition(idType: Date.self)
     @State private var offset: CGFloat = 0
     @State private var isPanning = false
 
@@ -63,9 +63,10 @@ struct WeekStrip: View {
         ScrollView(.horizontal) {
             HStack(spacing: 0) {
                 ForEach(weeks, id: \.self) { week in
-                    page(week).frame(width: width)
+                    page(week).frame(width: width).id(week)
                 }
             }
+            .scrollTargetLayout()
         }
         .scrollIndicators(.hidden)
         .scrollPosition($position)
@@ -73,7 +74,7 @@ struct WeekStrip: View {
         .scrollTargetBehavior(WeekScrollTarget(pageWidth: width))
         .onAppear {
             runwayStart = weeks.first
-            position.scrollTo(x: 2 * width)
+            position.scrollTo(id: selectedWeek, anchor: .leading)
             offset = 2 * width
         }
         .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.x } action: { _, x in
@@ -96,15 +97,13 @@ struct WeekStrip: View {
             if let index = weeks.firstIndex(of: week) {
                 let x = CGFloat(index) * width
                 guard abs(offset - x) > 1 else { return }
-                withAnimation(.snappy(duration: 0.3)) { position.scrollTo(x: x) }
+                withAnimation(.snappy(duration: 0.3)) { position.scrollTo(id: week, anchor: .leading) }
             } else {
                 recenter(on: week, width: width)
             }
         }
         .onChange(of: width) { _, width in
-            if let index = weeks.firstIndex(of: selectedWeek) {
-                position.scrollTo(x: CGFloat(index) * width)
-            }
+            position.scrollTo(id: selectedWeek, anchor: .leading)
         }
     }
 
@@ -114,7 +113,7 @@ struct WeekStrip: View {
         withTransaction(transaction) {
             runwayStart = DateNavigation.shift(week, by: -14, calendar: calendar)
             offset = 2 * width
-            position.scrollTo(x: offset)
+            position.scrollTo(id: week, anchor: .leading)
         }
     }
 }
