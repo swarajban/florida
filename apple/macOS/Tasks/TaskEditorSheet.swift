@@ -40,6 +40,7 @@ struct TaskEditorSheet: View {
     @State private var keyboard = TaskEditorKeyboard()
     @State private var openField: TaskEditorKey?
     @State private var saveError: String?
+    @State private var tagInput = ""
     @State private var aiParseState: AIParseSection.ParseState = .idle
 
     /// The text fields a key can put the keyboard in.
@@ -116,6 +117,7 @@ struct TaskEditorSheet: View {
                     .accessibilityIdentifier("task-notes")
                     .lineLimit(3...8)
                 }
+                TaskMetadataEditor(task: $draft, tagInput: $tagInput)
                 Section("Dates") {
                     MacDateField("Start", date: dateSelection($startAt, field: .start), isOn: dateEnabled($hasStart, field: .start), hasTime: startHasTime,
                                  key: TaskEditorKey.start.keycap, isPresented: showing(.start), identifier: "task-start",
@@ -193,6 +195,7 @@ struct TaskEditorSheet: View {
                     MacDateField("Pinned start", date: dateSelection($pinnedStart, field: .pin), isOn: dateEnabled($hasPinnedStart, field: .pin), hasTime: .constant(true),
                                  key: TaskEditorKey.pinnedStart.keycap, isPresented: showing(.pinnedStart),
                                  identifier: "task-pinned-start", onDismiss: leaveField, requiresTime: true)
+                        .disabled(draft.isWaiting)
                 }
                 TaskRecurrenceSection(
                     recurrence: $draft.recurrence,
@@ -267,6 +270,9 @@ struct TaskEditorSheet: View {
         .onChange(of: startAt) { keepDueAfterStart() }
         .onChange(of: hasStart) { keepDueAfterStart() }
         .onChange(of: hasDue) { keepDueAfterStart() }
+        .onChange(of: draft.isWaiting) { _, waiting in
+            if waiting { hasPinnedStart = false }
+        }
         #if DEBUG
         .onChange(of: draft.title) { model.applyEditorTestSyncIfNeeded() }
         #endif
@@ -487,7 +493,7 @@ struct TaskEditorSheet: View {
         let due: Date? = hasDue ? dueAt : nil
         let start: Date? = hasStart ? startAt : nil
         let pinned: Date? = hasPinnedStart ? pinnedStart : nil
-        return somedayIntent != nil || !dateEdits.isEmpty || draft != original || due != original.dueAt || start != original.startAt
+        return !tagInput.isEmpty || somedayIntent != nil || !dateEdits.isEmpty || draft != original || due != original.dueAt || start != original.startAt
             || pinned != original.pinnedStart || editedSource != original.source
     }
 
@@ -496,6 +502,7 @@ struct TaskEditorSheet: View {
     private var preparedTask: TaskItem {
         var task = draft
         task.source = editedSource
+        task.tags += TaskItem.tagsFromInput(tagInput)
         if isNew || task.title != original.title {
             task.title = task.title.trimmingCharacters(in: .whitespaces)
         }

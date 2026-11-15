@@ -59,6 +59,7 @@ struct TaskRowView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(task.title)
                     .lineLimit(2)
+                TaskMetadataCaption(task: task)
                 ViewThatFits(in: .horizontal) {
                     metadata(showsContext: true, showsSchedule: true).fixedSize(horizontal: true, vertical: false)
                     metadata(showsContext: false, showsSchedule: true).fixedSize(horizontal: true, vertical: false)

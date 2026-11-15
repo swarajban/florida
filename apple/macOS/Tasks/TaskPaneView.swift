@@ -62,11 +62,21 @@ struct TaskPaneView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
+            VStack(spacing: 6) {
+                TextField("Search tasks, waiting on, or #tag", text: Binding(
+                    get: { model.taskMetadataSearch }, set: { model.taskMetadataSearch = $0 }))
+                    .textFieldStyle(.roundedBorder)
+                Toggle("Waiting only", isOn: Binding(
+                    get: { model.taskWaitingOnly }, set: { model.taskWaitingOnly = $0 }))
+                    .toggleStyle(.checkbox)
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 8)
             Divider()
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                        ForEach(model.paneSuggestions) { group in
+                        ForEach(model.taskPaneSuggestions) { group in
                             Section {
                                 ForEach(group.picks, id: \.paneItemID) { pick in
                                     suggestionRow(pick)

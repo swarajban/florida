@@ -29,6 +29,8 @@ final class AppModel {
 
     private(set) var categories: [TaskCategory] = []
     private(set) var openTasks: [TaskItem] = []
+    var taskMetadataSearch = ""
+    var taskWaitingOnly = false
     private var storedPlacements: [Placement] = []
     var placements: [Placement] {
         storedPlacements.filter { tasksById[$0.taskId]?.isOpen == true && tasksById[$0.taskId]?.someday == false }

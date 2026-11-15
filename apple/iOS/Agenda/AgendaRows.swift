@@ -100,6 +100,7 @@ struct BlockRow: View {
                         Text(block.task.title)
                             .font(.body)
                     }
+                    TaskMetadataCaption(task: block.task)
                     // No priority glyph here: the agenda is about when, the Tasks tab about how urgent.
                     HStack(spacing: 4) {
                         Text(category?.name ?? "No category")
