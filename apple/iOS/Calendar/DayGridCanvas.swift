@@ -11,11 +11,13 @@ struct DayGridCanvas: View {
     let now: Date
     let calendar: Calendar
     let pinnedGutterX: CGFloat
+    let viewportWidth: CGFloat
 
     var body: some View {
         Canvas(rendersAsynchronously: false) { context, size in
+            context.translateBy(x: -pinnedGutterX, y: 0)
             drawTodayTint(in: &context)
-            drawHourLines(in: &context, width: size.width)
+            drawHourLines(in: &context, width: geometry.width)
             drawDaySeparators(in: &context)
             drawNowLine(in: &context)
             // The canvas scrolls horizontally with the days; redraw the gutter at the viewport
@@ -28,7 +30,8 @@ struct DayGridCanvas: View {
                     at: point, anchor: .trailing)
             }
         }
-        .frame(width: geometry.width, height: geometry.dayHeight)
+        .frame(width: viewportWidth, height: geometry.dayHeight)
+        .offset(x: pinnedGutterX)
     }
 
     private var todayIndex: Int? {

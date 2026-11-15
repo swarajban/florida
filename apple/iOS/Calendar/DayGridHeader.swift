@@ -93,6 +93,7 @@ struct DayGridAllDayStrip: View {
                         })
                         .frame(width: frame.width, height: frame.height)
                         .offset(x: frame.minX, y: frame.minY)
+                        .accessibilityHidden(!layout.days[block.startDayIndex...block.endDayIndex].contains { visibleDays.contains($0) })
                         .onTapGesture {
                             onSelect(block.event)
                         }

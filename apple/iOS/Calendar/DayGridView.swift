@@ -68,6 +68,7 @@ struct DayGridView: View {
             let geometry = DayGridGeometry(
                 width: proxy.size.width, gutterWidth: Self.gutterWidth, dayCount: dayCount, grid: grid)
             carousel(geometry: geometry, height: proxy.size.height)
+                .id(dayCount)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
         }
@@ -84,6 +85,11 @@ struct DayGridView: View {
             withAnimation(.snappy(duration: 0.3)) {
                 scrollToStart()
             }
+        }
+        .onChange(of: dayCount) { _, _ in
+            visibleHeight = 0
+            carouselStart = DateNavigation.shift(model.selectedDay, by: -Self.carouselPadding, calendar: model.calendar)
+            observeDays()
         }
         .onChange(of: inputs, initial: true) { _, inputs in
             rebuildLayout(inputs)
@@ -146,9 +152,6 @@ struct DayGridView: View {
                 horizontalPosition.scrollTo(x: CGFloat(index) * width)
             }
         }
-        .onChange(of: dayCount) { _, _ in
-            recenter(on: model.selectedDay, columnWidth: geometry.columnWidth)
-        }
     }
 
     private func observeDays() {
@@ -172,6 +175,13 @@ struct DayGridView: View {
 
     private var pinnedGutterX: CGFloat { horizontalOffset }
 
+    private func visibleDayIndices(columnWidth: CGFloat) -> Range<Int> {
+        guard columnWidth > 0 else { return 0..<0 }
+        let first = min(days.count, max(0, Int(((horizontalOffset + 0.5) / columnWidth).rounded(.down))))
+        let last = min(days.count, max(first, Int(((horizontalOffset - 0.5) / columnWidth).rounded(.up)) + dayCount))
+        return first..<last
+    }
+
     @ViewBuilder
     private func gridContent(geometry: DayGridGeometry, days: [Date]) -> some View {
         TimelineView(.everyMinute) { timeline in
@@ -188,11 +198,9 @@ struct DayGridView: View {
                     Divider()
                 }
                 if layout.allDayRowCount > 0 {
-                    let firstVisible = min(days.count, max(0, Int(((horizontalOffset + 0.5) / geometry.columnWidth).rounded(.down))))
-                    let lastVisible = min(days.count, max(firstVisible, Int(((horizontalOffset - 0.5) / geometry.columnWidth).rounded(.up)) + dayCount))
                     DayGridAllDayStrip(
                         layout: layout, geometry: geometry, now: now,
-                        pinnedGutterX: pinnedGutterX, visibleDays: Set(days[firstVisible..<lastVisible]),
+                        pinnedGutterX: pinnedGutterX, visibleDays: Set(days[visibleDayIndices(columnWidth: geometry.columnWidth)]),
                         compactsVisibleRows: dayCount == 1, onSelect: onSelectEvent)
                     Divider()
                 }
@@ -231,10 +239,11 @@ struct DayGridView: View {
         ZStack(alignment: .topLeading) {
             DayGridCanvas(
                 geometry: geometry, days: days, hourLabels: hourLabels, now: now,
-                calendar: model.calendar, pinnedGutterX: pinnedGutterX)
+                calendar: model.calendar, pinnedGutterX: pinnedGutterX,
+                viewportWidth: Self.gutterWidth + CGFloat(dayCount) * geometry.columnWidth)
                 .contentShape(Rectangle())
                 .onTapGesture(coordinateSpace: .local) { point in
-                    create(at: point, geometry: geometry, days: days)
+                    create(at: CGPoint(x: point.x + pinnedGutterX, y: point.y), geometry: geometry, days: days)
                 }
             ZStack(alignment: .topLeading) {
                 ForEach(layout.blocks) { block in
@@ -249,6 +258,7 @@ struct DayGridView: View {
                         .contentShape(Path(CGRect(
                             x: hitLeft, y: 0, width: max(0, rect.width - hitLeft), height: rect.height)))
                         .offset(x: rect.minX, y: rect.minY)
+                        .accessibilityHidden(!visibleDayIndices(columnWidth: geometry.columnWidth).contains(block.dayIndex))
                         .opacity(drag?.block.id == block.id ? 0.3 : 1)
                         // A quick tap opens; only a still hold lifts the block. Finished tasks
                         // and plan blocks get no hold, so their touches can always scroll.
