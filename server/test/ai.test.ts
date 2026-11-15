@@ -10,7 +10,7 @@ import {
   WEEKLY_SYSTEM,
 } from '../src/ai/brief.js'
 import type { BriefWriter, PlacementExplainer } from '../src/ai/brief.js'
-import { ClaudeError } from '../src/ai/claude.js'
+import { ClaudeError, type JsonSchema } from '../src/ai/claude.js'
 import { ClaudeTaskParser, TASK_DRAFT_JSON_SCHEMA, buildPrompt } from '../src/ai/parse-task.js'
 import type { ParseTaskContext, TaskDraft, TaskParser } from '../src/ai/parse-task.js'
 import {
@@ -82,6 +82,44 @@ const messageWith = (json: unknown) => ({
   stop_reason: 'end_turn',
 })
 
+describe('AI structured-output schemas', () => {
+  it.each([
+    ['task draft', TASK_DRAFT_JSON_SCHEMA],
+    ['category suggestion', CATEGORY_SUGGESTION_JSON_SCHEMA],
+    ['daily/weekly brief', BRIEF_JSON_SCHEMA],
+    ['explanation', EXPLANATION_JSON_SCHEMA],
+  ])('keeps %s objects closed and enum branches single-typed for Anthropic', (_name, schema) => {
+    const check = (node: JsonSchema) => {
+      if (node.type === 'object') {
+        const properties = node.properties as Record<string, JsonSchema>
+        expect(node.additionalProperties).toBe(false)
+        expect(node.required).toEqual(Object.keys(properties))
+        for (const property of Object.values(properties)) check(property)
+      }
+      if (Array.isArray(node.enum)) {
+        expect(typeof node.type).toBe('string')
+        for (const value of node.enum) {
+          expect(value === null ? 'null' : typeof value).toBe(node.type)
+        }
+      }
+      if (Array.isArray(node.anyOf)) {
+        for (const branch of node.anyOf) check(branch as JsonSchema)
+      }
+    }
+    check(schema as JsonSchema)
+  })
+
+  it('separates the nullable attention enum into string and null branches', () => {
+    expect((TASK_DRAFT_JSON_SCHEMA.properties as Record<string, unknown>).attention).toEqual({
+      anyOf: [
+        { type: 'string', enum: ['full', 'shared'] },
+        { type: 'null' },
+      ],
+      description: 'shared or full only when the text says so; otherwise null',
+    })
+  })
+})
+
 describe('buildPrompt', () => {
   it('states the local time, zone and category ids', () => {
     const { system, user } = buildPrompt('Write design doc 2h by fri', ctx)
@@ -113,6 +151,32 @@ describe('config', () => {
 
 describe('ClaudeTaskParser', () => {
   const config = { apiKey: 'sk-test', model: 'claude-test-1' }
+
+  it.each([null, 'full', 'shared'] as const)('preserves attention %s while normalizing the draft', async (attention) => {
+    const api = fakeApi({ body: messageWith({
+      ...modelDraft,
+      title: '  Call dentist  ',
+      categoryId: 'unknown',
+      projectId: 'unknown',
+      dueAt: null,
+      deadlineType: 'hard',
+      attention,
+    }) })
+    expect(await new ClaudeTaskParser(config, api.fetch).parse('x', ctx)).toEqual({
+      ...modelDraft,
+      title: 'Call dentist',
+      categoryId: null,
+      projectId: null,
+      dueAt: null,
+      deadlineType: 'none',
+      attention,
+    })
+  })
+
+  it('rejects attention outside the nullable enum', async () => {
+    const api = fakeApi({ body: messageWith({ ...modelDraft, attention: 'partial' }) })
+    await expect(new ClaudeTaskParser(config, api.fetch).parse('x', ctx)).rejects.toThrow(/attention/)
+  })
 
   it('sends a structured-output request and returns the validated draft', async () => {
     const api = fakeApi({ body: messageWith(modelDraft) })

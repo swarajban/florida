@@ -90,8 +90,10 @@ export const TASK_DRAFT_JSON_SCHEMA: JsonSchema = {
     context: { type: 'string', enum: ['computer', 'errand', 'home', 'office'], description: 'Where the task can be done' },
     projectId: { type: ['string', 'null'], description: 'One of the given project ids, or null when the task belongs to none' },
     attention: {
-      type: ['string', 'null'],
-      enum: ['full', 'shared', null],
+      anyOf: [
+        { type: 'string', enum: ['full', 'shared'] },
+        { type: 'null' },
+      ],
       description: 'shared or full only when the text says so; otherwise null',
     },
     rationale: { type: 'string', description: 'One sentence explaining the interpretation' },
