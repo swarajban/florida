@@ -1,7 +1,7 @@
 name: macOS TestFlight
 
 # PR pushes compile only; full UI suites are requested explicitly before merge.
-# Main's UI result is independent of uploads while APPLE_UI_GATE is off.
+# Main runs UI only when APPLE_UI_GATE is on; nightly suites live in ios.yml.
 on:
   push:
     branches: [main]
@@ -36,7 +36,8 @@ jobs:
 
   ui:
     name: macOS UI suite
-    if: github.ref == 'refs/heads/main'
+    needs: policy
+    if: github.ref == 'refs/heads/main' && needs.policy.outputs.ui_gate == 'true'
     runs-on: macos-26
     timeout-minutes: 60
     steps:

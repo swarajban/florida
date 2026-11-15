@@ -1,10 +1,12 @@
 name: iOS
 
-# build:      runs the full simulator suite on main, independently of uploads by default.
+# build:      runs the full simulator suite on main only when the release UI gate is enabled.
 # ui:         explicit ui_only dispatch runs both PR UI suites without release credentials.
 # testflight: archives, signs and uploads to TestFlight on pushes to main and on manual runs.
 #             Needs the App Store Connect secrets described in apple/README.md.
 on:
+  schedule:
+    - cron: '0 10 * * *'
   push:
     branches: [main]
     paths:
@@ -31,14 +33,18 @@ concurrency:
   group: ${{ inputs.ui_only && format('apple-ui-{0}', github.ref) || format('ios-run-{0}', github.run_id) }}
   cancel-in-progress: ${{ inputs.ui_only == true }}
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   policy:
-    if: inputs.ui_only != true
+    if: inputs.ui_only != true && github.event_name != 'schedule'
     uses: ./.github/workflows/apple-release-policy.yml
 
   ui:
     name: On-demand Apple UI
-    if: github.event_name == 'workflow_dispatch' && inputs.ui_only && inputs.mac_test_selector == '' && inputs.iphone_test_selector == ''
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.ui_only && inputs.mac_test_selector == '' && inputs.iphone_test_selector == '')
     uses: ./.github/workflows/apple-checks.yml
     with:
       run_ui: true
@@ -64,6 +70,27 @@ jobs:
             [[ "$selector" =~ ^Florida-macOS(KeyboardTests|UITests)(/[A-Za-z_][A-Za-z0-9_]*){0,2}$ ]] || exit 2
           done
       - run: brew install xcodegen
+      - name: Identify toolchain
+        id: xcode
+        run: echo "version=$(xcodebuild -version | shasum -a 256 | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Restore SwiftPM downloads
+        uses: actions/cache/restore@v4
+        with:
+          path: apple/build/SourcePackages
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('apple/**/Package.resolved', 'apple/**/Package.swift') }}
+      - name: Restore derived data
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            apple/build/ios
+            apple/build/macos
+          key: xcode-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('apple/**/*.swift', 'apple/**/*.yml', 'apple/**/*.plist', 'apple/**/*.entitlements', 'apple/**/Package.resolved', 'apple/Design/Assets.xcassets/**', 'apple/scripts/**') }}
+          restore-keys: |
+            xcode-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-
+      - name: Restore exact-SHA test products or fall back to cached build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash apple/scripts/restore-test-products.sh macos
       - name: Build and run selected Mac tests
         env:
           MAC_TEST_SELECTOR: ${{ inputs.mac_test_selector }}
@@ -106,6 +133,27 @@ jobs:
           done
       - run: brew install xcodegen
         timeout-minutes: 2
+      - name: Identify toolchain
+        id: xcode
+        run: echo "version=$(xcodebuild -version | shasum -a 256 | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Restore SwiftPM downloads
+        uses: actions/cache/restore@v4
+        with:
+          path: apple/build/SourcePackages
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('apple/**/Package.resolved', 'apple/**/Package.swift') }}
+      - name: Restore derived data
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            apple/build/ios
+            apple/build/macos
+          key: xcode-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('apple/**/*.swift', 'apple/**/*.yml', 'apple/**/*.plist', 'apple/**/*.entitlements', 'apple/**/Package.resolved', 'apple/Design/Assets.xcassets/**', 'apple/scripts/**') }}
+          restore-keys: |
+            xcode-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-
+      - name: Restore exact-SHA test products or fall back to cached build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash apple/scripts/restore-test-products.sh ios
       - name: Build and run selected iPhone tests
         timeout-minutes: 55
         env:
@@ -144,7 +192,8 @@ jobs:
 
   build:
     name: iPhone UI suite
-    if: inputs.ui_only != true
+    needs: policy
+    if: inputs.ui_only != true && needs.policy.outputs.ui_gate == 'true'
     runs-on: macos-26
     # The unsharded main suite includes simulator boot, all appearances and one retry.
     timeout-minutes: 75
