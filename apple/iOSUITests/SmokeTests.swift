@@ -4,6 +4,41 @@ import UIKit
 /// Wait for real content before capturing; a fixed launch delay can silently save a blank screen.
 final class SmokeTests: XCTestCase {
     @MainActor
+    func testCalendarActivationChecklist() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-demoData", "YES", "-uiCalendarActivation", "YES", "-uiTab", "agenda",
+                               "-uiAppearance", "light", "-uiAgendaMode", "list"]
+        addTeardownBlock { @MainActor [weak self] in
+            guard let self, (self.testRun?.failureCount ?? 0) > 0 else { return }
+            self.captureFailure(app, "calendar-assertion-failure")
+        }
+        app.launch()
+        let picker = app.buttons["agenda-calendars"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 10))
+        picker.tap()
+        let holidays = app.buttons["calendar-choice-demo-cal-us-holidays"]
+        let checklist = app.descendants(matching: .any).matching(identifier: "calendar-checklist").firstMatch
+        XCTAssertTrue(checklist.waitForExistence(timeout: 5))
+        XCTAssertTrue(holidays.waitForExistence(timeout: 5))
+        for _ in 0..<4 where !holidays.isHittable { checklist.swipeUp() }
+        holidays.tap()
+        let birthdays = app.buttons["calendar-choice-demo-cal-birthdays"]
+        birthdays.tap()
+        XCTAssertEqual(holidays.value as? String, "Selected")
+        XCTAssertEqual(birthdays.value as? String, "Selected")
+        capture(app, "calendar-checklist-selected")
+        app.buttons["Done"].tap()
+        let status = app.descendants(matching: .any).matching(identifier: "calendar-activation-status").firstMatch
+        let appeared = status.waitForExistence(timeout: 2)
+        capture(app, "calendar-activation")
+        XCTAssertTrue(appeared)
+        XCTAssertLessThanOrEqual(status.frame.height, 24)
+        XCTAssertTrue(status.waitForNonExistence(timeout: 15))
+        app.terminate()
+    }
+
+    @MainActor
     func testDeepLinkTaskAndAgendaNavigation() throws {
         continueAfterFailure = false
         let app = XCUIApplication()

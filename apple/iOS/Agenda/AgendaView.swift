@@ -21,6 +21,7 @@ struct AgendaView: View {
     @State private var newEvent: CalendarEvent?
     @State private var showsDayPicker = false
     @State private var showsWeeklyReview = false
+    @State private var showsCalendars = false
     @State private var openedLaunchSheet = false
     @State private var doneForNowTask: TaskItem?
     @State private var movingTask: TaskItem?
@@ -77,6 +78,16 @@ struct AgendaView: View {
         }
         .sheet(isPresented: $showsDayPicker) {
             DayPickerSheet(selectedDay: model.selectedDay, isPresented: $showsDayPicker)
+        }
+        .sheet(isPresented: $showsCalendars) {
+            CalendarChecklistSheet(onDone: { showsCalendars = false })
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .onDisappear {
+                    #if DEBUG
+                    model.finishCalendarActivationDemo()
+                    #endif
+                }
         }
         .sheet(isPresented: $showsWeeklyReview) {
             WeeklyReviewSheet()
@@ -190,11 +201,25 @@ struct AgendaView: View {
             .foregroundStyle(isToday ? Color.secondary : FloridaStyle.ink)
     }
 
-    private var dayStatusMenu: some View {
-        AgendaDayStatus(day: model.selectedDay, events: model.agenda?.blockingAllDayEvents ?? []) {
-            selectedEvent = $0
+    @ViewBuilder private var dayStatusMenu: some View {
+        if let status = model.calendarActivation.status(in: model.calendars) {
+            HStack(spacing: 4) {
+                ProgressView().controlSize(.mini)
+                Text(status).lineLimit(1).truncationMode(.middle)
+            }
+            .font(.caption2)
+            .padding(.horizontal, 6)
+            .frame(maxWidth: 160, minHeight: 24, maxHeight: 24)
+            .background(.secondary.opacity(0.08), in: Capsule())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(status)
+            .accessibilityIdentifier("calendar-activation-status")
+        } else {
+            AgendaDayStatus(day: model.selectedDay, events: model.agenda?.blockingAllDayEvents ?? []) {
+                selectedEvent = $0
+            }
+            .accessibilityIdentifier("agenda-day-kind")
         }
-        .accessibilityIdentifier("agenda-day-kind")
     }
 
     private var modePicker: some View {
@@ -213,31 +238,11 @@ struct AgendaView: View {
     /// Which calendars show, grouped by Google account. Flipping one updates the store at once and
     /// tells the server in the background, like the toggles in Settings.
     private var calendarMenu: some View {
-        Menu {
-            if model.calendars.isEmpty {
-                Text(model.needsSetup ? "Connect to the server in Settings." : "No calendars synced yet.")
-            }
-            ForEach(model.accounts) { account in
-                let owned = model.calendars.filter { $0.accountId == account.id }
-                if !owned.isEmpty {
-                    Section(account.label.isEmpty ? account.email : "\(account.label) · \(account.email)") {
-                        ForEach(owned) { info in
-                            Toggle(info.summary, isOn: calendarSelection(info))
-                        }
-                    }
-                }
-            }
-        } label: {
+        Button { showsCalendars = true } label: {
             Label("Calendars", systemImage: "calendar")
                 .frame(minWidth: 44, minHeight: 44)
         }
         .accessibilityIdentifier("agenda-calendars")
-    }
-
-    private func calendarSelection(_ info: CalendarInfo) -> Binding<Bool> {
-        Binding(
-            get: { model.calendarInfo(id: info.id)?.selected ?? info.selected },
-            set: { model.setCalendarSelected(id: info.id, selected: $0) })
     }
 
     /// New task (the same composer as Tasks and the widget) or new event, starting at the next quarter hour
@@ -508,5 +513,53 @@ struct AgendaView: View {
                 .foregroundStyle(.primary)
         }
         .accessibilityHint("Shows the event")
+    }
+}
+
+private struct CalendarChecklistSheet: View {
+    @Environment(AppModel.self) private var model
+    let onDone: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Calendars").font(.headline)
+                Spacer()
+                Button("Done", action: onDone)
+            }.padding(12)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    if model.calendars.isEmpty {
+                        Text(model.needsSetup ? "Connect to the server in Settings." : "No calendars synced yet.")
+                    }
+                    ForEach(model.accounts) { account in
+                        let owned = model.calendars.filter { $0.accountId == account.id }
+                        if !owned.isEmpty {
+                            Text(account.label.isEmpty ? account.email : "\(account.label) · \(account.email)")
+                                .font(.caption).foregroundStyle(.secondary).padding(.top, 8)
+                            ForEach(owned) { info in
+                                Button {
+                                    model.setCalendarSelected(id: info.id, selected: !info.selected)
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Circle().fill(info.color.flatMap(Color.init(hex:)) ?? .secondary).frame(width: 8, height: 8)
+                                        Text(info.summary).lineLimit(1).truncationMode(.middle)
+                                        Spacer(minLength: 0)
+                                        if model.calendarActivation.syncingCalendarIds.contains(info.id) {
+                                            ProgressView().controlSize(.mini)
+                                        }
+                                        Image(systemName: info.selected ? "checkmark.circle.fill" : "circle")
+                                    }
+                                    .frame(minHeight: 44).contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("calendar-choice-\(info.id)")
+                                .accessibilityValue(info.selected ? "Selected" : "Not selected")
+                            }
+                        }
+                    }
+                }.padding(.horizontal, 12).padding(.bottom, 12)
+            }.accessibilityIdentifier("calendar-checklist")
+        }
     }
 }

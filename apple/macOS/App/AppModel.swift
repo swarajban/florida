@@ -39,6 +39,7 @@ final class AppModel {
     private(set) var blockingAllDayEvents: [CalendarEvent] = []
     private(set) var accounts: [GoogleAccount] = []
     private(set) var calendars: [CalendarInfo] = []
+    let calendarActivation = CalendarActivation()
     private(set) var pendingWriteCount = 0
     private(set) var tasksById: [String: TaskItem] = [:]
     private(set) var categoriesById: [String: TaskCategory] = [:]

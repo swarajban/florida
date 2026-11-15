@@ -54,6 +54,10 @@ struct CalendarToggleRow: View {
                     .frame(width: 10, height: 10)
                 Text(calendar.summary)
                     .accessibilityIdentifier("calendar-name-\(calendar.id)")
+                if model.calendarActivation.syncingCalendarIds.contains(calendar.id) {
+                    ProgressView().controlSize(.mini)
+                    Text("Syncing…").font(.caption).foregroundStyle(.secondary)
+                }
                 if calendar.accessRole == "reader" || calendar.accessRole == "freeBusyReader" {
                     Text("read-only")
                         .font(.caption)

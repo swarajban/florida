@@ -3,6 +3,17 @@ import FloridaKit
 import Foundation
 
 extension AppModel {
+    func finishCalendarActivationDemo() {
+        guard LaunchOptions.demoData, UserDefaults.standard.bool(forKey: "uiCalendarActivation"), let database else { return }
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard let self, var calendars = try? database.calendars() else { return }
+            for index in calendars.indices where calendars[index].selected { calendars[index].lastSyncedAt = Date() }
+            try? database.apply(SyncResponse(cursor: Date().ISO8601Format(), calendars: calendars))
+            self.calendarActivation.reconcile(calendars)
+        }
+    }
+
     /// Screenshot runs (`-demoData YES`). The store is the fresh in-memory one `openStore()`
     /// returned; it is seeded here. A placeholder server config keeps the setup prompts away
     /// without touching the keychain, and with no `SyncClient` nothing reaches the network.

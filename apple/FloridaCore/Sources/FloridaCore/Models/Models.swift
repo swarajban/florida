@@ -843,11 +843,12 @@ public struct CalendarInfo: Codable, Hashable, Sendable, Identifiable {
     /// Whether events from this calendar are visible.
     public var selected: Bool
     public var blocksScheduling: Bool
+    public var lastSyncedAt: Date?
     public var updatedAt: Date
 
     public init(
         id: String, accountId: String, googleId: String, summary: String, color: String? = nil,
-        accessRole: String, selected: Bool, blocksScheduling: Bool = true, updatedAt: Date
+        accessRole: String, selected: Bool, blocksScheduling: Bool = true, lastSyncedAt: Date? = nil, updatedAt: Date
     ) {
         self.id = id
         self.accountId = accountId
@@ -857,11 +858,12 @@ public struct CalendarInfo: Codable, Hashable, Sendable, Identifiable {
         self.accessRole = accessRole
         self.selected = selected
         self.blocksScheduling = blocksScheduling
+        self.lastSyncedAt = lastSyncedAt
         self.updatedAt = updatedAt
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, accountId, googleId, summary, color, accessRole, selected, blocksScheduling, updatedAt
+        case id, accountId, googleId, summary, color, accessRole, selected, blocksScheduling, lastSyncedAt, updatedAt
     }
 
     public init(from decoder: any Decoder) throws {
@@ -874,6 +876,7 @@ public struct CalendarInfo: Codable, Hashable, Sendable, Identifiable {
         accessRole = try container.decode(String.self, forKey: .accessRole)
         selected = try container.decode(Bool.self, forKey: .selected)
         blocksScheduling = try container.decodeIfPresent(Bool.self, forKey: .blocksScheduling) ?? true
+        lastSyncedAt = try container.decodeIfPresent(Date.self, forKey: .lastSyncedAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
     }
 }
