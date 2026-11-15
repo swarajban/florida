@@ -873,6 +873,32 @@ describe('Wave 1A calendar and parser tools', () => {
     expect((await call('upsert_event', body)).isError).toBe(true)
   })
 
+  it('exposes guest invitations with the same merge and omission semantics as HTTP', async () => {
+    const body = { calendarId, summary: 'Guests', startAt: '2026-11-18T10:00:00Z', endAt: '2026-11-18T11:00:00Z', allDay: false }
+    const { event } = await data<{ event: { id: string, googleId: string } }>('upsert_event', {
+      ...body, attendees: [' ALICE@acme.com ', 'alice@acme.com'],
+    })
+    expect(sync.eventWrites.at(-1)?.body?.attendees).toEqual([{ email: 'alice@acme.com' }])
+    const live = sync.googleEvents.get(event.googleId)!
+    live.attendees = [
+      { email: 'alice@acme.com', displayName: 'Alice', responseStatus: 'accepted' },
+      { email: 'mcp@example.com', self: true, organizer: true, responseStatus: 'needsAction' },
+    ]
+    await data('upsert_event', { ...body, id: event.id, attendees: ['alice@acme.com', 'bob@acme.com'], responseStatus: 'tentative' })
+    expect(sync.eventWrites.at(-1)?.body?.attendees).toEqual([
+      { email: 'alice@acme.com', displayName: 'Alice', responseStatus: 'accepted' },
+      { email: 'mcp@example.com', self: true, organizer: true, responseStatus: 'tentative' },
+      { email: 'bob@acme.com' },
+    ])
+    await data('upsert_event', { ...body, id: event.id, summary: 'Omitted' })
+    expect(sync.eventWrites.at(-1)?.body).toEqual({ summary: 'Omitted' })
+    await data('upsert_event', { ...body, id: event.id, attendees: [] })
+    expect(sync.eventWrites.at(-1)?.body?.attendees).toEqual([{ email: 'mcp@example.com', self: true, organizer: true, responseStatus: 'tentative' }])
+    for (const attendees of [['invalid'], Array(51).fill('a@acme.com')]) {
+      expect((await call('upsert_event', { ...body, attendees })).isError).toBe(true)
+    }
+  })
+
   it('turns a remotely deleted event into a tool error after rescheduling', async () => {
     const body = { calendarId, summary: 'Gone', startAt: '2026-11-18T10:00:00Z', endAt: '2026-11-18T11:00:00Z', allDay: false }
     const { event } = await data<{ event: { id: string } }>('upsert_event', body)

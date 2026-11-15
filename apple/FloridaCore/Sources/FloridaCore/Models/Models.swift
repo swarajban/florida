@@ -1371,6 +1371,25 @@ public struct EventRecurrence: Codable, Hashable, Sendable {
     }
 }
 
+public struct EventAttendeeWrite: Codable, Hashable, Sendable {
+    public var email: String
+    public var displayName: String?
+    public var optional: Bool
+
+    public init(email: String, displayName: String? = nil, optional: Bool = false) {
+        self.email = email
+        self.displayName = displayName
+        self.optional = optional
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        email = try container.decode(String.self, forKey: .email)
+        displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
+        optional = try container.decodeIfPresent(Bool.self, forKey: .optional) ?? false
+    }
+}
+
 /// Body of `PUT /api/events/:id`. Creating an event is a `PUT` of a client-made id; the server
 /// writes it to Google and fills in `googleId`. Nil `location` and `description` are omitted from
 /// the JSON, like `TaskWrite`'s optionals.
@@ -1397,11 +1416,13 @@ public struct EventWrite: Codable, Hashable, Sendable {
     /// Nil, which the JSON omits, moves the instance alone.
     public var scope: Scope?
     public var blocksDay: Bool?
+    public var attendees: [EventAttendeeWrite]?
 
     public init(
         calendarId: String, summary: String, location: String? = nil, description: String? = nil,
         startAt: Date, endAt: Date, allDay: Bool, responseStatus: String? = nil,
-        recurrence: EventRecurrence? = nil, scope: Scope? = nil, blocksDay: Bool? = nil
+        recurrence: EventRecurrence? = nil, scope: Scope? = nil, blocksDay: Bool? = nil,
+        attendees: [EventAttendeeWrite]? = nil
     ) {
         self.calendarId = calendarId
         self.summary = summary
@@ -1414,6 +1435,7 @@ public struct EventWrite: Codable, Hashable, Sendable {
         self.recurrence = recurrence
         self.scope = scope
         self.blocksDay = blocksDay
+        self.attendees = attendees
     }
 
     /// The body for an existing row, or nil for a row without `startAt` or `endAt` (Google omits
@@ -1444,6 +1466,7 @@ public struct EventWrite: Codable, Hashable, Sendable {
         try container.encodeIfPresent(recurrence, forKey: .recurrence)
         try container.encodeIfPresent(scope, forKey: .scope)
         try container.encode(blocksDay, forKey: .blocksDay)
+        try container.encodeIfPresent(attendees, forKey: .attendees)
     }
 }
 

@@ -9,11 +9,12 @@ public struct EventQuickAddDraft: Hashable, Sendable {
     public var location: String?
     public var calendarHint: String?
     public var notes: String?
+    public var attendees: [String]
 
     public init(
         title: String, startAt: Date, endAt: Date, allDay: Bool = false,
         recurrence: EventRecurrence? = nil, location: String? = nil,
-        calendarHint: String? = nil, notes: String? = nil
+        calendarHint: String? = nil, notes: String? = nil, attendees: [String] = []
     ) {
         self.title = title
         self.startAt = startAt
@@ -23,6 +24,7 @@ public struct EventQuickAddDraft: Hashable, Sendable {
         self.location = location
         self.calendarHint = calendarHint
         self.notes = notes
+        self.attendees = attendees
     }
 }
 
@@ -32,6 +34,22 @@ public enum EventQuickAddParser {
     ) -> EventQuickAddDraft {
         let (body, notes) = QuickAddScanner.splitNotes(text)
         var tokens = body.split(whereSeparator: \.isWhitespace).map(String.init)
+        var attendees: [String] = []
+        var removed = Set<Int>()
+        for index in tokens.indices {
+            guard !tokens[index].hasPrefix("#") else { continue }
+            let emails = tokens[index].split(separator: ",").map {
+                $0.trimmingCharacters(in: CharacterSet(charactersIn: "<>.,;()" )).lowercased()
+            }
+            guard !emails.isEmpty, emails.allSatisfy(GuestSuggestion.isEmail) else { continue }
+            for email in emails where !attendees.contains(email) { attendees.append(email) }
+            removed.insert(index)
+            if index > 0, tokens[index - 1].lowercased() == "with" { removed.insert(index - 1) }
+            if index > 1, ["and", ","].contains(tokens[index - 1].lowercased()), removed.contains(index - 2) {
+                removed.insert(index - 1)
+            }
+        }
+        tokens = tokens.enumerated().filter { !removed.contains($0.offset) }.map(\.element)
         let hint: String?
         if let index = tokens.firstIndex(where: { $0.hasPrefix("#") }) {
             let value = String(tokens[index].dropFirst())
@@ -149,7 +167,7 @@ public enum EventQuickAddParser {
         }
         return EventQuickAddDraft(
             title: QuickAddScanner.joinTitle(title), startAt: start, endAt: end, allDay: allDay,
-            recurrence: recurrence, location: location, calendarHint: hint, notes: notes)
+            recurrence: recurrence, location: location, calendarHint: hint, notes: notes, attendees: attendees)
     }
 
     public static func matchingCalendars(

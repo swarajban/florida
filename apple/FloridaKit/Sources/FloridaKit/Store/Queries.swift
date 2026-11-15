@@ -106,6 +106,15 @@ extension AppDatabase {
         try writer.read { db in try CalendarInfo.order(Column("accountId"), Column("summary")).fetchAll(db) }
     }
 
+    public func guestSuggestions(query: String, limit: Int = 10) throws -> [GuestSuggestion] {
+        try writer.read { db in
+            let history = try String.fetchAll(db, sql: "SELECT attendees FROM event WHERE deletedAt IS NULL AND attendees IS NOT NULL")
+            let attendees = try history.flatMap { try JSONCoding.decoder.decode([EventAttendee].self, from: Data($0.utf8)) }
+            return GuestSuggestion.ranked(query: query, calendars: try CalendarInfo.fetchAll(db),
+                accounts: try GoogleAccount.fetchAll(db), attendees: attendees, limit: limit)
+        }
+    }
+
     /// Tasks that are neither deleted nor completed: asap first, then earlier due dates (tasks
     /// without a due date last), then oldest first.
     public func openTasks() throws -> [TaskItem] {
@@ -568,27 +577,36 @@ extension AppDatabase {
     /// server's copy replaces the row; it shows up in `events(in:)` as soon as its calendar is selected.
     /// Throws `WriteError.eventWithoutTimes` for a row missing `startAt` or `endAt`, which the
     /// server would refuse; nothing is stored or queued.
-    public func saveEvent(_ event: CalendarEvent, recurrence: EventRecurrence? = nil, now: Date = Date()) throws {
+    public func saveEvent(_ event: CalendarEvent, recurrence: EventRecurrence? = nil, attendees: [EventAttendeeWrite]? = nil, now: Date = Date()) throws {
         try writer.write { db in
-            try Self.saveEvent(event, recurrence: recurrence, in: db, now: now)
+            try Self.saveEvent(event, recurrence: recurrence, attendees: attendees, in: db, now: now)
         }
     }
 
-    static func saveEvent(_ event: CalendarEvent, recurrence: EventRecurrence?, in db: Database, now: Date) throws {
+    static func saveEvent(_ event: CalendarEvent, recurrence: EventRecurrence?, attendees: [EventAttendeeWrite]? = nil, in db: Database, now: Date) throws {
         var event = event
         event.updatedAt = now
         guard let initial = EventWrite(event) else { throw WriteError.eventWithoutTimes(id: event.id) }
         var write = initial
         if let stored = try CalendarEvent.fetchOne(db, key: event.id) {
+            event.attendees = stored.attendees
             event.blocksDay = stored.blocksDay
             write.blocksDay = stored.blocksDay
             event.autoBlocksDay = stored.autoBlocksDay
             event.blockingReason = stored.blockingReason
         }
         write.recurrence = recurrence
+        write.attendees = attendees.map(EventAttendeeWrite.normalized)
+        if let attendees {
+            event.attendees = EventAttendeeWrite.merging(attendees, into: event.attendees ?? [])
+        }
+        if let response = event.responseStatus, let index = event.attendees?.firstIndex(where: \.isSelf) {
+            event.attendees?[index].responseStatus = response
+        }
         if let pending = try PendingWrite.filter(Column("entity") == "event" && Column("entityId") == event.id).fetchOne(db),
            pending.op == .put, let body = pending.body {
             let queued = try JSONCoding.decoder.decode(EventWrite.self, from: body)
+            if write.attendees == nil { write.attendees = queued.attendees }
             // An offline rename/reschedule must not erase the queued series creation.
             if write.recurrence == nil, event.googleId.isEmpty {
                 write.recurrence = queued.recurrence
@@ -650,6 +668,10 @@ extension AppDatabase {
         instance.updatedAt = now
         guard var write = EventWrite(instance) else { throw WriteError.eventWithoutTimes(id: instanceId) }
         write.scope = .series
+        if let pending = try PendingWrite.filter(Column("entity") == "event" && Column("entityId") == instanceId).fetchOne(db),
+           pending.op == .put, let body = pending.body {
+            write.attendees = try JSONCoding.decoder.decode(EventWrite.self, from: body).attendees
+        }
         try instance.save(db)
         try Self.storeSeriesMoveTimes(db, id: instanceId, times: snapshots)
         try Self.enqueue(db, entity: .event, id: instanceId, op: .put, body: try JSONCoding.encoder.encode(write), now: now)
