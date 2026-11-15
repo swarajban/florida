@@ -254,6 +254,16 @@ enum DemoData {
                         """,
                     createdAt: now, updatedAt: now),
             ])
+        if UserDefaults.standard.bool(forKey: "uiCoworkerOOODemo") {
+            response.briefs = []
+            if let index = response.calendars.firstIndex(where: { $0.id == ooo }) {
+                response.calendars[index].summary = "Gusto time off"
+            }
+            for (index, name) in ["Priya Shah", "Alex Li", "Sam Jones", "Jo Lane"].enumerated() {
+                response.events.append(event("demo-ooo-\(index)", ooo, "\(name) - Out of Office", utcDay(0), utcDay(1),
+                                             allDay: true, autoBlocksDay: false, blockingReason: "Someone else’s time off"))
+            }
+        }
         if UserDefaults.standard.bool(forKey: "uiTaskGroupingDemo") {
             response = taskGroupingResponse(response, now: fixedNow ?? now)
         }
