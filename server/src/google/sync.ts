@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto'
-import { and, eq, inArray, isNull, or } from 'drizzle-orm'
+import { and, eq, getTableColumns, inArray, isNull, or, sql } from 'drizzle-orm'
 import { writeTimestamp } from '../db/sync-clock.js'
 import type { Config } from '../config.js'
 import { decrypt, encrypt } from '../crypto.js'
@@ -38,6 +38,8 @@ export interface CalendarSyncService {
   connectAccount(label: string, tokens: Tokens): Promise<GoogleAccountRow>
   syncAccount(account: GoogleAccountRow): Promise<void>
   syncCalendar(calendar: CalendarRow): Promise<void>
+  prefetchCalendar(calendarId: string, signal: AbortSignal): Promise<void>
+  ensureWatch?(calendar: CalendarRow): Promise<void>
   syncAll(): Promise<void>
   ensureAllWatches(): Promise<void>
   /** Google's current copy of one event of the calendar. */
@@ -69,6 +71,7 @@ export function selectedByDefault(entry: GoogleCalendarListEntry): boolean {
 
 export class GoogleSync implements CalendarSyncService {
   private readonly oauth: OAuthConfig
+  private readonly syncing = new Map<string, Promise<void>>()
 
   constructor(
     private readonly db: Db,
@@ -169,27 +172,85 @@ export class GoogleSync implements CalendarSyncService {
    * calendar is re-synced from scratch once.
    */
   async syncCalendar(calendar: CalendarRow): Promise<void> {
-    const account = await this.accountFor(calendar)
-    const token = await this.accessTokenFor(account)
-    try {
-      await this.sync(calendar, token, calendar.syncToken)
-    } catch (err) {
-      if (!(err instanceof GoogleGoneError)) throw err
-      console.warn(`[google] sync token for ${calendar.googleId} expired; running a full sync`)
-      const now = new Date()
-      await this.db
-        .update(events)
-        .set({ deletedAt: now, updatedAt: writeTimestamp })
-        .where(and(eq(events.calendarId, calendar.id), isNull(events.deletedAt)))
-      await this.db.update(calendars).set({ syncToken: null, updatedAt: writeTimestamp }).where(eq(calendars.id, calendar.id))
-      await this.sync(calendar, token, null)
+    await this.serialized(calendar.id, () => this.runSync(calendar.id))
+  }
+
+  async prefetchCalendar(calendarId: string, signal: AbortSignal): Promise<void> {
+    await this.serialized(calendarId, () => this.runSync(calendarId, signal), signal)
+  }
+
+  private async runSync(calendarId: string, signal?: AbortSignal): Promise<void> {
+    while (!signal?.aborted) {
+      const context = await this.syncContext(calendarId, signal)
+      if (context === undefined) return
+      if (signal !== undefined && context.calendar.syncToken !== null) return
+      const token = await this.tokenFor(context.calendar)
+      try {
+        if (await this.sync(context, token, signal !== undefined)) return
+      } catch (err) {
+        if (signal !== undefined || !(err instanceof GoogleGoneError)) throw err
+        console.warn(`[google] sync token for ${context.calendar.googleId} expired; running a full sync`)
+        const reset = await this.fencedWrite(context, async (tx) => {
+          await tx.update(events).set({ deletedAt: new Date(), updatedAt: writeTimestamp })
+            .where(and(eq(events.calendarId, calendarId), isNull(events.deletedAt)))
+          const [row] = await tx.update(calendars).set({ syncToken: null, updatedAt: sql`greatest(${writeTimestamp}, ${calendars.updatedAt} + interval '1 millisecond')` })
+            .where(eq(calendars.id, calendarId)).returning({ version: sql<string>`${calendars.updatedAt}::text` })
+          context.version = row!.version
+          context.calendar.syncToken = null
+        })
+        if (reset && await this.sync(context, token)) return
+      }
     }
   }
 
-  private async sync(calendar: CalendarRow, token: string, syncToken: string | null): Promise<void> {
+  private async serialized(calendarId: string, run: () => Promise<void>, signal?: AbortSignal): Promise<void> {
+    const previous = this.syncing.get(calendarId)
+    const pending = (async () => {
+      await previous?.catch(() => {})
+      if (signal?.aborted) return
+      if (signal === undefined) return run()
+      let aborted!: () => void
+      const cancelled = new Promise<void>((resolve) => {
+        aborted = resolve
+        signal.addEventListener('abort', aborted, { once: true })
+      })
+      try {
+        await Promise.race([run(), cancelled])
+      } finally {
+        signal.removeEventListener('abort', aborted)
+      }
+    })()
+    this.syncing.set(calendarId, pending)
+    try {
+      await pending
+    } finally {
+      if (this.syncing.get(calendarId) === pending) this.syncing.delete(calendarId)
+    }
+  }
+
+  private async syncContext(calendarId: string, signal?: AbortSignal): Promise<SyncContext | undefined> {
+    const [row] = await this.db.select({ calendar: calendars, version: sql<string>`${calendars.updatedAt}::text` })
+      .from(calendars).where(eq(calendars.id, calendarId))
+    if (row === undefined || (!row.calendar.selected && !row.calendar.blocksScheduling) || signal?.aborted) return undefined
+    return { ...row, ...(signal === undefined ? {} : { signal }) }
+  }
+
+  private async fencedWrite(context: SyncContext, write: (tx: Db) => Promise<void>): Promise<boolean> {
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx.select({ version: sql<string>`${calendars.updatedAt}::text` }).from(calendars)
+        .where(eq(calendars.id, context.calendar.id)).for('update')
+      if (context.signal?.aborted || row?.version !== context.version) return false
+      await write(tx)
+      return true
+    })
+  }
+
+  private async sync(context: SyncContext, token: string, near = false): Promise<boolean> {
+    const { calendar } = context
+    const syncToken = near ? null : calendar.syncToken
     const startedAt = new Date()
-    const timeMin = new Date(startedAt.getTime() - FULL_SYNC_PAST_DAYS * DAY).toISOString()
-    const timeMax = new Date(startedAt.getTime() + FULL_SYNC_FUTURE_DAYS * DAY).toISOString()
+    const timeMin = new Date(startedAt.getTime() - (near ? 7 : FULL_SYNC_PAST_DAYS) * DAY).toISOString()
+    const timeMax = new Date(startedAt.getTime() + (near ? 45 : FULL_SYNC_FUTURE_DAYS) * DAY).toISOString()
     const seen = new Set<string>()
     let pageToken: string | undefined
     let nextSyncToken: string | undefined
@@ -197,24 +258,32 @@ export class GoogleSync implements CalendarSyncService {
     let learned = false
 
     do {
-      const params: ListEventsParams = syncToken === null ? { timeMin, timeMax } : { syncToken }
+      context.signal?.throwIfAborted()
+      const params: ListEventsParams = syncToken === null ? { timeMin, timeMax, ...(near ? { showDeleted: false } : {}) } : { syncToken }
       if (pageToken !== undefined) params.pageToken = pageToken
-      const page = await listEvents(token, calendar.googleId, params)
+      const page = await listEvents(token, calendar.googleId, params, context.signal)
+      context.signal?.throwIfAborted()
       const names = await learnAccountProfiles(this.db, page.items, new Date(), profiles)
       learned ||= names.learned
-      for (const item of page.items) {
+      const unique = new Map(page.items.map((item) => [item.id, item]))
+      const rows = [...unique.values()].map((item) => {
         seen.add(item.id)
-        const row = { ...judgedGoogleEvent(calendar, item, profiles, new Date()), updatedAt: writeTimestamp }
-        await this.db
-          .insert(events)
-          .values({ id: randomUUID(), ...row })
-          .onConflictDoUpdate({ target: [events.calendarId, events.googleId], set: row })
+        return { id: randomUUID(), ...judgedGoogleEvent(calendar, item, profiles, new Date()), updatedAt: writeTimestamp }
+      })
+      for (let offset = 0; offset < rows.length; offset += 250) {
+        const written = await this.fencedWrite(context, async (tx) => {
+          const { id, blocksDay, ...columns } = getTableColumns(events)
+          const set = Object.fromEntries(Object.entries(columns).map(([key, column]) => [key, sql`excluded.${sql.identifier(column.name)}`]))
+          await tx.insert(events).values(rows.slice(offset, offset + 250))
+            .onConflictDoUpdate({ target: [events.calendarId, events.googleId], set })
+        })
+        if (!written) return false
       }
       pageToken = page.nextPageToken
       if (page.nextSyncToken !== undefined) nextSyncToken = page.nextSyncToken
     } while (pageToken !== undefined)
 
-    if (syncToken === null) {
+    if (!near && syncToken === null) {
       // Full sync: anything we hold that Google no longer returned is gone.
       const live = await this.db
         .select({ id: events.id, googleId: events.googleId })
@@ -223,23 +292,29 @@ export class GoogleSync implements CalendarSyncService {
       const stale = live.filter((e) => !seen.has(e.googleId)).map((e) => e.id)
       if (stale.length > 0) {
         const now = new Date()
-        await this.db.update(events).set({ deletedAt: now, updatedAt: writeTimestamp }).where(inArray(events.id, stale))
+        if (!await this.fencedWrite(context, async (tx) => {
+          await tx.update(events).set({ deletedAt: now, updatedAt: writeTimestamp }).where(inArray(events.id, stale))
+        })) return false
       }
     }
 
-    const completedAt = new Date()
-    await this.db
-      .update(calendars)
-      .set({ syncToken: nextSyncToken ?? syncToken, lastSyncedAt: completedAt, updatedAt: writeTimestamp })
-      .where(eq(calendars.id, calendar.id))
+    if (!near && !await this.fencedWrite(context, async (tx) => {
+      await tx.update(calendars)
+        .set({ syncToken: nextSyncToken ?? syncToken, lastSyncedAt: new Date(), updatedAt: sql`greatest(${writeTimestamp}, ${calendars.updatedAt} + interval '1 millisecond')` })
+        .where(eq(calendars.id, calendar.id))
+    })) return false
     const latest = await learnAccountProfiles(this.db, [], new Date())
     if (learned || latest.profiles.some((p) => p.displayName !== profiles.find((cached) => cached.id === p.id)?.displayName)) {
       await refreshAllDayJudgments(this.db, new Date())
     }
+    return true
   }
 
   /** Creates a push channel when the calendar has none or the current one expires within 24 h. */
   async ensureWatch(calendar: CalendarRow): Promise<void> {
+    const context = await this.syncContext(calendar.id)
+    if (context === undefined) return
+    calendar = context.calendar
     const expiresAt = calendar.channelExpiresAt?.getTime() ?? 0
     if (calendar.channelId !== null && expiresAt - Date.now() > WATCH_RENEWAL_LEAD) return
 
@@ -253,6 +328,20 @@ export class GoogleSync implements CalendarSyncService {
       address: `${this.config.PUBLIC_URL}/webhooks/google`,
     })
 
+    const stored = await this.fencedWrite(context, async (tx) => {
+      await tx.update(calendars).set({
+        channelId,
+        channelResourceId: watch.resourceId,
+        channelToken,
+        channelExpiresAt: watch.expiration,
+        updatedAt: sql`greatest(${writeTimestamp}, ${calendars.updatedAt} + interval '1 millisecond')`,
+      }).where(eq(calendars.id, calendar.id))
+    })
+    if (!stored) {
+      await stopChannel(token, channelId, watch.resourceId)
+      return
+    }
+
     if (calendar.channelId !== null && calendar.channelResourceId !== null) {
       try {
         await stopChannel(token, calendar.channelId, calendar.channelResourceId)
@@ -260,17 +349,6 @@ export class GoogleSync implements CalendarSyncService {
         console.warn(`[google] could not stop old channel ${calendar.channelId}:`, messageOf(err))
       }
     }
-
-    await this.db
-      .update(calendars)
-      .set({
-        channelId,
-        channelResourceId: watch.resourceId,
-        channelToken,
-        channelExpiresAt: watch.expiration,
-        updatedAt: writeTimestamp,
-      })
-      .where(eq(calendars.id, calendar.id))
   }
 
   async syncAll(): Promise<void> {
@@ -339,6 +417,12 @@ export class GoogleSync implements CalendarSyncService {
       console.error(`[google] ${what} failed:`, messageOf(err))
     }
   }
+}
+
+interface SyncContext {
+  calendar: CalendarRow
+  version: string
+  signal?: AbortSignal
 }
 
 function messageOf(err: unknown): string {

@@ -80,7 +80,12 @@ describe('event sync scope', () => {
       const responseReady = new Promise<void>((resolve) => { releaseFetch = resolve })
       const fetchStarted = new Promise<void>((resolve) => { markFetchStarted = resolve })
       vi.stubGlobal('fetch', async (url: string | URL) => {
-        calls.push(new URL(url))
+        const request = new URL(url)
+        if (request.pathname.endsWith('/watch')) return Response.json({ resourceId: 'watch' })
+        calls.push(request)
+        if (request.searchParams.get('showDeleted') === 'false') {
+          return Response.json({ items: [googleEvent], nextSyncToken: 'partial-token' })
+        }
         markFetchStarted()
         await responseReady
         return Response.json({ items: [googleEvent], nextSyncToken: 'fresh-token' })
@@ -99,20 +104,27 @@ describe('event sync scope', () => {
       })
       const activated = await app.request('/api/calendars/inactive', { method: 'PATCH', headers, body: JSON.stringify(patch) })
       expect(activated.status).toBe(200)
+      const immediate = await (await app.request(`/api/sync?since=${encodeURIComponent(first.cursor)}`, { headers })).json() as SyncResponse
+      expect(immediate.events.map((e) => e.id)).toEqual(['retained'])
+      expect((await db.select().from(calendars).where(eq(calendars.id, 'inactive')))[0]?.syncToken).toBeNull()
       await fetchStarted
       vi.setSystemTime(Date.now() + 1000)
       const during = await (await app.request(`/api/sync?since=${encodeURIComponent(first.cursor)}`, { headers })).json() as SyncResponse
-      expect(during.events).toEqual([])
+      expect(during.events.map((e) => e.id)).toEqual(['retained'])
       vi.setSystemTime(Date.now() + 1000)
       releaseFetch()
       await resynced
-      expect(calls).toHaveLength(1)
+      expect(calls).toHaveLength(2)
+      expect(calls[0]?.searchParams.get('showDeleted')).toBe('false')
       expect(calls[0]?.searchParams.has('syncToken')).toBe(false)
       expect(calls[0]?.searchParams.has('timeMin')).toBe(true)
+      expect(calls[1]?.searchParams.has('showDeleted')).toBe(false)
+      expect(calls[1]?.searchParams.has('syncToken')).toBe(false)
       const next = await (await app.request(`/api/sync?since=${encodeURIComponent(during.cursor)}`, { headers })).json() as SyncResponse
       expect(next.events.map((e) => e.id).sort()).toEqual(['gone', 'retained'])
       expect(next.events.find((e) => e.id === 'retained')?.deletedAt).toBeNull()
       expect(next.events.find((e) => e.id === 'gone')?.deletedAt).toEqual(expect.any(String))
+      await vi.waitFor(async () => expect((await db.select().from(calendars).where(eq(calendars.id, 'inactive')))[0]?.channelResourceId).toBe('watch'))
     } finally {
       await close()
     }
