@@ -438,8 +438,8 @@ struct EventGuestsInput: View {
             ForEach(entry.combined(parsed: parsed), id: \.email) { guest in
                 HStack(spacing: 8) {
                     if let attendee = existing.first(where: { $0.email.lowercased() == guest.email }) {
-                        Image(systemName: EventTiming.responseSymbol(attendee.responseStatus))
-                            .accessibilityLabel(EventTiming.responseText(attendee.responseStatus))
+                        Image(systemName: rsvpSymbol(attendee.responseStatus))
+                            .accessibilityLabel(attendee.responseStatus == "needsAction" ? "Awaiting response" : attendee.responseStatus)
                     }
                     VStack(alignment: .leading, spacing: 2) {
                         if let name = guest.displayName { Text(name).font(.subheadline) }
@@ -495,6 +495,14 @@ struct EventGuestsInput: View {
         }
     }
 
+    private func rsvpSymbol(_ status: String) -> String {
+        switch status {
+        case "accepted": "checkmark.circle"
+        case "declined": "xmark.circle"
+        case "tentative": "questionmark.circle"
+        default: "clock"
+        }
+    }
 }
 
 #if os(macOS)
