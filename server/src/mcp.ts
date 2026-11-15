@@ -4,18 +4,24 @@ import type { LocalDate, SchedulerResult } from '@florida/scheduler'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import { and, asc, desc, eq, getTableColumns, gt, inArray, isNotNull, isNull, lt, or } from 'drizzle-orm'
+import { and, asc, desc, eq, getTableColumns, gt, gte, ilike, inArray, isNotNull, isNull, lt, lte, or, sql } from 'drizzle-orm'
 import type { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import type { Db } from './db/client.js'
 import { latestBriefs } from './briefs.js'
-import { defaultTimeZone } from './db/queries.js'
+import { categoriesWithExamples, defaultTimeZone, INBOX_CATEGORY_ID } from './db/queries.js'
+import { writeTimestamp } from './db/sync-clock.js'
+import type { TaskParser } from './ai/parse-task.js'
+import type { CalendarSyncService } from './google/sync.js'
+import { GoogleApiError } from './google/client.js'
+import { eventBody, setEventBlocksDay, softDeleteEvent, upsertEvent } from './events.js'
 import {
   calendars,
   categories,
   dayOverrides,
   events,
+  googleAccounts,
   placements,
   projectPlacements,
   projects,
@@ -42,15 +48,18 @@ import {
   priority,
   softDeleteTask,
   taskBody,
+  taskContext,
   taskPatch,
   upsertTask,
 } from './tasks.js'
-import { calendarDate, formatCalendarDate, parseCalendarDate, timeZone } from './validation.js'
+import { badRequest, calendarDate, formatCalendarDate, isoInstant, notFound, parseCalendarDate, timeZone } from './validation.js'
 
 export interface McpDeps {
   db: Db
   /** Reruns the scheduler and notifies connected clients; the app's wrapper around `runScheduling`. */
   reschedule: () => Promise<SchedulerResult>
+  sync?: CalendarSyncService
+  ai?: TaskParser
 }
 
 const SERVER_INFO = { name: 'florida', version: '0.1.0' }
@@ -85,6 +94,13 @@ const INSTRUCTIONS = [
 ].join(' ')
 
 const taskId = z.string().min(1).describe('Task id')
+const dueFilter = z.union([calendarDate, isoInstant])
+const searchCondition = (query: string | undefined) => {
+  const text = query?.trim()
+  if (!text) return undefined
+  const pattern = `%${text.replace(/[\\%_]/g, '\\$&')}%`
+  return or(ilike(tasks.title, pattern), ilike(tasks.notes, pattern))
+}
 
 /**
  * Builds a fresh MCP server over the task store. Stateless transports need a new `McpServer` per
@@ -93,6 +109,106 @@ const taskId = z.string().min(1).describe('Task id')
 export function buildMcpServer(deps: McpDeps): McpServer {
   const { db, reschedule } = deps
   const server = new McpServer(SERVER_INFO, { instructions: INSTRUCTIONS })
+
+  server.registerTool('list_deleted_tasks', {
+    title: 'List deleted tasks', description: 'Lists tombstoned tasks, most recently deleted first.',
+    inputSchema: { query: z.string().optional(), limit: z.number().int().min(1).max(200).default(50) },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, ({ query, limit }) => run(async () => {
+    const rows = await db.select().from(tasks).where(and(isNotNull(tasks.deletedAt), searchCondition(query))).orderBy(desc(tasks.deletedAt), asc(tasks.id)).limit(limit)
+    return ok({ tasks: rows.map((task) => withPlacements(task, [])) })
+  }))
+
+  server.registerTool('restore_task', {
+    title: 'Restore task', description: 'Restores one deleted task and reschedules. Does not restart a deleted recurring series or restore its other occurrences.',
+    inputSchema: { id: taskId },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, ({ id }) => run(async () => {
+    const task = await db.transaction(async (tx) => {
+      const [current] = await tx.select().from(tasks).where(eq(tasks.id, id))
+      if (current === undefined) throw notFound(`task ${id}`)
+      if (current.deletedAt === null) return current
+      const [category] = await tx.select().from(categories).where(eq(categories.id, current.categoryId)).for('update')
+      await tx.update(tasks).set({
+        deletedAt: null, updatedAt: writeTimestamp,
+        categoryId: category === undefined || category.deletedAt !== null ? INBOX_CATEGORY_ID : current.categoryId,
+      }).where(and(eq(tasks.id, id), isNotNull(tasks.deletedAt)))
+      return getTask(tx, id)
+    })
+    const scheduling = await reschedule()
+    return ok({ task: withPlacements(task, await placementsFor([id])), scheduling: summary(scheduling) })
+  }))
+
+  server.registerTool('parse_task', {
+    title: 'Parse task', description: 'Parses natural-language text into a draft without saving it. Requires AI configuration.',
+    inputSchema: { text: z.string().trim().min(1).max(2000), now: isoInstant.optional(), timeZone: timeZone.optional() },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  }, ({ text, now, timeZone: zone }) => run(async () => {
+    if (deps.ai === undefined) throw new HTTPException(503, { message: 'ai is not configured (set ANTHROPIC_API_KEY)' })
+    const draft = await deps.ai.parse(text, {
+      now: now === undefined ? new Date() : new Date(now),
+      timeZone: zone ?? await defaultTimeZone(db),
+      categories: await categoriesWithExamples(db),
+      projects: await db.select({ id: projects.id, name: projects.name, parallel: projects.parallel }).from(projects)
+        .where(and(isNull(projects.deletedAt), eq(projects.status, 'active'))).orderBy(projects.sortOrder, projects.name),
+    })
+    return ok({ draft })
+  }))
+
+  server.registerTool('list_calendars', {
+    title: 'List calendars', description: 'Lists accounts and calendars without credentials; writableCalendarIds are selected owner/writer calendars.',
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, () => run(async () => {
+    const accountRows = await db.select({ id: googleAccounts.id, email: googleAccounts.email, label: googleAccounts.label, displayName: googleAccounts.displayName, createdAt: googleAccounts.createdAt, updatedAt: googleAccounts.updatedAt }).from(googleAccounts)
+    const calendarRows = await db.select({ id: calendars.id, accountId: calendars.accountId, googleId: calendars.googleId, summary: calendars.summary, color: calendars.color, accessRole: calendars.accessRole, selected: calendars.selected, blocksScheduling: calendars.blocksScheduling, lastSyncedAt: calendars.lastSyncedAt, channelExpiresAt: calendars.channelExpiresAt, updatedAt: calendars.updatedAt }).from(calendars)
+    return ok({
+      accounts: accountRows.map((account) => ({ ...account, calendars: calendarRows.filter((calendar) => calendar.accountId === account.id) })),
+      calendars: calendarRows,
+      writableCalendarIds: calendarRows.filter((calendar) => calendar.selected && ['owner', 'writer'].includes(calendar.accessRole)).map((calendar) => calendar.id),
+    })
+  }))
+
+  server.registerTool('upsert_event', {
+    title: 'Create or update event', description: 'Writes an event through to Google and reschedules. Omit id to generate a UUID; use the same id to retry creation.',
+    inputSchema: { id: z.uuid().optional(), ...eventBody.shape },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  }, ({ id, ...body }) => run(async () => {
+    const event = await upsertEvent(db, requireSync(), id ?? randomUUID(), eventBody.parse(body))
+    const scheduling = await reschedule()
+    if (event.deletedAt !== null) throw notFound(`event ${event.id}`)
+    return ok({ event, scheduling: summary(scheduling) })
+  }))
+
+  server.registerTool('delete_event', {
+    title: 'Delete event', description: 'Deletes an event through Google, tombstones it, and reschedules.',
+    inputSchema: { id: z.string().min(1) },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  }, ({ id }) => run(async () => {
+    await softDeleteEvent(db, requireSync(), id)
+    return ok({ deleted: id, scheduling: summary(await reschedule()) })
+  }))
+
+  server.registerTool('set_event_blocks_day', {
+    title: 'Set event day blocking', description: 'Overrides all-day blocking locally: true blocks, false frees, null restores automatic judgment.',
+    inputSchema: { id: z.string().min(1), blocksDay: z.boolean().nullable() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, ({ id, blocksDay }) => run(async () => {
+    const event = await setEventBlocksDay(db, id, blocksDay)
+    return ok({ event, scheduling: summary(await reschedule()) })
+  }))
+
+  server.registerTool('sync_google_calendar', {
+    title: 'Sync Google Calendar', description: 'Awaits Google sync when configured, then reschedules.',
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, () => run(async () => {
+    await deps.sync?.syncAll()
+    return ok({ scheduling: summary(await reschedule()) })
+  }))
+
+  function requireSync() {
+    if (deps.sync === undefined) throw new HTTPException(503, { message: 'Google Calendar sync is not configured' })
+    return deps.sync
+  }
 
   server.registerTool(
     'list_categories',
@@ -121,14 +237,47 @@ export function buildMcpServer(deps: McpDeps): McpServer {
       inputSchema: {
         categoryId: z.string().min(1).optional().describe('Only tasks in this category view; inbox is the derived needs-triage list'),
         includeCompleted: z.boolean().default(false),
+        query: z.string().optional(),
+        dueBefore: dueFilter.optional(),
+        dueAfter: dueFilter.optional(),
+        context: taskContext.optional(),
+        projectId: z.union([z.uuid(), z.literal('none')]).nullable().optional(),
+        priority: priority.optional(),
+        someday: z.boolean().optional(),
+        scheduledOn: calendarDate.optional(),
+        hasSource: z.boolean().optional(),
         limit: z.number().int().min(1).max(200).default(50),
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    ({ categoryId, includeCompleted, limit }) =>
+    ({ categoryId, includeCompleted, limit, ...filters }) =>
       run(async () => {
         const conditions = [isNull(tasks.deletedAt)]
         if (!includeCompleted) conditions.push(isNull(tasks.completedAt))
+        const search = searchCondition(filters.query)
+        if (search) conditions.push(search)
+        if (filters.context !== undefined) conditions.push(eq(tasks.context, filters.context))
+        if (filters.priority !== undefined) conditions.push(eq(tasks.priority, filters.priority))
+        if (filters.someday !== undefined) conditions.push(eq(tasks.someday, filters.someday))
+        if (filters.projectId !== undefined) conditions.push(filters.projectId === null || filters.projectId === 'none' ? isNull(tasks.projectId) : eq(tasks.projectId, filters.projectId))
+        if (filters.hasSource !== undefined) {
+          const hasSource = sql`coalesce(${tasks.source}->>'url', '') <> ''`
+          conditions.push(filters.hasSource ? hasSource : sql`not (${hasSource})`)
+        }
+        const tz = await defaultTimeZone(db)
+        for (const [value, before] of [[filters.dueBefore, true], [filters.dueAfter, false]] as const) {
+          if (value === undefined) continue
+          const date = parseCalendarDate(value)
+          const instant = date === undefined ? new Date(value) : new Date(zonedToUtc(before ? dateFromDayNumber(dayNumber(date) + 1) : date, 0, tz))
+          conditions.push(before ? (date === undefined ? lte(tasks.dueAt, instant) : lt(tasks.dueAt, instant)) : gte(tasks.dueAt, instant))
+        }
+        if (filters.scheduledOn !== undefined) {
+          const date = parseCalendarDate(filters.scheduledOn)!
+          const start = new Date(zonedToUtc(date, 0, tz))
+          const end = new Date(zonedToUtc(dateFromDayNumber(dayNumber(date) + 1), 0, tz))
+          const scheduled = db.select({ id: placements.taskId }).from(placements).where(and(lt(placements.startAt, end), gt(placements.endAt, start)))
+          conditions.push(or(inArray(tasks.id, scheduled), and(gte(tasks.pinnedStart, start), lt(tasks.pinnedStart, end)))!)
+        }
         if (categoryId === 'inbox') {
           conditions.push(or(eq(tasks.categoryId, 'inbox'), and(isNull(tasks.dueAt), isNull(tasks.startAt), isNull(tasks.pinnedStart), eq(tasks.someday, false)))!)
         } else if (categoryId !== undefined) {
@@ -216,7 +365,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
       run(async () => {
         const task = await completeTask(db, id)
         const scheduling = await reschedule()
-        return ok({ task, scheduling: summary(scheduling) })
+        return ok({ task: withPlacements(task, await placementsFor([id])), scheduling: summary(scheduling) })
       }),
   )
 
@@ -260,7 +409,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
           .from(tasks)
           .where(and(isNull(tasks.deletedAt), isNull(tasks.completedAt)))
         return ok({
-          projects: rows.map((p) => ({ ...p, openTasks: open.filter((t) => t.projectId === p.id).length })),
+          projects: rows.map((p) => ({ ...p, appUrl: `florida://projects/${p.id}`, openTasks: open.filter((t) => t.projectId === p.id).length })),
         })
       }),
   )
@@ -280,7 +429,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
       run(async () => {
         const project = await upsertProject(db, id ?? randomUUID(), body)
         const scheduling = await reschedule()
-        return ok({ project, scheduling: summary(scheduling) })
+        return ok({ project: { ...project, appUrl: `florida://projects/${project.id}` }, scheduling: summary(scheduling) })
       }),
   )
 
@@ -297,7 +446,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
       run(async () => {
         const project = await patchProject(db, id, patch)
         const scheduling = await reschedule()
-        return ok({ project, scheduling: summary(scheduling) })
+        return ok({ project: { ...project, appUrl: `florida://projects/${project.id}` }, scheduling: summary(scheduling) })
       }),
   )
 
@@ -376,100 +525,23 @@ export function buildMcpServer(deps: McpDeps): McpServer {
       run(async () => {
         const tz = args.timeZone ?? (await defaultTimeZone(db))
         const date = (args.date === undefined ? undefined : parseCalendarDate(args.date)) ?? localDate(Date.now(), tz)
-        const next = dateFromDayNumber(dayNumber(date) + 1)
-        // Timed rows are compared against the zoned day; all-day rows are stored at UTC midnight of
-        // their calendar date, so they are compared against the UTC day instead.
-        const start = new Date(zonedToUtc(date, 0, tz))
-        const end = new Date(zonedToUtc(next, 0, tz))
-        const utcStart = new Date(utcMidnight(date))
-        const utcEnd = new Date(utcMidnight(next))
-
-        const eventRows = await db
-          .select({
-            id: events.id,
-            calendarId: events.calendarId,
-            calendar: calendars.summary,
-            summary: events.summary,
-            location: events.location,
-            startAt: events.startAt,
-            endAt: events.endAt,
-            allDay: events.allDay,
-            transparency: events.transparency,
-            responseStatus: events.responseStatus,
-            htmlLink: events.htmlLink,
-            description: events.description,
-            conferenceUrl: events.conferenceUrl,
-            attendees: events.attendees,
-          })
-          .from(events)
-          .innerJoin(calendars, eq(events.calendarId, calendars.id))
-          .where(
-            and(
-              eq(calendars.selected, true),
-              isNull(events.deletedAt),
-              or(
-                and(eq(events.allDay, false), lt(events.startAt, end), gt(events.endAt, start)),
-                and(eq(events.allDay, true), lt(events.startAt, utcEnd), gt(events.endAt, utcStart)),
-              ),
-            ),
-          )
-          .orderBy(desc(events.allDay), asc(events.startAt))
-
-        const blockRows = await db
-          .select({
-            taskId: placements.taskId,
-            title: tasks.title,
-            categoryId: tasks.categoryId,
-            priority: tasks.priority,
-            projectId: tasks.projectId,
-            startAt: placements.startAt,
-            endAt: placements.endAt,
-            pinned: placements.pinned,
-            lane: placements.lane,
-          })
-          .from(placements)
-          .innerJoin(tasks, eq(placements.taskId, tasks.id))
-          .where(and(eq(tasks.someday, false), lt(placements.startAt, end), gt(placements.endAt, start)))
-          .orderBy(asc(placements.startAt))
-
-        const projectTime = await db
-          .select({
-            projectId: projectPlacements.projectId,
-            project: projects.name,
-            startAt: projectPlacements.startAt,
-            endAt: projectPlacements.endAt,
-            lane: projectPlacements.lane,
-          })
-          .from(projectPlacements)
-          .innerJoin(projects, eq(projectPlacements.projectId, projects.id))
-          .where(and(lt(projectPlacements.startAt, end), gt(projectPlacements.endAt, start)))
-          .orderBy(asc(projectPlacements.startAt))
-
-        const commitments = await db
-          .select({ name: routineBlocks.name, startAt: routineOccurrences.startAt, endAt: routineOccurrences.endAt })
-          .from(routineOccurrences)
-          .innerJoin(routineBlocks, eq(routineOccurrences.blockId, routineBlocks.id))
-          .where(and(lt(routineOccurrences.startAt, end), gt(routineOccurrences.endAt, start)))
-          .orderBy(asc(routineOccurrences.startAt))
-
-        const [override] = await db
-          .select({ kind: dayOverrides.kind, note: dayOverrides.note })
-          .from(dayOverrides)
-          .where(and(eq(dayOverrides.date, formatCalendarDate(date)), isNull(dayOverrides.deletedAt)))
-
-        return ok({
-          date: formatCalendarDate(date),
-          timeZone: tz,
-          start,
-          end,
-          events: eventRows,
-          taskBlocks: blockRows,
-          projectTime,
-          commitments,
-          dayOverride: override ?? null,
-        })
+        return ok((await agendaDays(date, date, tz))[0]!)
       }),
   )
+
+  server.registerTool('get_range', {
+    title: 'Get agenda range',
+    description: 'Inclusive range of up to 31 calendar days in the home time zone, with the same day shape as get_agenda.',
+    inputSchema: { startDate: calendarDate, endDate: calendarDate },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, ({ startDate, endDate }) => run(async () => {
+    const start = parseCalendarDate(startDate)!
+    const end = parseCalendarDate(endDate)!
+    const span = dayNumber(end) - dayNumber(start) + 1
+    if (span < 1 || span > 31) throw badRequest('endDate must be on or after startDate; range must contain at most 31 days')
+    const tz = await defaultTimeZone(db)
+    return ok({ startDate, endDate, timeZone: tz, days: await agendaDays(start, end, tz) })
+  }))
 
   server.registerTool(
     'run_scheduler',
@@ -482,6 +554,106 @@ export function buildMcpServer(deps: McpDeps): McpServer {
   )
 
   return server
+
+  async function agendaDays(date: LocalDate, last: LocalDate, tz: string) {
+    const next = dateFromDayNumber(dayNumber(last) + 1)
+    // Timed rows are compared against the zoned day; all-day rows are stored at UTC midnight of
+    // their calendar date, so they are compared against the UTC day instead.
+    const start = new Date(zonedToUtc(date, 0, tz))
+    const end = new Date(zonedToUtc(next, 0, tz))
+    const utcStart = new Date(utcMidnight(date))
+    const utcEnd = new Date(utcMidnight(next))
+
+    const eventRows = await db
+      .select({
+        id: events.id,
+        calendarId: events.calendarId,
+        calendar: calendars.summary,
+        summary: events.summary,
+        location: events.location,
+        startAt: events.startAt,
+        endAt: events.endAt,
+        allDay: events.allDay,
+        transparency: events.transparency,
+        responseStatus: events.responseStatus,
+        htmlLink: events.htmlLink,
+        description: events.description,
+        conferenceUrl: events.conferenceUrl,
+        attendees: events.attendees,
+      })
+      .from(events)
+      .innerJoin(calendars, eq(events.calendarId, calendars.id))
+      .where(
+        and(
+          eq(calendars.selected, true),
+          isNull(events.deletedAt),
+          or(
+            and(eq(events.allDay, false), lt(events.startAt, end), gt(events.endAt, start)),
+            and(eq(events.allDay, true), lt(events.startAt, utcEnd), gt(events.endAt, utcStart)),
+          ),
+        ),
+      )
+      .orderBy(desc(events.allDay), asc(events.startAt))
+
+    const blockRows = await db
+      .select({
+        taskId: placements.taskId,
+        title: tasks.title,
+        categoryId: tasks.categoryId,
+        priority: tasks.priority,
+        projectId: tasks.projectId,
+        startAt: placements.startAt,
+        endAt: placements.endAt,
+        pinned: placements.pinned,
+        lane: placements.lane,
+      })
+      .from(placements)
+      .innerJoin(tasks, eq(placements.taskId, tasks.id))
+      .where(and(eq(tasks.someday, false), lt(placements.startAt, end), gt(placements.endAt, start)))
+      .orderBy(asc(placements.startAt))
+
+    const projectTime = await db
+      .select({
+        projectId: projectPlacements.projectId,
+        project: projects.name,
+        startAt: projectPlacements.startAt,
+        endAt: projectPlacements.endAt,
+        lane: projectPlacements.lane,
+      })
+      .from(projectPlacements)
+      .innerJoin(projects, eq(projectPlacements.projectId, projects.id))
+      .where(and(lt(projectPlacements.startAt, end), gt(projectPlacements.endAt, start)))
+      .orderBy(asc(projectPlacements.startAt))
+
+    const commitments = await db
+      .select({ name: routineBlocks.name, startAt: routineOccurrences.startAt, endAt: routineOccurrences.endAt })
+      .from(routineOccurrences)
+      .innerJoin(routineBlocks, eq(routineOccurrences.blockId, routineBlocks.id))
+      .where(and(lt(routineOccurrences.startAt, end), gt(routineOccurrences.endAt, start)))
+      .orderBy(asc(routineOccurrences.startAt))
+
+    const overrides = await db
+      .select({ date: dayOverrides.date, kind: dayOverrides.kind, note: dayOverrides.note })
+      .from(dayOverrides)
+      .where(and(gte(dayOverrides.date, formatCalendarDate(date)), lte(dayOverrides.date, formatCalendarDate(last)), isNull(dayOverrides.deletedAt)))
+
+    return Array.from({ length: dayNumber(last) - dayNumber(date) + 1 }, (_, i) => {
+      const day = dateFromDayNumber(dayNumber(date) + i)
+      const following = dateFromDayNumber(dayNumber(day) + 1)
+      const start = new Date(zonedToUtc(day, 0, tz))
+      const end = new Date(zonedToUtc(following, 0, tz))
+      const overlaps = (row: { startAt: Date | null, endAt: Date | null }, from = start.getTime(), to = end.getTime()) => row.startAt !== null && row.endAt !== null && row.startAt.getTime() < to && row.endAt.getTime() > from
+      const override = overrides.find((row) => row.date === formatCalendarDate(day))
+      return {
+        date: formatCalendarDate(day), timeZone: tz, start, end,
+        events: eventRows.filter((row) => row.allDay ? overlaps(row, utcMidnight(day), utcMidnight(following)) : overlaps(row)),
+        taskBlocks: blockRows.filter((row) => overlaps(row)).map((row) => ({ ...row, appUrl: `florida://tasks/${row.taskId}` })),
+        projectTime: projectTime.filter((row) => overlaps(row)),
+        commitments: commitments.filter((row) => overlaps(row)),
+        dayOverride: override === undefined ? null : { kind: override.kind, note: override.note },
+      }
+    })
+  }
 
   async function placementsFor(ids: string[]): Promise<PlacementRow[]> {
     if (ids.length === 0) return []
@@ -517,6 +689,7 @@ export function mountMcp(app: Hono, deps: McpDeps): void {
 function withPlacements(task: TaskRow, all: PlacementRow[]) {
   return {
     ...task,
+    appUrl: `florida://tasks/${task.id}`,
     placements: all
       .filter((p) => !task.someday && p.taskId === task.id)
       .map((p) => ({ startAt: p.startAt, endAt: p.endAt, pinned: p.pinned })),
@@ -542,6 +715,7 @@ async function run(fn: () => Promise<CallToolResult>): Promise<CallToolResult> {
     return await fn()
   } catch (err) {
     if (err instanceof HTTPException) return { content: [{ type: 'text', text: err.message }], isError: true }
+    if (err instanceof z.ZodError || err instanceof GoogleApiError) return { content: [{ type: 'text', text: err.message }], isError: true }
     throw err
   }
 }
