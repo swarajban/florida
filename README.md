@@ -23,3 +23,6 @@ Apple targets: see `apple/README.md` (`xcodegen generate` on a Mac).
 ## Deploy
 
 See `server/README.md` for Neon, Google OAuth client, Fly secrets, and `fly deploy`.
+
+## Agent MCP
+Connect personal AI agents to `POST /mcp` with [the agent guide](docs/MCP.md); see [the implementation](server/src/mcp.ts).
