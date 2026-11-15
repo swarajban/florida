@@ -24,11 +24,6 @@ struct AgendaView: View {
     @State private var doneForNowTask: TaskItem?
     @State private var movingTask: TaskItem?
     @State private var now = Date()
-    /// The day the list on screen was built for. It follows `model.selectedDay` one update later,
-    /// inside an animation, so the old day's list slides out while the new one slides in.
-    @State private var shownDay: Date?
-    /// +1 when the day moved forward (new content enters from the right), −1 when back.
-    @State private var slideDirection: CGFloat = 1
     @AppStorage(AgendaMode.storageKey, store: .florida) private var mode: AgendaMode = .list
     @AppStorage(JoySetting.blockProgress.rawValue, store: .florida) private var showsProgress = true
     @AppStorage(JoySetting.freeGaps.rawValue, store: .florida) private var showsGaps = true
@@ -52,12 +47,6 @@ struct AgendaView: View {
             }
             .background(FloridaStyle.paper)
             .toolbar(.hidden, for: .navigationBar)
-            .onChange(of: model.selectedDay) { old, new in
-                slideDirection = new > old ? 1 : -1
-                withAnimation(.snappy(duration: 0.22)) {
-                    shownDay = new
-                }
-            }
             .onChange(of: model.agenda, initial: true) { _, agenda in
                 // Screenshot runs (`-uiSheet event`): open the demo design review once it loads.
                 guard LaunchOptions.initialSheet == "event", !openedLaunchSheet,
@@ -103,70 +92,8 @@ struct AgendaView: View {
         .taskActionSheets(doneForNow: $doneForNowTask)
     }
 
-    private var items: [AgendaItem] {
-        model.agenda.map { AgendaItem.timed(from: $0, ghosts: showsGhosts ? model.visibleGhosts : []) } ?? []
-    }
-
-    private var allDayEvents: [CalendarEvent] {
-        model.agenda.map(AgendaItem.allDay) ?? []
-    }
-
-    private var rows: [TimelineRow] {
-        TimelineRow.rows(for: items, now: isToday ? now : nil, showsGaps: showsGaps)
-    }
-
-    /// For each task block (by `Placement.id`) and project block (by `PlanBlock.id`) of the day
-    /// that shares its time, the titles of the work beside it. A finished task's block is no
-    /// longer work: it gets no caption and is not named in another's.
-    private var companions: [String: [String]] {
-        guard let agenda = model.agenda else { return [:] }
-        let open = agenda.placements.filter { $0.task.completedAt == nil }
-        return ParallelWork.companionTitles(
-            placements: open.map(\.placement),
-            tasksById: Dictionary(open.map { ($0.task.id, $0.task) }, uniquingKeysWith: { first, _ in first }),
-            planBlocks: agenda.planBlocks)
-    }
-
-    /// "1h 30m free": the selected day's open computer time, which is what `PlanText.free` reports.
-    private var freeText: String? {
-        model.freeMinutes(on: model.selectedDay).flatMap { PlanText.free($0.computer) }
-    }
-
-    /// The commitments with no slot this week, said once: on today.
-    private var missedText: String? {
-        guard isToday else { return nil }
-        let names = model.missedCommitments(inWeekOf: model.selectedDay)
-        return names.isEmpty ? nil : PlanText.missed(names)
-    }
-
-    /// Nothing on the day: no events, blocks or suggestions.
-    private var isEmptyDay: Bool {
-        items.isEmpty && allDayEvents.isEmpty && picks.isEmpty
-    }
-
-    /// Suggestions for the day's optional routine blocks; not part of the timeline above.
-    private var picks: [OptionalPicks] {
-        model.optionalPicks(on: model.selectedDay, now: now)
-    }
-
-    /// Today was asked for (the wordmark, a widget) while today's list is already on screen:
-    /// bring the now marker to the middle. Another day's list is new and starts at the top.
-    private func scrollToNow(_ proxy: ScrollViewProxy) {
-        guard isToday, rows.contains(.now) else { return }
-        withAnimation(.snappy(duration: 0.3)) {
-            proxy.scrollTo(TimelineRow.now.id, anchor: .center)
-        }
-    }
-
     private var isToday: Bool {
         model.selectedDay == model.today
-    }
-
-    /// New-content-from-the-side slide for day changes: 28 points and a fade, mirrored on exit.
-    private var slide: AnyTransition {
-        .asymmetric(
-            insertion: .offset(x: 28 * slideDirection).combined(with: .opacity),
-            removal: .offset(x: -28 * slideDirection).combined(with: .opacity))
     }
 
     // MARK: - Heading and toolbar
@@ -347,23 +274,41 @@ struct AgendaView: View {
                 onEditTask: { editingTask = $0 },
                 onCreateAt: { newEvent = model.newEventTemplate(start: $0) })
         } else {
-            // A ZStack so the outgoing and incoming lists overlap during the slide instead of
-            // stacking.
-            ZStack {
+            AgendaListCarousel { day, agenda in
                 ScrollViewReader { proxy in
-                    timeline
+                    timeline(on: day, agenda: agenda)
                         .onChange(of: model.todayRequests) { _, _ in
-                            scrollToNow(proxy)
+                            guard day == model.today, day == model.selectedDay else { return }
+                            withAnimation(.snappy(duration: 0.3)) {
+                                proxy.scrollTo(TimelineRow.now.id, anchor: .center)
+                            }
                         }
                 }
-                .id(shownDay ?? model.selectedDay)
-                .transition(slide)
             }
         }
     }
 
-    private var timeline: some View {
-        let beside = companions
+    private func timeline(on day: Date, agenda: DayAgenda?) -> some View {
+        let isToday = day == model.today
+        let live = Set(agenda?.placements.map(\.placement.id) ?? [])
+        let ghosts = isToday && showsGhosts
+            ? model.ghostBlocks.filter { !live.contains($0.id) && !model.somedayTaskIDs.contains($0.taskId) } : []
+        let items = agenda.map { AgendaItem.timed(from: $0, ghosts: ghosts) } ?? []
+        let allDayEvents = agenda.map(AgendaItem.allDay) ?? []
+        let rows = TimelineRow.rows(for: items, now: isToday ? now : nil, showsGaps: showsGaps)
+        let picks = model.optionalPicks(on: day, now: now)
+        let isEmptyDay = items.isEmpty && allDayEvents.isEmpty && picks.isEmpty
+        let freeText = model.freeMinutes(on: day).flatMap { PlanText.free($0.computer) }
+        let missed = isToday ? model.missedCommitments(inWeekOf: day) : []
+        let missedText = missed.isEmpty ? nil : PlanText.missed(missed)
+        let open = agenda?.placements.filter { $0.task.completedAt == nil } ?? []
+        let beside = ParallelWork.companionTitles(
+            placements: open.map(\.placement),
+            tasksById: Dictionary(open.map { ($0.task.id, $0.task) }, uniquingKeysWith: { first, _ in first }),
+            planBlocks: agenda?.planBlocks ?? [])
+        let unfinished = open.filter { model.blooming[$0.task.id] == nil }
+        let isDayCleared = isToday && unfinished.isEmpty
+            && (agenda?.placements.count ?? 0) - unfinished.count + ghosts.count > 0
         return List {
             if model.hasProblem {
                 Section {
@@ -402,8 +347,8 @@ struct AgendaView: View {
                             selectedEvent = event
                         } label: {
                             AllDayEventRow(
-                                event: event, style: model.eventStyle(event), continuation: continuation(of: event),
-                                protectsDay: model.agenda?.blockingAllDayEvents.contains(where: { $0.id == event.id }) == true)
+                                event: event, style: model.eventStyle(event), continuation: EventTiming.continuation(of: event, on: day, calendar: model.calendar),
+                                protectsDay: agenda?.blockingAllDayEvents.contains(where: { $0.id == event.id }) == true)
                                 .foregroundStyle(.primary)
                         }
                         .accessibilityHint("Shows the event")
@@ -422,11 +367,11 @@ struct AgendaView: View {
                         FreeGapRow(gap: gap)
                             .listRowBackground(FloridaStyle.paper)
                     case .item(.event(let event)):
-                        eventRow(event)
+                        eventRow(event, on: day)
                             .timelineSeparator()
                             .listRowBackground(FloridaStyle.paper)
                     case .item(.block(let block)):
-                        blockRow(block, beside: beside[block.placement.id])
+                        blockRow(block, beside: beside[block.placement.id], isToday: isToday)
                     case .item(.plan(let block)):
                         planRow(block, beside: beside[block.id])
                             .timelineSeparator()
@@ -445,7 +390,7 @@ struct AgendaView: View {
                         .listRowBackground(FloridaStyle.paper)
                 }
             } header: {
-                if showsDayCleared && model.isDayCleared {
+                if showsDayCleared && isDayCleared {
                     Label("Day cleared", systemImage: "checkmark.seal.fill")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.green)
@@ -460,7 +405,7 @@ struct AgendaView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(FloridaStyle.paper)
-        .animation(.snappy, value: model.isDayCleared)
+        .animation(.snappy, value: isDayCleared)
         .overlay {
             if isEmptyDay && !isToday {
                 nothingScheduled
@@ -470,15 +415,6 @@ struct AgendaView: View {
         .refreshable {
             await model.syncNow()
         }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 30)
-                .onEnded { value in
-                    let dx = value.translation.width
-                    let dy = value.translation.height
-                    guard abs(dx) > 60, abs(dx) > abs(dy) * 1.5 else { return }
-                    model.shiftDay(by: dx < 0 ? 1 : -1)
-                }
-        )
     }
 
     private var nothingScheduled: some View {
@@ -492,7 +428,7 @@ struct AgendaView: View {
     /// already done has none. `beside` names the work that shares its time, said under the block
     /// and outside its button, so the button reads to VoiceOver and UI tests as it always did.
     @ViewBuilder
-    private func blockRow(_ block: ScheduledBlock, beside: [String]?) -> some View {
+    private func blockRow(_ block: ScheduledBlock, beside: [String]?, isToday: Bool) -> some View {
         let category = model.category(id: block.task.categoryId)
         let isBlooming = model.blooming[block.task.id] != nil
         let row = VStack(alignment: .leading, spacing: 0) {
@@ -521,7 +457,7 @@ struct AgendaView: View {
         if block.task.completedAt == nil {
             row.taskActions(
                 block.task, targets: TaskActionTargets(doneForNow: $doneForNowTask, moving: $movingTask),
-                onEdit: { editingTask = block.task }, allowsDelete: false)
+                onEdit: { editingTask = block.task }, allowsDelete: false, allowsSwipe: false)
         } else {
             row
         }
@@ -548,17 +484,14 @@ struct AgendaView: View {
     }
 
     /// Tapping an event opens its detail sheet.
-    private func eventRow(_ event: CalendarEvent) -> some View {
+    private func eventRow(_ event: CalendarEvent, on day: Date) -> some View {
         Button {
             selectedEvent = event
         } label: {
-            EventRow(event: event, style: model.eventStyle(event), continuation: continuation(of: event), now: now)
+            EventRow(event: event, style: model.eventStyle(event), continuation: EventTiming.continuation(of: event, on: day, calendar: model.calendar), now: now)
                 .foregroundStyle(.primary)
         }
         .accessibilityHint("Shows the event")
     }
 
-    private func continuation(of event: CalendarEvent) -> String? {
-        EventTiming.continuation(of: event, on: model.selectedDay, calendar: model.calendar)
-    }
 }

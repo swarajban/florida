@@ -14,9 +14,11 @@ struct TaskActionTargets {
 
 extension View {
     func taskActions(
-        _ task: TaskItem, targets: TaskActionTargets, onEdit: (() -> Void)? = nil, allowsDelete: Bool = true
+        _ task: TaskItem, targets: TaskActionTargets, onEdit: (() -> Void)? = nil,
+        allowsDelete: Bool = true, allowsSwipe: Bool = true
     ) -> some View {
-        modifier(TaskActionsModifier(task: task, targets: targets, onEdit: onEdit, allowsDelete: allowsDelete))
+        modifier(TaskActionsModifier(
+            task: task, targets: targets, onEdit: onEdit, allowsDelete: allowsDelete, allowsSwipe: allowsSwipe))
     }
 
     /// The Done for now sheet for a list using `taskActions`. The Move to… dialog sits on each row.
@@ -33,44 +35,49 @@ private struct TaskActionsModifier: ViewModifier {
     let targets: TaskActionTargets
     let onEdit: (() -> Void)?
     let allowsDelete: Bool
+    let allowsSwipe: Bool
     @State private var confirmingRecurringDelete = false
 
     func body(content: Content) -> some View {
         content
             .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                Button {
-                    model.complete(task)
-                } label: {
-                    Label("Done", systemImage: "checkmark")
+                if allowsSwipe {
+                    Button {
+                        model.complete(task)
+                    } label: {
+                        Label("Done", systemImage: "checkmark")
+                    }
+                    .tint(.green)
+                    Button {
+                        targets.doneForNow.wrappedValue = task
+                    } label: {
+                        Label("Done for now", systemImage: "checkmark.circle.badge.questionmark")
+                    }
+                    .tint(.teal)
                 }
-                .tint(.green)
-                Button {
-                    targets.doneForNow.wrappedValue = task
-                } label: {
-                    Label("Done for now", systemImage: "checkmark.circle.badge.questionmark")
-                }
-                .tint(.teal)
             }
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                if allowsDelete {
-                    Button(role: .destructive) {
-                        requestDelete()
-                    } label: {
-                        Label("Delete", systemImage: "trash")
+                if allowsSwipe {
+                    if allowsDelete {
+                        Button(role: .destructive) {
+                            requestDelete()
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
                     }
+                    Button {
+                        model.pushToTomorrow(task)
+                    } label: {
+                        Label("Tomorrow", systemImage: "arrow.turn.down.right")
+                    }
+                    .tint(.orange)
+                    Button {
+                        targets.moving.wrappedValue = task
+                    } label: {
+                        Label("Move to…", systemImage: "folder")
+                    }
+                    .tint(.indigo)
                 }
-                Button {
-                    model.pushToTomorrow(task)
-                } label: {
-                    Label("Tomorrow", systemImage: "arrow.turn.down.right")
-                }
-                .tint(.orange)
-                Button {
-                    targets.moving.wrappedValue = task
-                } label: {
-                    Label("Move to…", systemImage: "folder")
-                }
-                .tint(.indigo)
             }
             // On the row, so the dialog opens next to it rather than at the list's edge.
             .moveToDialog(task: targets.moving.only(task))
