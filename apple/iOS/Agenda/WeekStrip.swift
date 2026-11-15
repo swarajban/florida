@@ -79,6 +79,10 @@ private final class WeekPagerView: UIScrollView, UIScrollViewDelegate {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    override func touchesShouldCancel(in view: UIView) -> Bool {
+        view is WeekDateButton || super.touchesShouldCancel(in: view)
+    }
+
     func update(selectedDay: Date, today: Date, calendar: Calendar, onSelect: @escaping (Date) -> Void,
                 onShiftWeek: @escaping (Int) -> Void) {
         self.calendar = calendar

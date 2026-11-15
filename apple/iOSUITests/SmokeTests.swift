@@ -537,6 +537,7 @@ final class SmokeTests: XCTestCase {
 
                 @MainActor
                 func assertDay(_ day: Date) {
+                    XCTAssertTrue(waitForHittable(cell(day)))
                     if heading.value as? String != day.formatted(.dateTime.weekday(.wide).month(.wide).day().year())
                         || !cell(day).isHittable {
                         captureFailure(app, "week-carousel-failure-\(mode)-\(appearance)")
@@ -672,6 +673,7 @@ final class SmokeTests: XCTestCase {
 
             @MainActor
             func assertDay(_ day: Date) {
+                XCTAssertTrue(waitForHittable(app.buttons[day.formatted(.dateTime.weekday(.wide).month(.wide).day())]))
                 if !app.buttons[day.formatted(.dateTime.weekday(.wide).month(.wide).day())].isHittable {
                     captureFailure(app, "one-day-carousel-failure-\(appearance)")
                 }
@@ -1532,6 +1534,12 @@ final class SmokeTests: XCTestCase {
         let element = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
         XCTAssertTrue(element.waitForExistence(timeout: 20), "Missing \(text)")
+    }
+
+    @MainActor
+    private func waitForHittable(_ element: XCUIElement) -> Bool {
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: element)
+        return XCTWaiter.wait(for: [ready], timeout: 5) == .completed
     }
 
     @MainActor
