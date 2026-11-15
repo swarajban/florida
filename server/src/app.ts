@@ -244,7 +244,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
   app.use('/mcp', requireToken)
 
   // Model Context Protocol endpoint for agents; the same token, the same store, the same scheduler.
-  mountMcp(app, { db, reschedule })
+  mountMcp(app, { db, reschedule, sync, ...(deps.ai === undefined ? {} : { ai: deps.ai }) })
 
   // ---- Sync -------------------------------------------------------------------------------------
 

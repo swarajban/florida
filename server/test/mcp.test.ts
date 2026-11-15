@@ -1,14 +1,18 @@
+import { randomUUID } from 'node:crypto'
 import { dateFromDayNumber, dayNumber, localDate, weekdayOf, zonedToUtc } from '@florida/scheduler'
 import type { LocalDate } from '@florida/scheduler'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { eq } from 'drizzle-orm'
-import type { Hono } from 'hono'
+import { Hono } from 'hono'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../src/app.js'
 import { ChangeBus } from '../src/changes.js'
 import type { Db } from '../src/db/client.js'
-import { briefs, calendars, events, googleAccounts, tasks } from '../src/db/schema.js'
+import { briefs, calendars, dayOverrides, events, googleAccounts, placements, projectPlacements, projects, routineBlocks, routineOccurrences, tasks } from '../src/db/schema.js'
+import type { TaskDraft, ParseTaskContext } from '../src/ai/parse-task.js'
+import { GoogleApiError } from '../src/google/client.js'
+import { mountMcp } from '../src/mcp.js'
 import { runScheduling } from '../src/scheduling.js'
 import { seed } from '../src/seed.js'
 import type { TaskSource } from '../src/task-source.js'
@@ -171,18 +175,27 @@ describe('transport and auth', () => {
       'create_project',
       'create_task',
       'delete_project',
+      'delete_event',
       'delete_task',
       'get_agenda',
       'get_brief',
+      'get_range',
       'get_task',
       'list_categories',
+      'list_calendars',
+      'list_deleted_tasks',
       'list_projects',
       'list_tasks',
+      'parse_task',
+      'restore_task',
       'run_scheduler',
       'set_day',
+      'set_event_blocks_day',
+      'sync_google_calendar',
       'update_project',
       'update_task',
-    ])
+      'upsert_event',
+    ].sort())
     const create = tools.find((t) => t.name === 'create_task')
     expect(create?.inputSchema.type).toBe('object')
     expect(Object.keys(create?.inputSchema.properties ?? {})).toEqual(
@@ -626,5 +639,270 @@ describe('official client', () => {
     } finally {
       await client.close()
     }
+  })
+})
+
+describe('Wave 1A filters and deep links', () => {
+  const ids = Array.from({ length: 5 }, () => randomUUID())
+  const projectId = randomUUID()
+  const day = '2026-11-01'
+  const matchingIds = async (filters: Record<string, unknown>) => (await data<{ tasks: TaskView[] }>('list_tasks', filters)).tasks.map((task) => task.id).filter((id) => ids.includes(id))
+
+  beforeAll(async () => {
+    await db.insert(projects).values({ id: projectId, name: 'Filter project', status: 'active' })
+    await db.insert(tasks).values([
+      { id: ids[0]!, categoryId: 'inbox', title: 'Needle 100%_ done', notes: 'Alpha', context: 'office' as const, priority: 'asap' as const, projectId, dueAt: new Date('2026-11-01T07:00:00Z'), source: { url: 'https://example.com', title: 'Example', kind: 'web' as const } },
+      { id: ids[1]!, categoryId: 'inbox', title: 'Other task', notes: 'nEeDlE', context: 'computer' as const, priority: 'low' as const, dueAt: new Date('2026-11-02T07:59:59.999Z') },
+      { id: ids[2]!, categoryId: 'inbox', title: 'Undated', someday: true },
+      { id: ids[3]!, categoryId: 'inbox', title: 'Outside', dueAt: new Date('2026-11-02T08:00:00Z'), pinnedStart: new Date('2026-11-02T08:00:00Z') },
+      { id: ids[4]!, categoryId: 'inbox', title: 'Pinned', dueAt: new Date('2026-11-01T06:59:59.999Z'), pinnedStart: new Date('2026-11-02T07:59:59.999Z') },
+    ].map((task) => ({ durationMinutes: 30, priority: 'medium' as const, deadlineType: 'soft' as const, ...task })))
+    await db.insert(placements).values([
+      { id: randomUUID(), computedAt: new Date(), taskId: ids[0]!, startAt: new Date('2026-11-01T06:30:00Z'), endAt: new Date('2026-11-01T07:30:00Z'), pinned: false },
+      { id: randomUUID(), computedAt: new Date(), taskId: ids[1]!, startAt: new Date('2026-11-02T08:00:00Z'), endAt: new Date('2026-11-02T08:30:00Z'), pinned: false },
+    ])
+  })
+
+  it('matches title or notes case-insensitively, trims query, and treats wildcards literally', async () => {
+    expect((await matchingIds({ query: '  NEEDLE ' })).sort()).toEqual([ids[0], ids[1]].sort())
+    expect(await matchingIds({ query: '100%_' })).toEqual([ids[0]])
+    expect((await matchingIds({ query: '   ' })).sort()).toEqual([...ids].sort())
+  })
+
+  it('uses inclusive timestamp bounds and the entire 25-hour local DST day for dates', async () => {
+    expect((await matchingIds({ dueAfter: day, dueBefore: day })).sort()).toEqual([ids[0], ids[1]].sort())
+    expect(await matchingIds({ dueAfter: '2026-11-01T07:00:00Z', dueBefore: '2026-11-01T07:00:00Z' })).toEqual([ids[0]])
+    expect((await matchingIds({ dueBefore: day })).sort()).toEqual([ids[0], ids[1], ids[4]].sort())
+    expect((await call('list_tasks', { dueBefore: '2026-02-30' })).isError).toBe(true)
+  })
+
+  it('filters context, priority, project, someday, source, and combinations', async () => {
+    expect(await matchingIds({ context: 'office', priority: 'asap', projectId, hasSource: true, someday: false })).toEqual([ids[0]])
+    for (const projectId of [null, 'none']) expect((await matchingIds({ projectId })).sort()).toEqual(ids.slice(1).sort())
+    expect(await matchingIds({ someday: true })).toEqual([ids[2]])
+    expect((await matchingIds({ someday: false })).sort()).toEqual(ids.filter((id) => id !== ids[2]).sort())
+    expect((await matchingIds({ hasSource: false })).sort()).toEqual(ids.slice(1).sort())
+    expect((await matchingIds({ context: 'computer', priority: 'low' }))).toEqual([ids[1]])
+    expect((await call('list_tasks', { projectId: 'bad' })).isError).toBe(true)
+    expect((await call('list_tasks', { context: 'phone' })).isError).toBe(true)
+  })
+
+  it('matches overlapping placements or pins in the local half-open day', async () => {
+    expect((await matchingIds({ scheduledOn: day })).sort()).toEqual([ids[0], ids[4]].sort())
+    const agenda = await data<{ taskBlocks: { taskId: string, appUrl: string }[] }>('get_agenda', { date: day })
+    expect(agenda.taskBlocks.find((block) => block.taskId === ids[0])?.appUrl).toBe(`florida://tasks/${ids[0]}`)
+  })
+
+  it('adds appUrl to task and project reads and writes', async () => {
+    const created = await data<{ task: TaskView & { appUrl: string } }>('create_task', { categoryId: 'inbox', title: 'Link task' })
+    const id = created.task.id
+    expect(created.task.appUrl).toBe(`florida://tasks/${id}`)
+    for (const [tool, args] of [['get_task', { id }], ['update_task', { id, notes: 'Updated' }], ['complete_task', { id }]] as const) {
+      expect((await data<{ task: { appUrl: string } }>(tool, args)).task.appUrl).toBe(`florida://tasks/${id}`)
+    }
+    expect((await data<{ tasks: { id: string, appUrl: string }[] }>('list_tasks', { includeCompleted: true })).tasks.find((task) => task.id === id)?.appUrl).toBe(`florida://tasks/${id}`)
+    const createdProject = await data<{ project: { id: string, appUrl: string } }>('create_project', { name: 'Link project' })
+    const project = createdProject.project
+    expect(project.appUrl).toBe(`florida://projects/${project.id}`)
+    expect((await data<{ project: { appUrl: string } }>('update_project', { id: project.id, name: 'Renamed' })).project.appUrl).toBe(project.appUrl)
+    expect((await data<{ projects: { id: string, appUrl: string }[] }>('list_projects')).projects.find((p) => p.id === project.id)?.appUrl).toBe(project.appUrl)
+  })
+})
+
+describe('Wave 1A range and restore tools', () => {
+  it('returns the same agenda shape for every day, including DST and an all-day span', async () => {
+    const accountId = randomUUID()
+    const calendarId = randomUUID()
+    await db.insert(googleAccounts).values({ id: accountId, email: 'range@example.com', label: 'range', refreshTokenEnc: 'private' })
+    await db.insert(calendars).values({ id: calendarId, accountId, googleId: 'range', summary: 'Range', accessRole: 'owner', selected: true })
+    await db.insert(events).values({ id: randomUUID(), calendarId, googleId: 'range-all-day', status: 'confirmed', summary: 'Trip', allDay: true, startAt: new Date('2026-10-31T00:00:00Z'), endAt: new Date('2026-11-02T00:00:00Z') })
+    await db.insert(events).values({ id: randomUUID(), calendarId, googleId: 'range-timed', status: 'confirmed', summary: 'Overnight', allDay: false, startAt: new Date('2026-11-01T06:30:00Z'), endAt: new Date('2026-11-01T08:30:00Z') })
+    const taskId = randomUUID()
+    const projectId = randomUUID()
+    const blockId = randomUUID()
+    const window = { startAt: new Date('2026-11-01T06:30:00Z'), endAt: new Date('2026-11-01T08:30:00Z') }
+    await db.insert(tasks).values({ id: taskId, categoryId: 'inbox', title: 'Range task', durationMinutes: 120, priority: 'medium', deadlineType: 'none' })
+    await db.insert(placements).values({ id: randomUUID(), taskId, computedAt: new Date(), pinned: false, ...window })
+    await db.insert(projects).values({ id: projectId, name: 'Range project' })
+    await db.insert(projectPlacements).values({ id: randomUUID(), projectId, weekOf: '2026-11-01', computedAt: new Date(), ...window })
+    await db.insert(routineBlocks).values({ id: blockId, name: 'Range commitment', days: [0], start: '01:00', end: '02:00', allows: [] })
+    await db.insert(routineOccurrences).values({ id: randomUUID(), blockId, computedAt: new Date(), ...window })
+    await db.insert(dayOverrides).values({ date: '2026-11-01', kind: 'home', note: 'DST day' })
+    const select = vi.spyOn(db, 'select')
+    let result: { days: Record<string, unknown>[], timeZone: string }
+    try {
+      result = await data('get_range', { startDate: '2026-10-31', endDate: '2026-11-02' })
+      expect(select).toHaveBeenCalledTimes(6)
+    } finally { select.mockRestore() }
+    expect(result.timeZone).toBe(LA)
+    expect(result.days).toHaveLength(3)
+    for (const day of result.days) expect(day).toEqual(await data('get_agenda', { date: day.date }))
+    expect(result.days[1]?.start).toBe('2026-11-01T07:00:00.000Z')
+    expect(result.days[1]?.end).toBe('2026-11-02T08:00:00.000Z')
+    expect((result.days[1]?.events as unknown[]).length).toBeGreaterThan(0)
+    for (const day of result.days.slice(0, 2)) {
+      expect(day.taskBlocks).toEqual(expect.arrayContaining([expect.objectContaining({ taskId, appUrl: `florida://tasks/${taskId}` })]))
+      expect(day.projectTime).toEqual(expect.arrayContaining([expect.objectContaining({ projectId })]))
+      expect(day.commitments).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'Range commitment' })]))
+    }
+    expect(result.days[1]?.dayOverride).toEqual({ kind: 'home', note: 'DST day' })
+    expect(result.days[2]?.taskBlocks).not.toEqual(expect.arrayContaining([expect.objectContaining({ taskId })]))
+    expect((await data<{ days: unknown[] }>('get_range', { startDate: '2026-12-01', endDate: '2026-12-31' })).days).toHaveLength(31)
+    for (const endDate of ['2026-10-30', '2026-12-01']) {
+      expect((await call('get_range', { startDate: '2026-10-31', endDate })).content[0]?.text).toContain('at most 31 days')
+    }
+    expect((await call('get_range', { startDate: '2026-02-30', endDate: '2026-03-01' })).isError).toBe(true)
+  })
+
+  it('lists, searches, and restores tombstones idempotently with scheduling and links', async () => {
+    const older = randomUUID()
+    const newer = randomUUID()
+    await db.insert(tasks).values([
+      { id: older, categoryId: 'inbox', title: 'Deleted unique', durationMinutes: 30, priority: 'medium', deadlineType: 'none', deletedAt: new Date('2026-11-01T00:00:00Z') },
+      { id: newer, categoryId: 'inbox', title: 'Other', durationMinutes: 30, priority: 'medium', deadlineType: 'none', notes: 'DELETED UNIQUE', deletedAt: new Date('2026-11-02T00:00:00Z') },
+    ])
+    const deleted = await data<{ tasks: { id: string, appUrl: string }[] }>('list_deleted_tasks', { query: ' deleted unique ', limit: 1 })
+    expect(deleted.tasks).toEqual([expect.objectContaining({ id: newer, appUrl: `florida://tasks/${newer}` })])
+    for (let i = 0; i < 2; i++) {
+      const restored = await data<{ task: TaskView & { appUrl: string, deletedAt: null }, scheduling: object }>('restore_task', { id: newer })
+      expect(restored.task).toMatchObject({ id: newer, deletedAt: null, appUrl: `florida://tasks/${newer}`, placements: expect.any(Array) })
+      expect(restored.scheduling).toMatchObject({ unscheduled: expect.any(Array), late: expect.any(Array) })
+    }
+    expect((await data<{ tasks: { id: string }[] }>('list_deleted_tasks', { query: 'deleted unique' })).tasks.map((task) => task.id)).toEqual([older])
+    expect((await call('restore_task', { id: randomUUID() })).content[0]?.text).toContain('not found')
+    expect((await call('list_deleted_tasks', { limit: 201 })).isError).toBe(true)
+  })
+
+  it('publishes restores through incremental sync even with a skewed application clock', async () => {
+    const { task } = await data<{ task: TaskView }>('create_task', { categoryId: 'inbox', title: 'Sync restore' })
+    await data('delete_task', { id: task.id })
+    const response = await app.request('/api/sync', { headers })
+    const { cursor } = await response.json() as { cursor: string }
+    const NativeDate = Date
+    const skewed = new NativeDate(cursor).getTime() - 60_000
+    class ApplicationDate extends NativeDate {
+      constructor(value?: string | number) { super(value ?? skewed) }
+    }
+    vi.stubGlobal('Date', ApplicationDate)
+    try {
+      await data('restore_task', { id: task.id })
+      const incremental = await app.request(`/api/sync?since=${encodeURIComponent(cursor)}`, { headers })
+      const body = await incremental.json() as { tasks: { id: string, deletedAt: string | null, appUrl?: string }[] }
+      expect(body.tasks.find((row) => row.id === task.id)).toMatchObject({ id: task.id, deletedAt: null })
+      expect(body.tasks.find((row) => row.id === task.id)).not.toHaveProperty('appUrl')
+    } finally { vi.unstubAllGlobals() }
+  })
+
+  it('restores a task from a deleted category into Inbox, ready for subsequent edits', async () => {
+    const categoryId = randomUUID()
+    const category = await app.request(`/api/categories/${categoryId}`, { method: 'PUT', headers, body: JSON.stringify({ name: 'Temporary', scheduleId: 'work' }) })
+    expect(category.status).toBe(200)
+    const { task } = await data<{ task: TaskView }>('create_task', { categoryId, title: 'Orphan restore' })
+    await data('delete_task', { id: task.id })
+    expect((await app.request(`/api/categories/${categoryId}`, { method: 'DELETE', headers })).status).toBe(200)
+    expect((await data<{ task: { categoryId: string } }>('restore_task', { id: task.id })).task.categoryId).toBe('inbox')
+    expect((await data<{ task: TaskView }>('update_task', { id: task.id, title: 'Editable again' })).task.title).toBe('Editable again')
+  })
+
+  it('restores only one recurring occurrence without restarting its deleted series', async () => {
+    const { task } = await data<{ task: TaskView }>('create_task', {
+      categoryId: 'inbox', title: 'Recurring restore', recurrence: { frequency: 'day', interval: 1, timeZone: LA, startDate: '2026-11-10' },
+    })
+    await data('delete_task', { id: task.id })
+    await data('restore_task', { id: task.id })
+    const rows = (await data<{ tasks: TaskView[] }>('list_tasks', { query: 'Recurring restore' })).tasks
+    expect(rows.map((row) => row.id)).toEqual([task.id])
+    expect((await data<{ tasks: TaskView[] }>('list_deleted_tasks', { query: 'Recurring restore' })).tasks.length).toBeGreaterThan(0)
+  })
+})
+
+describe('Wave 1A calendar and parser tools', () => {
+  const sync = new FakeSync()
+  const calendarId = randomUUID()
+  const accountId = randomUUID()
+  let original: Hono
+
+  beforeAll(async () => {
+    original = app
+    app = createApp({ db, config, sync, reschedule: () => runScheduling(db, config) })
+    await db.insert(googleAccounts).values({ id: accountId, email: 'mcp@example.com', label: 'mcp', refreshTokenEnc: 'SECRET_REFRESH', accessToken: 'SECRET_ACCESS' })
+    await db.insert(calendars).values([
+      { id: calendarId, accountId, googleId: 'mcp', summary: 'Writable', accessRole: 'writer', selected: true, syncToken: 'SECRET_SYNC', channelToken: 'SECRET_CHANNEL' },
+      { id: `${calendarId}-reader`, accountId, googleId: 'reader', summary: 'Reader', accessRole: 'reader', selected: true },
+      { id: `${calendarId}-off`, accountId, googleId: 'off', summary: 'Off', accessRole: 'owner', selected: false },
+    ])
+  })
+  afterAll(() => { app = original })
+
+  it('lists writable calendars without exposing account or sync credentials', async () => {
+    const result = await data<{ accounts: unknown[], calendars: unknown[], writableCalendarIds: string[] }>('list_calendars')
+    expect(JSON.stringify(result)).not.toContain('SECRET_')
+    expect(result.writableCalendarIds).toContain(calendarId)
+    expect(result.writableCalendarIds).not.toContain(`${calendarId}-reader`)
+    expect(result.writableCalendarIds).not.toContain(`${calendarId}-off`)
+  })
+
+  it('creates, updates, overrides, syncs, and deletes events through shared write paths', async () => {
+    const body = { calendarId, summary: 'MCP holiday', startAt: '2026-11-18T00:00:00Z', endAt: '2026-11-19T00:00:00Z', allDay: true }
+    const created = await data<{ event: { id: string }, scheduling: object }>('upsert_event', body)
+    const id = created.event.id
+    expect(id).toMatch(/^[0-9a-f-]{36}$/)
+    expect(sync.eventWrites.at(-1)?.method).toBe('insert')
+    expect(created.scheduling).toMatchObject({ unscheduled: expect.any(Array), late: expect.any(Array) })
+    expect((await data<{ event: { summary: string } }>('upsert_event', { ...body, id, summary: 'Updated' })).event.summary).toBe('Updated')
+    expect(sync.eventWrites.at(-1)?.method).toBe('patch')
+    for (const blocksDay of [true, false, null]) expect((await data<{ event: { blocksDay: boolean | null } }>('set_event_blocks_day', { id, blocksDay })).event.blocksDay).toBe(blocksDay)
+    await data('sync_google_calendar')
+    expect(sync.syncAllCalls).toBe(1)
+    expect(await data('delete_event', { id })).toMatchObject({ deleted: id })
+    await data('delete_event', { id })
+    expect((await call('upsert_event', { ...body, id })).isError).toBe(true)
+    expect((await call('set_event_blocks_day', { id, blocksDay: true })).isError).toBe(true)
+    expect((await call('delete_event', { id: randomUUID() })).isError).toBe(true)
+    for (const patch of [{ endAt: body.startAt }, { startAt: '2026-11-18T01:00:00Z' }, { id: 'invalid' }, { calendarId: `${calendarId}-reader` }]) expect((await call('upsert_event', { ...body, ...patch })).isError).toBe(true)
+    sync.nextWriteError = new GoogleApiError(403, 'Google refused write')
+    expect((await call('upsert_event', body)).isError).toBe(true)
+  })
+
+  it('turns a remotely deleted event into a tool error after rescheduling', async () => {
+    const body = { calendarId, summary: 'Gone', startAt: '2026-11-18T10:00:00Z', endAt: '2026-11-18T11:00:00Z', allDay: false }
+    const { event } = await data<{ event: { id: string } }>('upsert_event', body)
+    expect((await call('set_event_blocks_day', { id: event.id, blocksDay: true })).isError).toBe(true)
+    sync.nextWriteError = new GoogleApiError(410, 'Gone')
+    expect((await call('upsert_event', { ...body, id: event.id, summary: 'Changed' })).isError).toBe(true)
+    const [stored] = await db.select().from(events).where(eq(events.id, event.id))
+    expect(stored?.deletedAt).not.toBeNull()
+  })
+
+  it('returns a clear AI error when unconfigured and drafts without writing with live context', async () => {
+    expect((await call('parse_task', { text: 'Do something' })).content[0]?.text).toContain('ai is not configured')
+    const draft = { title: 'Draft only' } as TaskDraft
+    const parse = vi.fn(async (_text: string, _context: ParseTaskContext) => draft)
+    const previous = app
+    app = createApp({ db, config, sync, reschedule: () => runScheduling(db, config), ai: { parse } })
+    try {
+      const before = await db.select().from(tasks)
+      expect(await data('parse_task', { text: '  Do something  ', now: '2026-11-16T10:00:00Z', timeZone: 'UTC' })).toEqual({ draft })
+      expect(parse.mock.calls[0]?.[0]).toBe('Do something')
+      expect(parse.mock.calls[0]?.[1]).toMatchObject({ now: new Date('2026-11-16T10:00:00Z'), timeZone: 'UTC', categories: expect.arrayContaining([expect.objectContaining({ id: 'inbox', examples: expect.any(Array) })]) })
+      const active = await db.select().from(projects)
+      expect(parse.mock.calls[0]?.[1].projects?.map((p) => p.id).sort()).toEqual(active.filter((p) => p.status === 'active' && p.deletedAt === null).map((p) => p.id).sort())
+      await data('parse_task', { text: 'Defaults' })
+      expect(parse.mock.calls[1]?.[1].timeZone).toBe(LA)
+      expect(await db.select().from(tasks)).toEqual(before)
+      expect((await call('parse_task', { text: '  ' })).isError).toBe(true)
+    } finally { app = previous }
+  })
+
+  it('allows scheduler-only sync without Google configuration but refuses event writes clearly', async () => {
+    const previous = app
+    app = new Hono()
+    const reschedule = vi.fn(() => runScheduling(db, config))
+    mountMcp(app, { db, reschedule })
+    try {
+      await data('sync_google_calendar')
+      expect(reschedule).toHaveBeenCalledOnce()
+      expect((await call('delete_event', { id: randomUUID() })).content[0]?.text).toContain('sync is not configured')
+    } finally { app = previous }
   })
 })

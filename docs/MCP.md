@@ -56,7 +56,7 @@ For clients that support remote HTTP MCP servers natively (Claude Code, Cursor, 
 
 ### Quick sanity check
 
-Calling `tools/list` returns 16 tools (`list_categories`, `list_tasks`, `get_task`, `create_task`, `update_task`, `complete_task`, `delete_task`, `list_projects`, `create_project`, `update_project`, `delete_project`, `set_day`, `clear_day`, `get_brief`, `get_agenda`, `run_scheduler`). `GET https://florida-swaraj.fly.dev/health` is unauthenticated and returns `{"ok":true}`.
+Calling `tools/list` returns 25 tools (the reference below lists them). `GET https://florida-swaraj.fly.dev/health` is unauthenticated and returns `{"ok":true}`. These tools require the Wave 1A server version; a server not yet deployed may advertise fewer tools.
 
 ---
 
@@ -102,19 +102,33 @@ Florida derives `kind` (`"github" | "linear" | "slack" | "email" | "web"`) autom
 
 ---
 
-## 3. MCP Tool Reference (16 Tools)
+## 3. MCP Tool Reference (25 Tools)
+
+Task objects returned by MCP carry a computed `appUrl`, for example `florida://tasks/<id>`; project objects carry `florida://projects/<id>`. Agenda task blocks also include the task's `appUrl`. These links do not change the HTTP sync payload. Opening them requires a compatible Florida app handler.
 
 ### Reading the day & plan
 
 | Tool | Arguments | What it returns |
 |---|---|---|
 | `get_agenda` | `{ date?: "YYYY-MM-DD", timeZone?: string }` | One day's full picture (defaults to today in `America/Los_Angeles`): calendar events from selected calendars (all-day first), scheduled task blocks (parallel blocks carry a `lane`), reserved project blocks, commitments (e.g. gym), and any `dayOverride`. |
+| `get_range` | `{ startDate: "YYYY-MM-DD", endDate: "YYYY-MM-DD" }` | Inclusive range of 1–31 days in the settings/default time zone. Returns `{ startDate, endDate, timeZone, days }`; each day has exactly the `get_agenda` shape, including zoned `start`/`end`, events, task blocks, project time, commitments, and override. Reversed or oversized ranges are errors. |
 | `get_brief` | `{}` | Latest stored morning daily brief and weekly review (if generated). |
 | `list_categories` | `{}` | All live categories with `id`, `name`, `area` (`"work" \| "personal" \| null`), `color`, and `scheduleId`. |
-| `list_tasks` | `{ categoryId?: string, includeCompleted?: boolean (false), limit?: 1..200 (50) }` | Open tasks (soonest `dueAt` first, undated last) with their scheduled blocks. Pass `categoryId: "inbox"` for everything needing triage. |
+| `list_tasks` | `{ categoryId?, includeCompleted?, limit?, query?, dueBefore?, dueAfter?, context?, projectId?, priority?, someday?, scheduledOn?, hasSource? }` | Open tasks (soonest `dueAt` first, undated last) with scheduled blocks. Filters combine with AND; see below. `includeCompleted` defaults to false; `limit` is 1–200, default 50. |
 | `get_task` | `{ id: string }` | One task by ID plus its scheduled blocks. |
 | `list_projects` | `{ status?: "thinking" \| "active" \| "on_hold" \| "done" }` | Live projects with status, `nextStep`, `weeklyMinutes`, `parallel`, and open task counts. |
 | `run_scheduler` | `{}` | Forces a full reschedule across all open tasks and returns placements + unscheduled/late summaries. (Usually unnecessary after writes, which reschedule automatically.) |
+
+### Task search and filters
+
+- `query`: case-insensitive literal substring of title OR notes; trimmed, with blank text ignored. `%` and `_` are literal characters, not wildcards.
+- `dueAfter` / `dueBefore`: inclusive ISO timestamps (explicit offset or `Z`), or `YYYY-MM-DD`. A date means start of day for `dueAfter`, and the entire day for `dueBefore`, in the user's settings/default time zone. Undated tasks never match either bound. Local days can be 23 or 25 hours at DST transitions.
+- `context`: `"computer" | "errand" | "home" | "office"`; `priority`: `"asap" | "high" | "medium" | "low"`. These are Florida's actual enums, not `critical`, `phone`, or `anywhere`.
+- `projectId`: a UUID, or `"none"` / `null` for tasks without a project; omission means any project.
+- `someday`: exact boolean match; `hasSource`: true for a non-empty source URL, false for absent/empty source.
+- `scheduledOn`: `YYYY-MM-DD` in the settings/default time zone. Matches any placement overlapping that day, or a `pinnedStart` inside the day. Day end is exclusive.
+
+Example: `list_tasks({ query: "proposal", dueBefore: "2026-11-20", context: "computer", projectId: "none", someday: false, hasSource: true })`.
 
 ### Creating & updating tasks
 
@@ -138,6 +152,17 @@ Florida derives `kind` (`"github" | "linear" | "slack" | "email" | "web"`) autom
   - **Recurring tasks:** editing template/rule fields updates this and future unfinished occurrences (pass `expectedRecurrenceRevision` from the task row if guarding concurrent edits); passing `recurrence: null` stops future repeats while keeping the current occurrence.
 - **`complete_task`** — `{ id: string }`. Marks **only this occurrence** done right now, credits remaining duration, and reschedules remaining work. Recurring series keep future occurrences.
 - **`delete_task`** — `{ id: string }`. Soft-deletes (tombstones) the task and reschedules. **Warning:** on a recurring task, `delete_task` also stops the series and deletes future unfinished occurrences (completed history stays). Use `complete_task` when Swaraj finished an occurrence.
+- **`list_deleted_tasks`** — `{ query?: string, limit?: 1..200 }`, default limit 50. Returns tombstoned task objects with `appUrl`, newest `deletedAt` first. Search has the same title/notes semantics as `list_tasks`.
+- **`restore_task`** — `{ id: string }`. Clears one task's tombstone, reschedules, and returns `{ task, scheduling: { unscheduled, late } }`, with placements and `appUrl` on the task. If its category was deleted, the restored task moves to Inbox. Already-live tasks succeed idempotently; unknown IDs are errors. Restoring a recurring occurrence does **not** restart its stopped series or restore other deleted occurrences.
+- **`parse_task`** — `{ text: string, now?: ISO timestamp, timeZone?: IANA zone }`. Returns `{ draft }` using live category examples and active projects, without saving or scheduling anything. Text is trimmed and limited to 1–2000 characters; the clock and settings/default zone are used when omitted. If AI is not configured, returns a clear tool error; review the draft before calling `create_task`.
+
+### Calendar tools
+
+- **`list_calendars`** — `{}`. Returns `{ accounts, calendars, writableCalendarIds }`; accounts also contain their calendars. Credentials, sync tokens, and channel secrets are never included. Writable IDs are Florida calendar IDs with `selected: true` and `accessRole: "owner" | "writer"`; unselected calendars cannot be written through Florida.
+- **`upsert_event`** — Required: `{ calendarId, summary, startAt, endAt, allDay }`; optional `id` must be a UUID (generated when omitted). Optional fields match the event HTTP API: `location`, `description`, tri-state `blocksDay`, `responseStatus` (`accepted`, `declined`, `tentative`, `needsAction`), `recurrence` (`{ frequency: daily|weekly|monthly|yearly, interval: 1..99, timeZone, count?: 1..999 }`), and `scope: "instance" | "series"`. Writes through Google, then returns `{ event, scheduling: { unscheduled, late } }`. Reuse a chosen UUID to retry creation safely. `endAt` must be after `startAt`; all-day boundaries are UTC midnights, with exclusive end. Recurrence is creation-only; series edits obey the same restrictions as the HTTP API. A tombstoned event is an error, not a resurrection.
+- **`delete_event`** — `{ id: string }`. Deletes through Google and returns `{ deleted: id, scheduling }`. Already-deleted events succeed; unknown IDs are errors.
+- **`set_event_blocks_day`** — `{ id: string, blocksDay: boolean | null }`. Local all-day override: true blocks, false frees, null restores automatic judgment. Returns `{ event, scheduling }`; timed or deleted events are errors. Does not write to Google.
+- **`sync_google_calendar`** — `{}`. Awaits a Google sync, then reschedules and returns `{ scheduling: { unscheduled, late } }`. Like the HTTP endpoint, production sync is best-effort: individual calendar failures are logged server-side, so a scheduling response does not confirm that every calendar refreshed. Without a configured sync dependency, it only reschedules; event create/delete tools instead return a configuration error. Event-write Google refusals become readable MCP tool errors.
 
 ### Managing projects
 
@@ -154,7 +179,7 @@ Florida derives `kind` (`"github" | "linear" | "slack" | "email" | "web"`) autom
 
 ## 4. Companion HTTP Endpoints (When MCP Tools Aren't Enough)
 
-Calendar event writes, all-day blocking overrides, Google Calendar sync, and server-side AI helpers are not yet exposed as MCP tools, but use the **exact same base URL and `Authorization: Bearer <FLORIDA_API_TOKEN>` header**:
+These HTTP counterparts use the **same base URL and `Authorization: Bearer <FLORIDA_API_TOKEN>` header**. Prefer the MCP tools above for event writes, blocking overrides, calendar sync, and task parsing; fresh AI brief generation remains HTTP-only:
 
 - **Create or update a Google Calendar event:**
   `PUT https://florida-swaraj.fly.dev/api/events/<uuid>`
