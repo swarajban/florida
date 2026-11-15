@@ -511,6 +511,51 @@ final class SmokeTests: XCTestCase {
     }
 
     @MainActor
+    func testAgendaListCarouselNavigation() {
+        continueAfterFailure = false
+        let calendar = Calendar.current
+        let demoNow = calendar.date(from: DateComponents(year: 2026, month: 11, day: 14, hour: 12))!
+        let saturday = calendar.startOfDay(for: demoNow)
+        let sunday = calendar.date(byAdding: .day, value: 1, to: saturday)!
+        let app = launch(demoNow: demoNow)
+        let heading = app.buttons["Go to day"]
+        XCTAssertTrue(heading.waitForExistence(timeout: 15))
+        capture(app, "agenda-carousel-start-light")
+
+        @MainActor
+        func assertDay(_ day: Date) {
+            let expected = day.formatted(.dateTime.weekday(.wide).month(.wide).day().year())
+            let cell = app.buttons[day.formatted(.dateTime.weekday(.wide).month(.wide).day())]
+            if heading.value as? String != expected || !cell.isHittable || !cell.isSelected {
+                print("Agenda paging: expected \(expected); actual \(heading.value ?? "nil"); heading \(heading.frame); cell \(cell.debugDescription)")
+                captureFailure(app, "agenda-carousel-assertion-failure")
+            }
+            XCTAssertEqual(heading.value as? String, expected)
+            XCTAssertTrue(cell.isHittable && cell.isSelected)
+        }
+
+        @MainActor
+        func swipe(forward: Bool, fast: Bool = false) {
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: forward ? 0.9 : 0.1, dy: 0.6))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: forward ? 0.1 : 0.9, dy: 0.6))
+            start.press(forDuration: 0.05, thenDragTo: end,
+                        withVelocity: fast ? .fast : XCUIGestureVelocity(rawValue: 150),
+                        thenHoldForDuration: fast ? 0 : 0.4)
+        }
+
+        swipe(forward: true)
+        assertDay(sunday)
+        XCTAssertFalse(app.buttons["agenda-brief-week"].exists)
+        swipe(forward: false)
+        assertDay(saturday)
+        swipe(forward: true, fast: true)
+        assertDay(sunday)
+        XCTAssertEqual(app.buttons.matching(identifier: "all-day-event-demo-event-offsite").count, 1)
+        capture(app, "agenda-carousel-next-light")
+        app.terminate()
+    }
+
+    @MainActor
     func testWeekStripCarouselNavigation() {
         continueAfterFailure = false
         let calendar = Calendar.current
