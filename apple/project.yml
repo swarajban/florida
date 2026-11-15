@@ -203,6 +203,9 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         LSApplicationCategoryType: public.app-category.productivity
+        CFBundleURLTypes:
+          - CFBundleURLName: com.swarajban.florida
+            CFBundleURLSchemes: [florida]
         # Only HTTPS, like the iOS app; no per-build export-compliance prompt.
         ITSAppUsesNonExemptEncryption: false
     entitlements:

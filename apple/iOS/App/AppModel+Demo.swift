@@ -12,6 +12,11 @@ extension AppModel {
         guard let database else { return }
         do {
             try database.apply(DemoData.syncResponse(now: now, calendar: calendar))
+            if UserDefaults.standard.bool(forKey: "uiDeepLinkFixture") {
+                try database.apply(SyncResponse(cursor: now.ISO8601Format(), tasks: [TaskItem(
+                    id: "abcdef01-2345-6789-abcd-ef0123456789", title: "Deep link fixture",
+                    durationMinutes: 30, priority: .medium, createdAt: now, updatedAt: now)]))
+            }
             // A block finished this morning, as a ghost (not persisted: demo runs are throwaway).
             if let start = calendar.date(bySettingHour: 8, minute: 30, second: 0, of: today) {
                 ghostBlocks = [GhostBlock(

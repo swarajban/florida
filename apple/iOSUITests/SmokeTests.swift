@@ -4,6 +4,29 @@ import UIKit
 /// Wait for real content before capturing; a fixed launch delay can silently save a blank screen.
 final class SmokeTests: XCTestCase {
     @MainActor
+    func testDeepLinkTaskAndAgendaNavigation() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-demoData", "YES", "-uiDeepLinkFixture", "YES", "-uiTab", "agenda",
+                               "-uiAppearance", "light", "-uiAgendaMode", "list"]
+        app.launch()
+        app.open(try XCTUnwrap(URL(string: "florida://tasks/abcdef01-2345-6789-abcd-ef0123456789")))
+        let title = app.textFields["Title"]
+        let opened = title.waitForExistence(timeout: 10)
+        captureFailure(app, "deep-link-task-state")
+        XCTAssertTrue(opened)
+        XCTAssertEqual(title.value as? String, "Deep link fixture")
+        app.buttons["task-editor-cancel"].tap()
+        app.open(try XCTUnwrap(URL(string: "florida://agenda/2028-02-29")))
+        let picker = app.buttons["Go to day"]
+        let jumped = picker.waitForExistence(timeout: 5)
+        captureFailure(app, "deep-link-agenda-state")
+        XCTAssertTrue(jumped)
+        XCTAssertTrue((picker.value as? String)?.contains("2028") == true)
+        app.terminate()
+    }
+
+    @MainActor
     func testCompactAgendaCoworkerOOO() {
         continueAfterFailure = false
         let app = launch(coworkerOOO: true)

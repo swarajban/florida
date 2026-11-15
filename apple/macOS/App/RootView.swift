@@ -121,6 +121,7 @@ struct RootView: View {
         .onAppear {
             model.start()
         }
+        .onOpenURL { model.openDeepLink($0) }
     }
 
     @ViewBuilder
