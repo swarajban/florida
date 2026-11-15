@@ -651,7 +651,10 @@ already loaded locally. The one-day grid snaps one day per swipe and retains
 its week strip; the three-day grid keeps its multi-day momentum. The hour gutter
 stays fixed, all-day events move with their dates, and horizontal navigation
 preserves the scrolled hour. Week-strip taps, Today and the date picker also
-position the carousel; Today brings the current time back into view.
+position the carousel; Today brings the current time back into view. In list and
+one-day modes, the date strip also tracks the finger through preloaded local
+weeks, snapping one week per swipe while keeping the same selected weekday.
+Crossing a week in the one-day grid keeps the date strip in sync.
 Large accessibility text can wrap these controls into additional rows without
 clipping. There is no separate brand toolbar. An
 event is a card filled in its calendar's color; a task block is the scheduler's

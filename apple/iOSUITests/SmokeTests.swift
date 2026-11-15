@@ -511,6 +511,141 @@ final class SmokeTests: XCTestCase {
     }
 
     @MainActor
+    func testWeekStripCarouselNavigation() {
+        continueAfterFailure = false
+        let calendar = Calendar.current
+        let demoNow = calendar.date(from: DateComponents(year: 2026, month: 11, day: 12, hour: 12))!
+        let today = calendar.startOfDay(for: demoNow)
+        for appearance in ["light", "dark"] {
+            for mode in ["day", "list"] {
+                let app = launch(appearance: appearance, mode: mode, demoNow: demoNow)
+                let heading = app.buttons["Go to day"]
+                XCTAssertTrue(heading.waitForExistence(timeout: 10))
+
+                @MainActor
+                func cell(_ day: Date) -> XCUIElement {
+                    app.buttons[day.formatted(.dateTime.weekday(.wide).month(.wide).day())]
+                }
+
+                func weekDays(_ day: Date) -> [Date] {
+                    let start = calendar.dateInterval(of: .weekOfYear, for: day)!.start
+                    return (0..<7).map { calendar.date(byAdding: .day, value: $0, to: start)! }
+                }
+
+                @MainActor
+                func assertDay(_ day: Date) {
+                    XCTAssertEqual(heading.value as? String, day.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
+                    XCTAssertEqual(app.buttons.matching(identifier: day.formatted(.dateTime.weekday(.wide).month(.wide).day())).count, 1)
+                    XCTAssertTrue(cell(day).isHittable)
+                    XCTAssertTrue(cell(day).isSelected)
+                    let week = weekDays(day)
+                    for date in week { XCTAssertTrue(cell(date).isHittable) }
+                    for delta in [-7, 7] {
+                        let offscreen = calendar.date(byAdding: .day, value: delta, to: day)!
+                        XCTAssertFalse(cell(offscreen).exists, "Preloaded weeks must not expose offscreen date buttons")
+                    }
+                }
+
+                @MainActor
+                func swipeWeek(from day: Date, forward: Bool, fast: Bool = false) {
+                    let week = weekDays(day)
+                    let first = cell(week.first!).frame
+                    let last = cell(week.last!).frame
+                    let start = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                        dx: forward ? last.midX : first.midX, dy: first.midY))
+                    let end = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                        dx: forward ? first.midX : last.midX, dy: first.midY))
+                    start.press(forDuration: 0.05, thenDragTo: end,
+                                withVelocity: fast ? .fast : XCUIGestureVelocity(rawValue: 150),
+                                thenHoldForDuration: fast ? 0 : 0.4)
+                }
+
+                assertDay(today)
+                capture(app, "week-carousel-\(mode)-today-\(appearance)")
+                var selected = today
+                for _ in 0..<3 {
+                    swipeWeek(from: selected, forward: true, fast: true)
+                    selected = calendar.date(byAdding: .day, value: 7, to: selected)!
+                    assertDay(selected)
+                }
+                capture(app, "week-carousel-\(mode)-next-\(appearance)")
+                if mode == "day" {
+                    let hours = app.scrollViews["day-grid-hours"].frame.intersection(app.frame)
+                    app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                        dx: app.frame.width - 20, dy: hours.midY)).tap()
+                    XCTAssertTrue(app.textFields["event-quick-add-input"].waitForExistence(timeout: 5))
+                    app.buttons["event-quick-add-details"].tap()
+                    XCTAssertTrue(app.navigationBars["New Event"].waitForExistence(timeout: 5))
+                    XCTAssertTrue(app.datePickers["event-start"].buttons[
+                        selected.formatted(.dateTime.month(.abbreviated).day().year())].exists)
+                    app.buttons["Cancel"].tap()
+                    assertDay(selected)
+                }
+                for _ in 0..<4 {
+                    swipeWeek(from: selected, forward: false)
+                    selected = calendar.date(byAdding: .day, value: -7, to: selected)!
+                    assertDay(selected)
+                }
+                capture(app, "week-carousel-\(mode)-previous-\(appearance)")
+                let tapped = calendar.date(byAdding: .day, value: 1, to: selected)!
+                cell(tapped).tap()
+                assertDay(tapped)
+                app.buttons["Today"].tap()
+                assertDay(today)
+
+                heading.tap()
+                let edgeDay = calendar.date(byAdding: .day, value: 14, to: today)!
+                let choice = app.datePickers.buttons.matching(NSPredicate(
+                    format: "label CONTAINS %@", edgeDay.formatted(.dateTime.weekday(.wide).month(.wide).day()))).firstMatch
+                XCTAssertTrue(choice.waitForExistence(timeout: 5))
+                choice.tap()
+                assertDay(edgeDay)
+                swipeWeek(from: edgeDay, forward: true)
+                assertDay(calendar.date(byAdding: .day, value: 7, to: edgeDay)!)
+                app.buttons["Today"].tap()
+                assertDay(today)
+
+                if mode == "day" {
+                    let saturday = calendar.date(byAdding: .day, value: 2, to: today)!
+                    cell(saturday).tap()
+                    assertDay(saturday)
+                    let hours = app.scrollViews["day-grid-hours"].frame.intersection(app.frame)
+                    let right = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                        dx: app.frame.width * 0.92, dy: hours.midY))
+                    let left = right.withOffset(CGVector(dx: -app.frame.width * 0.72, dy: 0))
+                    right.press(forDuration: 0.05, thenDragTo: left, withVelocity: .slow, thenHoldForDuration: 0.4)
+                    assertDay(calendar.date(byAdding: .day, value: 1, to: saturday)!)
+                    capture(app, "week-carousel-cross-boundary-\(appearance)")
+                    left.press(forDuration: 0.05, thenDragTo: right, withVelocity: .slow, thenHoldForDuration: 0.4)
+                    assertDay(saturday)
+                    app.buttons["Today"].tap()
+                    assertDay(today)
+                    let design = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Design review: scheduler v2")).firstMatch
+                    positionInGrid(design, in: app)
+                    XCTAssertTrue(design.isHittable, "Today must restore the matching grid content after week navigation")
+                }
+                app.terminate()
+            }
+            for accessibilityText in [false, true] {
+                let app = launch(appearance: appearance, mode: "list", largeText: true,
+                                 demoNow: demoNow, accessibilityText: accessibilityText)
+                let selected = app.buttons[today.formatted(.dateTime.weekday(.wide).month(.wide).day())]
+                XCTAssertTrue(selected.waitForExistence(timeout: 10))
+                XCTAssertTrue(selected.isHittable)
+                for control in [app.buttons["Go to day"], app.buttons["Today"], app.buttons["agenda-day-kind"],
+                                app.buttons["agenda-add"], app.buttons["agenda-calendars"], app.segmentedControls["agenda-mode"]] {
+                    XCTAssertTrue(control.isHittable)
+                    XCTAssertGreaterThanOrEqual(control.frame.minX, 0)
+                    XCTAssertLessThanOrEqual(control.frame.maxX, app.frame.maxX)
+                    XCTAssertLessThan(control.frame.maxY, selected.frame.minY)
+                }
+                capture(app, "week-carousel-large-text-\(accessibilityText)-\(appearance)")
+                app.terminate()
+            }
+        }
+    }
+
+    @MainActor
     func testOneDayCarouselNavigation() {
         continueAfterFailure = false
         let calendar = Calendar.current

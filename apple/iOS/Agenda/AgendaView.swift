@@ -40,16 +40,12 @@ struct AgendaView: View {
             VStack(spacing: 0) {
                 dayHeading
                 if mode != .threeDays {
-                    ZStack {
-                        WeekStrip(
-                            selectedDay: model.selectedDay,
-                            today: model.today,
-                            calendar: model.calendar,
-                            onSelect: { model.select(day: $0) },
-                            onShiftWeek: { model.shiftDay(by: 7 * $0) })
-                        .id(DateNavigation.startOfWeek(for: shownDay ?? model.selectedDay, calendar: model.calendar))
-                        .transition(slide)
-                    }
+                    WeekStrip(
+                        selectedDay: model.selectedDay,
+                        today: model.today,
+                        calendar: model.calendar,
+                        onSelect: { model.select(day: $0) },
+                        onShiftWeek: { model.shiftDay(by: 7 * $0) })
                 }
                 Divider()
                 content
