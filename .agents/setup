@@ -11,7 +11,7 @@ step() { printf '\n==> %s (%s)\n' "$1" "$(date +%T)"; }
 
 step "System packages for the Swift toolchain"
 missing=()
-for pkg in binutils-gold pkg-config libedit-dev libpython3-dev zip libsqlite3-dev libcurl4-openssl-dev libxml2-dev; do
+for pkg in binutils-gold pkg-config libedit-dev libpython3-dev zip libsqlite3-dev libcurl4-openssl-dev libxml2-dev gnupg2 libz3-dev; do
   dpkg -s "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
 done
 if [ "${#missing[@]}" -gt 0 ]; then
@@ -34,6 +34,11 @@ if [ ! -x "$SWIFTLY_HOME/toolchains/$SWIFT_VERSION/usr/bin/swift" ]; then
 else
   echo "already installed"
 fi
+
+mkdir -p "$HOME/.local/bin"
+for tool in swift swiftc; do
+  ln -sfn "$SWIFTLY_HOME/toolchains/$SWIFT_VERSION/usr/bin/$tool" "$HOME/.local/bin/$tool"
+done
 
 marker="# florida: swift toolchain"
 for profile in "$HOME/.bash_profile" "$HOME/.profile"; do

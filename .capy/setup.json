@@ -1,0 +1,18 @@
+{
+  "$schema": "https://api.capy.ai/schemas/setup.v1.json",
+  "format_version": 1,
+  "scripts": {
+    "initialize": "set -euo pipefail\nbash .agents/setup\npnpm build\n(cd apple/FloridaCore && swift build --build-tests)\n(cd apple/FloridaKit && swift build --build-tests)\nbash .agents/refresh --record",
+    "refresh": "set -euo pipefail\nbash .agents/refresh"
+  },
+  "timeouts": { "initialize": 1800, "refresh": 300 },
+  "startup": [],
+  "commands": [
+    { "name": "build", "command": "pnpm build" },
+    { "name": "typecheck", "command": "pnpm typecheck" },
+    { "name": "test", "command": "pnpm test" },
+    { "name": "swift-core", "command": "cd apple/FloridaCore && swift build --build-tests && swift test" },
+    { "name": "swift-kit", "command": "cd apple/FloridaKit && swift build --build-tests && swift test" },
+    { "name": "dev", "command": "pnpm dev", "port": 8080 }
+  ]
+}
