@@ -81,6 +81,7 @@ export interface AppDeps {
   webhookDebounceMs?: number
   /** Interval between SSE keep-alive comments. Default 25 s. */
   sseHeartbeatMs?: number
+  calendarPrefetchTimeoutMs?: number
 }
 
 /** Columns of `google_accounts` that may leave the server (never the tokens). */
@@ -667,22 +668,45 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
   app.patch('/api/calendars/:id', async (c) => {
     const id = c.req.param('id')
     const body = calendarPatch.parse(await c.req.json())
-    const now = new Date()
     const calendar = await db.transaction(async (tx) => {
       const [current] = await tx.select().from(calendars).where(eq(calendars.id, id)).for('update')
       if (current === undefined) return undefined
       const activated = !current.selected && !current.blocksScheduling && (body.selected === true || body.blocksScheduling === true)
       const [row] = await tx
         .update(calendars)
-        .set({ ...body, ...(activated ? { syncToken: null } : {}), updatedAt: writeTimestamp })
+        .set({ ...body, ...(activated ? { syncToken: null } : {}), updatedAt: sql`greatest(${writeTimestamp}, ${calendars.updatedAt} + interval '1 millisecond')` })
         .where(eq(calendars.id, id))
         .returning(publicCalendarColumns)
       return row === undefined ? undefined : { row, activated }
     })
     if (calendar === undefined) throw notFound(`calendar ${id}`)
-    const scheduling = await reschedule()
-    if (calendar.activated) void runCalendarSync(id)
-    return c.json({ calendar: calendar.row, scheduling })
+    if (calendar.activated) {
+      const controller = new AbortController()
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        await Promise.race([
+          sync.prefetchCalendar(id, controller.signal),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              controller.abort()
+              reject(new Error('calendar prefetch timed out'))
+            }, deps.calendarPrefetchTimeoutMs ?? 4_000)
+          }),
+        ])
+      } catch (err) {
+        console.warn(`[google] near-window prefetch of ${id} failed:`, err)
+      } finally {
+        clearTimeout(timer)
+        controller.abort()
+      }
+    }
+    try {
+      const scheduling = await reschedule()
+      const [latest] = await db.select(publicCalendarColumns).from(calendars).where(eq(calendars.id, id))
+      return c.json({ calendar: latest ?? calendar.row, scheduling })
+    } finally {
+      if (calendar.activated) void runCalendarSync(id)
+    }
   })
 
   app.post('/api/google/sync', async (c) => {
@@ -778,6 +802,8 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
       if (calendar === undefined || (!calendar.selected && !calendar.blocksScheduling)) return
       await sync.syncCalendar(calendar)
       await reschedule('rescheduled due to Google Calendar sync')
+      const [latest] = await db.select().from(calendars).where(eq(calendars.id, calendarId)).limit(1)
+      if (latest !== undefined && (latest.selected || latest.blocksScheduling)) await sync.ensureWatch?.(latest)
     } catch (err) {
       console.error(`[webhook] sync of calendar ${calendarId} failed:`, err)
     }

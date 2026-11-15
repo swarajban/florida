@@ -142,7 +142,7 @@ export interface GoogleEventWrite {
 
 export type ListEventsParams =
   | { syncToken: string; pageToken?: string }
-  | { timeMin: string; timeMax: string; pageToken?: string }
+  | { timeMin: string; timeMax: string; pageToken?: string; showDeleted?: boolean }
 
 export interface ListEventsResult {
   items: GoogleEvent[]
@@ -241,6 +241,7 @@ export async function listEvents(
   accessToken: string,
   calendarId: string,
   params: ListEventsParams,
+  signal?: AbortSignal,
 ): Promise<ListEventsResult> {
   const query = new URLSearchParams({ singleEvents: 'true', maxResults: '2500' })
   if ('syncToken' in params) {
@@ -249,11 +250,13 @@ export async function listEvents(
   } else {
     query.set('timeMin', params.timeMin)
     query.set('timeMax', params.timeMax)
+    if (params.showDeleted !== undefined) query.set('showDeleted', String(params.showDeleted))
   }
   if (params.pageToken !== undefined) query.set('pageToken', params.pageToken)
   const page = await apiFetch<{ items?: GoogleEvent[]; nextPageToken?: string; nextSyncToken?: string }>(
     accessToken,
     `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events?${query.toString()}`,
+    signal === undefined ? {} : { signal },
   )
   const result: ListEventsResult = { items: page.items ?? [] }
   if (page.nextPageToken !== undefined) result.nextPageToken = page.nextPageToken

@@ -72,6 +72,7 @@ export class FakeSync implements CalendarSyncService {
   async syncCalendar(calendar: CalendarRow): Promise<void> {
     this.syncCalendarCalls.push(calendar)
   }
+  async prefetchCalendar(_calendarId: string, _signal: AbortSignal): Promise<void> {}
   async syncAll(): Promise<void> {
     this.syncAllCalls += 1
   }
