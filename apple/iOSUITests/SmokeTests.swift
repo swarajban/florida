@@ -537,6 +537,10 @@ final class SmokeTests: XCTestCase {
 
                 @MainActor
                 func assertDay(_ day: Date) {
+                    if heading.value as? String != day.formatted(.dateTime.weekday(.wide).month(.wide).day().year())
+                        || !cell(day).isHittable {
+                        captureFailure(app, "week-carousel-failure-\(mode)-\(appearance)")
+                    }
                     XCTAssertEqual(heading.value as? String, day.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
                     XCTAssertEqual(app.buttons.matching(identifier: day.formatted(.dateTime.weekday(.wide).month(.wide).day())).count, 1)
                     XCTAssertTrue(cell(day).isHittable, cell(day).debugDescription)
@@ -668,6 +672,9 @@ final class SmokeTests: XCTestCase {
 
             @MainActor
             func assertDay(_ day: Date) {
+                if !app.buttons[day.formatted(.dateTime.weekday(.wide).month(.wide).day())].isHittable {
+                    captureFailure(app, "one-day-carousel-failure-\(appearance)")
+                }
                 XCTAssertEqual(heading.value as? String, day.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
                 let cell = app.buttons[day.formatted(.dateTime.weekday(.wide).month(.wide).day())]
                 XCTAssertTrue(cell.isHittable)
@@ -1525,6 +1532,15 @@ final class SmokeTests: XCTestCase {
         let element = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
         XCTAssertTrue(element.waitForExistence(timeout: 20), "Missing \(text)")
+    }
+
+    @MainActor
+    private func captureFailure(_ app: XCUIApplication, _ name: String) {
+        capture(app, name)
+        let attachment = XCTAttachment(string: app.debugDescription)
+        attachment.name = "\(name)-hierarchy"
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     @MainActor
