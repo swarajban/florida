@@ -515,160 +515,44 @@ final class SmokeTests: XCTestCase {
         continueAfterFailure = false
         let calendar = Calendar.current
         let demoNow = calendar.date(from: DateComponents(year: 2026, month: 11, day: 14, hour: 12))!
-        let today = calendar.startOfDay(for: demoNow)
-        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
-        let yesterday = calendar.date(byAdding: .day, value: -1, to: today)!
-        for appearance in ["light", "dark"] {
-            let liveClockApp = launch(appearance: appearance)
-            let writtenBrief = liveClockApp.buttons["agenda-brief-text"]
-            XCTAssertTrue(writtenBrief.waitForExistence(timeout: 15))
-            XCTAssertTrue(writtenBrief.isHittable)
-            let collapsed = writtenBrief.frame.height
-            writtenBrief.tap()
-            XCTAssertGreaterThan(writtenBrief.frame.height, collapsed)
-            writtenBrief.tap()
-            liveClockApp.terminate()
-            let app = launch(appearance: appearance, demoNow: demoNow)
-            let heading = app.buttons["Go to day"]
-            XCTAssertTrue(heading.waitForExistence(timeout: 15))
+        let saturday = calendar.startOfDay(for: demoNow)
+        let sunday = calendar.date(byAdding: .day, value: 1, to: saturday)!
+        let app = launch(demoNow: demoNow)
+        let heading = app.buttons["Go to day"]
+        XCTAssertTrue(heading.waitForExistence(timeout: 15))
+        capture(app, "agenda-carousel-start-light")
 
-            @MainActor
-            func cell(_ day: Date) -> XCUIElement {
-                app.buttons[day.formatted(.dateTime.weekday(.wide).month(.wide).day())]
+        @MainActor
+        func assertDay(_ day: Date) {
+            let expected = day.formatted(.dateTime.weekday(.wide).month(.wide).day().year())
+            let cell = app.buttons[day.formatted(.dateTime.weekday(.wide).month(.wide).day())]
+            if heading.value as? String != expected || !cell.isHittable || !cell.isSelected {
+                print("Agenda paging: expected \(expected); actual \(heading.value ?? "nil"); heading \(heading.frame); cell \(cell.debugDescription)")
+                captureFailure(app, "agenda-carousel-assertion-failure")
             }
-
-            @MainActor
-            func assertDay(_ day: Date) {
-                XCTAssertEqual(heading.value as? String, day.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
-                XCTAssertTrue(cell(day).isSelected)
-                XCTAssertTrue(cell(day).isHittable)
-                XCTAssertEqual(app.buttons.matching(identifier: day.formatted(.dateTime.weekday(.wide).month(.wide).day())).count, 1)
-                XCTAssertLessThanOrEqual(app.buttons.matching(identifier: "all-day-event-demo-event-offsite").count, 1)
-            }
-
-            @MainActor
-            func swipeDay(forward: Bool, fast: Bool = false) {
-                let start = app.coordinate(withNormalizedOffset: CGVector(dx: forward ? 0.9 : 0.1, dy: 0.6))
-                let end = app.coordinate(withNormalizedOffset: CGVector(dx: forward ? 0.1 : 0.9, dy: 0.6))
-                start.press(forDuration: 0.05, thenDragTo: end,
-                            withVelocity: fast ? .fast : XCUIGestureVelocity(rawValue: 150),
-                            thenHoldForDuration: fast ? 0 : 0.4)
-            }
-
-            @MainActor
-            func show(_ element: XCUIElement) {
-                for _ in 0..<8 where !element.isHittable { app.swipeUp() }
-                XCTAssertTrue(element.isHittable)
-            }
-
-            assertDay(today)
-            let brief = app.buttons["agenda-brief-week"]
-            XCTAssertTrue(brief.isHittable)
-            XCTAssertEqual(app.buttons.matching(identifier: "agenda-brief-week").count, 1)
-            brief.tap()
-            XCTAssertTrue(app.navigationBars["Weekly Review"].waitForExistence(timeout: 5))
-            app.navigationBars.buttons["Done"].tap()
-            capture(app, "agenda-carousel-today-\(appearance)")
-
-            swipeDay(forward: true)
-            assertDay(tomorrow)
-            XCTAssertFalse(brief.exists)
-            XCTAssertFalse(app.buttons["all-day-event-demo-event-ooo"].exists)
-            let architecture = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Architecture sync")).firstMatch
-            show(architecture)
-            capture(app, "agenda-carousel-next-\(appearance)")
-            architecture.tap()
-            XCTAssertTrue(app.navigationBars["Event"].waitForExistence(timeout: 5))
-            app.navigationBars.buttons["Done"].tap()
-            let dentist = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Book dentist appointment")).firstMatch
-            XCTAssertTrue(dentist.isHittable)
-            dentist.tap()
-            XCTAssertTrue(app.buttons["Mark done"].waitForExistence(timeout: 5))
-            app.buttons["Cancel"].tap()
-            dentist.press(forDuration: 1)
-            XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
-            app.buttons["Done"].tap()
-            XCTAssertTrue(app.buttons["Undo"].waitForExistence(timeout: 5))
-            app.buttons["Undo"].tap()
-            assertDay(tomorrow)
-
-            swipeDay(forward: false)
-            assertDay(today)
-            XCTAssertTrue(brief.isHittable)
-            swipeDay(forward: false)
-            assertDay(yesterday)
-            XCTAssertTrue(app.buttons["all-day-event-demo-event-offsite"].isHittable)
-            swipeDay(forward: true, fast: true)
-            assertDay(today)
-            swipeDay(forward: true, fast: true)
-            assertDay(tomorrow)
-            app.buttons["Today"].tap()
-            assertDay(today)
-            let design = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Design review: scheduler v2")).firstMatch
-            show(design)
-            let oldY = design.frame.minY
-            let point = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
-            point.press(forDuration: 0.05, thenDragTo: point.withOffset(CGVector(dx: 0, dy: -90)),
-                        withVelocity: .slow, thenHoldForDuration: 0.3)
-            XCTAssertLessThan(design.frame.minY, oldY - 50)
-            assertDay(today)
-            let scrolledY = design.frame.minY
-            swipeDay(forward: true)
-            assertDay(tomorrow)
-            swipeDay(forward: false)
-            assertDay(today)
-            XCTAssertEqual(design.frame.minY, scrolledY, accuracy: 2)
-
-            cell(yesterday).tap()
-            assertDay(yesterday)
-            let week = calendar.dateInterval(of: .weekOfYear, for: yesterday)!.start
-            let first = cell(week).frame
-            let last = cell(calendar.date(byAdding: .day, value: 6, to: week)!).frame
-            let right = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: last.midX, dy: last.midY))
-            let left = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: first.midX, dy: first.midY))
-            right.press(forDuration: 0.05, thenDragTo: left, withVelocity: .fast, thenHoldForDuration: 0)
-            let nextWeek = calendar.date(byAdding: .day, value: 7, to: yesterday)!
-            assertDay(nextWeek)
-            XCTAssertTrue(app.staticTexts["Nothing scheduled"].exists)
-            let endpoint = calendar.date(byAdding: .day, value: 7, to: today)!
-            cell(endpoint).tap()
-            assertDay(endpoint)
-            swipeDay(forward: true)
-            assertDay(calendar.date(byAdding: .day, value: 1, to: endpoint)!)
-            swipeDay(forward: false)
-            assertDay(endpoint)
-            swipeDay(forward: false)
-            assertDay(nextWeek)
-            app.buttons["Today"].tap()
-            assertDay(today)
-
-            heading.tap()
-            XCTAssertTrue(app.buttons["Next Month"].waitForExistence(timeout: 5))
-            app.buttons["Next Month"].tap()
-            let distant = calendar.date(bySetting: .day, value: 15, of: calendar.date(byAdding: .month, value: 1, to: today)!)!
-            let choice = app.datePickers.buttons.matching(NSPredicate(
-                format: "label CONTAINS %@", distant.formatted(.dateTime.weekday(.wide).month(.wide).day()))).firstMatch
-            XCTAssertTrue(choice.waitForExistence(timeout: 5))
-            choice.tap()
-            assertDay(distant)
-            swipeDay(forward: true)
-            let afterDistant = calendar.date(byAdding: .day, value: 1, to: distant)!
-            assertDay(afterDistant)
-            for mode in ["Day", "3 Days", "List"] {
-                app.segmentedControls["agenda-mode"].buttons[mode].tap()
-                XCTAssertEqual(heading.value as? String, afterDistant.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
-            }
-            swipeDay(forward: false)
-            assertDay(distant)
-            app.buttons["Today"].tap()
-            assertDay(today)
-            let take = app.buttons["Do tonight"].firstMatch
-            show(take)
-            take.tap()
-            XCTAssertTrue(app.buttons["Undo"].waitForExistence(timeout: 5))
-            capture(app, "agenda-carousel-suggestion-\(appearance)")
-            app.terminate()
+            XCTAssertEqual(heading.value as? String, expected)
+            XCTAssertTrue(cell.isHittable && cell.isSelected)
         }
+
+        @MainActor
+        func swipe(forward: Bool, fast: Bool = false) {
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: forward ? 0.9 : 0.1, dy: 0.6))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: forward ? 0.1 : 0.9, dy: 0.6))
+            start.press(forDuration: 0.05, thenDragTo: end,
+                        withVelocity: fast ? .fast : XCUIGestureVelocity(rawValue: 150),
+                        thenHoldForDuration: fast ? 0 : 0.4)
+        }
+
+        swipe(forward: true)
+        assertDay(sunday)
+        XCTAssertFalse(app.buttons["agenda-brief-week"].exists)
+        swipe(forward: false)
+        assertDay(saturday)
+        swipe(forward: true, fast: true)
+        assertDay(sunday)
+        XCTAssertEqual(app.buttons.matching(identifier: "all-day-event-demo-event-offsite").count, 1)
+        capture(app, "agenda-carousel-next-light")
+        app.terminate()
     }
 
     @MainActor

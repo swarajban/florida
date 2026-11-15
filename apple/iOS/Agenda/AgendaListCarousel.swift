@@ -55,7 +55,7 @@ struct AgendaListCarousel<Page: View>: View {
             if phase == .interacting { isPanning = true }
             guard phase == .idle, isPanning, width > 0 else { return }
             isPanning = false
-            let index = min(days.count - 1, max(0, Int((offset / width).rounded())))
+            let index = DayPaging.settledIndex(offset: Double(offset), pageWidth: Double(width), pageCount: days.count)
             let day = days[index]
             model.select(day: day)
             if index == 0 || index == days.count - 1 { recenter(on: day, width: width) }
@@ -97,9 +97,8 @@ private struct AgendaDayScrollTarget: ScrollTargetBehavior {
 
     func updateTarget(_ target: inout ScrollTarget, context: TargetContext) {
         guard pageWidth > 0 else { return }
-        let start = (context.originalTarget.rect.minX / pageWidth).rounded() * pageWidth
-        let proposed = (target.rect.minX / pageWidth).rounded() * pageWidth
-        let x = min(max(proposed, start - pageWidth), start + pageWidth)
-        target.rect.origin.x = min(max(0, x), max(0, context.contentSize.width - context.containerSize.width))
+        target.rect.origin.x = CGFloat(DayPaging.targetOffset(
+            proposed: Double(target.rect.minX), original: Double(context.originalTarget.rect.minX),
+            pageWidth: Double(pageWidth), pageCount: Int((context.contentSize.width / pageWidth).rounded())))
     }
 }
