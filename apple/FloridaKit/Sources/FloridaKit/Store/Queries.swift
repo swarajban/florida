@@ -148,6 +148,7 @@ extension AppDatabase {
             SELECT unscheduled.* FROM unscheduled
             LEFT JOIN task ON task.id = unscheduled.taskId
             WHERE COALESCE(task.someday, 0) = 0
+              AND (COALESCE(task.waitingOn, '') = '' OR task.waitingUntil IS NOT NULL)
             ORDER BY unscheduled.taskId
             """)
     }
@@ -163,6 +164,8 @@ extension AppDatabase {
             SELECT optionalPlacement.* FROM optionalPlacement
             LEFT JOIN task ON task.id = optionalPlacement.taskId
             WHERE COALESCE(task.someday, 0) = 0
+              AND (COALESCE(task.waitingOn, '') = '' OR
+                   (task.waitingUntil IS NOT NULL AND optionalPlacement.startAt >= task.waitingUntil))
             ORDER BY optionalPlacement.startAt, optionalPlacement.taskId
             """)
     }
@@ -198,6 +201,8 @@ extension AppDatabase {
             SELECT placement.* FROM placement
             LEFT JOIN task ON task.id = placement.taskId
             WHERE COALESCE(task.someday, 0) = 0
+              AND (COALESCE(task.waitingOn, '') = '' OR
+                   (task.waitingUntil IS NOT NULL AND placement.pinned = 0 AND placement.startAt >= task.waitingUntil))
             ORDER BY placement.startAt
             """)
     }
@@ -232,6 +237,8 @@ extension AppDatabase {
             SELECT placement.* FROM placement
             LEFT JOIN task ON task.id = placement.taskId
             WHERE placement.startAt < ? AND placement.endAt > ? AND COALESCE(task.someday, 0) = 0
+              AND (COALESCE(task.waitingOn, '') = '' OR
+                   (task.waitingUntil IS NOT NULL AND placement.pinned = 0 AND placement.startAt >= task.waitingUntil))
             ORDER BY placement.startAt
             """, arguments: [range.upperBound, range.lowerBound])
     }
@@ -368,9 +375,10 @@ extension AppDatabase {
         let previous = try TaskItem.fetchOne(db, id: task.id)
         let pending = try PendingWrite.filter(Column("entity") == "task" && Column("entityId") == task.id).fetchOne(db)
         var local = task
+        try local.normalizeMetadata()
         let dueChanged: Bool = local.dueAt?.databaseValue != previous?.dueAt?.databaseValue
         let startChanged: Bool = local.startAt?.databaseValue != previous?.startAt?.databaseValue
-        let pinChanged: Bool = local.pinnedStart?.databaseValue != previous?.pinnedStart?.databaseValue
+        let pinChanged: Bool = !local.isWaiting && local.pinnedStart?.databaseValue != previous?.pinnedStart?.databaseValue
         let datesChanged = dueChanged || startChanged || pinChanged
         if local.someday && (previous?.someday != true || datesChanged) {
             local.dueAt = nil
@@ -426,11 +434,14 @@ extension AppDatabase {
             try UnscheduledTask.filter(Column("taskId") == local.id).deleteAll(db)
             try OptionalPlacement.filter(Column("taskId") == local.id).deleteAll(db)
         }
-        if local.someday {
+        let waitingChanged = local.waitingOn != previous?.waitingOn
+            || local.waitingUntil?.databaseValue != previous?.waitingUntil?.databaseValue
+        if local.someday || waitingChanged {
             try Placement.filter(Column("taskId") == local.id).deleteAll(db)
             try OptionalPlacement.filter(Column("taskId") == local.id).deleteAll(db)
             try UnscheduledTask.filter(Column("taskId") == local.id).deleteAll(db)
-        } else if local.pinnedStart != previous?.pinnedStart || (local.pinnedStart != nil && local.remainingMinutes != previous?.remainingMinutes) || !local.isOpen {
+        }
+        if local.pinnedStart != previous?.pinnedStart || (local.pinnedStart != nil && local.remainingMinutes != previous?.remainingMinutes) || !local.isOpen {
             try placePin(of: local, in: db, now: now)
         }
         if let start = local.startAt {
@@ -441,7 +452,7 @@ extension AppDatabase {
         }
     }
 
-    private static let taskSchedulingFields: Set<String> = ["categoryId", "durationMinutes", "minChunkMinutes", "priority", "deadlineType", "dueAt", "startAt", "scheduleId", "context", "projectId", "attention", "pinnedStart", "completedMinutes", "completedAt", "recurrence", "someday"]
+    private static let taskSchedulingFields: Set<String> = ["categoryId", "durationMinutes", "minChunkMinutes", "priority", "deadlineType", "dueAt", "startAt", "scheduleId", "context", "projectId", "attention", "pinnedStart", "completedMinutes", "completedAt", "recurrence", "someday", "waitingOn", "waitingUntil"]
 
     /// A pinned task sits at exactly its pinned start for its remaining minutes, so its block does
     /// not have to wait for the server: pinning shows it there at once, and unpinning takes it off
@@ -449,7 +460,7 @@ extension AppDatabase {
     /// block like every other row; other tasks keep their blocks until then.
     private static func placePin(of task: TaskItem, in db: Database, now: Date) throws {
         try Placement.filter(Column("taskId") == task.id).deleteAll(db)
-        guard let start = task.pinnedStart, task.isOpen, !task.someday, task.remainingMinutes > 0 else { return }
+        guard let start = task.pinnedStart, task.isOpen, !task.someday, !task.isWaiting, task.remainingMinutes > 0 else { return }
         if let id = task.projectId, let project = try Project.fetchOne(db, id: id), project.status != .active || project.deletedAt != nil { return }
         try UnscheduledTask.filter(Column("taskId") == task.id).deleteAll(db)
         try Placement(
@@ -484,6 +495,9 @@ extension AppDatabase {
         track("title", \.title)
         track("notes", \.notes)
         track("source", \.source)
+        track("tags", \.tags)
+        track("waitingOn", \.waitingOn)
+        trackDate("waitingUntil", \.waitingUntil)
         track("durationMinutes", \.durationMinutes)
         track("minChunkMinutes", \.minChunkMinutes)
         track("priority", \.priority)
@@ -911,9 +925,21 @@ extension AppDatabase {
                 try UnscheduledTask.filter(Column("taskId") == task.id).deleteAll(db)
                 try OptionalPlacement.filter(Column("taskId") == task.id).deleteAll(db)
             }
+            if task.isWaiting {
+                if let until = task.waitingUntil {
+                    try Placement.filter(Column("taskId") == task.id && (Column("pinned") == true || Column("startAt") < until)).deleteAll(db)
+                    try OptionalPlacement.filter(Column("taskId") == task.id && Column("startAt") < until).deleteAll(db)
+                } else {
+                    try Placement.filter(Column("taskId") == task.id).deleteAll(db)
+                    try OptionalPlacement.filter(Column("taskId") == task.id).deleteAll(db)
+                    try UnscheduledTask.filter(Column("taskId") == task.id).deleteAll(db)
+                }
+            }
             let blocks = try Placement.filter(Column("taskId") == task.id).fetchAll(db)
             let agrees = if task.someday {
                 blocks.isEmpty
+            } else if task.isWaiting {
+                true
             } else if let pin = task.pinnedStart {
                 blocks.count == 1 && blocks[0].pinned && blocks[0].startAt == pin
                     && blocks[0].endAt == pin.addingTimeInterval(TimeInterval(task.remainingMinutes) * 60) && task.isOpen

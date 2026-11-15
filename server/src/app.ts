@@ -1,6 +1,6 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { SchedulerResult } from '@florida/scheduler'
-import { and, eq, getTableColumns, gt, isNotNull, isNull, or } from 'drizzle-orm'
+import { and, eq, getTableColumns, gt, isNotNull, isNull, or, sql } from 'drizzle-orm'
 import type { PgColumn } from 'drizzle-orm/pg-core'
 import { Hono } from 'hono'
 import type { MiddlewareHandler } from 'hono'
@@ -59,6 +59,7 @@ import {
   taskBody,
   taskContext,
   taskPatch,
+  taskPlacementVisible,
   upsertTask,
 } from './tasks.js'
 import { badRequest, calendarDate, clock, isoInstant, notFound, timeZone } from './validation.js'
@@ -270,11 +271,13 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
       ))
     // Small tables without tombstones: always sent in full so clients can replace them wholesale.
     const placementRows = await db.select(getTableColumns(placements)).from(placements)
-      .innerJoin(tasks, eq(placements.taskId, tasks.id)).where(eq(tasks.someday, false))
+      .innerJoin(tasks, eq(placements.taskId, tasks.id)).where(taskPlacementVisible(placements.startAt, placements.pinned))
     const optionalPlacementRows = await db.select(getTableColumns(optionalPlacements)).from(optionalPlacements)
-      .innerJoin(tasks, eq(optionalPlacements.taskId, tasks.id)).where(eq(tasks.someday, false))
+      .innerJoin(tasks, eq(optionalPlacements.taskId, tasks.id)).where(taskPlacementVisible(optionalPlacements.startAt))
     const unscheduledRows = await db.select(getTableColumns(unscheduled)).from(unscheduled)
-      .innerJoin(tasks, eq(unscheduled.taskId, tasks.id)).where(eq(tasks.someday, false))
+      .innerJoin(tasks, eq(unscheduled.taskId, tasks.id)).where(and(eq(tasks.someday, false), or(
+        isNull(tasks.waitingOn), sql`${tasks.waitingUntil} < ${unscheduled.computedAt} + ${config.HORIZON_DAYS} * interval '1 day'`,
+      )))
     const projectPlacementRows = await db.select().from(projectPlacements)
     const routineOccurrenceRows = await db.select().from(routineOccurrences)
     const [summary] = await db.select().from(planSummary)

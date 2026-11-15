@@ -67,14 +67,14 @@ Every task/project/day mutation automatically reruns the scheduler on the server
 ### Time zone and date conventions
 - **Home time zone:** `America/Los_Angeles`.
 - **Calendar dates** (`date`, `startDate`, `endDate`): `YYYY-MM-DD` in `America/Los_Angeles` (e.g. `"2026-11-16"`).
-- **Timestamps** (`dueAt`, `startAt`, `pinnedStart`, `completedAt`): ISO 8601 UTC strings (e.g. `"2026-11-18T01:00:00.000Z"`).
+- **Timestamps** (`dueAt`, `startAt`, `pinnedStart`, `completedAt`, `waitingUntil`): ISO 8601 UTC strings (e.g. `"2026-11-18T01:00:00.000Z"`). MCP also accepts `waitingUntil: "YYYY-MM-DD"`, meaning midnight at the start of that day in the user's settings time zone. HTTP writes require an ISO instant.
 - **Day-only due dates:** When Swaraj specifies a date without a clock time (e.g. *"due Tuesday"*), set `dueAt` to **17:00 local time** in `America/Los_Angeles` (for example `2026-11-17T17:00:00-08:00` → `"2026-11-18T01:00:00.000Z"`). Florida's apps display 17:00-local due dates cleanly as day-only labels.
 
 ### Categories, Inbox ("needs triage"), and Someday
 1. **Always call `list_categories` first** in a session to get real `categoryId` values and their `area` (`"work"` or `"personal"`). Never invent category IDs. The built-in unfiled category ID is `"inbox"`.
 2. **What counts as Inbox:** In Florida, Inbox means **"needs triage"**. A task is in Inbox if:
    - `categoryId === "inbox"`, **OR**
-   - it has a real category **and** `dueAt == null && startAt == null && pinnedStart == null && someday === false`.
+   - it has a real category **and** `dueAt == null && startAt == null && pinnedStart == null && someday === false && waitingOn == null`.
    *(Calling `list_tasks({ categoryId: "inbox" })` returns all untriaged tasks across both cases; calling `list_tasks({ categoryId: "<other>" })` excludes untriaged tasks.)*
 3. **Choosing between Inbox, Scheduled, and Someday:**
    - **Quick dump / needs triage later:** `categoryId: "inbox"`, no dates (`someday: false`). Note: ordinary Inbox tasks **do** still get auto-scheduled onto the plan until triaged.
@@ -93,6 +93,18 @@ Whenever a task originates from a URL (GitHub PR/issue, Linear issue, Slack thre
 }
 ```
 Florida derives `kind` (`"github" | "linear" | "slack" | "email" | "web"`) automatically from the URL and derives a title if omitted. On `update_task`, **omit** `source` to keep the existing link; pass `source: null` only to remove it.
+
+### Tags and waiting follow-ups
+
+Tasks carry `tags: string[]` (default `[]`), `waitingOn: string | null`, and `waitingUntil: ISO timestamp | null`. These fields round-trip through every task response, HTTP sync, and the offline Apple store; the app editors are a separate UI rollout.
+
+- Tags are free-form: entries are trimmed, lowercased, empty entries dropped, and duplicates removed in first-seen order. At most 30 normalized tags of at most 64 characters each are accepted. Omit `tags` to preserve them on edits, or send `[]` to clear them; `null` is invalid.
+- `waitingOn` describes the person or blocker (trimmed, at most 500 characters); empty/whitespace becomes `null`. A waiting task has no pin: setting a blocker clears `pinnedStart`, preserves `startAt` and the due date, and leaves `someday` unchanged. In a real category, waiting counts as an explicit triage decision.
+- Without `waitingUntil`, waiting tasks have no placements, optional suggestions, or unscheduled warnings. A dated follow-up makes the earliest schedulable instant the later of `startAt`, `waitingUntil`, and now. Follow-ups at or beyond the horizon end remain parked without an unscheduled warning. After the follow-up is eligible, scheduling and deadline warnings work normally, but `waitingOn` remains set until explicitly cleared.
+- Send `waitingOn: null` (or a blank string) to clear the blocker and its follow-up together. A follow-up without a non-empty blocker is rejected; an update can omit `waitingOn` if the task already has a blocker. Clearing the blocker never restores a removed pin. Someday and inactive projects still keep the task off the plan.
+- Recurring tasks copy tags and the blocker to future unfinished occurrences, shifting the follow-up by local calendar dates like `startAt`. Completion affects only that occurrence, not the next one's blocker.
+
+Example: `create_task({ categoryId: "work", title: "Follow up on approval", tags: ["client", "approval"], waitingOn: "Alice", waitingUntil: "2026-11-20" })`. All single writes, batch variants, and `dryRun` previews use these same rules.
 
 ### Contexts, routines, and day overrides
 - Tasks have `context`: `"computer"` (default), `"errand"`, `"home"`, or `"office"`.
@@ -114,7 +126,7 @@ Task objects returned by MCP carry a computed `appUrl`, for example `florida://t
 | `get_range` | `{ startDate: "YYYY-MM-DD", endDate: "YYYY-MM-DD" }` | Inclusive range of 1–31 days in the settings/default time zone. Returns `{ startDate, endDate, timeZone, days }`; each day has exactly the `get_agenda` shape, including zoned `start`/`end`, events, task blocks, project time, commitments, and override. Reversed or oversized ranges are errors. |
 | `get_brief` | `{}` | Latest stored morning daily brief and weekly review (if generated). |
 | `list_categories` | `{}` | All live categories with `id`, `name`, `area` (`"work" \| "personal" \| null`), `color`, and `scheduleId`. |
-| `list_tasks` | `{ categoryId?, includeCompleted?, limit?, query?, dueBefore?, dueAfter?, context?, projectId?, priority?, someday?, scheduledOn?, hasSource? }` | Open tasks (soonest `dueAt` first, undated last) with scheduled blocks. Filters combine with AND; see below. `includeCompleted` defaults to false; `limit` is 1–200, default 50. |
+| `list_tasks` | `{ categoryId?, includeCompleted?, limit?, query?, dueBefore?, dueAfter?, context?, projectId?, priority?, someday?, scheduledOn?, hasSource?, tag?, tags?, waiting? }` | Open tasks (soonest `dueAt` first, undated last) with scheduled blocks. Filters combine with AND; see below. `includeCompleted` defaults to false; `limit` is 1–200, default 50. |
 | `get_task` | `{ id: string }` | One task by ID plus its scheduled blocks. |
 | `list_projects` | `{ status?: "thinking" \| "active" \| "on_hold" \| "done" }` | Live projects with status, `nextStep`, `weeklyMinutes`, `parallel`, and open task counts. |
 | `run_scheduler` | `{}` | Forces a full reschedule across all open tasks and returns placements + unscheduled/late summaries. (Usually unnecessary after writes, which reschedule automatically.) |
@@ -126,6 +138,8 @@ Task objects returned by MCP carry a computed `appUrl`, for example `florida://t
 - `context`: `"computer" | "errand" | "home" | "office"`; `priority`: `"asap" | "high" | "medium" | "low"`. These are Florida's actual enums, not `critical`, `phone`, or `anywhere`.
 - `projectId`: a UUID, or `"none"` / `null` for tasks without a project; omission means any project.
 - `someday`: exact boolean match; `hasSource`: true for a non-empty source URL, false for absent/empty source.
+- `tag`: one trimmed/lowercase tag; `tags`: all specified normalized tags must be present (an empty array adds no restriction). Both filters can be combined, and tag comparisons are exact, not substrings.
+- `waiting`: `true` matches a non-null blocker, even after its follow-up date; `false` matches no blocker.
 - `scheduledOn`: `YYYY-MM-DD` in the settings/default time zone. Matches any placement overlapping that day, or a `pinnedStart` inside the day. Day end is exclusive.
 
 Example: `list_tasks({ query: "proposal", dueBefore: "2026-11-20", context: "computer", projectId: "none", someday: false, hasSource: true })`.
@@ -137,6 +151,9 @@ Example: `list_tasks({ query: "proposal", dueBefore: "2026-11-20", context: "com
   - Optional fields:
     - `notes`: `string | null`
     - `source`: `{ url: string, title?: string } | null`
+    - `tags`: `string[]` (normalized; see above)
+    - `waitingOn`: `string | null`
+    - `waitingUntil`: ISO 8601 timestamp, `YYYY-MM-DD`, or `null` (requires a non-empty blocker)
     - `durationMinutes`: integer `>= 1` (total estimated minutes)
     - `minChunkMinutes`: integer `>= 1 | null` (minimum splittable block size; omit/null if unsplittable or default)
     - `priority`: `"asap" | "high" | "medium" | "low"`

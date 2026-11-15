@@ -45,8 +45,12 @@ interface TaskView {
   dueAt: string | null
   completedAt: string | null
   completedMinutes: number
+  tags: string[]
+  waitingOn: string | null
+  waitingUntil: string | null
   placements: { startAt: string; endAt: string; pinned: boolean }[]
 }
+
 
 let db: Db
 let close: () => Promise<void>
@@ -909,5 +913,76 @@ describe('Wave 1A calendar and parser tools', () => {
       expect(reschedule).toHaveBeenCalledOnce()
       expect((await call('delete_event', { id: randomUUID() })).content[0]?.text).toContain('sync is not configured')
     } finally { app = previous }
+  })
+})
+
+describe('task tags and waiting follow-ups', () => {
+  it('normalizes tags and supports combined tag, all-tags, and waiting filters', async () => {
+    const title = 'Wave3 filter'
+    const a = (await data<{ task: TaskView }>('create_task', { categoryId: 'work', title, tags: [' Client ', '', 'CLIENT', 'Approval'], waitingOn: ' Alice ' })).task
+    const b = (await data<{ task: TaskView }>('create_task', { categoryId: 'work', title, tags: ['client'] })).task
+    expect(a).toMatchObject({ tags: ['client', 'approval'], waitingOn: 'Alice', waitingUntil: null, placements: [] })
+    const ids = async (filters: object) => (await data<{ tasks: TaskView[] }>('list_tasks', { query: title, ...filters })).tasks.map((t) => t.id).sort()
+    expect(await ids({ tag: ' CLIENT ' })).toEqual([a.id, b.id].sort())
+    expect(await ids({ tags: ['CLIENT', ' Approval ', 'client'] })).toEqual([a.id])
+    expect(await ids({ tag: 'client', tags: ['approval'], waiting: true })).toEqual([a.id])
+    expect(await ids({ waiting: false })).toEqual([b.id])
+    expect(await ids({ tags: ['missing'] })).toEqual([])
+    expect((await data<{ tasks: TaskView[] }>('list_tasks', { categoryId: 'work', query: title })).tasks.map((t) => t.id)).toContain(a.id)
+    for (const tags of [Array.from({ length: 31 }, (_, i) => `tag-${i}`), ['x'.repeat(65)]]) {
+      expect((await call('update_task', { id: a.id, tags })).isError).toBe(true)
+    }
+  })
+
+  it('converts follow-up dates in the settings time zone, keeps ISO instants, clears pins, and resumes on clear', async () => {
+    const created = (await data<{ task: TaskView & { pinnedStart: string | null } }>('create_task', {
+      categoryId: 'work', title: 'Wave3 follow-up', waitingOn: ' Reply ', waitingUntil: '2026-11-10', pinnedStart: '2026-11-09T18:00:00Z',
+    })).task
+    expect(created.waitingUntil).toBe('2026-11-10T08:00:00.000Z')
+    expect(created.pinnedStart).toBeNull()
+    expect(created.placements.length).toBeGreaterThan(0)
+    expect(created.placements.every((p) => p.startAt >= created.waitingUntil!)).toBe(true)
+    const iso = '2026-11-11T12:34:00-08:00'
+    expect((await data<{ task: TaskView }>('update_task', { id: created.id, waitingUntil: iso })).task.waitingUntil).toBe(new Date(iso).toISOString())
+    const cleared = (await data<{ task: TaskView }>('update_task', { id: created.id, waitingOn: '  ' })).task
+    expect(cleared).toMatchObject({ waitingOn: null, waitingUntil: null })
+    expect(cleared.placements.some((p) => p.startAt < created.waitingUntil!)).toBe(true)
+    for (const waitingUntil of ['2026-02-30', 'invalid', '2026-11-11T00:00:00']) {
+      expect((await call('update_task', { id: created.id, waitingOn: 'Reply', waitingUntil })).isError).toBe(true)
+    }
+    expect((await call('create_task', { categoryId: 'work', title: 'Orphan follow-up', waitingUntil: '2026-11-10' })).isError).toBe(true)
+    expect((await call('update_task', { id: created.id, waitingUntil: '2026-11-10' })).isError).toBe(true)
+    const invalid = { id: created.id, waitingOn: null, waitingUntil: '2026-11-10' }
+    for (const dryRun of [false, true]) {
+      expect((await call('update_task', { ...invalid, dryRun })).isError).toBe(true)
+      expect((await call('batch_update_tasks', { tasks: [invalid], dryRun })).isError).toBe(true)
+      expect((await call('batch', { operations: [{ tool: 'update_task', arguments: invalid }], dryRun })).isError).toBe(true)
+    }
+  })
+
+  it('supports tags and date follow-ups in every batch path and rolls previews back', async () => {
+    const ids = [randomUUID(), randomUUID()]
+    const inputs = ids.map((id) => ({ id, categoryId: 'work', title: 'Wave3 batch', tags: [' Batch ', 'batch'], waitingOn: ' Client ', waitingUntil: '2026-11-10' }))
+    const before = await db.select().from(tasks)
+    const beforeNotices = notices
+    const preview = await data<{ results: { task: TaskView }[] }>('batch_create_tasks', { tasks: inputs, dryRun: true })
+    expect(preview.results[0]?.task).toMatchObject({ tags: ['batch'], waitingOn: 'Client', waitingUntil: '2026-11-10T08:00:00.000Z' })
+    expect(await db.select().from(tasks)).toEqual(before)
+    expect(notices).toBe(beforeNotices)
+    const single = await data<{ task: TaskView }>('create_task', { ...inputs[0], dryRun: true })
+    expect(single.task.tags).toEqual(['batch'])
+    expect(await db.select().from(tasks)).toEqual(before)
+    await data('batch_create_tasks', { tasks: inputs })
+    const updates = ids.map((id) => ({ id, tags: [' Updated '], waitingUntil: '2026-11-12' }))
+    await data('batch_update_tasks', { tasks: updates, dryRun: true })
+    expect((await data<{ task: TaskView }>('get_task', { id: ids[0] })).task.tags).toEqual(['batch'])
+    const changed = await data<{ results: { task: TaskView }[] }>('batch_update_tasks', { tasks: updates })
+    expect(changed.results[1]?.task).toMatchObject({ tags: ['updated'], waitingUntil: '2026-11-12T08:00:00.000Z' })
+    const mixed = await data<{ results: { task: TaskView }[] }>('batch', { operations: [
+      { tool: 'update_task', arguments: { id: ids[0], waitingOn: null } },
+      { tool: 'create_task', arguments: { categoryId: 'work', title: 'Wave3 mixed', tags: [' Mixed '], waitingOn: 'Approval', waitingUntil: '2026-11-13' } },
+    ] })
+    expect(mixed.results[0]?.task).toMatchObject({ waitingOn: null, waitingUntil: null })
+    expect(mixed.results[1]?.task).toMatchObject({ tags: ['mixed'], waitingUntil: '2026-11-13T08:00:00.000Z' })
   })
 })

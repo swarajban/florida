@@ -172,17 +172,18 @@ extension TaskItem {
     /// midnight/end-of-day defaults. Server-owned membership/date are never fabricated here.
     public mutating func prepareToEnableRecurrence() {
         guard let recurrence, let anchor = recurrence.date(for: recurrence.startDate) else { return }
-        if someday {
-            dueAt = nil
-            pinnedStart = nil
-            deadlineType = .none
-            return
-        }
         let calendar = recurrence.calendar
         func onAnchorDay(_ instant: Date) -> Date {
             let clock = calendar.dateComponents([.hour, .minute, .second], from: instant)
             return calendar.date(bySettingHour: clock.hour ?? 0, minute: clock.minute ?? 0,
                                  second: clock.second ?? 0, of: anchor) ?? anchor
+        }
+        waitingUntil = waitingUntil.map(onAnchorDay)
+        if someday {
+            dueAt = nil
+            pinnedStart = nil
+            deadlineType = .none
+            return
         }
         startAt = startAt.map(onAnchorDay) ?? anchor
         let next = calendar.date(byAdding: .day, value: 1, to: anchor) ?? anchor.addingTimeInterval(86_400)

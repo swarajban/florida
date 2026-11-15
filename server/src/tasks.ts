@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
-import { and, eq, gt, gte, isNull, ne, sql } from 'drizzle-orm'
+import { and, eq, gt, gte, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm'
+import type { SQLWrapper } from 'drizzle-orm'
 import { writeTimestamp } from './db/sync-clock.js'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
@@ -17,6 +18,8 @@ export const priority = z.enum(['asap', 'high', 'medium', 'low'])
 export const deadlineType = z.enum(['hard', 'soft', 'none'])
 export const taskContext = z.enum(['computer', 'errand', 'home', 'office'])
 export const attention = z.enum(['full', 'shared'])
+export const taskTags = z.array(z.string()).transform((tags) => [...new Set(tags.map((tag) => tag.trim().toLowerCase()).filter(Boolean))])
+  .pipe(z.array(z.string().max(64)).max(30))
 
 /** Full task body as accepted by `PUT /api/tasks/:id` and the MCP tools. */
 export const taskBody = z.object({
@@ -24,6 +27,9 @@ export const taskBody = z.object({
   title: z.string().min(1),
   notes: z.string().nullish(),
   source: taskSourceInput.nullish(),
+  tags: taskTags.optional(),
+  waitingOn: z.string().trim().max(500).nullish(),
+  waitingUntil: isoInstant.nullish(),
   durationMinutes: z.number().int().min(1),
   minChunkMinutes: z.number().int().min(1).nullish(),
   priority,
@@ -59,6 +65,13 @@ export type TaskBody = z.infer<typeof taskBody>
 export const taskPatch = taskBody.partial()
 export type TaskPatch = z.infer<typeof taskPatch>
 
+export function taskPlacementVisible(startAt: SQLWrapper, pinned?: SQLWrapper) {
+  return and(eq(tasks.someday, false), or(isNull(tasks.waitingOn), and(
+    isNotNull(tasks.waitingUntil), lte(tasks.waitingUntil, startAt),
+    pinned === undefined ? undefined : eq(pinned, false),
+  )))
+}
+
 /** Creates or replaces a task. Undeletes a tombstoned id. Throws 400 for unknown references. */
 export async function upsertTask(db: Db, id: string, body: TaskBody, now: Date = new Date()): Promise<TaskRow> {
   return db.transaction(async (tx) => {
@@ -73,9 +86,17 @@ export async function lockTaskRecurrences(db: Db): Promise<void> {
 }
 
 function taskFields(body: TaskBody, now: Date, current: TaskRow | undefined) {
+  const waitingOn = (body.waitingOn === undefined ? current?.waitingOn : body.waitingOn)?.trim() || null
+  let waitingUntil = body.waitingUntil === undefined ? current?.waitingUntil ?? null : toDate(body.waitingUntil)
+  if (waitingOn === null) {
+    if (body.waitingUntil != null) {
+      throw badRequest('waitingUntil requires a non-empty waitingOn')
+    }
+    waitingUntil = null
+  }
   const dueAt = toDate(body.dueAt)
   const startAt = toDate(body.startAt)
-  const pinnedStart = toDate(body.pinnedStart)
+  const pinnedStart = waitingOn === null ? toDate(body.pinnedStart) : null
   const datesChanged = current !== undefined && (
     (dueAt !== null && dueAt.getTime() !== current.dueAt?.getTime())
     || (startAt !== null && startAt.getTime() !== current.startAt?.getTime())
@@ -89,6 +110,9 @@ function taskFields(body: TaskBody, now: Date, current: TaskRow | undefined) {
     title: body.title,
     notes: body.notes ?? null,
     source: body.source === undefined ? (current?.source ?? null) : body.source === null ? null : normalizeTaskSource(body.source),
+    tags: body.tags === undefined ? current?.tags ?? [] : taskTags.parse(body.tags),
+    waitingOn,
+    waitingUntil,
     durationMinutes: body.durationMinutes,
     minChunkMinutes: body.minChunkMinutes ?? null,
     priority: body.priority,
@@ -102,7 +126,7 @@ function taskFields(body: TaskBody, now: Date, current: TaskRow | undefined) {
     // Likewise: absent keeps, null clears.
     projectId: body.projectId === undefined ? (current?.projectId ?? null) : body.projectId,
     attention: body.attention === undefined ? (current?.attention ?? null) : body.attention,
-    pinnedStart: someday ? null : pinnedStart,
+    pinnedStart: someday || waitingOn !== null ? null : pinnedStart,
     completedMinutes: body.completedMinutes ?? 0,
     completedAt: toDate(body.completedAt),
     updatedAt: now,
@@ -117,6 +141,9 @@ function seriesTemplate(fields: Pick<TaskRow, keyof ReturnType<typeof taskFields
     title: fields.title,
     notes: fields.notes,
     source: fields.source,
+    tags: fields.tags,
+    waitingOn: fields.waitingOn,
+    waitingUntil: fields.waitingUntil?.toISOString() ?? null,
     durationMinutes: fields.durationMinutes,
     minChunkMinutes: fields.minChunkMinutes,
     priority: fields.priority,
@@ -185,7 +212,7 @@ async function writeTask(db: Db, id: string, body: TaskBody, now: Date): Promise
       // A retried creation still contains dates relative to the original rule anchor. Normalize
       // that request exactly as the first write; omitted dates otherwise mean local day bounds.
       const incoming = seriesTemplate(fields, series.template.anchorDate)
-      const stored = { ...series.template, source: series.template.source ?? null }
+      const stored = { ...series.template, source: series.template.source ?? null, tags: series.template.tags ?? [], waitingOn: series.template.waitingOn ?? null, waitingUntil: series.template.waitingUntil ?? null }
       const source = isDeepStrictEqual(incoming, stored) && isDeepStrictEqual(recurrence, series.rule)
         ? stored
         : seriesTemplate(fields, recurrenceDate)
@@ -245,6 +272,9 @@ export async function patchTask(db: Db, id: string, patch: TaskPatch, now: Date 
   return db.transaction(async (tx) => {
     await lockTaskRecurrences(tx)
     const current = await getTask(tx, id)
+    if (patch.waitingUntil != null && !(patch.waitingOn === undefined ? current.waitingOn : patch.waitingOn)?.trim()) {
+      throw badRequest('waitingUntil requires a non-empty waitingOn')
+    }
     const keep = <T>(next: T | undefined, stored: T): T => (next === undefined ? stored : next)
     const iso = (d: Date | null): string | null => (d === null ? null : d.toISOString())
     const body: TaskBody = {
@@ -252,6 +282,9 @@ export async function patchTask(db: Db, id: string, patch: TaskPatch, now: Date 
       title: keep(patch.title, current.title),
       notes: keep(patch.notes, current.notes),
       source: keep(patch.source, current.source),
+      tags: keep(patch.tags, current.tags),
+      waitingOn: keep(patch.waitingOn, current.waitingOn),
+      waitingUntil: patch.waitingOn !== undefined && !patch.waitingOn?.trim() ? null : keep(patch.waitingUntil, iso(current.waitingUntil)),
       durationMinutes: keep(patch.durationMinutes, current.durationMinutes),
       minChunkMinutes: keep(patch.minChunkMinutes, current.minChunkMinutes),
       priority: keep(patch.priority, current.priority),

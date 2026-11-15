@@ -246,6 +246,9 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
     public var title: String
     public var notes: String?
     public var source: TaskSource?
+    public var tags: [String]
+    public var waitingOn: String?
+    public var waitingUntil: Date?
     public var durationMinutes: Int
     /// Smallest piece the scheduler may split the task into; nil means one contiguous block.
     public var minChunkMinutes: Int?
@@ -283,13 +286,17 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
         pinnedStart: Date? = nil, completedMinutes: Int = 0, completedAt: Date? = nil, createdAt: Date,
         updatedAt: Date, deletedAt: Date? = nil, recurrence: TaskRecurrence? = nil,
         recurrenceSeriesId: String? = nil, recurrenceDate: String? = nil, recurrenceRevision: String? = nil,
-        projectId: String? = nil, attention: TaskAttention? = nil, source: TaskSource? = nil, someday: Bool = false
+        projectId: String? = nil, attention: TaskAttention? = nil, source: TaskSource? = nil, someday: Bool = false,
+        tags: [String] = [], waitingOn: String? = nil, waitingUntil: Date? = nil
     ) {
         self.id = id
         self.categoryId = categoryId
         self.title = title
         self.notes = notes
         self.source = source
+        self.tags = tags
+        self.waitingOn = waitingOn
+        self.waitingUntil = waitingUntil
         self.durationMinutes = durationMinutes
         self.minChunkMinutes = minChunkMinutes
         self.priority = priority
@@ -322,6 +329,9 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
         title = try c.decode(String.self, forKey: .title)
         notes = try c.decodeIfPresent(String.self, forKey: .notes)
         source = try c.decodeIfPresent(TaskSource.self, forKey: .source)
+        tags = try c.decodeIfPresent([String].self, forKey: .tags) ?? []
+        waitingOn = try c.decodeIfPresent(String.self, forKey: .waitingOn)
+        waitingUntil = try c.decodeIfPresent(Date.self, forKey: .waitingUntil)
         durationMinutes = try c.decode(Int.self, forKey: .durationMinutes)
         minChunkMinutes = try c.decodeIfPresent(Int.self, forKey: .minChunkMinutes)
         priority = try c.decode(Priority.self, forKey: .priority)
@@ -347,7 +357,7 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
 
     public var isOpen: Bool { deletedAt == nil && completedAt == nil }
     public var needsTriage: Bool {
-        categoryId == TaskCategory.inboxId || (dueAt == nil && startAt == nil && pinnedStart == nil && !someday)
+        categoryId == TaskCategory.inboxId || (dueAt == nil && startAt == nil && pinnedStart == nil && !someday && !isWaiting)
     }
     public var remainingMinutes: Int { max(0, durationMinutes - completedMinutes) }
 
@@ -1165,6 +1175,9 @@ public struct TaskWrite: Codable, Hashable, Sendable {
     public var title: String
     public var notes: String?
     public var source: TaskSource?
+    public var tags: [String]
+    public var waitingOn: String?
+    public var waitingUntil: Date?
     public var durationMinutes: Int
     public var minChunkMinutes: Int?
     public var priority: Priority
@@ -1185,11 +1198,20 @@ public struct TaskWrite: Codable, Hashable, Sendable {
     /// The revision the user edited, including nil when the task was not in a series.
     public var expectedRecurrenceRevision: String?
 
+    enum CodingKeys: String, CodingKey {
+        case categoryId, title, notes, source, tags, waitingOn, waitingUntil, durationMinutes, minChunkMinutes
+        case priority, deadlineType, dueAt, someday, startAt, scheduleId, context, projectId, attention
+        case pinnedStart, completedMinutes, completedAt, recurrence, expectedRecurrenceRevision
+    }
+
     public init(_ task: TaskItem) {
         categoryId = task.categoryId
         title = task.title
         notes = task.notes
         source = task.source
+        tags = task.tags
+        waitingOn = task.waitingOn
+        waitingUntil = task.waitingUntil
         durationMinutes = task.durationMinutes
         minChunkMinutes = task.minChunkMinutes
         priority = task.priority
@@ -1208,12 +1230,42 @@ public struct TaskWrite: Codable, Hashable, Sendable {
         expectedRecurrenceRevision = task.recurrenceRevision
     }
 
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        categoryId = try c.decode(String.self, forKey: .categoryId)
+        title = try c.decode(String.self, forKey: .title)
+        notes = try c.decodeIfPresent(String.self, forKey: .notes)
+        source = try c.decodeIfPresent(TaskSource.self, forKey: .source)
+        tags = try c.decodeIfPresent([String].self, forKey: .tags) ?? []
+        waitingOn = try c.decodeIfPresent(String.self, forKey: .waitingOn)
+        waitingUntil = try c.decodeIfPresent(Date.self, forKey: .waitingUntil)
+        durationMinutes = try c.decode(Int.self, forKey: .durationMinutes)
+        minChunkMinutes = try c.decodeIfPresent(Int.self, forKey: .minChunkMinutes)
+        priority = try c.decode(Priority.self, forKey: .priority)
+        deadlineType = try c.decode(DeadlineType.self, forKey: .deadlineType)
+        dueAt = try c.decodeIfPresent(Date.self, forKey: .dueAt)
+        someday = try c.decodeIfPresent(Bool.self, forKey: .someday)
+        startAt = try c.decodeIfPresent(Date.self, forKey: .startAt)
+        scheduleId = try c.decodeIfPresent(String.self, forKey: .scheduleId)
+        context = try c.decode(TaskContext.self, forKey: .context)
+        projectId = try c.decodeIfPresent(String.self, forKey: .projectId)
+        attention = try c.decodeIfPresent(TaskAttention.self, forKey: .attention)
+        pinnedStart = try c.decodeIfPresent(Date.self, forKey: .pinnedStart)
+        completedMinutes = try c.decode(Int.self, forKey: .completedMinutes)
+        completedAt = try c.decodeIfPresent(Date.self, forKey: .completedAt)
+        recurrence = try c.decodeIfPresent(TaskRecurrence.self, forKey: .recurrence)
+        expectedRecurrenceRevision = try c.decodeIfPresent(String.self, forKey: .expectedRecurrenceRevision)
+    }
+
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(categoryId, forKey: .categoryId)
         try container.encode(title, forKey: .title)
         try container.encodeIfPresent(notes, forKey: .notes)
         try container.encode(source, forKey: .source)
+        try container.encode(tags, forKey: .tags)
+        try container.encode(waitingOn, forKey: .waitingOn)
+        try container.encode(waitingUntil, forKey: .waitingUntil)
         try container.encode(durationMinutes, forKey: .durationMinutes)
         try container.encodeIfPresent(minChunkMinutes, forKey: .minChunkMinutes)
         try container.encode(priority, forKey: .priority)

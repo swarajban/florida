@@ -92,6 +92,13 @@
       "when": 1794771949713,
       "tag": "0012_natural_jackpot",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1794773160051,
+      "tag": "0013_public_nebula",
+      "breakpoints": true
     }
   ]
 }
