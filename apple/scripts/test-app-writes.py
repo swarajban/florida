@@ -71,6 +71,7 @@ struct TaskEditorSheet {
     var isNew = false
     var sourceURL = ""
     var sourceTitle = ""
+    var tagInput = ""
     var model = AppModel()
     var somedayIntent: Bool?
     var dateEdits: Set<TaskDateField> = []
@@ -98,6 +99,7 @@ completion_start = ios_editor.index('        var task = preparedTask', ios_edito
 completion_preparation = ios_editor[completion_start:ios_editor.index('        guard model.complete(', completion_start)]
 editor_harness += ('struct TaskEditorView {\n    var draft: TaskItem\n    var original: TaskItem\n'
                    + '    var isNew = false\n    var sourceURL = ""\n    var sourceTitle = ""\n'
+                   + '    var tagInput = ""\n'
                    + '    func saved() -> TaskItem { preparedTask }\n'
                    + '    func completed() -> TaskItem {\n' + completion_preparation + '        return task\n    }\n'
                    + computed(ios_editor, 'trimmedTitle') + '\n' + computed(ios_editor, 'validatedSource')
@@ -674,6 +676,14 @@ for (platform, prepare) in taskPreparers {
     let new = prepare(rawTask, rawTask, rawTask.source!.url, rawTask.source!.title, true)
     check(new.title == "Original title" && new.source?.title == "Original source",
           "\(platform) new task caller still normalizes title and source")
+}
+var macMetadata = TaskEditorSheet(draft: taskDraft, original: rawTask, tagInput: "CLIENT, #review",
+                                  dueAt: oldDate, startAt: oldDate, pinnedStart: oldDate)
+var iosMetadata = TaskEditorView(draft: taskDraft, original: rawTask, tagInput: "CLIENT, #review")
+for prepared in [macMetadata.saved(), iosMetadata.saved()] {
+    var normalized = prepared
+    try normalized.normalizeMetadata()
+    check(normalized.tags == ["client", "review"], "Editor Save includes pending tags without an Add tap")
 }
 let completingDraft = TaskEditorView(draft: taskDraft, original: rawTask,
                                      sourceURL: rawTask.source!.url, sourceTitle: rawTask.source!.title)

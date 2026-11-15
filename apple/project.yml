@@ -65,6 +65,7 @@ targets:
       - Design/EventQuickAddComposer.swift
       - Design/TaskContext+Display.swift
       - Design/TaskCategoryChip.swift
+      - Design/TaskMetadataViews.swift
       - Design/Plan+Display.swift
       - Design/DayBlockingIndicator.swift
       - Design/DayBlockingControl.swift
@@ -182,6 +183,7 @@ targets:
       - Design/EventQuickAddComposer.swift
       - Design/TaskContext+Display.swift
       - Design/TaskCategoryChip.swift
+      - Design/TaskMetadataViews.swift
       - Design/Plan+Display.swift
       - Design/DayBlockingIndicator.swift
       - Design/Assets.xcassets

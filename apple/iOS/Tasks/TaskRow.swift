@@ -27,6 +27,7 @@ struct TaskRow: View {
                             .accessibilityIdentifier("task-source-mark-\(task.id)")
                     }
                 }
+                TaskMetadataCaption(task: task)
                 ViewThatFits(in: .horizontal) {
                     metadata(showsContext: true).fixedSize(horizontal: true, vertical: false)
                     metadata(showsContext: false)

@@ -22,6 +22,7 @@ struct TaskEditorView: View {
     @State private var dateEdits: Set<TaskDateField> = []
     @State private var confirmingDelete = false
     @State private var saveError: String?
+    @State private var tagInput = ""
     @State private var sourceURL: String
     @State private var sourceTitle: String
     @State private var editingSource: Bool
@@ -112,6 +113,8 @@ struct TaskEditorView: View {
                     }
                 }
 
+                TaskMetadataEditor(task: $draft, tagInput: $tagInput)
+
                 Section("Dates") {
                     TaskDateRow(title: "Start", identifier: "task-start", isOn: hasStart, date: startAt, hasTime: hasStartTime)
                     TaskDateRow(title: "Due", identifier: "task-due", isOn: hasDue, date: dueAt, hasTime: hasDueTime)
@@ -185,6 +188,7 @@ struct TaskEditorView: View {
 
                 Section {
                     Toggle("Pin to a time", isOn: hasPin)
+                        .disabled(draft.isWaiting)
                         .accessibilityIdentifier("task-pin")
                     if draft.pinnedStart != nil {
                         DatePicker("Pinned start", selection: pinnedStart, displayedComponents: [.date, .hourAndMinute])
@@ -495,6 +499,7 @@ struct TaskEditorView: View {
             task.title = trimmedTitle
         }
         task.source = validatedSource
+        task.tags += TaskItem.tagsFromInput(tagInput)
         if isNew || task.deadlineType != original.deadlineType || task.dueAt != original.dueAt,
            task.deadlineType == .none && task.recurrence == nil {
             task.dueAt = nil

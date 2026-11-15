@@ -9,7 +9,12 @@ extension AppModel {
 
     var taskGroups: [TaskListSection] {
         taskListGrouping.sections(
-            tasks: openTasks, categories: categories, now: clockNow, calendar: taskListCalendar)
+            tasks: openTasks.filter { $0.matchesMetadataSearch(taskMetadataSearch, waitingOnly: taskWaitingOnly) },
+            categories: categories, now: clockNow, calendar: taskListCalendar)
+    }
+
+    var taskPaneSuggestions: [OptionalPicks] {
+        taskMetadataSearch.isEmpty && !taskWaitingOnly ? paneSuggestions : []
     }
 
     var taskListCalendar: Calendar {
@@ -20,7 +25,7 @@ extension AppModel {
 
     /// `j` / `k` order in the task pane: today's suggestions, then the displayed task sections.
     var orderedTaskItems: [ItemID] {
-        paneSuggestions.flatMap { group in group.picks.map { ItemID.suggestion($0.id) } }
+        taskPaneSuggestions.flatMap { group in group.picks.map { ItemID.suggestion($0.id) } }
             + taskGroups.flatMap { group in group.tasks.map { ItemID.task($0.id) } }
     }
 

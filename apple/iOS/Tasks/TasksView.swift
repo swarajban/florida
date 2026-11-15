@@ -9,6 +9,8 @@ struct TasksView: View {
     @State private var doneForNowTask: TaskItem?
     @State private var path: [TasksRoute] = TasksRoute.launchPath
     @State private var now = AppModel.currentTime
+    @State private var metadataSearch = ""
+    @State private var waitingOnly = false
     @AppStorage("taskListGrouping", store: .florida) private var grouping: TaskListGrouping = .dueDate
 
     var body: some View {
@@ -47,6 +49,14 @@ struct TasksView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
+                }
+                Section {
+                    TextField("Search tasks, waiting on, or #tag", text: $metadataSearch)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .accessibilityIdentifier("tasks-metadata-search")
+                    Toggle("Waiting only", isOn: $waitingOnly)
+                        .accessibilityIdentifier("tasks-waiting-filter")
                 }
                 ForEach(sections) { section in
                     Section {
@@ -184,7 +194,9 @@ struct TasksView: View {
     }
 
     private var sections: [TaskSection] {
-        grouping.sections(tasks: model.listedOpenTasks, categories: model.categories, now: now, calendar: groupingCalendar)
+        grouping.sections(tasks: model.listedOpenTasks.filter {
+            $0.matchesMetadataSearch(metadataSearch, waitingOnly: waitingOnly)
+        }, categories: model.categories, now: now, calendar: groupingCalendar)
     }
 
     private var groupingCalendar: Calendar {
