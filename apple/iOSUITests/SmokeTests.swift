@@ -4,6 +4,42 @@ import UIKit
 /// Wait for real content before capturing; a fixed launch delay can silently save a blank screen.
 final class SmokeTests: XCTestCase {
     @MainActor
+    func testCompactAgendaCoworkerOOO() {
+        continueAfterFailure = false
+        let app = launch(coworkerOOO: true)
+        let group = app.buttons["all-day-coworker-ooo"]
+        XCTAssertTrue(group.waitForExistence(timeout: 10))
+        XCTAssertEqual(app.buttons.matching(identifier: "all-day-coworker-ooo").count, 1)
+        XCTAssertTrue(group.label.contains("OOO: Marcus, Priya +3"))
+        let brief = app.buttons["agenda-brief-write"]
+        let free = app.descendants(matching: .any).matching(identifier: "agenda-free-time").firstMatch
+        XCTAssertLessThanOrEqual(brief.frame.height, 36)
+        XCTAssertLessThan(abs(brief.frame.midY - free.frame.midY), 8)
+        capture(app, "compact-agenda-ooo")
+        group.tap()
+        let person = app.buttons["coworker-ooo-demo-event-ooo"]
+        if !person.waitForExistence(timeout: 5) { captureFailure(app, "ooo-sheet-failure") }
+        XCTAssertTrue(person.exists)
+        person.tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "event-blocks-day-demo-event-ooo").firstMatch.waitForExistence(timeout: 5))
+        app.terminate()
+    }
+
+    @MainActor
+    func testSingleDayCoworkerOOO() {
+        continueAfterFailure = false
+        let app = launch(mode: "day", coworkerOOO: true)
+        let group = app.buttons["all-day-coworker-ooo"]
+        if !group.waitForExistence(timeout: 10) { captureFailure(app, "ooo-grid-failure") }
+        XCTAssertTrue(group.exists)
+        XCTAssertTrue(group.label.contains("OOO: Marcus, Priya +3"))
+        capture(app, "single-day-ooo")
+        group.tap()
+        XCTAssertTrue(app.buttons["coworker-ooo-demo-ooo-3"].waitForExistence(timeout: 5))
+        app.terminate()
+    }
+
+    @MainActor
     func testTaskSourceCaptureAndRemoval() {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {
@@ -1544,7 +1580,7 @@ final class SmokeTests: XCTestCase {
     private func launch(
         appearance: String = "light", tab: String = "agenda", sheet: String? = nil, mode: String = "list", largeText: Bool = false,
         recordResourceOpens: Bool = false, recordSourceOpens: Bool = false, demoNow: Date? = nil, accessibilityText: Bool = false,
-        overlappingStays: Bool = false
+        overlappingStays: Bool = false, coworkerOOO: Bool = false
     ) -> XCUIApplication {
         let app = XCUIApplication()
         // The agenda mode is always passed: the app remembers the last one in the App Group
@@ -1555,6 +1591,7 @@ final class SmokeTests: XCTestCase {
         if let demoNow { app.launchArguments += ["-demoNow", ISO8601DateFormatter().string(from: demoNow)] }
         if recordSourceOpens { app.launchArguments += ["-uiRecordSourceOpens", "YES"] }
         if overlappingStays { app.launchArguments += ["-uiOverlappingStaysDemo", "YES"] }
+        if coworkerOOO { app.launchArguments += ["-uiCoworkerOOODemo", "YES"] }
         app.launchArguments += [
             "-UIPreferredContentSizeCategoryName",
             accessibilityText ? "UICTContentSizeCategoryAccessibilityXL"

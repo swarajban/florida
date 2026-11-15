@@ -14,6 +14,7 @@ struct BriefCard: View {
     @Environment(AppModel.self) private var model
     /// Opens the weekly review. The sheet belongs to the screen, not to a list row.
     let onShowWeek: () -> Void
+    var freeText: String? = nil
     @State private var isExpanded = false
 
     var body: some View {
@@ -79,6 +80,14 @@ struct BriefCard: View {
                     .accessibilityIdentifier("agenda-brief-write")
                 Spacer(minLength: 0)
                 weekButton
+                if let freeText {
+                    Text(freeText)
+                        .font(.caption)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(FloridaStyle.panel, in: Capsule())
+                        .accessibilityIdentifier("agenda-free-time")
+                }
             }
             .font(.footnote.weight(.semibold))
             .buttonStyle(.borderless)
@@ -96,11 +105,20 @@ struct BriefCard: View {
     /// No brief for today yet: one line, as quiet as a free gap.
     private var offer: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 16) {
-                BriefWriteButton(kind: .daily, title: "Write today's brief", symbol: BriefWriteButton.aiSymbol)
+            HStack(spacing: 10) {
+                BriefWriteButton(kind: .daily, title: "Brief", symbol: BriefWriteButton.aiSymbol)
+                    .accessibilityLabel("Write today's brief")
                     .accessibilityIdentifier("agenda-brief-write")
                 Spacer(minLength: 0)
                 weekButton
+                if let freeText {
+                    Text(freeText)
+                        .font(.caption)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(FloridaStyle.panel, in: Capsule())
+                        .accessibilityIdentifier("agenda-free-time")
+                }
             }
             .font(.footnote)
             .foregroundStyle(.secondary)

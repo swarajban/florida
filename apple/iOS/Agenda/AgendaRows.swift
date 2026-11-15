@@ -168,6 +168,8 @@ struct AllDayEventRow: View {
                     .accessibilityHidden(true)
             }
             Text(AgendaItem.event(event).title)
+                .font(.subheadline)
+                .lineLimit(1)
             if let continuation {
                 Text(continuation)
                     .font(.caption2)
@@ -181,9 +183,64 @@ struct AllDayEventRow: View {
                     .lineLimit(1)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 1)
         .accessibilityElement(children: .combine)
         .accessibilityValue("All day, \(style.accessibilityDescription)\(protectsDay ? ", Protected. " + AllDayBlocking.explanation(for: event) : "")")
+    }
+}
+
+struct CoworkerOOOLabel: View {
+    let item: AllDayPresentation.Item
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "person.2")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Text(item.title)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+            Text("all-day")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .font(.subheadline)
+        .foregroundStyle(.primary)
+        .accessibilityElement(children: .combine)
+        .accessibilityValue("All day, \(item.events.count) coworkers out of office. Does not block scheduling")
+    }
+}
+
+struct CoworkerOOOSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedEvent: CalendarEvent?
+    let events: [CalendarEvent]
+
+    var body: some View {
+        NavigationStack {
+            List(events) { event in
+                Button {
+                    selectedEvent = event
+                } label: {
+                    Text(event.summary ?? "Untitled event")
+                        .foregroundStyle(.primary)
+                }
+                .accessibilityIdentifier("coworker-ooo-\(event.id)")
+            }
+            .accessibilityIdentifier("coworker-ooo-list")
+            .navigationTitle("Coworkers out of office")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .sheet(item: $selectedEvent) { event in
+                EventDetailView(event: event)
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 }
 

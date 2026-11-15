@@ -17,6 +17,7 @@ struct AgendaView: View {
     @Environment(AppModel.self) private var model
     @State private var editingTask: TaskItem?
     @State private var selectedEvent: CalendarEvent?
+    @State private var selectedOOO: AllDayPresentation.Item?
     @State private var newEvent: CalendarEvent?
     @State private var showsDayPicker = false
     @State private var showsWeeklyReview = false
@@ -85,6 +86,9 @@ struct AgendaView: View {
         }
         .sheet(item: $selectedEvent) { event in
             EventDetailView(event: event)
+        }
+        .sheet(item: $selectedOOO) { item in
+            CoworkerOOOSheet(events: item.events)
         }
         .sheet(item: $newEvent) { event in
             EventCaptureSheet(event: event, onDismiss: { newEvent = nil })
@@ -295,6 +299,9 @@ struct AgendaView: View {
             ? model.ghostBlocks.filter { !live.contains($0.id) && !model.somedayTaskIDs.contains($0.taskId) } : []
         let items = agenda.map { AgendaItem.timed(from: $0, ghosts: ghosts) } ?? []
         let allDayEvents = agenda.map(AgendaItem.allDay) ?? []
+        let allDayItems = AllDayPresentation.items(for: allDayEvents) { id in
+            model.calendars.first { $0.id == id }?.summary
+        }
         let rows = TimelineRow.rows(for: items, now: isToday ? now : nil, showsGaps: showsGaps)
         let picks = model.optionalPicks(on: day, now: now)
         let isEmptyDay = items.isEmpty && allDayEvents.isEmpty && picks.isEmpty
@@ -322,18 +329,16 @@ struct AgendaView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            // What the plan says about the day, before the day itself. Both rows line up with the
-            // heading above (20 points) and take less height than a default row would.
-            if isToday || freeText != nil {
+            if isToday || freeText != nil || missedText != nil {
                 Section {
                     if isToday {
-                        BriefCard(onShowWeek: { showsWeeklyReview = true })
-                            .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 4, trailing: 20))
+                        BriefCard(onShowWeek: { showsWeeklyReview = true }, freeText: freeText)
+                            .listRowInsets(EdgeInsets(top: 2, leading: 20, bottom: 2, trailing: 20))
                             .listRowSeparator(.hidden)
                             .listRowBackground(FloridaStyle.paper)
                     }
-                    if freeText != nil || missedText != nil {
-                        DayPlanNotes(free: freeText, missed: missedText)
+                    if (!isToday && freeText != nil) || missedText != nil {
+                        DayPlanNotes(free: isToday ? nil : freeText, missed: missedText)
                             .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
                             .listRowSeparator(.hidden)
                             .listRowBackground(FloridaStyle.paper)
@@ -341,22 +346,29 @@ struct AgendaView: View {
                 }
             }
             if !allDayEvents.isEmpty {
-                Section("All day") {
-                    ForEach(allDayEvents) { event in
+                Section {
+                    ForEach(allDayItems) { item in
+                        let event = item.events[0]
                         Button {
-                            selectedEvent = event
+                            if item.isGroup { selectedOOO = item } else { selectedEvent = event }
                         } label: {
-                            AllDayEventRow(
-                                event: event, style: model.eventStyle(event),
-                                continuation: EventTiming.continuation(of: event, on: day, calendar: model.calendar),
-                                protectsDay: agenda?.blockingAllDayEvents.contains(where: { $0.id == event.id }) == true)
-                                .foregroundStyle(.primary)
+                            if item.isGroup {
+                                CoworkerOOOLabel(item: item)
+                            } else {
+                                AllDayEventRow(
+                                    event: event, style: model.eventStyle(event),
+                                    continuation: EventTiming.continuation(of: event, on: day, calendar: model.calendar),
+                                    protectsDay: agenda?.blockingAllDayEvents.contains(where: { $0.id == event.id }) == true)
+                                    .foregroundStyle(.primary)
+                            }
                         }
                         .accessibilityHint("Shows the event")
-                        .accessibilityIdentifier("all-day-event-\(event.id)")
+                        .accessibilityIdentifier(item.isGroup ? "all-day-coworker-ooo" : "all-day-event-\(event.id)")
+                        .listRowInsets(EdgeInsets(top: 3, leading: 20, bottom: 3, trailing: 20))
                         .listRowBackground(FloridaStyle.paper)
                     }
                 }
+                .listSectionSeparator(.visible, edges: .bottom)
             }
             Section {
                 ForEach(rows) { row in
@@ -404,6 +416,7 @@ struct AgendaView: View {
             }
         }
         .listStyle(.plain)
+        .environment(\.defaultMinListRowHeight, 30)
         .scrollContentBackground(.hidden)
         .background(FloridaStyle.paper)
         .animation(.snappy, value: isDayCleared)
