@@ -133,7 +133,7 @@ struct DayGridAllDayStrip: View {
 
     private var spanningStrip: some View {
         let rows = Array(0..<layout.allDayRowCount)
-        ZStack(alignment: .topLeading) {
+        return ZStack(alignment: .topLeading) {
             ForEach(layout.allDayBlocks) { block in
                 let frame = frame(for: block, rows: rows)
                 if frame.width > 0 {
