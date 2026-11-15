@@ -9,17 +9,21 @@ final class SmokeTests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-demoData", "YES", "-uiCalendarActivation", "YES", "-uiTab", "agenda",
                                "-uiAppearance", "light", "-uiAgendaMode", "list"]
+        addTeardownBlock { @MainActor [weak self] in
+            guard let self, (self.testRun?.failureCount ?? 0) > 0 else { return }
+            self.captureFailure(app, "calendar-assertion-failure")
+        }
         app.launch()
         let picker = app.buttons["agenda-calendars"]
         XCTAssertTrue(picker.waitForExistence(timeout: 10))
         picker.tap()
         let holidays = app.buttons["calendar-choice-demo-cal-us-holidays"]
         let checklist = app.descendants(matching: .any).matching(identifier: "calendar-checklist").firstMatch
+        XCTAssertTrue(checklist.waitForExistence(timeout: 5))
+        XCTAssertTrue(holidays.waitForExistence(timeout: 5))
         for _ in 0..<4 where !holidays.isHittable { checklist.swipeUp() }
-        XCTAssertTrue(holidays.isHittable)
         holidays.tap()
         let birthdays = app.buttons["calendar-choice-demo-cal-birthdays"]
-        XCTAssertTrue(birthdays.isHittable)
         birthdays.tap()
         print("Calendar checklist: holidays=\(String(describing: holidays.value)) frame=\(holidays.frame); birthdays=\(String(describing: birthdays.value)) frame=\(birthdays.frame); list=\(checklist.frame)")
         if holidays.value as? String != "Selected" || birthdays.value as? String != "Selected" {

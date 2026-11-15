@@ -234,46 +234,7 @@ struct AgendaView: View {
         }
         .accessibilityIdentifier("agenda-calendars")
         .popover(isPresented: $showsCalendars) {
-            VStack(spacing: 0) {
-                HStack {
-                    Text("Calendars").font(.headline)
-                    Spacer()
-                    Button("Done") { showsCalendars = false }
-                }.padding(12)
-                List {
-                    if model.calendars.isEmpty {
-                        Text(model.needsSetup ? "Connect to the server in Settings." : "No calendars synced yet.")
-                    }
-                    ForEach(model.accounts) { account in
-                        let owned = model.calendars.filter { $0.accountId == account.id }
-                        if !owned.isEmpty {
-                            Section(account.label.isEmpty ? account.email : "\(account.label) · \(account.email)") {
-                                ForEach(owned) { info in
-                                    Button {
-                                        model.setCalendarSelected(id: info.id, selected: !info.selected)
-                                    } label: {
-                                        HStack(spacing: 8) {
-                                            Circle().fill(info.color.flatMap(Color.init(hex:)) ?? .secondary).frame(width: 8, height: 8)
-                                            Text(info.summary).lineLimit(1).truncationMode(.middle)
-                                            Spacer(minLength: 0)
-                                            if model.calendarActivation.syncingCalendarIds.contains(info.id) {
-                                                ProgressView().controlSize(.mini)
-                                            }
-                                            Image(systemName: info.selected ? "checkmark.circle.fill" : "circle")
-                                        }
-                                        .contentShape(Rectangle())
-                                    }
-                                    .buttonStyle(.plain)
-                                    .accessibilityIdentifier("calendar-choice-\(info.id)")
-                                    .accessibilityValue(info.selected ? "Selected" : "Not selected")
-                                }
-                            }
-                        }
-                    }
-                }.listStyle(.plain).accessibilityIdentifier("calendar-checklist")
-            }
-            .frame(width: 320, height: 360)
-            .presentationCompactAdaptation(.popover)
+            CalendarChecklistPopover(model: model, onDone: { showsCalendars = false })
         }
     }
 
@@ -545,5 +506,55 @@ struct AgendaView: View {
                 .foregroundStyle(.primary)
         }
         .accessibilityHint("Shows the event")
+    }
+}
+
+private struct CalendarChecklistPopover: View {
+    let model: AppModel
+    let onDone: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Calendars").font(.headline)
+                Spacer()
+                Button("Done", action: onDone)
+            }.padding(12)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    if model.calendars.isEmpty {
+                        Text(model.needsSetup ? "Connect to the server in Settings." : "No calendars synced yet.")
+                    }
+                    ForEach(model.accounts) { account in
+                        let owned = model.calendars.filter { $0.accountId == account.id }
+                        if !owned.isEmpty {
+                            Text(account.label.isEmpty ? account.email : "\(account.label) · \(account.email)")
+                                .font(.caption).foregroundStyle(.secondary).padding(.top, 8)
+                            ForEach(owned) { info in
+                                Button {
+                                    model.setCalendarSelected(id: info.id, selected: !info.selected)
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Circle().fill(info.color.flatMap(Color.init(hex:)) ?? .secondary).frame(width: 8, height: 8)
+                                        Text(info.summary).lineLimit(1).truncationMode(.middle)
+                                        Spacer(minLength: 0)
+                                        if model.calendarActivation.syncingCalendarIds.contains(info.id) {
+                                            ProgressView().controlSize(.mini)
+                                        }
+                                        Image(systemName: info.selected ? "checkmark.circle.fill" : "circle")
+                                    }
+                                    .frame(minHeight: 44).contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("calendar-choice-\(info.id)")
+                                .accessibilityValue(info.selected ? "Selected" : "Not selected")
+                            }
+                        }
+                    }
+                }.padding(.horizontal, 12).padding(.bottom, 12)
+            }.accessibilityIdentifier("calendar-checklist")
+        }
+        .frame(width: 320, height: 360)
+        .presentationCompactAdaptation(.popover)
     }
 }
