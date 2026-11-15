@@ -14,7 +14,7 @@ extension AppModel {
             try database.apply(DemoData.syncResponse(now: now, calendar: calendar))
             if UserDefaults.standard.bool(forKey: "uiDeepLinkFixture") {
                 try database.apply(SyncResponse(cursor: now.ISO8601Format(), tasks: [TaskItem(
-                    id: "abcdef01-2345-6789-abcd-ef0123456789", categoryId: nil, title: "Deep link fixture",
+                    id: "abcdef01-2345-6789-abcd-ef0123456789", categoryId: TaskCategory.inboxId, title: "Deep link fixture",
                     durationMinutes: 30, priority: .medium, createdAt: now, updatedAt: now)]))
             }
             // A block finished this morning, as a ghost (not persisted: demo runs are throwaway).
