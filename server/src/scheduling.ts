@@ -33,6 +33,9 @@ import type {
 import { materializeRecurringTasks } from './tasks.js'
 import { automaticTripEnd } from './all-day-blocking.js'
 import { parseCalendarDate } from './validation.js'
+import { scheduleChanges } from './db/schema.js'
+import { writeTimestamp } from './db/sync-clock.js'
+import { placementChanges } from './schedule-changes.js'
 
 /** Smallest piece of shared work: long enough for an agent to get somewhere between check-ins. */
 export const SHARED_CHUNK_MINUTES = 60
@@ -359,6 +362,7 @@ export async function runScheduling(
   db: Db,
   config: Pick<Config, 'HORIZON_DAYS'>,
   now: Date = new Date(),
+  reason?: string,
 ): Promise<PlanResult> {
   return db.transaction(async (tx) => {
     // Without this a slow run that read stale tasks could commit after (and overwrite) a newer one.
@@ -378,6 +382,7 @@ export async function runScheduling(
       .innerJoin(calendars, eq(events.calendarId, calendars.id))
       .where(and(eq(calendars.blocksScheduling, true), isNull(events.deletedAt)))
     const previousRows = await tx.select().from(placements)
+    const previousUnscheduled = await tx.select().from(unscheduled)
     const projectRows = await tx.select().from(projects).where(isNull(projects.deletedAt))
     const overrideRows = await tx.select().from(dayOverrides).where(isNull(dayOverrides.deletedAt))
     await tx.delete(projectPlacements).where(lt(projectPlacements.endAt, new Date(now.getTime() - PROJECT_TIME_RETENTION)))
@@ -408,6 +413,9 @@ export async function runScheduling(
       timeZone,
     )
 
+    const changes = placementChanges(previousRows, result.placements, { now, previousUnscheduled, unscheduled: result.unscheduled })
+    await tx.delete(scheduleChanges).where(lt(scheduleChanges.updatedAt, sql`clock_timestamp() - interval '30 days'`))
+    if (changes.length > 0) await tx.insert(scheduleChanges).values(changes.map((change) => ({ ...change, reason: reason ?? change.reason, id: randomUUID(), updatedAt: writeTimestamp })))
     await tx.delete(placements)
     if (result.placements.length > 0) {
       await tx.insert(placements).values(

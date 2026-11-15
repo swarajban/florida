@@ -85,6 +85,13 @@
       "when": 1794576778467,
       "tag": "0011_secret_sharon_carter",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1794771949713,
+      "tag": "0012_natural_jackpot",
+      "breakpoints": true
     }
   ]
 }

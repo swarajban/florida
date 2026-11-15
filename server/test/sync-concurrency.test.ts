@@ -7,6 +7,7 @@ import { migrate } from 'drizzle-orm/postgres-js/migrator'
 import postgres from 'postgres'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../src/app.js'
+import { ChangeBus } from '../src/changes.js'
 import type { Db } from '../src/db/client.js'
 import * as schema from '../src/db/schema.js'
 import { events } from '../src/db/schema.js'
@@ -16,6 +17,7 @@ import { learnAccountProfiles, refreshAllDayJudgments, repairLegacyJudgmentCurso
 import { seed } from '../src/seed.js'
 import { patchTask, upsertTask } from '../src/tasks.js'
 import { FakeSync, testConfig } from './fixtures.js'
+import { runScheduling } from '../src/scheduling.js'
 
 const url = process.env.TEST_DATABASE_URL
 
@@ -68,6 +70,49 @@ describe.skipIf(url === undefined)('concurrent Postgres sync cursors', () => {
       updatedAt: new Date('2026-11-01T00:00:00Z'),
     })
   }
+
+  it('isolates MCP previews and batches on real Postgres and records event reasons', async () => {
+    const changes = new ChangeBus()
+    let notices = 0
+    changes.subscribe(() => { notices++ })
+    const app = createApp({ db, config: testConfig, sync: new FakeSync(), changes,
+      reschedule: (reason) => runScheduling(db, testConfig, new Date(), reason),
+    })
+    const headers = { authorization: 'Bearer ' + testConfig.API_TOKEN, 'content-type': 'application/json', accept: 'application/json, text/event-stream' }
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const response = await app.request('/mcp', { method: 'POST', headers, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) })
+      const body = await response.json() as { result: { isError?: boolean; structuredContent: { task?: { id: string; placements: { startAt: string; endAt: string }[] }; newlyUnscheduled?: unknown[] } } }
+      return body.result
+    }
+    const snapshot = () => Promise.all(Object.values(schema).map(async (table) => (await db.select().from(table)).map((row) => JSON.stringify(row)).sort()))
+    const before = await snapshot()
+    const id = randomUUID()
+    const preview = await call('create_task', { id, categoryId: 'inbox', title: 'Real PG preview', dryRun: true,
+      recurrence: { frequency: 'day', interval: 1, timeZone: 'America/Los_Angeles', startDate: new Date().toISOString().slice(0, 10) },
+    })
+    expect(preview.isError).toBeFalsy()
+    expect(preview.structuredContent.task?.id).toBe(id)
+    expect(await snapshot()).toEqual(before)
+    expect(notices).toBe(0)
+    const failed = await call('batch_create_tasks', { tasks: [{ id, categoryId: 'inbox', title: 'Rolled back' }, { categoryId: 'missing', title: 'Invalid' }] })
+    expect(failed.isError).toBe(true)
+    expect(await snapshot()).toEqual(before)
+    expect(notices).toBe(0)
+    const committed = await call('create_task', { id, categoryId: 'inbox', title: 'Real PG scheduled' })
+    expect(committed.isError).toBeFalsy()
+    expect(notices).toBe(1)
+    const [placement] = committed.structuredContent.task!.placements
+    expect(placement).toBeDefined()
+    await db.update(schema.calendars).set({ selected: true, blocksScheduling: true }).where(eq(schema.calendars.id, 'calendar'))
+    const event = await app.request(`/api/events/${randomUUID()}`, { method: 'PUT', headers, body: JSON.stringify({ calendarId: 'calendar', summary: 'Displaces task', startAt: placement!.startAt, endAt: placement!.endAt, allDay: false }) })
+    expect(event.status).toBe(200)
+    const journal = await db.select().from(schema.scheduleChanges)
+    expect(journal.some((row) => row.taskId === id && row.reason === 'rescheduled due to new event' && row.changeType === 'moved')).toBe(true)
+    const [locks] = await client<{ count: number }[]>`select count(*)::int as count from pg_locks where locktype='advisory' and objid in (731104,731105) and pid in (select pid from pg_stat_activity where datname=current_database())`
+    expect(locks?.count).toBe(0)
+    const [latest] = await db.select({ updatedAt: schema.scheduleChanges.updatedAt }).from(schema.scheduleChanges).orderBy(sql`${schema.scheduleChanges.updatedAt} desc`).limit(1)
+    expect(latest!.updatedAt.getTime()).toBeGreaterThan(Date.now() - 5000)
+  })
 
   async function waitForLock(event: string, queryPrefix = '') {
     for (let i = 0; i < 200; i++) {

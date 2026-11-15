@@ -16,7 +16,7 @@ const config = loadConfig()
 const { db, close } = createDb(config.DATABASE_URL)
 const sync = new GoogleSync(db, config)
 const changes = new ChangeBus()
-const reschedule = () => runScheduling(db, config)
+const reschedule = (reason?: string) => runScheduling(db, config, new Date(), reason)
 const claude =
   config.ANTHROPIC_API_KEY === undefined ? undefined : { apiKey: config.ANTHROPIC_API_KEY, model: config.ANTHROPIC_MODEL }
 const briefWriter = claude === undefined ? undefined : new ClaudeBriefWriter(claude)

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { dateFromDayNumber, dayNumber, localDate, zonedToUtc } from '@florida/scheduler'
+import { dateFromDayNumber, dayNumber, findFreeSlots, localDate, zonedToUtc } from '@florida/scheduler'
 import type { LocalDate, SchedulerResult } from '@florida/scheduler'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
@@ -12,6 +12,9 @@ import type { Db } from './db/client.js'
 import { latestBriefs } from './briefs.js'
 import { categoriesWithExamples, defaultTimeZone, INBOX_CATEGORY_ID } from './db/queries.js'
 import { writeTimestamp } from './db/sync-clock.js'
+import { syncCursor } from './db/sync-clock.js'
+import { blockingEventInterval, localWeeks, runScheduling } from './scheduling.js'
+import { placementChanges } from './schedule-changes.js'
 import type { TaskParser } from './ai/parse-task.js'
 import type { CalendarSyncService } from './google/sync.js'
 import { GoogleApiError } from './google/client.js'
@@ -23,10 +26,13 @@ import {
   events,
   googleAccounts,
   placements,
+  planSummary,
   projectPlacements,
   projects,
   routineBlocks,
   routineOccurrences,
+  scheduleChanges,
+  unscheduled,
   tasks,
 } from './db/schema.js'
 import type { PlacementRow, TaskRow } from './db/schema.js'
@@ -51,15 +57,18 @@ import {
   taskContext,
   taskPatch,
   upsertTask,
+  lockTaskRecurrences,
 } from './tasks.js'
 import { badRequest, calendarDate, formatCalendarDate, isoInstant, notFound, parseCalendarDate, timeZone } from './validation.js'
 
 export interface McpDeps {
   db: Db
   /** Reruns the scheduler and notifies connected clients; the app's wrapper around `runScheduling`. */
-  reschedule: () => Promise<SchedulerResult>
+  reschedule: (reason?: string) => Promise<SchedulerResult>
   sync?: CalendarSyncService
   ai?: TaskParser
+  horizonDays?: number
+  publish?: () => void
 }
 
 const SERVER_INFO = { name: 'florida', version: '0.1.0' }
@@ -94,6 +103,27 @@ const INSTRUCTIONS = [
 ].join(' ')
 
 const taskId = z.string().min(1).describe('Task id')
+const dryRunInput = z.boolean().default(false).describe('Validate and compute the proposed plan in a rolled-back transaction; persist nothing and send no notifications')
+const writeReason = (tool: string) => tool === 'set_day' || tool === 'clear_day' ? 'rescheduled due to day override' : tool.includes('project') ? 'rescheduled due to project update' : 'rescheduled due to task update'
+const createTaskInput = z.object({
+  ...taskBody.shape,
+  id: taskId.optional(),
+  durationMinutes: z.number().int().min(1).default(30),
+  priority: priority.default('medium'),
+  deadlineType: deadlineType.optional(),
+})
+const operation = z.discriminatedUnion('tool', [
+  z.object({ tool: z.literal('create_task'), arguments: createTaskInput }),
+  z.object({ tool: z.literal('update_task'), arguments: z.object({ id: taskId, ...taskPatch.shape }) }),
+  z.object({ tool: z.literal('complete_task'), arguments: z.object({ id: taskId }) }),
+  z.object({ tool: z.literal('delete_task'), arguments: z.object({ id: taskId }) }),
+  z.object({ tool: z.literal('set_day'), arguments: z.object({ date: calendarDate, ...dayOverrideBody.shape }) }),
+  z.object({ tool: z.literal('clear_day'), arguments: z.object({ date: calendarDate }) }),
+  z.object({ tool: z.literal('update_project'), arguments: z.object({ id: taskId, ...projectPatch.shape }) }),
+  z.object({ tool: z.literal('create_project'), arguments: z.object({ id: taskId.optional(), ...projectBody.shape }) }),
+  z.object({ tool: z.literal('delete_project'), arguments: z.object({ id: taskId }) }),
+])
+type WriteOperation = z.infer<typeof operation>
 const dueFilter = z.union([calendarDate, isoInstant])
 const searchCondition = (query: string | undefined) => {
   const text = query?.trim()
@@ -109,6 +139,77 @@ const searchCondition = (query: string | undefined) => {
 export function buildMcpServer(deps: McpDeps): McpServer {
   const { db, reschedule } = deps
   const server = new McpServer(SERVER_INFO, { instructions: INSTRUCTIONS })
+
+  server.registerTool('batch_create_tasks', {
+    description: 'Atomically creates 1–100 tasks, then schedules once. dryRun rolls back all writes and returns the proposed plan and placement changes.',
+    inputSchema: { tasks: z.array(createTaskInput).min(1).max(100), dryRun: dryRunInput },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  }, ({ tasks: bodies, dryRun }) => run(() => write(bodies.map((arguments_) => ({ tool: 'create_task', arguments: arguments_ })), dryRun)))
+
+  server.registerTool('batch_update_tasks', {
+    description: 'Atomically updates 1–100 tasks in order, then schedules once. Any invalid reference rolls back the whole batch.',
+    inputSchema: { tasks: z.array(z.object({ id: taskId, ...taskPatch.shape })).min(1).max(100), dryRun: dryRunInput },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  }, ({ tasks: patches, dryRun }) => run(() => write(patches.map((arguments_) => ({ tool: 'update_task', arguments: arguments_ })), dryRun)))
+
+  server.registerTool('batch', {
+    description: 'Atomically applies 1–100 local write operations in order and schedules once. No Google/network writes. Results match operation order; errors roll back all writes.',
+    inputSchema: { operations: z.array(operation).min(1).max(100), dryRun: dryRunInput },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+  }, ({ operations, dryRun }) => run(() => write(operations, dryRun)))
+
+  server.registerTool('list_changes', {
+    description: 'Changed task/project snapshots and a 30-day placement/unscheduled journal since an exclusive timestamp. Follow nextCursor with the original since until hasMore is false, then save the returned since watermark.',
+    inputSchema: { since: isoInstant, cursor: z.object({ tasks: z.object({ at: isoInstant, id: z.string() }).optional(), projects: z.object({ at: isoInstant, id: z.string() }).optional(), placements: z.object({ at: isoInstant, id: z.string() }).optional() }).optional(), limit: z.number().int().min(1).max(200).default(100) },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, ({ since, cursor, limit }) => run(async () => {
+    const fence = await syncCursor(db)
+    const rows = await db.select({ ...getTableColumns(scheduleChanges), title: tasks.title }).from(scheduleChanges).leftJoin(tasks, eq(tasks.id, scheduleChanges.taskId)).where(and(
+      gt(scheduleChanges.updatedAt, new Date(since)), lte(scheduleChanges.updatedAt, fence),
+      cursor?.placements === undefined ? undefined : or(gt(scheduleChanges.updatedAt, new Date(cursor.placements.at)), and(eq(scheduleChanges.updatedAt, new Date(cursor.placements.at)), gt(scheduleChanges.id, cursor.placements.id))),
+    )).orderBy(asc(scheduleChanges.updatedAt), asc(scheduleChanges.id)).limit(limit + 1)
+    const taskRows = await db.select().from(tasks).where(and(gt(tasks.updatedAt, new Date(since)), lte(tasks.updatedAt, fence), cursor?.tasks === undefined ? undefined : or(gt(tasks.updatedAt, new Date(cursor.tasks.at)), and(eq(tasks.updatedAt, new Date(cursor.tasks.at)), gt(tasks.id, cursor.tasks.id))))).orderBy(tasks.updatedAt, tasks.id).limit(limit + 1)
+    const projectRows = await db.select().from(projects).where(and(gt(projects.updatedAt, new Date(since)), lte(projects.updatedAt, fence), cursor?.projects === undefined ? undefined : or(gt(projects.updatedAt, new Date(cursor.projects.at)), and(eq(projects.updatedAt, new Date(cursor.projects.at)), gt(projects.id, cursor.projects.id))))).orderBy(projects.updatedAt, projects.id).limit(limit + 1)
+    const changeType = (row: { createdAt: Date; deletedAt: Date | null; completedAt?: Date | null }) => row.deletedAt !== null ? 'deleted' : row.completedAt != null && row.completedAt > new Date(since) ? 'completed' : row.createdAt > new Date(since) ? 'created' : 'updated'
+    const key = (row: { id: string; updatedAt: Date } | undefined) => row === undefined ? undefined : { at: row.updatedAt.toISOString(), id: row.id }
+    const hasMore = [rows, taskRows, projectRows].some((items) => items.length > limit)
+    return ok({
+      tasks: taskRows.slice(0, limit).map((task) => ({ ...task, appUrl: `florida://tasks/${task.id}`, changeType: changeType(task) })),
+      projects: projectRows.slice(0, limit).map((project) => ({ ...project, appUrl: `florida://projects/${project.id}`, changeType: changeType(project) })),
+      placements: rows.slice(0, limit).map((row) => ({ id: row.id, taskId: row.taskId, title: row.title, appUrl: `florida://tasks/${row.taskId}`, changeType: row.changeType, previousPlacements: row.before, newPlacements: row.after, unscheduledReason: row.afterUnscheduled?.reason ?? null, previousUnscheduled: row.beforeUnscheduled, newUnscheduled: row.afterUnscheduled, reason: row.reason, changedAt: row.updatedAt })),
+      hasMore, since: fence.toISOString(), nextCursor: hasMore ? { tasks: key(taskRows.slice(0, limit).at(-1)) ?? cursor?.tasks, projects: key(projectRows.slice(0, limit).at(-1)) ?? cursor?.projects, placements: key(rows.slice(0, limit).at(-1)) ?? cursor?.placements } : null,
+    })
+  }))
+
+  server.registerTool('find_free_slots', {
+    description: 'Returns maximal free windows within routine hours, at least durationMinutes long. Respects context, day overrides, blocking calendars, commitments, and (by default) all planned task/project time. Optional routine hours and hard-deadline overflow are excluded. Read-only; does not rerun the scheduler.',
+    inputSchema: { windowStart: dueFilter, windowEnd: dueFilter, deadline: dueFilter.optional(), durationMinutes: z.number().int().min(1), context: taskContext.optional(), includeScheduledTasks: z.boolean().default(true), limit: z.number().int().min(1).max(100).default(20) },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, ({ windowStart, windowEnd, deadline, durationMinutes, context, includeScheduledTasks, limit }) => run(async () => {
+    const timeZone = await defaultTimeZone(db)
+    const instant = (value: string, inclusiveEnd: boolean) => {
+      const date = parseCalendarDate(value)
+      return date === undefined ? Date.parse(value) : zonedToUtc(inclusiveEnd ? dateFromDayNumber(dayNumber(date) + 1) : date, 0, timeZone)
+    }
+    const start = new Date(instant(windowStart, false)).toISOString()
+    const end = new Date(Math.min(instant(windowEnd, true), deadline === undefined ? Infinity : instant(deadline, true))).toISOString()
+    if (Date.parse(end) <= Date.parse(start) || Date.parse(end) - Date.parse(start) > 31 * 86400000) throw badRequest('Expected a positive range of at most 31 days after applying deadline')
+    const blocks = await db.select().from(routineBlocks).where(isNull(routineBlocks.deletedAt))
+    const overrides = await db.select().from(dayOverrides).where(isNull(dayOverrides.deletedAt))
+    const eventRows = await db.select(getTableColumns(events)).from(events).innerJoin(calendars, eq(events.calendarId, calendars.id)).where(and(eq(calendars.blocksScheduling, true), isNull(events.deletedAt)))
+    const planned = includeScheduledTasks ? [...await db.select().from(placements), ...await db.select().from(projectPlacements)] : []
+    const [storedPlan] = await db.select().from(planSummary)
+    const commitments = storedPlan === undefined ? undefined : await db.select().from(routineOccurrences)
+    return ok({ timeZone, slots: findFreeSlots({
+      start, end, durationMinutes, ...(context === undefined ? {} : { context }),
+      routine: { timeZone, blocks: blocks.map((b) => ({ ...b, alternates: b.alternates ?? [] })) },
+      dayOverrides: overrides.map((o) => ({ date: o.date, kind: o.kind })),
+      busy: eventRows.flatMap((event) => { const interval = blockingEventInterval(event, timeZone); return interval === undefined ? [] : [interval] }),
+      occupied: planned.map((p) => ({ start: p.startAt.toISOString(), end: p.endAt.toISOString() })),
+      ...(commitments === undefined ? {} : { commitments: commitments.map((p) => ({ start: p.startAt.toISOString(), end: p.endAt.toISOString() })) }),
+      ...(storedPlan === undefined ? {} : { commitmentWindow: { start: new Date(localWeeks(storedPlan.computedAt.getTime(), timeZone, 1)[0]!.start).toISOString(), end: new Date(storedPlan.computedAt.getTime() + (deps.horizonDays ?? 30) * 86400000).toISOString() } }),
+    }).slice(0, limit).map((slot) => ({ startAt: slot.start, endAt: slot.end, durationMinutes: (Date.parse(slot.end) - Date.parse(slot.start)) / 60000 })) })
+  }))
 
   server.registerTool('list_deleted_tasks', {
     title: 'List deleted tasks', description: 'Lists tombstoned tasks, most recently deleted first.',
@@ -135,7 +236,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
       }).where(and(eq(tasks.id, id), isNotNull(tasks.deletedAt)))
       return getTask(tx, id)
     })
-    const scheduling = await reschedule()
+    const scheduling = await reschedule('rescheduled due to task update')
     return ok({ task: withPlacements(task, await placementsFor([id])), scheduling: summary(scheduling) })
   }))
 
@@ -173,8 +274,9 @@ export function buildMcpServer(deps: McpDeps): McpServer {
     inputSchema: { id: z.uuid().optional(), ...eventBody.shape },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   }, ({ id, ...body }) => run(async () => {
+    const [current] = id === undefined ? [] : await db.select({ id: events.id }).from(events).where(eq(events.id, id))
     const event = await upsertEvent(db, requireSync(), id ?? randomUUID(), eventBody.parse(body))
-    const scheduling = await reschedule()
+    const scheduling = await reschedule(current === undefined ? 'rescheduled due to new event' : 'rescheduled due to updated event')
     if (event.deletedAt !== null) throw notFound(`event ${event.id}`)
     return ok({ event, scheduling: summary(scheduling) })
   }))
@@ -185,7 +287,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, ({ id }) => run(async () => {
     await softDeleteEvent(db, requireSync(), id)
-    return ok({ deleted: id, scheduling: summary(await reschedule()) })
+    return ok({ deleted: id, scheduling: summary(await reschedule('rescheduled due to deleted event')) })
   }))
 
   server.registerTool('set_event_blocks_day', {
@@ -194,7 +296,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, ({ id, blocksDay }) => run(async () => {
     const event = await setEventBlocksDay(db, id, blocksDay)
-    return ok({ event, scheduling: summary(await reschedule()) })
+    return ok({ event, scheduling: summary(await reschedule('rescheduled due to event day-block change')) })
   }))
 
   server.registerTool('sync_google_calendar', {
@@ -202,7 +304,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, () => run(async () => {
     await deps.sync?.syncAll()
-    return ok({ scheduling: summary(await reschedule()) })
+    return ok({ scheduling: summary(await reschedule('rescheduled due to Google Calendar sync')) })
   }))
 
   function requireSync() {
@@ -316,24 +418,12 @@ export function buildMcpServer(deps: McpDeps): McpServer {
       description:
         'Creates a one-off or recurring task and reschedules. Recurrence generates separate upcoming tasks, not just a new task after completion. Returns the task with its scheduled blocks plus scheduling issues.',
       inputSchema: {
-        ...taskBody.shape,
-        id: z.string().min(1).optional().describe('Client-chosen id; a UUID is generated when omitted'),
-        durationMinutes: z.number().int().min(1).default(30),
-        priority: priority.default('medium'),
-        deadlineType: deadlineType.optional().describe("Defaults to 'soft' when dueAt is set, otherwise 'none'"),
+        ...createTaskInput.shape,
+        dryRun: dryRunInput,
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
-    ({ id, deadlineType: deadline, ...rest }) =>
-      run(async () => {
-        const newId = id ?? randomUUID()
-        const task = await upsertTask(db, newId, {
-          ...rest,
-          deadlineType: deadline ?? (rest.dueAt == null ? 'none' : 'soft'),
-        })
-        const scheduling = await reschedule()
-        return ok({ task: withPlacements(task, await placementsFor([newId])), scheduling: summary(scheduling) })
-      }),
+    ({ dryRun, ...args }) => run(() => write([{ tool: 'create_task', arguments: args }], dryRun, true)),
   )
 
   server.registerTool(
@@ -342,15 +432,10 @@ export function buildMcpServer(deps: McpDeps): McpServer {
       title: 'Update task',
       description:
         'Changes the given fields and reschedules. Omitted fields keep their value; null clears. For recurring tasks, template/rule edits apply to this and future unfinished occurrences; recurrence: null stops future repeats and keeps this task.',
-      inputSchema: { id: taskId, ...taskPatch.shape },
+      inputSchema: { id: taskId, ...taskPatch.shape, dryRun: dryRunInput },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    ({ id, ...patch }) =>
-      run(async () => {
-        const task = await patchTask(db, id, patch)
-        const scheduling = await reschedule()
-        return ok({ task: withPlacements(task, await placementsFor([id])), scheduling: summary(scheduling) })
-      }),
+    ({ dryRun, ...args }) => run(() => write([{ tool: 'update_task', arguments: args }], dryRun, true)),
   )
 
   server.registerTool(
@@ -364,7 +449,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
     ({ id }) =>
       run(async () => {
         const task = await completeTask(db, id)
-        const scheduling = await reschedule()
+        const scheduling = await reschedule('rescheduled due to task update')
         return ok({ task: withPlacements(task, await placementsFor([id])), scheduling: summary(scheduling) })
       }),
   )
@@ -380,7 +465,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
     ({ id }) =>
       run(async () => {
         await softDeleteTask(db, id)
-        const scheduling = await reschedule()
+        const scheduling = await reschedule('rescheduled due to task update')
         return ok({ deleted: id, scheduling: summary(scheduling) })
       }),
   )
@@ -428,7 +513,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
     ({ id, ...body }) =>
       run(async () => {
         const project = await upsertProject(db, id ?? randomUUID(), body)
-        const scheduling = await reschedule()
+        const scheduling = await reschedule('rescheduled due to project update')
         return ok({ project: { ...project, appUrl: `florida://projects/${project.id}` }, scheduling: summary(scheduling) })
       }),
   )
@@ -439,15 +524,10 @@ export function buildMcpServer(deps: McpDeps): McpServer {
       title: 'Update project',
       description:
         'Changes the given fields and reschedules. Omitted fields keep their value; null clears. Setting status to on_hold, thinking or done takes the project’s tasks out of the plan; active puts them back.',
-      inputSchema: { id: z.string().min(1).describe('Project id'), ...projectPatch.shape },
+      inputSchema: { id: z.string().min(1).describe('Project id'), ...projectPatch.shape, dryRun: dryRunInput },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    ({ id, ...patch }) =>
-      run(async () => {
-        const project = await patchProject(db, id, patch)
-        const scheduling = await reschedule()
-        return ok({ project: { ...project, appUrl: `florida://projects/${project.id}` }, scheduling: summary(scheduling) })
-      }),
+    ({ dryRun, ...args }) => run(() => write([{ tool: 'update_project', arguments: args }], dryRun, true)),
   )
 
   server.registerTool(
@@ -461,7 +541,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
     ({ id }) =>
       run(async () => {
         await softDeleteProject(db, id)
-        const scheduling = await reschedule()
+        const scheduling = await reschedule('rescheduled due to project update')
         return ok({ deleted: id, scheduling: summary(scheduling) })
       }),
   )
@@ -472,15 +552,10 @@ export function buildMcpServer(deps: McpDeps): McpServer {
       title: 'Set day',
       description:
         'Marks one date as different from its weekday’s routine and reschedules: home (work from home), office (go in), or off (nothing planned, no gym). Replaces an earlier setting for that date.',
-      inputSchema: { date: calendarDate.describe('YYYY-MM-DD in the routine’s time zone'), ...dayOverrideBody.shape },
+      inputSchema: { date: calendarDate.describe('YYYY-MM-DD in the routine’s time zone'), ...dayOverrideBody.shape, dryRun: dryRunInput },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    ({ date, ...body }) =>
-      run(async () => {
-        const dayOverride = await setDayOverride(db, date, body)
-        const scheduling = await reschedule()
-        return ok({ dayOverride, scheduling: summary(scheduling) })
-      }),
+    ({ dryRun, ...args }) => run(() => write([{ tool: 'set_day', arguments: args }], dryRun, true)),
   )
 
   server.registerTool(
@@ -494,7 +569,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
     ({ date }) =>
       run(async () => {
         await clearDayOverride(db, date)
-        const scheduling = await reschedule()
+        const scheduling = await reschedule('rescheduled due to day override')
         return ok({ cleared: date, scheduling: summary(scheduling) })
       }),
   )
@@ -550,10 +625,89 @@ export function buildMcpServer(deps: McpDeps): McpServer {
       description: 'Reruns the scheduler over all open tasks and returns every placement.',
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    () => run(async () => ok({ scheduling: await reschedule() })),
+    () => run(async () => ok({ scheduling: await reschedule('manual scheduler run') })),
   )
 
   return server
+
+  async function write(operations: WriteOperation[], dryRun: boolean, single = false): Promise<CallToolResult> {
+    const rollback = new Error('preview rollback')
+    let previous: PlacementRow[] = []
+    let previousUnscheduled: SchedulerResult['unscheduled'] = []
+    let previousLate = new Set<string>()
+    const apply = async (store: Db): Promise<Record<string, unknown>[]> => {
+      await store.execute(sql`select pg_advisory_xact_lock(731104)`)
+      await lockTaskRecurrences(store)
+      previous = await store.select().from(placements)
+      previousUnscheduled = await store.select().from(unscheduled)
+      const baselineTasks = await store.select().from(tasks).where(and(isNull(tasks.deletedAt), isNull(tasks.completedAt)))
+      previousLate = new Set(baselineTasks.filter((task) => task.dueAt !== null && task.deadlineType !== 'none' && previous.some((p) => p.taskId === task.id && !p.pinned && p.endAt > task.dueAt!)).map((t) => t.id))
+      const results: Record<string, unknown>[] = []
+      for (const op of operations) {
+        switch (op.tool) {
+          case 'create_task': {
+            const { id, deadlineType: deadline, ...body } = op.arguments
+            results.push({ task: await upsertTask(store, id ?? randomUUID(), { ...body, deadlineType: deadline ?? (body.dueAt == null ? 'none' : 'soft') }) })
+            break
+          }
+          case 'update_task': {
+            const { id, ...patch } = op.arguments
+            results.push({ task: await patchTask(store, id, patch) })
+            break
+          }
+          case 'complete_task': results.push({ task: await completeTask(store, op.arguments.id) }); break
+          case 'delete_task': await softDeleteTask(store, op.arguments.id); results.push({ deleted: op.arguments.id }); break
+          case 'set_day': {
+            const { date, ...body } = op.arguments
+            results.push({ dayOverride: await setDayOverride(store, date, body) })
+            break
+          }
+          case 'clear_day': await clearDayOverride(store, op.arguments.date); results.push({ cleared: op.arguments.date }); break
+          case 'update_project': {
+            const { id, ...patch } = op.arguments
+            const project = await patchProject(store, id, patch)
+            results.push({ project: { ...project, appUrl: `florida://projects/${id}` } })
+            break
+          }
+          case 'create_project': {
+            const { id, ...body } = op.arguments
+            const project = await upsertProject(store, id ?? randomUUID(), body)
+            results.push({ project: { ...project, appUrl: `florida://projects/${project.id}` } })
+            break
+          }
+          case 'delete_project': await softDeleteProject(store, op.arguments.id); results.push({ deleted: op.arguments.id }); break
+        }
+      }
+      return results
+    }
+    const response = (results: Record<string, unknown>[], scheduling: SchedulerResult) => {
+      const enriched = results.map((result) => {
+        if (result.task === undefined) return result
+        const task = result.task as TaskRow
+        return { ...result, task: {
+          ...task, appUrl: `florida://tasks/${task.id}`,
+          placements: scheduling.placements.filter((p) => p.taskId === task.id).map((p) => ({ startAt: p.start, endAt: p.end, pinned: p.pinned })),
+        } }
+      })
+      return ok({ ...(single ? enriched[0] : { results: enriched }), dryRun, scheduling: dryRun ? scheduling : summary(scheduling),
+        newlyLate: scheduling.late.filter((item) => !previousLate.has(item.taskId)),
+        newlyUnscheduled: scheduling.unscheduled.filter((item) => !previousUnscheduled.some((old) => old.taskId === item.taskId)),
+        changes: placementChanges(previous, scheduling.placements, { now: new Date(), previousUnscheduled, unscheduled: scheduling.unscheduled }),
+      })
+    }
+    let result: CallToolResult | undefined
+    try {
+      await db.transaction(async (tx) => {
+        const results = await apply(tx)
+        result = response(results, await runScheduling(tx, { HORIZON_DAYS: deps.horizonDays ?? 30 }, new Date(), single ? writeReason(operations[0]!.tool) : 'rescheduled due to batch update'))
+        if (dryRun) throw rollback
+      })
+    } catch (error) {
+      if (error !== rollback) throw error
+    }
+    if (!dryRun) deps.publish?.()
+    return result!
+  }
 
   async function agendaDays(date: LocalDate, last: LocalDate, tz: string) {
     const next = dateFromDayNumber(dayNumber(last) + 1)

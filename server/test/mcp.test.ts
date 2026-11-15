@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../src/app.js'
 import { ChangeBus } from '../src/changes.js'
 import type { Db } from '../src/db/client.js'
-import { briefs, calendars, dayOverrides, events, googleAccounts, placements, projectPlacements, projects, routineBlocks, routineOccurrences, tasks } from '../src/db/schema.js'
+import { briefs, calendars, dayOverrides, events, googleAccounts, placements, projectPlacements, projects, routineBlocks, routineOccurrences, scheduleChanges, tasks } from '../src/db/schema.js'
 import type { TaskDraft, ParseTaskContext } from '../src/ai/parse-task.js'
 import { GoogleApiError } from '../src/google/client.js'
 import { mountMcp } from '../src/mcp.js'
@@ -67,7 +67,7 @@ beforeAll(async () => {
   changes.subscribe(() => {
     notices += 1
   })
-  app = createApp({ db, config, sync: new FakeSync(), reschedule: () => runScheduling(db, config), changes })
+  app = createApp({ db, config, sync: new FakeSync(), reschedule: (reason) => runScheduling(db, config, new Date(), reason), changes })
 })
 
 afterAll(async () => {
@@ -170,6 +170,9 @@ describe('transport and auth', () => {
     const body = await rpc('tools/list')
     const tools = (body.result as { tools: { name: string; inputSchema: { type: string; properties?: object } }[] }).tools
     expect(tools.map((t) => t.name).sort()).toEqual([
+      'batch',
+      'batch_create_tasks',
+      'batch_update_tasks',
       'clear_day',
       'complete_task',
       'create_project',
@@ -177,12 +180,14 @@ describe('transport and auth', () => {
       'delete_project',
       'delete_event',
       'delete_task',
+      'find_free_slots',
       'get_agenda',
       'get_brief',
       'get_range',
       'get_task',
       'list_categories',
       'list_calendars',
+      'list_changes',
       'list_deleted_tasks',
       'list_projects',
       'list_tasks',

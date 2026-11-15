@@ -33,7 +33,9 @@ async function beforeMigration() {
     client,
     db,
     migrate: () => client.transaction(async (tx) => {
-      for (const statement of migrations[index]!.sql) await tx.exec(statement)
+      for (const migration of migrations.slice(index)) {
+        for (const statement of migration.sql) await tx.exec(statement)
+      }
     }),
   }
 }

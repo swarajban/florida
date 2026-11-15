@@ -56,7 +56,7 @@ For clients that support remote HTTP MCP servers natively (Claude Code, Cursor, 
 
 ### Quick sanity check
 
-Calling `tools/list` returns 25 tools (the reference below lists them). `GET https://florida-swaraj.fly.dev/health` is unauthenticated and returns `{"ok":true}`. These tools require the Wave 1A server version; a server not yet deployed may advertise fewer tools.
+Calling `tools/list` returns 30 tools (the reference below lists them). `GET https://florida-swaraj.fly.dev/health` is unauthenticated and returns `{"ok":true}`. These tools require the Wave 2 server version; a server not yet deployed may advertise fewer tools.
 
 ---
 
@@ -102,7 +102,7 @@ Florida derives `kind` (`"github" | "linear" | "slack" | "email" | "web"`) autom
 
 ---
 
-## 3. MCP Tool Reference (25 Tools)
+## 3. MCP Tool Reference (30 Tools)
 
 Task objects returned by MCP carry a computed `appUrl`, for example `florida://tasks/<id>`; project objects carry `florida://projects/<id>`. Agenda task blocks also include the task's `appUrl`. These links do not change the HTTP sync payload. Opening them requires a compatible Florida app handler.
 
@@ -155,6 +155,15 @@ Example: `list_tasks({ query: "proposal", dueBefore: "2026-11-20", context: "com
 - **`list_deleted_tasks`** — `{ query?: string, limit?: 1..200 }`, default limit 50. Returns tombstoned task objects with `appUrl`, newest `deletedAt` first. Search has the same title/notes semantics as `list_tasks`.
 - **`restore_task`** — `{ id: string }`. Clears one task's tombstone, reschedules, and returns `{ task, scheduling: { unscheduled, late } }`, with placements and `appUrl` on the task. If its category was deleted, the restored task moves to Inbox. Already-live tasks succeed idempotently; unknown IDs are errors. Restoring a recurring occurrence does **not** restart its stopped series or restore other deleted occurrences.
 - **`parse_task`** — `{ text: string, now?: ISO timestamp, timeZone?: IANA zone }`. Returns `{ draft }` using live category examples and active projects, without saving or scheduling anything. Text is trimmed and limited to 1–2000 characters; the clock and settings/default zone are used when omitted. If AI is not configured, returns a clear tool error; review the draft before calling `create_task`.
+
+### Availability, previews, change history, and batch writes
+
+- **`find_free_slots`** — `{ windowStart, windowEnd, durationMinutes, context?, deadline?, includeScheduledTasks?: true, limit?: 20 }`. Bounds and optional deadline accept ISO instants or `YYYY-MM-DD` in the settings time zone. A start date means local midnight; end/deadline dates include the entire day. The effective range must be positive and at most 31 elapsed days. Duration is a positive integer; limit is 1–100. Omitted context accepts any active routine work window; a context restricts eligibility. Returns `{ timeZone, slots: [{ startAt, endAt, durationMinutes }] }`: maximal contiguous windows at least the requested duration long. Calendar blocking policy, day overrides, blocking all-day events and commitments always apply. Task/project placements in all lanes are also subtracted unless `includeScheduledTasks: false`. Settled commitments are preserved inside the stored horizon, including searches crossing its edge; uncovered time uses calculated commitments. Optional hours and hard-deadline overflow are excluded. The tool is read-only and does not refresh a stale plan.
+- **Write previews:** `create_task`, `update_task`, `set_day`, and `update_project` accept `dryRun: true`. The server applies the same validation and recurrence behavior, computes the proposed plan inside one transaction, and rolls everything back before responding. No entity, recurrence, placement, journal row, database sync timestamp, Google write, or SSE notification persists. Responses keep the usual entity and add full proposed `scheduling`, `changes`, `newlyLate`, and `newlyUnscheduled`. The latter two contain only tasks not already late/unscheduled in the stored baseline before the hypothetical write; the full scheduling result still includes all warnings. Preview IDs are provisional unless supplied. A preview is not a reservation: a later write recomputes from current state. Normal writes return the usual scheduling summary plus the same change/warning-diff fields and `dryRun: false`.
+- **`batch_create_tasks`** — `{ tasks: [<create_task arguments>, ...], dryRun?: false }`.
+- **`batch_update_tasks`** — `{ tasks: [{ id, ...taskPatch }, ...], dryRun?: false }`.
+- **`batch`** — `{ operations: [{ tool, arguments }, ...], dryRun?: false }`. Supported tools: `create_task`, `update_task`, `complete_task`, `delete_task`, `create_project`, `update_project`, `delete_project`, `set_day`, `clear_day`. Google/network writes are excluded. Every batch contains 1–100 operations. Mutations execute in order with the scheduler run exactly once at the end of the same transaction. Validation, reference, or scheduling failure rolls back all changes. SSE publishes once, after commit, and never for previews. Responses contain ordered `results` with the usual entity snapshots and final task placements, a scheduling summary, and changes/warning diffs. All three batch tools support rollback-only previews. Use explicit IDs for retryable creations; retrying without IDs creates new tasks.
+- **`list_changes`** — `{ since: ISO timestamp, limit?: 1..200, cursor?: { tasks?: { at, id }, projects?: { at, id }, placements?: { at, id } } }`, default limit 100 **per collection**. Returns `{ tasks, projects, placements, hasMore, nextCursor, since }`. Task/project entries are current changed snapshots (not a field-by-field audit log), including tombstones, `changeType`, timestamps, and `appUrl`. Task types are `created`, `updated`, `completed`, `deleted`; projects omit `completed`. Placement entries record changed future intervals or unscheduled state: `taskId`, `title`, `appUrl`, `changeType` (`created`, `moved`, `removed`, `unscheduled`), `previousPlacements`, `newPlacements`, `previousUnscheduled`, `newUnscheduled`, `unscheduledReason`, `reason`, and `changedAt`. Unchanged scheduler runs add nothing. Reasons identify the initiating task/project/day/event write, Google sync, or manual run; they describe the trigger rather than claiming which individual constraint caused each downstream move. The server-only journal starts at Wave 2 deployment, is pruned after 30 days during scheduling, and is never added to Apple sync payloads. Keep the original `since` while following `nextCursor` until `hasMore` is false, then save the final returned `since` as the next watermark. Keyset pagination handles equal timestamps; the sync fence excludes in-flight transactions.
 
 ### Calendar tools
 
