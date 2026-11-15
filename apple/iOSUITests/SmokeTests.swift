@@ -521,6 +521,9 @@ final class SmokeTests: XCTestCase {
                 let app = launch(appearance: appearance, mode: mode, demoNow: demoNow)
                 let heading = app.buttons["Go to day"]
                 XCTAssertTrue(heading.waitForExistence(timeout: 10))
+                let strip = app.scrollViews["agenda-week-strip"]
+                XCTAssertTrue(strip.exists)
+                XCTAssertLessThanOrEqual(strip.frame.width, app.frame.width)
 
                 @MainActor
                 func cell(_ day: Date) -> XCUIElement {

@@ -70,8 +70,11 @@ struct WeekStrip: View {
                 }
             }
             .scrollTargetLayout()
+            .frame(width: CGFloat(weeks.count) * width, height: 43)
         }
+        .frame(width: width, height: 43)
         .scrollIndicators(.hidden)
+        .accessibilityIdentifier("agenda-week-strip")
         .scrollPosition($position)
         .defaultScrollAnchor(.center)
         .scrollTargetBehavior(WeekScrollTarget(pageWidth: width))
