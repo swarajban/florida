@@ -17,8 +17,18 @@ final class SmartAddTests: XCTestCase {
         let input = app.textViews["quick-add-input"]
         XCTAssertTrue(input.waitForExistence(timeout: 5))
         input.typeText("x")
-        if app.buttons["Continue"].waitForExistence(timeout: 2) { app.buttons["Continue"].tap() }
-        app.buttons["Clear draft"].tap()
+        let clear = app.buttons["Clear draft"]
+        if !clear.waitForExistence(timeout: 2), app.buttons["Continue"].waitForExistence(timeout: 10) {
+            app.buttons["Continue"].tap()
+        }
+        guard clear.waitForExistence(timeout: 5) else {
+            print("Keyboard onboarding: text=\(input.value ?? "nil"), label=\(input.label), frame=\(input.frame), continue=\(app.buttons["Continue"].exists)")
+            capture(app, "keyboard-onboarding-failure")
+            XCTFail("Keyboard onboarding did not settle before editing the draft")
+            return
+        }
+        if app.buttons["Continue"].exists { app.buttons["Continue"].tap() }
+        clear.tap()
         input.typeText("Task &")
         let parallel = app.buttons["quick-add-suggestion-&parallel"]
         XCTAssertTrue(parallel.waitForExistence(timeout: 5))
