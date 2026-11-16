@@ -42,6 +42,45 @@ import Testing
         #expect(draft.title == "Work")
     }
 
+    @Test(arguments: ["#", "!", "^", "@", "*", "=", "&"])
+    func deletingTriggerDismissesImmediately(_ symbol: String) {
+        let session = QuickAddCompletionSession()
+        for prefix in ["", "Task ", "Atlas press page audio clips #Engineering ^today "] {
+            let text = prefix + symbol
+            let choices = session.suggestions(in: text, selection: NSRange(location: text.utf16.count, length: 0), categories: categories)
+            if symbol != "#" || !prefix.contains("#") { #expect(!choices.isEmpty) }
+            #expect(session.suggestions(in: prefix, selection: NSRange(location: prefix.utf16.count, length: 0), categories: categories).isEmpty)
+            #expect(suggestions(prefix, caret: text.utf16.count).isEmpty)
+        }
+        #expect(suggestions("Task " + symbol + " ").isEmpty)
+    }
+
+    @Test func deletionRangesAndCaretMovementDismiss() {
+        let session = QuickAddCompletionSession()
+        let editing = "Task #Work-Engineering"
+        #expect(!suggestions(editing).isEmpty)
+        for updated in ["Task ", "", "Task Engineering"] {
+            #expect(session.suggestions(in: updated, selection: NSRange(location: updated.utf16.count, length: 0), categories: categories).isEmpty)
+        }
+        for caret in [0, 4, 5] {
+            #expect(session.suggestions(in: editing, selection: NSRange(location: caret, length: 0), categories: categories).isEmpty)
+        }
+        #expect(session.suggestions(in: editing, selection: NSRange(location: 5, length: 17), categories: categories).isEmpty)
+        #expect(suggestions(editing + " tail").isEmpty)
+    }
+
+    @Test func escapeDismissesWithoutChangingTextAndNewTriggerReopens() {
+        var session = QuickAddCompletionSession()
+        let text = "Task !"
+        let selection = NSRange(location: text.utf16.count, length: 0)
+        #expect(!session.suggestions(in: text, selection: selection, categories: categories).isEmpty)
+        session.dismiss(in: text, selection: selection)
+        #expect(session.isDismissed(in: text, selection: selection))
+        #expect(session.suggestions(in: text, selection: selection, categories: categories).isEmpty)
+        let updated = text + " @"
+        #expect(!session.suggestions(in: updated, selection: NSRange(location: updated.utf16.count, length: 0), categories: categories).isEmpty)
+    }
+
     @Test func choicesFilterEveryGrammarFamily() {
         let cases: [(String, [String])] = [
             ("@of", ["@office"]), ("^no", ["^none"]), ("^tom", ["^tomorrow"]),

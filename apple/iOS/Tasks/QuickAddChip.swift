@@ -11,6 +11,9 @@ struct QuickAddChip: Identifiable, Hashable {
     static func chips(for draft: QuickAddDraft, categories: [TaskCategory], calendar: Calendar) -> [QuickAddChip] {
         let now = Date()
         var chips: [QuickAddChip] = []
+        chips.append(QuickAddChip(
+            id: "attention", symbol: draft.attention == .shared ? "square.stack.3d.up" : "scope",
+            text: draft.attention.map { $0 == .shared ? "Parallel" : "Full focus" } ?? "Attention: default"))
         if let minutes = draft.durationMinutes {
             chips.append(QuickAddChip(id: "duration", symbol: "clock", text: Formatting.duration(minutes: minutes)))
         }

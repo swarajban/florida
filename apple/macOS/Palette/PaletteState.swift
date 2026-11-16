@@ -36,8 +36,7 @@ struct PaletteState {
     var suggestionIndex = 0
     var caretUTF16 = 0
     var caretRevision = 0
-    var dismissedSuggestionText: String?
-    var dismissedSuggestionCaret: Int?
+    var completionSession = QuickAddCompletionSession()
     var completedCategoryId: String?
     var completedCategoryHint: String?
     private var baseMode: Mode = .quickAdd

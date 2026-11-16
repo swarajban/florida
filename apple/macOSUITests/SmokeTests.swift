@@ -4,6 +4,43 @@ import XCTest
 /// Kept screenshots are exported from the result bundle by CI for light/dark visual review.
 final class SmokeTests: XCTestCase {
     @MainActor
+    func testQuickAddTriggerDeletionDismissesSuggestions() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-demoData", "YES", "-uiAppearance", "light"]
+        app.launch()
+        addTeardownBlock {
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = "quick-add-trigger-dismissal"
+            attachment.lifetime = .keepAlways
+            self.add(attachment)
+            app.terminate()
+        }
+        XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 15))
+        app.typeKey("c", modifierFlags: [])
+        let input = app.textFields["palette-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        input.typeText("Atlas press page audio clips #Engineering ^today !")
+        let priority = app.buttons["smart-add-suggestion-!2"]
+        XCTAssertTrue(priority.waitForExistence(timeout: 5))
+        app.typeKey(.delete, modifierFlags: [])
+        print("After Backspace: text=\(input.value ?? "nil"), priority=\(priority.exists), frame=\(input.frame)")
+        XCTAssertTrue(priority.waitForNonExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["esc to dismiss suggestions"].exists)
+        input.typeText("!")
+        XCTAssertTrue(priority.waitForExistence(timeout: 5))
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(priority.waitForNonExistence(timeout: 5))
+        app.typeKey("a", modifierFlags: .command)
+        input.typeText("Task #")
+        let category = app.buttons["smart-add-suggestion-#demo-eng"]
+        XCTAssertTrue(category.waitForExistence(timeout: 5))
+        app.typeKey(.delete, modifierFlags: [])
+        XCTAssertTrue(category.waitForNonExistence(timeout: 5))
+        XCTAssertEqual(input.value as? String, "Task ")
+    }
+
+    @MainActor
     func testTaskSourceCaptureAndEditing() {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {

@@ -24,7 +24,7 @@ struct ShareSheet: View {
                         .lineLimit(2...5)
                         .textFieldStyle(.roundedBorder)
                         .accessibilityIdentifier("share-input")
-                    Text(model.literalTitle ? "Page title is literal. Editing enables Smart Add symbols." : "Smart Add: #category · ^date · ^someday · =30m · // notes")
+                    Text(model.literalTitle ? "Page title is literal. Editing enables Smart Add symbols." : "Smart Add: #category · ^date · ^someday · =30m · &attention · // notes")
                         .font(.caption).foregroundStyle(.secondary)
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Task preview").font(.caption).foregroundStyle(.secondary)

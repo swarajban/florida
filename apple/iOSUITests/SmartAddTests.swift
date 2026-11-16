@@ -2,6 +2,55 @@ import XCTest
 
 final class SmartAddTests: XCTestCase {
     @MainActor
+    func testTriggerDeletionAndAttentionCapture() {
+        continueAfterFailure = false
+        let app = launch("light")
+        addTeardownBlock {
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = "quick-add-attention-dismissal"
+            attachment.lifetime = .keepAlways
+            self.add(attachment)
+            app.terminate()
+        }
+        XCTAssertTrue(app.buttons["New task"].waitForExistence(timeout: 15))
+        app.buttons["New task"].tap()
+        let input = app.textViews["quick-add-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        input.typeText("x")
+        let clear = app.buttons["Clear draft"]
+        if !clear.waitForExistence(timeout: 2), app.buttons["Continue"].waitForExistence(timeout: 10) {
+            app.buttons["Continue"].tap()
+        }
+        guard clear.waitForExistence(timeout: 5) else {
+            print("Keyboard onboarding: text=\(input.value ?? "nil"), label=\(input.label), frame=\(input.frame), continue=\(app.buttons["Continue"].exists)")
+            capture(app, "keyboard-onboarding-failure")
+            XCTFail("Keyboard onboarding did not settle before editing the draft")
+            return
+        }
+        if app.buttons["Continue"].exists { app.buttons["Continue"].tap() }
+        clear.tap()
+        input.typeText("Task &")
+        let parallel = app.buttons["quick-add-suggestion-&parallel"]
+        XCTAssertTrue(parallel.waitForExistence(timeout: 5))
+        input.typeText(XCUIKeyboardKey.delete.rawValue)
+        print("After Backspace: text=\(input.value ?? "nil"), label=\(input.label), frame=\(input.frame)")
+        XCTAssertTrue(parallel.waitForNonExistence(timeout: 5))
+        input.typeText("&parallel ")
+        let chip = app.buttons["quick-add-chip-attention"]
+        XCTAssertTrue(chip.waitForExistence(timeout: 5))
+        XCTAssertTrue(chip.label.contains("Parallel"))
+        chip.tap()
+        XCTAssertTrue(chip.label.contains("Full focus"))
+        chip.tap()
+        XCTAssertTrue(chip.label.contains("default"))
+        input.typeText("#missing-category")
+        let create = app.buttons["quick-add-create-category"]
+        XCTAssertTrue(create.waitForExistence(timeout: 5))
+        app.typeKey(.leftArrow, modifierFlags: .command)
+        XCTAssertTrue(create.waitForNonExistence(timeout: 5), input.label)
+    }
+
+    @MainActor
     func testFourSuggestionRowsRemainVisible() {
         continueAfterFailure = false
         for appearance in ["light", "dark"] {
@@ -104,12 +153,15 @@ final class SmartAddTests: XCTestCase {
         XCTAssertFalse(app.buttons["quick-add-create-category"].exists)
         input.typeText("\n")
         XCTAssertEqual(input.value as? String, "Keyboard unresolved #not-a-category ^tomorrow ")
+        XCTAssertFalse(app.buttons["quick-add-create-category"].exists)
+        app.typeKey(.leftArrow, modifierFlags: .command)
+        for _ in 0..<"Keyboard unresolved #".utf16.count { app.typeKey(.rightArrow, modifierFlags: []) }
         XCTAssertTrue(app.buttons["quick-add-create-category"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["quick-add-suggestion-^tomorrow"].exists)
         invokeRegisteredEscape(in: app, input: input)
         XCTAssertTrue(app.buttons["quick-add-create-category"].waitForNonExistence(timeout: 5), input.label)
         XCTAssertTrue(app.keyboards.firstMatch.exists)
-        input.typeText(" ")
+        input.typeText("x")
         XCTAssertTrue(app.buttons["quick-add-use-inbox"].waitForExistence(timeout: 5))
         app.typeKey(.downArrow, modifierFlags: [])
         app.typeKey(.tab, modifierFlags: [])

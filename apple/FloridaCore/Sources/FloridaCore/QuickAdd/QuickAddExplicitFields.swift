@@ -7,6 +7,7 @@ extension QuickAddDraft {
         if let durationMinutes { task.durationMinutes = durationMinutes }
         if let priority { task.priority = priority }
         if let context { task.context = context }
+        if let attention { task.attention = attention }
         if let notes { task.notes = notes }
         if let source { task.source = source }
         if someday || clearsDueAndPin {

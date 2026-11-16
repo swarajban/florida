@@ -18,6 +18,7 @@ public struct QuickAddDraft: Hashable, Sendable {
     public var categoryHint: String?
     /// Where the task can be done, from `@errand`, `@home`, `@office` or `@computer`.
     public var context: TaskContext?
+    public var attention: TaskAttention?
     /// Text after the first ` // ` or ` -- ` separator, untouched by the token grammar.
     public var notes: String?
     public var source: TaskSource?
@@ -29,7 +30,8 @@ public struct QuickAddDraft: Hashable, Sendable {
         title: String = "", durationMinutes: Int? = nil, priority: Priority? = nil,
         deadlineType: DeadlineType? = nil, dueAt: Date? = nil, startAt: Date? = nil,
         pinnedStart: Date? = nil, categoryHint: String? = nil, context: TaskContext? = nil, notes: String? = nil,
-        source: TaskSource? = nil, someday: Bool = false, recurrence: TaskRecurrence? = nil
+        source: TaskSource? = nil, someday: Bool = false, recurrence: TaskRecurrence? = nil,
+        attention: TaskAttention? = nil
     ) {
         self.title = title
         self.durationMinutes = durationMinutes
@@ -40,6 +42,7 @@ public struct QuickAddDraft: Hashable, Sendable {
         self.pinnedStart = pinnedStart
         self.categoryHint = categoryHint
         self.context = context
+        self.attention = attention
         self.notes = notes
         self.source = source
         self.someday = someday
@@ -77,6 +80,26 @@ public struct QuickAddDraft: Hashable, Sendable {
 ///   time has already passed.
 /// - Notes: everything after the first ` // ` or ` -- `.
 public enum QuickAddParser {
+    public static func cyclingAttention(in text: String, current: TaskAttention?) -> String {
+        let body = QuickAddScanner.splitNotes(text).body
+        var updated = String(body)
+        for token in body.split(whereSeparator: \.isWhitespace).reversed()
+            where QuickAddScanner.attentions[token.lowercased()] != nil {
+            updated.removeSubrange(token.startIndex..<token.endIndex)
+        }
+        updated = updated.trimmingCharacters(in: .whitespacesAndNewlines)
+        let next: String
+        switch current {
+        case nil: next = "&parallel"
+        case .shared: next = "&full"
+        case .full: next = ""
+        }
+        if !next.isEmpty { updated += (updated.isEmpty ? "" : " ") + next }
+        let suffix = text[body.endIndex...]
+        if suffix.isEmpty { return updated.isEmpty ? "" : updated + " " }
+        return updated + (updated.isEmpty ? "" : " ") + suffix
+    }
+
     public static func removingSource(from text: String) -> String {
         let body = QuickAddScanner.splitNotes(text).body
         guard let token = body.split(whereSeparator: \.isWhitespace).first(where: { TaskSource.from(url: String($0)) != nil })
@@ -173,6 +196,11 @@ public enum QuickAddParser {
             }
             if draft.context == nil, let context = QuickAddScanner.contexts[word] {
                 draft.context = context
+                i += 1
+                continue
+            }
+            if draft.attention == nil, let attention = QuickAddScanner.attentions[word] {
+                draft.attention = attention
                 i += 1
                 continue
             }
@@ -316,6 +344,11 @@ struct QuickAddScanner {
     static let contexts: [String: TaskContext] = Dictionary(
         uniqueKeysWithValues: TaskContext.allCases.map { ("@\($0.rawValue)", $0) }
     )
+
+    static let attentions: [String: TaskAttention] = [
+        "&parallel": .shared, "&shared": .shared, "&alongside": .shared,
+        "&full": .full, "&focus": .full,
+    ]
 
     static let dueKeywords: [String: DeadlineType] = ["by": .soft, "due": .hard, "deadline": .hard]
     static let startKeywords: Set<String> = ["after", "from", "starting", "start"]

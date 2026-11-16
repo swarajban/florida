@@ -36,10 +36,8 @@ extension AppModel {
             palette.suggestions = []
             return
         }
-        guard palette.dismissedSuggestionText != palette.text || palette.dismissedSuggestionCaret != caretUTF16 else {
-            return
-        }
-        let suggestions = QuickAddCompletion.suggestions(in: palette.text, caretUTF16: caretUTF16, categories: orderedCategories)
+        let suggestions = palette.completionSession.suggestions(
+            in: palette.text, selection: NSRange(location: caretUTF16, length: selectionLength), categories: orderedCategories)
         if suggestions.map(\.id) != palette.suggestions.map(\.id) {
             palette.suggestionIndex = 0
         }
@@ -47,8 +45,7 @@ extension AppModel {
     }
 
     func dismissPaletteSuggestions() {
-        palette.dismissedSuggestionText = palette.text
-        palette.dismissedSuggestionCaret = palette.caretUTF16
+        palette.completionSession.dismiss(in: palette.text, selection: NSRange(location: palette.caretUTF16, length: 0))
         palette.suggestions = []
     }
 
