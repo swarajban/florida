@@ -29,8 +29,9 @@ struct CommandPaletteView: View {
                     text: $model.palette.text, placeholder: placeholder, identifier: "palette-input",
                     command: inputCommand, isPaletteInput: true, caretUTF16: model.palette.caretUTF16,
                     caretRevision: model.palette.caretRevision,
-                    selectionChanged: { selection, rect in
+                    selectionChanged: { text, selection, rect in
                         if caretRect != rect { caretRect = rect }
+                        model.palette.text = text
                         model.updatePaletteSuggestions(caretUTF16: selection.location, selectionLength: selection.length)
                     })
                     .frame(height: 24)

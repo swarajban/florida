@@ -58,7 +58,7 @@ struct QuickAddPreview: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("quick-add-source")
             }
-            Text("^due · !priority · #category · @context · *repeat · =estimate · ~start · //notes")
+            Text("^due · !priority · #category · @context · *repeat · =estimate · &attention · ~start · //notes")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .accessibilityIdentifier("smart-add-symbol-guide")
@@ -70,6 +70,7 @@ struct QuickAddPreview: View {
                     Text("@context: @computer, @errand, @home, @office — not a location")
                     Text("*repeat: *weekly, *every 2 weeks, *mon wed")
                     Text("=estimate: =45m, =2h")
+                    Text("&attention: &parallel (can run alongside), &full (full focus)")
                     Text("~start: ~tomorrow, ~nov 20")
                     Text("//notes: everything after // stays in the notes")
                 }
@@ -117,7 +118,7 @@ struct QuickAddPreview: View {
 
     private var previewChips: some View {
         ForEach(chips) { chip in
-            Label(chip.text, systemImage: chip.symbol)
+            let label = Label(chip.text, systemImage: chip.symbol)
                 .font(.caption)
                 .foregroundStyle(chip.isDefault ? Color.secondary : Color.primary)
                 .padding(.horizontal, 8)
@@ -126,11 +127,28 @@ struct QuickAddPreview: View {
                     chip.isDefault ? FloridaStyle.panel : FloridaStyle.ink.opacity(0.08),
                     in: RoundedRectangle(cornerRadius: 4))
                 .accessibilityIdentifier("smart-add-preview-\(chip.id)")
+            if chip.id == "attention" {
+                Button {
+                    model.palette.text = QuickAddParser.cyclingAttention(in: model.palette.text, current: draft.attention)
+                    model.palette.caretUTF16 = model.palette.text.utf16.count
+                    model.palette.caretRevision += 1
+                    model.paletteTextDidChange()
+                    model.dismissPaletteSuggestions()
+                } label: { label }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("smart-add-preview-attention")
+            } else {
+                label
+            }
         }
     }
 
     private var chips: [Chip] {
         var chips: [Chip] = []
+        chips.append(Chip(
+            id: "attention", symbol: draft.attention == .shared ? "square.stack.3d.up" : "scope",
+            text: draft.attention.map { $0 == .shared ? "Parallel" : "Full focus" } ?? "Attention: default",
+            isDefault: draft.attention == nil))
         chips.append(Chip(
             id: "duration", symbol: "clock",
             text: DateText.duration(minutes: draft.durationMinutes ?? AppModel.defaultDurationMinutes),

@@ -1,5 +1,26 @@
 import Foundation
 
+public struct QuickAddCompletionSession: Sendable {
+    private var dismissedText: String?
+    private var dismissedSelection: NSRange?
+
+    public init() {}
+
+    public func isDismissed(in text: String, selection: NSRange) -> Bool {
+        dismissedText == text && dismissedSelection == selection
+    }
+
+    public mutating func dismiss(in text: String, selection: NSRange) {
+        dismissedText = text
+        dismissedSelection = selection
+    }
+
+    public func suggestions(in text: String, selection: NSRange, categories: [TaskCategory]) -> [QuickAddSuggestion] {
+        guard selection.length == 0, !isDismissed(in: text, selection: selection) else { return [] }
+        return QuickAddCompletion.suggestions(in: text, caretUTF16: selection.location, categories: categories)
+    }
+}
+
 public struct QuickAddSuggestion: Hashable, Sendable, Identifiable {
     public let id: String
     public let symbol: String
@@ -41,16 +62,17 @@ public enum QuickAddCompletion {
             if caret > boundary { return [] }
         }
         guard let index = tokens.lastIndex(where: { token in
-            token.startIndex < caret && token.first.map { "#@^!*=~/".contains($0) } == true
+            token.startIndex < caret && token.first.map { "#@^!*=~/&".contains($0) } == true
         }) else { return [] }
         let token = tokens[index]
         let symbol = String(token.prefix(1))
         if symbol == "#", tokens[..<index].contains(where: { $0.hasPrefix("#") }) { return [] }
-        if "#@!/".contains(symbol), caret > token.endIndex { return [] }
+        if "#@!/&".contains(symbol), caret > token.endIndex { return [] }
         if symbol == "/", token != "/", token != "//" { return [] }
         let queryStart = symbol == "/" ? token.endIndex : text.index(after: token.startIndex)
         guard queryStart <= caret else { return [] }
         let query = normalize(String(text[queryStart..<caret]))
+        if caret > token.endIndex, query.isEmpty { return [] }
         var end = token.endIndex
         if "^*=~".contains(symbol) {
             var calendar = Calendar(identifier: .gregorian)
@@ -77,6 +99,11 @@ public enum QuickAddCompletion {
             }
         case "@":
             choices = TaskContext.allCases.map { ($0.rawValue, $0.rawValue.capitalized, "@" + $0.rawValue, [], nil) }
+        case "&":
+            choices = [
+                ("parallel", "Can run in parallel", "&parallel", ["shared", "alongside"], nil),
+                ("full", "Full focus", "&full", ["focus"], nil),
+            ]
         case "^", "~":
             let dates = [
                 ("today", "Today"), ("tomorrow", "Tomorrow"), ("mon", "Monday"),

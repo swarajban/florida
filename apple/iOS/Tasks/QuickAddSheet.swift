@@ -16,16 +16,14 @@ struct QuickAddSheet: View {
     @State private var selection = NSRange(location: 0, length: 0)
     @State private var selectionRevision = 0
     @State private var highlightedSuggestion = 0
-    @State private var dismissedSuggestions: String?
+    @State private var completionSession = QuickAddCompletionSession()
     @State private var composing = false
     @State private var showingHelp = false
 
-    private var suggestionContext: String { "\(model.quickAddText)\u{0}\(selection.location):\(selection.length)" }
-
     private var suggestions: [QuickAddSuggestion] {
-        guard focused, !composing, selection.length == 0, dismissedSuggestions != suggestionContext else { return [] }
-        return QuickAddCompletion.suggestions(
-            in: model.quickAddText, caretUTF16: selection.location, categories: model.categories)
+        guard focused, !composing else { return [] }
+        return completionSession.suggestions(
+            in: model.quickAddText, selection: selection, categories: model.categories)
     }
 
     private var draft: QuickAddDraft {
@@ -62,8 +60,11 @@ struct QuickAddSheet: View {
     }
 
     private var showsCategoryChoices: Bool {
-        focused && !composing && selection.length == 0 && dismissedSuggestions != suggestionContext
-            && categoryToken != nil && category == nil
+        guard focused, !composing, selection.length == 0,
+              !completionSession.isDismissed(in: model.quickAddText, selection: selection),
+              let token = categoryToken, category == nil else { return false }
+        let range = NSRange(token, in: model.quickAddText)
+        return selection.location > range.location && selection.location <= range.upperBound
             && (suggestions.isEmpty || suggestions.first?.symbol == "#")
     }
 
@@ -104,7 +105,7 @@ struct QuickAddSheet: View {
                 }
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
-                        if categoryToken == nil || category != nil {
+                        if !showsCategoryChoices {
                             if !draft.title.isEmpty { preview }
                             destination
                         }
@@ -269,7 +270,7 @@ struct QuickAddSheet: View {
         HStack(spacing: 8) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 4) {
-                    ForEach(["^", "!", "#", "@", "*", "=", "~", "//"], id: \.self) { symbol in
+                    ForEach(["^", "!", "#", "@", "*", "=", "&", "~", "//"], id: \.self) { symbol in
                         Button { insert(symbol) } label: {
                             Text(symbol)
                                 .font(.body.monospaced().weight(.semibold))
@@ -292,7 +293,7 @@ struct QuickAddSheet: View {
             .popover(isPresented: $showingHelp) {
                 NavigationStack {
                     ScrollView {
-                        Text("^fri / ^nov 20: due date\n\nsomeday / ^someday / ^none: Someday, no due date and off the plan\n\n!1 ASAP · !2 high · !3 medium · !4 low (names work too)\n\n#work: category · @home: context, not location\n\n*weekly / *every 2 weeks / *mon wed: repeat\n\n=45m: estimate · ~tomorrow: start\n\n// notes: everything after this stays literal\n\nArrows choose; Tab or Return completes; Esc closes suggestions. Plain “30m by fri” still works.")
+                        Text("^fri / ^nov 20: due date\n\nsomeday / ^someday / ^none: Someday, no due date and off the plan\n\n!1 ASAP · !2 high · !3 medium · !4 low (names work too)\n\n#work: category · @home: context, not location\n\n*weekly / *every 2 weeks / *mon wed: repeat\n\n=45m: estimate · ~tomorrow: start\n\n&parallel / &shared: can run in parallel · &full: full focus\n\n// notes: everything after this stays literal\n\nArrows choose; Tab or Return completes; Esc closes suggestions. Plain “30m by fri” still works.")
                             .font(.callout)
                             .padding(20)
                             .accessibilityIdentifier("quick-add-help-content")
@@ -322,7 +323,7 @@ struct QuickAddSheet: View {
         model.quickAddText.replaceSubrange(range, with: insertion)
         selection = NSRange(location: selection.location + insertion.utf16.count, length: 0)
         selectionRevision += 1
-        dismissedSuggestions = nil
+        completionSession = QuickAddCompletionSession()
         focused = true
     }
 
@@ -335,7 +336,9 @@ struct QuickAddSheet: View {
             model.quickAddCategory = chosen
             model.quickAddCategoryHint = draft.categoryHint
         }
-        dismissedSuggestions = categoryToken != nil && category == nil ? nil : suggestionContext
+        if categoryToken == nil || category != nil {
+            completionSession.dismiss(in: model.quickAddText, selection: selection)
+        }
         focused = true
     }
 
@@ -362,7 +365,7 @@ struct QuickAddSheet: View {
 
     private func dismissSuggestions() {
         if activeChoiceIDs.isEmpty { focused = false }
-        else { dismissedSuggestions = suggestionContext }
+        else { completionSession.dismiss(in: model.quickAddText, selection: selection) }
     }
 
     private var preview: some View {
@@ -397,13 +400,26 @@ struct QuickAddSheet: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
                         ForEach(chips) { chip in
-                            Label(chip.text, systemImage: chip.symbol)
+                            let label = Label(chip.text, systemImage: chip.symbol)
                                 .font(.caption)
                                 .foregroundStyle(chip.tint)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
                                 .background(FloridaStyle.panel, in: Capsule())
                                 .accessibilityIdentifier("quick-add-chip-\(chip.id)")
+                            if chip.id == "attention" {
+                                Button {
+                                    model.quickAddText = QuickAddParser.cyclingAttention(in: model.quickAddText, current: draft.attention)
+                                    selection = NSRange(location: model.quickAddText.utf16.count, length: 0)
+                                    selectionRevision += 1
+                                    completionSession.dismiss(in: model.quickAddText, selection: selection)
+                                    focused = true
+                                } label: { label }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("quick-add-chip-attention")
+                            } else {
+                                label
+                            }
                         }
                     }
                 }
@@ -559,7 +575,7 @@ struct QuickAddSheet: View {
         }
         model.quickAddCategory = category
         model.quickAddCategoryHint = draft.categoryHint
-        dismissedSuggestions = suggestionContext
+        completionSession.dismiss(in: model.quickAddText, selection: selection)
         error = nil
         focused = true
     }

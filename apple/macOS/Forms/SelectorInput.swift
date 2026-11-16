@@ -9,7 +9,7 @@ struct SelectorInput: NSViewRepresentable {
     var isPaletteInput = false
     var caretUTF16: Int?
     var caretRevision: Int?
-    var selectionChanged: ((NSRange, CGRect) -> Void)?
+    var selectionChanged: ((String, NSRange, CGRect) -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -34,6 +34,8 @@ struct SelectorInput: NSViewRepresentable {
 
     func updateNSView(_ field: SelectorTextField, context: Context) {
         context.coordinator.parent = self
+        context.coordinator.isUpdating = true
+        defer { context.coordinator.isUpdating = false }
         field.placeholderString = placeholder
         if field.stringValue != text {
             field.stringValue = text
@@ -55,12 +57,14 @@ struct SelectorInput: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextFieldDelegate {
         var parent: SelectorInput
         var appliedCaretRevision: Int?
+        var isUpdating = false
 
         init(_ parent: SelectorInput) { self.parent = parent }
 
         func controlTextDidChange(_ notification: Notification) {
             guard let field = notification.object as? NSTextField else { return }
             parent.text = field.stringValue
+            if !isUpdating { reportSelection(field) }
             scheduleSelectionReport(field)
         }
 
@@ -82,6 +86,7 @@ struct SelectorInput: NSViewRepresentable {
         @objc private func selectionDidChange(_ notification: Notification) {
             guard let editor = notification.object as? NSTextView,
                   let field = editor.delegate as? NSTextField else { return }
+            if !isUpdating { reportSelection(field) }
             scheduleSelectionReport(field)
         }
 
@@ -95,12 +100,12 @@ struct SelectorInput: NSViewRepresentable {
         private func reportSelection(_ field: NSTextField) {
             guard let callback = parent.selectionChanged,
                   let editor = field.currentEditor() as? NSTextView,
-                  let window = field.window, !editor.hasMarkedText(), parent.text == field.stringValue else { return }
+                  let window = field.window, !editor.hasMarkedText() else { return }
             let selection = editor.selectedRange()
             let screenRect = editor.firstRect(forCharacterRange: NSRange(location: selection.location, length: 0), actualRange: nil)
             let rect = field.convert(window.convertFromScreen(screenRect), from: nil)
             let y = field.isFlipped ? rect.maxY : field.bounds.maxY - rect.minY
-            callback(selection, CGRect(x: rect.minX, y: y, width: rect.width, height: rect.height))
+            callback(editor.string, selection, CGRect(x: rect.minX, y: y, width: rect.width, height: rect.height))
         }
 
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
