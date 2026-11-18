@@ -19,7 +19,7 @@ env:
 jobs:
   testflight:
     name: ${{ github.workflow == 'iOS upload' && github.event_name == 'workflow_dispatch' && 'Verify signing (no upload)' || 'Upload to TestFlight' }}
-    runs-on: macos-26
+    runs-on: xcode-27
     concurrency:
       group: ios-${{ github.ref }}
       cancel-in-progress: false
