@@ -14,7 +14,7 @@ struct GridGeometry {
     }
 
     private var contentWidth: CGFloat {
-        columnWidth - min(16, columnWidth / 3)
+        TimeGrid.eventColumnContentWidth(columnWidth)
     }
 
     func x(forDay index: Int) -> CGFloat {

@@ -34,6 +34,16 @@ public struct TimeGrid: Hashable, Sendable {
         min(snappedMinute(forY: y), DayLayout.minutesPerDay - eventSlotMinutes)
     }
 
+    public static let eventDragMinimumDistance = 6.0
+
+    public static func eventDragHasStarted(dx: Double, dy: Double) -> Bool {
+        hypot(dx, dy) >= eventDragMinimumDistance
+    }
+
+    public static func eventColumnContentWidth(_ width: Double) -> Double {
+        width - min(16, width / 3)
+    }
+
     public func eventMinutes(from startY: Double, to endY: Double) -> ClosedRange<Int> {
         let anchor = snappedMinute(forY: startY)
         let edge = snappedMinute(forY: endY)

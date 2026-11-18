@@ -78,7 +78,7 @@ struct CalendarGridView: View {
                         }
                     }
                     .gesture(
-                        DragGesture(minimumDistance: 4)
+                        DragGesture(minimumDistance: TimeGrid.eventDragMinimumDistance)
                             .updating($dragIsActive) { _, active, _ in active = true }
                             .onChanged { dragChanged($0, width: geometry.size.width) }
                             .onEnded { dragEnded($0, width: geometry.size.width) })
@@ -246,6 +246,7 @@ struct CalendarGridView: View {
         } else if dragSession == .idle, model.canBeginGridDrag,
                   let dayIndex = geometry.dayIndex(atX: value.startLocation.x) {
             guard let block = geometry.block(at: value.startLocation, in: layout) else {
+                guard TimeGrid.eventDragHasStarted(dx: value.translation.width, dy: value.translation.height) else { return }
                 dragSession = .creation
                 updateDraft(dayIndex: dayIndex, from: value.startLocation.y, to: value.location.y)
                 return

@@ -76,6 +76,14 @@ import Testing
         #expect(grid.eventStartMinute(forY: 1439) == 1425)
     }
 
+    @Test func eventCreationDistinguishesClicksAndReservesAColumnGutter() {
+        #expect(!TimeGrid.eventDragHasStarted(dx: 1, dy: 5))
+        #expect(TimeGrid.eventDragHasStarted(dx: 0, dy: -6))
+        #expect(TimeGrid.eventColumnContentWidth(120) == 104)
+        #expect(TimeGrid.eventColumnContentWidth(36) == 24)
+        #expect(TimeGrid.eventColumnContentWidth(0) == 0)
+    }
+
     @Test func eventDragCanEndAtNextMidnightEvenOnADSTDay() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try #require(TimeZone(identifier: "America/Los_Angeles"))

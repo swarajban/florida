@@ -113,20 +113,13 @@ struct MacKeymap: Sendable {
     /// How a sequence reads in the help, the palette and the status bar: plain letters stay
     /// lowercase as typed ("g d", "z"), and chords with modifiers use glyphs ("⇧C", "⌘K").
     static func display(_ sequence: KeySequence) -> String {
-        sequence.map(display).joined(separator: " ")
+        sequence.map(\.shortcutLabel).joined(separator: " ")
     }
 
     /// A sequence as a keycap shows it: "V", "R Y", "⇧E". Capitals read better at that size, so
     /// Shift is spelled out.
     static func keycap(_ sequence: KeySequence) -> String {
         sequence.map(\.description).joined(separator: " ")
-    }
-
-    static func display(_ chord: KeyChord) -> String {
-        if chord.modifiers.isEmpty, chord.key.count == 1, chord.key.first?.isLetter == true {
-            return chord.key
-        }
-        return chord.description
     }
 }
 

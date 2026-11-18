@@ -67,8 +67,14 @@ struct TimeGridCanvas: View {
                 context.stroke(shape, with: .color(Color.accentColor), lineWidth: 1.5)
                 let style = Date.IntervalFormatStyle(calendar: calendar, timeZone: calendar.timeZone).hour().minute()
                 let label = (draft.dates.lowerBound..<draft.dates.upperBound).formatted(style)
-                context.draw(Text(label).font(.system(size: 10, weight: .medium)).foregroundStyle(FloridaStyle.ink),
-                             in: rect.insetBy(dx: min(4, rect.width / 4), dy: 1))
+                var textRect = rect.insetBy(dx: min(4, rect.width / 4), dy: 1)
+                if textRect.height >= 26 {
+                    context.draw(Text("New event").font(.system(size: 11, weight: .semibold)).foregroundStyle(FloridaStyle.ink),
+                                 in: CGRect(x: textRect.minX, y: textRect.minY, width: textRect.width, height: 13))
+                    textRect = CGRect(x: textRect.minX, y: textRect.minY + 13, width: textRect.width, height: textRect.height - 13)
+                }
+                let caption = rect.height < 26 && rect.width >= 145 ? "New event · \(label)" : label
+                context.draw(Text(caption).font(.system(size: 10, weight: .medium)).foregroundStyle(FloridaStyle.ink), in: textRect)
             }
             drawJumpLabels(in: &context, geometry: geometry)
         }

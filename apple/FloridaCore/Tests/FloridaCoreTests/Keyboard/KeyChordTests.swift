@@ -3,6 +3,15 @@ import Testing
 @testable import FloridaCore
 
 @Suite struct KeyChordTests {
+    @Test func creationShortcutsDisplayAndParseUnambiguously() {
+        let chords = ["c", "cmd+n", "shift+n", "cmd+shift+n", "shift+c", "cmd+option+n"].compactMap(KeyChord.init(parsing:))
+        let labels = chords.map(\.shortcutLabel)
+        #expect(labels == ["c", "⌘N", "⇧N", "⇧⌘N", "⇧C", "⌥⌘N"])
+        #expect(Set(labels.compactMap(KeyChord.init(parsing:))) == Set(chords))
+        #expect(Keymap.default.command(for: [KeyChord("c")]) == .newTask)
+        #expect(Keymap.default.command(for: [KeyChord("c", [.shift])]) == .newEvent)
+    }
+
     @Test func parsesModifierNamesAndAliases() {
         #expect(KeyChord(parsing: "cmd+k") == KeyChord("k", [.command]))
         #expect(KeyChord(parsing: "command+k") == KeyChord("k", [.command]))

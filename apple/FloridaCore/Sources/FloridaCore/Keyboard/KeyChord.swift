@@ -102,6 +102,11 @@ public struct KeyChord: Hashable, Sendable, CustomStringConvertible {
         return glyphs + (KeyChord.keyDisplayNames[key] ?? key.uppercased())
     }
 
+    /// Keep unmodified letters lowercase in shortcut lists, and show every modifier explicitly.
+    public var shortcutLabel: String {
+        modifiers.isEmpty && key.count == 1 && key.first?.isLetter == true ? key : description
+    }
+
     /// Parses a whitespace-separated sequence such as "g d" or "cmd+k". Nil if any chord fails to parse.
     public static func sequence(parsing text: String) -> KeySequence? {
         let chords = text.split(whereSeparator: \.isWhitespace).map { KeyChord(parsing: String($0)) }
