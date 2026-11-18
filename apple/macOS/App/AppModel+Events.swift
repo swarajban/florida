@@ -61,18 +61,26 @@ extension AppModel {
 
     // MARK: - Commands
 
-    /// ⇧C / `>New event`: the composer on a blank 30-minute event. Without `start` it begins at the
-    /// next quarter hour when the highlighted day is today, else at 9:00 on that day.
-    func openNewEventEditor(start: Date? = nil) {
-        guard !writableCalendars.isEmpty else {
+    /// Opens the composer for an exact grid slot, or a 30-minute event at the default time.
+    func openNewEventEditor(start: Date? = nil, end: Date? = nil) {
+        guard let calendarID = writableCalendars.first?.id else {
             statusMessage = "No calendar you can add events to — connect a Google account on the server, then sync"
             return
         }
         let fallback = calendar.isDateInToday(selectedDay)
             ? Date()
             : calendar.date(bySettingHour: 9, minute: 0, second: 0, of: selectedDay) ?? selectedDay
-        eventDetailID = nil
-        eventEditor = EventEditorRequest(event: newEventTemplate(start: start ?? fallback), isNew: true, showsComposer: true)
+        let begin = start ?? Self.nextQuarterHour(from: fallback, calendar: calendar)
+        let event = CalendarEvent(
+            id: UUID().uuidString.lowercased(),
+            calendarId: calendarID,
+            googleId: "",
+            status: "confirmed",
+            startAt: begin,
+            endAt: end ?? begin.addingTimeInterval(30 * 60),
+            allDay: false,
+            updatedAt: Date())
+        eventEditor = EventEditorRequest(event: event, isNew: true, showsComposer: true)
     }
 
     /// ⇧E: the editor sheet for the selected event, or the one whose detail popover is open.
@@ -196,21 +204,6 @@ extension AppModel {
     }
 
     // MARK: - Writes
-
-    /// A blank 30-minute event starting at `start` (rounded to the next 15 minutes) on the first
-    /// writable calendar; id = lowercase UUID, googleId "", status "confirmed".
-    func newEventTemplate(start: Date) -> CalendarEvent {
-        let begin = Self.nextQuarterHour(from: start, calendar: calendar)
-        return CalendarEvent(
-            id: UUID().uuidString.lowercased(),
-            calendarId: writableCalendars.first?.id ?? "",
-            googleId: "",
-            status: "confirmed",
-            startAt: begin,
-            endAt: begin.addingTimeInterval(30 * 60),
-            allDay: false,
-            updatedAt: Date())
-    }
 
     /// Upserts the event locally and syncs in the background. Returns false, with a status
     /// message, when its calendar is read-only or the store refused.

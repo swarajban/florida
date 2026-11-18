@@ -3,6 +3,56 @@ import XCTest
 
 final class MacModeStateTests: XCTestCase {
     @MainActor
+    func testNewEventShortcutAndHelpLabels() {
+        continueAfterFailure = false
+        let app = launch(taskFixture: false)
+        addTeardownBlock {
+            self.capture(app, "calendar-shortcut-end")
+            app.terminate()
+        }
+        app.typeKey("?", modifierFlags: [])
+        waitForValue("⇧C, ⌥⌘N", of: element("help-command-New event", in: app))
+        waitForValue("⇧N, ⇧⌘N", of: element("help-command-New task", in: app))
+        capture(app, "calendar-shortcut-help")
+        app.typeKey("n", modifierFlags: [.command, .option])
+        XCTAssertTrue(app.textFields["event-quick-add-input"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testGridGutterDragCancelsAndComposesTheSnappedRange() {
+        continueAfterFailure = false
+        let app = launch(taskFixture: false)
+        addTeardownBlock {
+            self.capture(app, "calendar-gutter-end")
+            app.terminate()
+        }
+        app.typeKey("d", modifierFlags: [])
+        waitForValue("day", of: app.staticTexts["mode-calendar-view"])
+        let grid = element("calendar-time-grid", in: app)
+        let origin = grid.coordinate(withNormalizedOffset: .zero)
+        let start = origin.withOffset(CGVector(dx: grid.frame.width - 8, dy: 544))
+        let end = start.withOffset(CGVector(dx: 0, dy: 38))
+        let window = app.windows.firstMatch.frame
+        print("Calendar gutter: grid=\(grid.frame), window=\(window), start=\(start.screenPoint), end=\(end.screenPoint)")
+        XCTAssertTrue(window.contains(start.screenPoint) && window.contains(end.screenPoint))
+        capture(app, "calendar-gutter")
+        let input = app.textFields["event-quick-add-input"]
+        app.buttons["mode-arm-drag-escape"].click()
+        start.press(forDuration: 0.3, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.5)
+        XCTAssertEqual(app.staticTexts["mode-drag-injection"].value as? String, "sent")
+        XCTAssertFalse(input.exists)
+        start.press(forDuration: 0.3, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0)
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        let calendar = Calendar.current
+        let style = Date.FormatStyle(calendar: calendar, timeZone: calendar.timeZone).hour().minute()
+        let startTime = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: Date())!.formatted(style)
+        let endTime = calendar.date(bySettingHour: 9, minute: 45, second: 0, of: Date())!.formatted(style)
+        let chip = app.buttons["event-quick-add-time"]
+        print("Calendar composer time: label=\(chip.label), value=\(chip.value ?? "nil"), frame=\(chip.frame)")
+        XCTAssertTrue(chip.label.contains("\(startTime)–\(endTime)"))
+    }
+
+    @MainActor
     func testDateQueryKeepsTextWhenMovingTheCaret() {
         continueAfterFailure = false
         let app = launch()

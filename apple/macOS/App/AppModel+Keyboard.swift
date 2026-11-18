@@ -38,6 +38,11 @@ extension AppModel {
             return true
         }
 
+        if gridEventDraft != nil, isEscape {
+            cancel()
+            return true
+        }
+
         if isCalendarsPopoverOpen, !isCommandChord {
             if isEscape { isCalendarsPopoverOpen = false }
             return isEscape

@@ -66,6 +66,29 @@ import Testing
         #expect(grid.snappedMinute(forY: 2000) == 1440)
     }
 
+    @Test func eventDragSnapsBothEndsAndKeepsAtLeastOneSlot() {
+        #expect(grid.eventMinutes(from: 544, to: 582) == 540...585)
+        #expect(grid.eventMinutes(from: 582, to: 544) == 540...585)
+        #expect(grid.eventMinutes(from: 540, to: 545) == 540...555)
+        #expect(grid.eventMinutes(from: 540, to: 535) == 525...540)
+        #expect(grid.eventMinutes(from: 1, to: -20) == 0...15)
+        #expect(grid.eventMinutes(from: 1439, to: 1500) == 1425...1440)
+        #expect(grid.eventStartMinute(forY: 1439) == 1425)
+    }
+
+    @Test func eventDragCanEndAtNextMidnightEvenOnADSTDay() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "America/Los_Angeles"))
+        let day = try #require(calendar.date(from: DateComponents(year: 2026, month: 3, day: 8)))
+        let late = grid.eventDates(on: day, minutes: 1425...1440, calendar: calendar)
+        #expect(calendar.component(.hour, from: late.upperBound) == 0)
+        #expect(calendar.component(.day, from: late.upperBound) == 9)
+        #expect(late.upperBound.timeIntervalSince(late.lowerBound) == 15 * 60)
+        let skipped = grid.eventDates(on: day, minutes: 120...135, calendar: calendar)
+        #expect(calendar.component(.hour, from: skipped.lowerBound) == 3)
+        #expect(skipped.upperBound.timeIntervalSince(skipped.lowerBound) == 15 * 60)
+    }
+
     @Test func hourLabelsAreTwelveHourEnglish() {
         let labels = TimeGrid.hourLabels()
         #expect(labels.count == 24)

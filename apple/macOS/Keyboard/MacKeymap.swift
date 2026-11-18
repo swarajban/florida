@@ -35,6 +35,8 @@ struct MacKeymap: Sendable {
         ("shift+m", .core(.viewMonth)),
         ("tab", .acceptSuggestion),
         ("shift+n", .newTaskEditor),
+        ("cmd+shift+n", .newTaskEditor),
+        ("cmd+option+n", .core(.newEvent)),
         ("n", .doNow),
         ("shift+space", .doneForNow),
         (".", .repeatLast),
@@ -109,8 +111,7 @@ struct MacKeymap: Sendable {
     }
 
     /// How a sequence reads in the help, the palette and the status bar: plain letters stay
-    /// lowercase as typed ("g d", "z"), shifted letters are capitals ("G", "H"), and chords with
-    /// other modifiers use the glyph form ("⌘K").
+    /// lowercase as typed ("g d", "z"), and chords with modifiers use glyphs ("⇧C", "⌘K").
     static func display(_ sequence: KeySequence) -> String {
         sequence.map(display).joined(separator: " ")
     }
@@ -122,9 +123,8 @@ struct MacKeymap: Sendable {
     }
 
     static func display(_ chord: KeyChord) -> String {
-        if chord.key.count == 1, chord.key.first?.isLetter == true {
-            if chord.modifiers.isEmpty { return chord.key }
-            if chord.modifiers == [.shift] { return chord.key.uppercased() }
+        if chord.modifiers.isEmpty, chord.key.count == 1, chord.key.first?.isLetter == true {
+            return chord.key
         }
         return chord.description
     }

@@ -148,6 +148,8 @@ extension AppModel {
             endJump()
         case .dragging:
             gridDrag = nil
+        case .draftingEvent:
+            transitionInteraction(to: .browsing)
         case .palette:
             closePalette()
         case .sheet(.projects(let editor)):

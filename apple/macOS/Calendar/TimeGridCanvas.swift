@@ -19,6 +19,7 @@ struct TimeGridCanvas: View {
     let jumpViewport: JumpViewport?
     /// The event being dragged: its block is drawn where it would land, on top of the others.
     let drag: GridDrag?
+    let draft: GridEventDraft?
     let selectedDay: Date
     let now: Date
     /// The animation frame's time, which drives `transition`.
@@ -57,6 +58,18 @@ struct TimeGridCanvas: View {
             }
             drawSelectionRing(in: &context, geometry: geometry)
             drawNowLine(in: &context, geometry: geometry)
+            if let draft {
+                let rect = geometry.rect(dayIndex: draft.dayIndex, column: 0, columnCount: 1,
+                                         startMinute: draft.minutes.lowerBound, endMinute: draft.minutes.upperBound)
+                let shape = Path(roundedRect: rect, cornerRadius: 5)
+                context.fill(shape, with: .color(FloridaStyle.paper))
+                context.fill(shape, with: .color(Color.accentColor.opacity(0.18)))
+                context.stroke(shape, with: .color(Color.accentColor), lineWidth: 1.5)
+                let style = Date.IntervalFormatStyle(calendar: calendar, timeZone: calendar.timeZone).hour().minute()
+                let label = (draft.dates.lowerBound..<draft.dates.upperBound).formatted(style)
+                context.draw(Text(label).font(.system(size: 10, weight: .medium)).foregroundStyle(FloridaStyle.ink),
+                             in: rect.insetBy(dx: min(4, rect.width / 4), dy: 1))
+            }
             drawJumpLabels(in: &context, geometry: geometry)
         }
         .frame(height: grid.dayHeight)

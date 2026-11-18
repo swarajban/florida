@@ -1,6 +1,12 @@
 import FloridaKit
 import Foundation
 
+struct GridEventDraft: Equatable {
+    let dayIndex: Int
+    let minutes: ClosedRange<Int>
+    let dates: ClosedRange<Date>
+}
+
 /// An event being dragged in the time grid, and where it would land. The canvas draws its block
 /// there, the full width of the day, instead of where the layout has it. After the drop the
 /// block stays there until the store's change reaches the layout (`AppModel.rebuildLayout` then

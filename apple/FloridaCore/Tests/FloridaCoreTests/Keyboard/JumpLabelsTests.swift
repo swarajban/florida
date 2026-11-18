@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import FloridaCore
 
@@ -91,6 +92,37 @@ import Testing
     @Test func noItemsIsEmpty() {
         #expect(JumpLabels<String>(items: []).isEmpty)
         #expect(!JumpLabels(items: ["one"]).isEmpty)
+    }
+
+    @Test func aBusyWeeksPastDoesNotUseTheUpcomingItemsShortcuts() throws {
+        let iso = ISO8601DateFormatter()
+        let monday = try #require(iso.date(from: "2026-11-16T08:00:00Z"))
+        let wednesday = monday.addingTimeInterval(48 * 3600)
+        let now = wednesday.addingTimeInterval(10 * 3600)
+        typealias Target = JumpLabels<String>.CalendarTarget
+        let past = (0..<38).map { hour in
+            Target(item: "past-\(hour)", start: monday.addingTimeInterval(Double(hour) * 3600),
+                   end: monday.addingTimeInterval(Double(hour + 1) * 3600))
+        }
+        let active = [
+            Target(item: "friday", start: now.addingTimeInterval(48 * 3600), end: now.addingTimeInterval(49 * 3600)),
+            Target(item: "ongoing", start: now.addingTimeInterval(-1800), end: now.addingTimeInterval(1800)),
+            Target(item: "all-day today", start: wednesday, end: wednesday.addingTimeInterval(86400)),
+            Target(item: "later today", start: now.addingTimeInterval(3600), end: now.addingTimeInterval(7200)),
+        ]
+        let ended = [
+            Target(item: "all-day yesterday", start: monday, end: wednesday),
+            Target(item: "just ended", start: now.addingTimeInterval(-3600), end: now),
+            Target(item: "completed", start: now, end: now.addingTimeInterval(1), isCompleted: true),
+            Target(item: "friday", start: monday, end: monday.addingTimeInterval(300)),
+        ]
+        let hints = JumpLabels(calendarTargets: past + active + ended, paneItems: ["pane", "ongoing"], now: now).remaining
+        #expect(["all-day today", "ongoing", "later today", "friday", "pane"].compactMap { hints[$0] } == ["a", "s", "d", "f", "g"])
+        #expect(hints["past-37"]?.count == 2)
+        #expect(hints["just ended"]?.count == 2)
+        #expect(hints["completed"]?.count == 2)
+        #expect(hints["all-day yesterday"] != nil)
+        #expect(hints.count == 46)
     }
 }
 

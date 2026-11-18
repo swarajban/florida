@@ -263,6 +263,7 @@ final class AppModel {
     func rangeDidChange() {
         endJump()
         gridDrag = nil
+        if gridEventDraft != nil { transitionInteraction(to: .browsing) }
         resetKeySequence()
         let visible = visibleRange
         let covered = loadedRange.map { $0.lowerBound <= visible.lowerBound && visible.upperBound <= $0.upperBound } ?? false

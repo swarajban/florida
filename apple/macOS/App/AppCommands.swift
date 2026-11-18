@@ -28,6 +28,7 @@ struct AppCommands: Commands {
             Button("New Task…") { model.run(.newTaskEditor) }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
             Button("New Event…") { model.perform(.newEvent) }
+                .keyboardShortcut("n", modifiers: [.command, .option])
             Button("New Category…") { model.run(.newCategory) }
             Button("Routine…") { model.run(.showRoutine) }
             Divider()
