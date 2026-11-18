@@ -54,10 +54,30 @@ final class TaskPaneSearchField: NSTextField {
     }
 
     override func mouseDown(with event: NSEvent) {
+        focusForClick { super.mouseDown(with: event) }
+    }
+
+    func focusForClick(perform: () -> Void = {}) {
         handlingClick = true
         defer { handlingClick = false }
         if isEnabled, currentEditor() == nil { window?.makeFirstResponder(self) }
-        super.mouseDown(with: event)
+        perform()
+    }
+
+    static func editing(in window: NSWindow) -> TaskPaneSearchField? {
+        (window.firstResponder as? NSTextView)?.delegate as? TaskPaneSearchField
+    }
+
+    func handleKey(_ chord: KeyChord?) -> Bool? {
+        guard chord == KeyChord("escape") || chord == KeyChord("return") else { return nil }
+        guard let editor = currentEditor() as? NSTextView, !editor.hasMarkedText() else { return false }
+        return window?.makeFirstResponder(nil) == true
+    }
+
+    func releaseFocusIfOutside(_ locationInWindow: NSPoint) {
+        if !bounds.contains(convert(locationInWindow, from: nil)) {
+            window?.makeFirstResponder(nil)
+        }
     }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {

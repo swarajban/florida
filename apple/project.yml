@@ -265,6 +265,7 @@ targets:
       - macOSTests
       - macOS/App/JoyPreferences.swift
       - macOS/Tasks/TaskEditorKeys.swift
+      - macOS/Tasks/TaskPaneSearch.swift
       - macOS/Keyboard/ShortcutRepeatState.swift
       - macOS/Keyboard/KeyChord+NSEvent.swift
       - macOS/Keyboard/MacCommand.swift

@@ -36,36 +36,6 @@ final class MacModeStateTests: XCTestCase {
     }
 
     @MainActor
-    func testTaskSearchDoesNotTakeFocusAfterPaneToggleOrSheet() {
-        continueAfterFailure = false
-        let app = launch(taskFixture: false)
-        let search = app.textFields["task-pane-search"]
-        let viewMode = app.staticTexts["mode-calendar-view"]
-        let editor = app.textFields["task-title"]
-        addTeardownBlock {
-            print("Search: frame=\(search.frame), value=\(String(describing: search.value)), mode=\(String(describing: viewMode.value)), editor=\(editor.exists)")
-            self.capture(app, "task-search-focus-restoration")
-            app.terminate()
-        }
-
-        search.click()
-        app.typeKey("t", modifierFlags: .command)
-        XCTAssertTrue(search.waitForNonExistence(timeout: 5))
-        app.typeKey("t", modifierFlags: .command)
-        XCTAssertTrue(search.waitForExistence(timeout: 5))
-        app.typeKey("d", modifierFlags: [])
-        waitForValue("day", of: viewMode)
-
-        search.click()
-        app.typeKey("n", modifierFlags: [.command, .shift])
-        XCTAssertTrue(editor.waitForExistence(timeout: 5))
-        app.typeKey(.escape, modifierFlags: [])
-        XCTAssertTrue(editor.waitForNonExistence(timeout: 5))
-        app.typeKey("w", modifierFlags: [])
-        waitForValue("week", of: viewMode)
-    }
-
-    @MainActor
     func testNewEventShortcutAndHelpLabels() {
         continueAfterFailure = false
         let app = launch(taskFixture: false)

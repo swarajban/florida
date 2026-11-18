@@ -75,11 +75,8 @@ final class KeyMonitorHostView: NSView {
     private func handle(_ event: NSEvent) -> Bool {
         guard let model = box.model, let window else { return false }
         if event.type != .keyDown, event.type != .keyUp {
-            if event.window === window,
-               let editor = window.firstResponder as? NSTextView,
-               let search = editor.delegate as? TaskPaneSearchField,
-               !search.bounds.contains(search.convert(event.locationInWindow, from: nil)) {
-                window.makeFirstResponder(nil)
+            if event.window === window {
+                TaskPaneSearchField.editing(in: window)?.releaseFocusIfOutside(event.locationInWindow)
             }
             return false
         }
@@ -91,13 +88,11 @@ final class KeyMonitorHostView: NSView {
         guard event.window === window else { return false }
         guard !SelectorInput.isEditing(in: window) else { return false }
         let chord = KeyChord(event: event)
-        if chord == KeyChord("escape"),
-           let editor = window.firstResponder as? NSTextView, editor.delegate is TaskPaneSearchField {
-            guard !editor.hasMarkedText() else { return false }
-            if window.makeFirstResponder(nil) {
+        if let handled = TaskPaneSearchField.editing(in: window)?.handleKey(chord) {
+            if handled {
                 model.shortcutRepeats.gate.didHandle(keyCode: event.keyCode)
-                return true
             }
+            return handled
         }
         let allowsRepeat = model.jump == nil && chord.map(ShortcutKeyRepeat.isNavigation) == true
         let handled = model.handleKeyDown(event, inEventPopover: isEventPopover)
