@@ -18,6 +18,9 @@ extension AppModel {
         switch command {
         case .core(let shared):
             perform(shared)
+        case .toggleCalendars:
+            guard canToggleCalendars else { return }
+            isCalendarsPopoverOpen.toggle()
         case .undo, .move, .acceptSuggestion, .newCategory, .showRoutine, .newTaskEditor,
              .doNow, .doneForNow, .repeatLast, .centerOnNow, .jumpToFirst, .jumpToLast,
              .editEvent, .respondYes, .respondMaybe, .respondNo,
@@ -65,7 +68,7 @@ extension AppModel {
             case .toggleTaskGrouping:
                 taskListGrouping = taskListGrouping == .dueDate ? .category : .dueDate
                 statusMessage = "Grouped tasks by \(taskListGrouping.title.lowercased())"
-            case .core: break
+            case .core, .toggleCalendars: break
             }
         }
     }
@@ -152,7 +155,7 @@ extension AppModel {
             else { isProjectsOpen = false }
         case .sheet(.eventMove):
             cancelEventMove()
-        case .help, .eventPopover, .taskDueDate, .sheet:
+        case .help, .eventPopover, .calendarsPopover, .taskDueDate, .sheet:
             transitionInteraction(to: .browsing)
         case .browsing:
             selection = nil

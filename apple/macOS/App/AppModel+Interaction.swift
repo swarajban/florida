@@ -5,6 +5,7 @@ enum MacInteraction {
     case browsing
     case jumping(JumpLabels<ItemID>)
     case eventPopover(String)
+    case calendarsPopover
     case taskDueDate(String)
     case dragging(GridDrag)
     case palette
@@ -27,7 +28,7 @@ enum MacInteraction {
     }
 
     enum Kind: String {
-        case browsing, jumping, eventPopover, taskDueDate, dragging, palette, help, availability, sheet
+        case browsing, jumping, eventPopover, calendarsPopover, taskDueDate, dragging, palette, help, availability, sheet
     }
 
     var kind: Kind {
@@ -35,6 +36,7 @@ enum MacInteraction {
         case .browsing: .browsing
         case .jumping: .jumping
         case .eventPopover: .eventPopover
+        case .calendarsPopover: .calendarsPopover
         case .taskDueDate: .taskDueDate
         case .dragging: .dragging
         case .palette: .palette
@@ -65,6 +67,18 @@ extension AppModel {
         set {
             if newValue { transitionInteraction(to: .help) }
             else if isHelpOpen { transitionInteraction(to: .browsing) }
+        }
+    }
+
+    var canToggleCalendars: Bool {
+        config != nil && startupError == nil && !isSheetOpen && availabilityShare == nil
+    }
+
+    var isCalendarsPopoverOpen: Bool {
+        get { interaction.kind == .calendarsPopover }
+        set {
+            if newValue { transitionInteraction(to: .calendarsPopover) }
+            else if isCalendarsPopoverOpen { transitionInteraction(to: .browsing) }
         }
     }
 

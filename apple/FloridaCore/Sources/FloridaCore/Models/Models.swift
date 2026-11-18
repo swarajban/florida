@@ -846,6 +846,11 @@ public struct CalendarInfo: Codable, Hashable, Sendable, Identifiable {
     public var lastSyncedAt: Date?
     public var updatedAt: Date
 
+    public func matchesSearch(_ query: String) -> Bool {
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return query.isEmpty || summary.localizedStandardContains(query)
+    }
+
     public init(
         id: String, accountId: String, googleId: String, summary: String, color: String? = nil,
         accessRole: String, selected: Bool, blocksScheduling: Bool = true, lastSyncedAt: Date? = nil, updatedAt: Date

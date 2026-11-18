@@ -56,6 +56,7 @@ struct MacKeymap: Sendable {
         ("i", .someday),
         ("g s", .openTaskSource),
         ("g o", .toggleTaskGrouping),
+        ("cmd+shift+l", .toggleCalendars),
     ]
 
     static let `default`: MacKeymap = {

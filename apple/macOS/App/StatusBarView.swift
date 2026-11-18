@@ -51,6 +51,14 @@ struct StatusBarView: View {
                 Text("\(model.pendingWriteCount) pending")
                     .foregroundStyle(.secondary)
             }
+            if let status = model.calendarActivation.status(in: model.calendars) {
+                HStack(spacing: 4) {
+                    ProgressView().controlSize(.mini)
+                    Text(status).lineLimit(1)
+                }
+                .foregroundStyle(.secondary)
+                .help(status)
+            }
             SyncStatusLabel()
             Text("? for shortcuts")
                 .foregroundStyle(.tertiary)

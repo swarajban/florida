@@ -60,6 +60,8 @@ struct CalendarHeaderBar: View {
             .labelsHidden()
             .frame(width: 250)
 
+            CalendarsToolbarButton()
+
             Button {
                 model.perform(.toggleTasks)
             } label: {

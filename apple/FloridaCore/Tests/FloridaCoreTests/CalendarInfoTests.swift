@@ -34,4 +34,13 @@ import Testing
             accessRole: "owner", selected: false, updatedAt: .distantPast)
         #expect(calendar.blocksScheduling)
     }
+
+    @Test(arguments: ["", "  ", "  equipe ", "TEAM"])
+    func searchFindsHiddenCalendarsByDisplayName(query: String) {
+        let calendar = CalendarInfo(
+            id: "cal", accountId: "account", googleId: "g-cal", summary: "Équipe Team",
+            accessRole: "reader", selected: false, updatedAt: .distantPast)
+        #expect(calendar.matchesSearch(query))
+        #expect(!calendar.matchesSearch("personal"))
+    }
 }

@@ -267,6 +267,9 @@ targets:
       - macOS/Tasks/TaskEditorKeys.swift
       - macOS/Keyboard/ShortcutRepeatState.swift
       - macOS/Keyboard/KeyChord+NSEvent.swift
+      - macOS/Keyboard/MacCommand.swift
+      - macOS/Keyboard/MacKeymap.swift
+      - macOS/Palette/FuzzyMatch.swift
       - path: macOS/Forms
         optional: true
         includes: [SelectorInput.swift]
