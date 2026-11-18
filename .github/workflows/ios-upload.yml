@@ -19,7 +19,7 @@ env:
 jobs:
   testflight:
     name: ${{ github.workflow == 'iOS upload' && github.event_name == 'workflow_dispatch' && 'Verify signing (no upload)' || 'Upload to TestFlight' }}
-    runs-on: macos-26
+    runs-on: xcode-27
     concurrency:
       group: ios-${{ github.ref }}
       cancel-in-progress: false
@@ -32,6 +32,35 @@ jobs:
       TEAM_ID: ${{ secrets.APPLE_TEAM_ID || '8G7N7547R6' }}
       EXPORT_ONLY: ${{ github.workflow == 'iOS upload' && github.event_name == 'workflow_dispatch' && inputs.export_only }}
     steps:
+      - name: Select and verify Xcode 27
+        shell: bash
+        run: |
+          active=$(xcode-select -p 2>/dev/null || true)
+          active=$(cd "$active" 2>/dev/null && pwd -P || true)
+          preferred=''
+          for app in /Applications/Xcode_27*.app; do
+            [[ ${app##*/} =~ ^Xcode_27(\.[0-9]+)*\.app$ && -d "$app/Contents/Developer" ]] || continue
+            developer=$(cd "$app/Contents/Developer" && pwd -P)
+            if [[ "$developer" == "$active" ]]; then
+              preferred=$active
+              break
+            fi
+            [[ -n "$preferred" ]] || preferred=$developer
+          done
+          if [[ -n "$preferred" && "$preferred" != "$active" ]]; then
+            sudo xcode-select -s "$preferred"
+          fi
+          sw_vers
+          if ! version=$(xcodebuild -version); then
+            echo '::error::Could not read the active Xcode version; TestFlight requires Xcode 27 or later.'
+            exit 1
+          fi
+          printf '%s\n' "$version"
+          if ! [[ $version =~ ^Xcode[[:space:]]+([0-9]+) && ${BASH_REMATCH[1]} -ge 27 ]]; then
+            echo '::error::TestFlight requires Xcode 27 or later.'
+            exit 1
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Require export-only manual runs
