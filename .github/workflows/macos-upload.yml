@@ -2,6 +2,12 @@ name: macOS upload
 
 on:
   workflow_call:
+  workflow_dispatch:
+    inputs:
+      export_only:
+        description: Verify signing without uploading to TestFlight (always on outside main)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -12,7 +18,7 @@ env:
 
 jobs:
   testflight:
-    name: Upload to TestFlight
+    name: ${{ (github.ref != 'refs/heads/main' || inputs.export_only) && 'Verify signed export' || 'Upload to TestFlight' }}
     runs-on: xcode-27
     concurrency:
       group: macos-testflight
@@ -23,6 +29,7 @@ jobs:
       ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
       ASC_KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
       TEAM_ID: ${{ secrets.APPLE_TEAM_ID || '8G7N7547R6' }}
+      EXPORT_ONLY: ${{ github.ref != 'refs/heads/main' || inputs.export_only }}
     steps:
       - name: Select and verify Xcode 27
         shell: bash
@@ -142,7 +149,14 @@ jobs:
         working-directory: apple
         run: |
           APP="$RUNNER_TEMP/Florida-macOS.xcarchive/Products/Applications/Florida.app"
-          lipo "$APP/Contents/MacOS/Florida" -verify_arch arm64 x86_64
+          archs=$(lipo -archs "$APP/Contents/MacOS/Florida")
+          printf 'Detected macOS architectures: %s\n' "$archs"
+          for arch in arm64 x86_64; do
+            if ! [[ $archs =~ (^|[[:space:]])$arch($|[[:space:]]) ]]; then
+              echo "::error::macOS archive is missing the $arch architecture."
+              exit 1
+            fi
+          done
           # Export preserves entitlements from the signature, not the source .entitlements.
           # macOS TestFlight also requires an application identifier and provisioning profile.
           ENTITLEMENTS="$RUNNER_TEMP/mac-entitlements.plist"
@@ -175,22 +189,31 @@ jobs:
           print("Archive preserves the sandbox, network access, App Group, and application identity.")
           PY
 
-      - name: Export and upload to TestFlight
+      - name: ${{ env.EXPORT_ONLY == 'true' && 'Export signed package locally' || 'Export and upload to TestFlight' }}
         working-directory: apple
         run: |
           set -o pipefail
-          plutil -insert teamID -string "$TEAM_ID" ExportOptions.plist
+          OPTIONS="$RUNNER_TEMP/MacExportOptions.plist"
+          cp ExportOptions.plist "$OPTIONS"
+          plutil -insert teamID -string "$TEAM_ID" "$OPTIONS"
+          if [[ "$EXPORT_ONLY" == 'true' ]]; then
+            plutil -replace destination -string export "$OPTIONS"
+          fi
           xcodebuild -exportArchive \
             -archivePath "$RUNNER_TEMP/Florida-macOS.xcarchive" \
-            -exportOptionsPlist ExportOptions.plist \
+            -exportOptionsPlist "$OPTIONS" \
             -exportPath "$RUNNER_TEMP/mac-export" \
             -allowProvisioningUpdates \
             -authenticationKeyPath "$KEY_PATH" \
             -authenticationKeyID "$ASC_KEY_ID" \
             -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
             2>&1 | tee mac-export.log
+          if [[ "$EXPORT_ONLY" == 'true' ]]; then
+            pkgutil --check-signature "$RUNNER_TEMP/mac-export/"*.pkg
+          fi
 
       - name: Wait for TestFlight processing
+        if: env.EXPORT_ONLY != 'true'
         timeout-minutes: 21
         run: |
           "$RUNNER_TEMP/asc-venv/bin/python" -u - <<'PY'
