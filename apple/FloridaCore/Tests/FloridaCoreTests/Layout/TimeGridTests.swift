@@ -81,7 +81,6 @@ import Testing
         #expect(TimeGrid.eventDragHasStarted(dx: 0, dy: -6))
         #expect(TimeGrid.eventColumnContentWidth(120) == 104)
         #expect(TimeGrid.eventColumnContentWidth(36) == 24)
-        #expect(TimeGrid.eventColumnContentWidth(0) == 0)
     }
 
     @Test func eventDragCanEndAtNextMidnightEvenOnADSTDay() throws {

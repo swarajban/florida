@@ -18,11 +18,11 @@ public struct EventQuickAddSession: Sendable {
         template = event
         self.now = now
         self.calendar = calendar
-        draft = EventQuickAddParser.parse("", now: now, calendar: calendar, defaultStart: event.startAt)
+        draft = EventQuickAddParser.parse("", now: now, calendar: calendar, defaultStart: event.startAt, defaultEnd: event.endAt)
     }
 
     public mutating func updateText(_ text: String) {
-        var parsed = EventQuickAddParser.parse(text, now: now, calendar: calendar, defaultStart: template.startAt)
+        var parsed = EventQuickAddParser.parse(text, now: now, calendar: calendar, defaultStart: template.startAt, defaultEnd: template.endAt)
         if parsed.calendarHint != draft.calendarHint { chosenCalendarID = nil }
         if correctedTitle { parsed.title = draft.title }
         if correctedSchedule {

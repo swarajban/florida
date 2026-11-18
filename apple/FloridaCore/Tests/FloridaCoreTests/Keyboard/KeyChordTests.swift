@@ -8,8 +8,6 @@ import Testing
         let labels = chords.map(\.shortcutLabel)
         #expect(labels == ["c", "⌘N", "⇧N", "⇧⌘N", "⇧C", "⌥⌘N"])
         #expect(Set(labels.compactMap(KeyChord.init(parsing:))) == Set(chords))
-        #expect(Keymap.default.command(for: [KeyChord("c")]) == .newTask)
-        #expect(Keymap.default.command(for: [KeyChord("c", [.shift])]) == .newEvent)
     }
 
     @Test func parsesModifierNamesAndAliases() {

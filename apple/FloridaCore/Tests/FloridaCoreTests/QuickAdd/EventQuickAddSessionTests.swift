@@ -31,10 +31,19 @@ struct EventQuickAddSessionTests {
         ]
     }
 
-    private func session() -> EventQuickAddSession {
+    private func session(end: String = "2026-11-12T18:30:00Z") -> EventQuickAddSession {
         EventQuickAddSession(event: CalendarEvent(
             id: "new-event", calendarId: "primary", googleId: "", startAt: date("2026-11-12T18:00:00Z"),
-            endAt: date("2026-11-12T18:30:00Z"), updatedAt: now), now: now, calendar: calendar)
+            endAt: date(end), updatedAt: now), now: now, calendar: calendar)
+    }
+
+    @Test func aGridRangeSurvivesTitleEntryUnlessTextSetsDuration() {
+        var session = session(end: "2026-11-12T18:45:00Z")
+        #expect(session.draft.endAt == date("2026-11-12T18:45:00Z"))
+        session.updateText("Design sync")
+        #expect(session.event(in: calendars, accounts: accounts)?.endAt == date("2026-11-12T18:45:00Z"))
+        session.updateText("Design sync 1h")
+        #expect(session.draft.endAt == date("2026-11-12T19:00:00Z"))
     }
 
     @Test func usesExistingCalendarOrderEvenWhenPrimaryHidden() throws {

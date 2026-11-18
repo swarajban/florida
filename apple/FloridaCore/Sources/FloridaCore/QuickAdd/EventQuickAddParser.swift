@@ -30,7 +30,7 @@ public struct EventQuickAddDraft: Hashable, Sendable {
 
 public enum EventQuickAddParser {
     public static func parse(
-        _ text: String, now: Date, calendar: Calendar, defaultStart: Date? = nil
+        _ text: String, now: Date, calendar: Calendar, defaultStart: Date? = nil, defaultEnd: Date? = nil
     ) -> EventQuickAddDraft {
         let (body, notes) = QuickAddScanner.splitNotes(text)
         var tokens = body.split(whereSeparator: \.isWhitespace).map(String.init)
@@ -162,7 +162,8 @@ public enum EventQuickAddParser {
                 end = candidate > start ? candidate : scanner.instant(
                     on: scanner.addDays(1, to: startDay), clock: endClock)
             } else {
-                end = start.addingTimeInterval(Double(duration ?? 30) * 60)
+                let templateDuration = defaultStart.flatMap { begin in defaultEnd?.timeIntervalSince(begin) } ?? 0
+                end = start.addingTimeInterval(duration.map { Double($0) * 60 } ?? (templateDuration > 0 ? templateDuration : 1800))
             }
         }
         return EventQuickAddDraft(
