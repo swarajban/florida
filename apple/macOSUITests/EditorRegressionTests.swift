@@ -2,6 +2,51 @@ import XCTest
 
 final class EditorRegressionTests: XCTestCase {
     @MainActor
+    func testImmediateDatePresetAndUndoableDelete() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-demoData", "YES", "-uiAppearance", "light", "-joy.ghosts", "YES"]
+        app.launch()
+        addTeardownBlock {
+            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            attachment.name = "task-editor-shortcuts-teardown"
+            attachment.lifetime = .keepAlways
+            self.add(attachment)
+            app.terminate()
+        }
+
+        let row = app.staticTexts["Renew VPN certificate"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.click()
+        let due = app.buttons["task-due"]
+        XCTAssertTrue(due.waitForExistence(timeout: 5))
+        let originalDue = due.value as? String
+        app.typeKey("d", modifierFlags: [])
+        let search = app.textFields["task-due-search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        app.typeKey("4", modifierFlags: [])
+        XCTAssertTrue(search.waitForNonExistence(timeout: 3), "Search value: \(search.value ?? "nil")")
+        let calendar = Calendar.current
+        let nextSunday = calendar.nextDate(after: calendar.startOfDay(for: Date()),
+                                           matching: DateComponents(hour: 0, weekday: 1), matchingPolicy: .nextTime)!
+        let nextMonday = calendar.date(byAdding: .day, value: 1, to: nextSunday)!
+        let nextWeek = nextMonday.formatted(.dateTime.month(.abbreviated).day().year())
+        XCTAssertNotEqual(originalDue, nextWeek)
+        XCTAssertEqual(due.value as? String, nextWeek)
+        XCTAssertTrue(app.buttons["task-delete"].exists)
+        let editor = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        editor.name = "task-editor-next-week-and-delete"
+        editor.lifetime = .keepAlways
+        add(editor)
+
+        app.typeKey("x", modifierFlags: [])
+        XCTAssertTrue(due.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(row.waitForNonExistence(timeout: 5))
+        app.typeKey("z", modifierFlags: [])
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testUnchangedEditorDoesNotConsumeUndoOrWrite() {
         let app = XCUIApplication()
         app.launchArguments = ["-demoData", "YES", "-uiEditorDiagnostics", "YES"]

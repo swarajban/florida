@@ -156,9 +156,11 @@ struct MacDateSelector: View {
     @State private var clock = ""
     @State private var timed = false
     @State private var now = Date()
+    @State private var searchFocus = SelectorInput.ManualFocus()
     @FocusState private var gridFocused: Bool
 
     private var parsed: DateEntryResult {
+        if let choice = DateEntryQuickChoice.matching(shortcut: query) { return quickResult(choice) }
         if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let result = DateEntry.parse(query, now: now, calendar: calendar)
             if case .date(let day, false) = result, timed { return withClock(on: day) }
@@ -184,13 +186,14 @@ struct MacDateSelector: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SelectorInput(text: $query, placeholder: "Type a date…", identifier: "\(identifier)-search", command: command)
+            SelectorInput(text: $query, placeholder: "Type a date…", identifier: "\(identifier)-search",
+                          command: command, manualFocus: searchFocus)
                 .frame(height: 26)
             Text(preview)
                 .font(.callout.weight(.medium))
                 .accessibilityIdentifier("\(identifier)-preview")
             Divider()
-            ForEach(Array(DateEntryQuickChoice.allCases.enumerated()), id: \.element) { index, choice in
+            ForEach(DateEntryQuickChoice.allCases, id: \.self) { choice in
                 if choice != .none || allowsClear {
                     Button {
                         quick(choice)
@@ -198,7 +201,7 @@ struct MacDateSelector: View {
                         HStack {
                             Text(choice.title)
                             Spacer()
-                            Keycap(String(index + 1))
+                            Keycap(choice.shortcut)
                         }
                         .contentShape(Rectangle())
                     }
@@ -216,10 +219,16 @@ struct MacDateSelector: View {
                 .onKeyPress(.downArrow) { move(7); return .handled }
                 .onKeyPress(.return) { submit(); return .handled }
                 .onKeyPress(.escape) { cancel(); return .handled }
+                .onKeyPress(.tab) { searchFocus.activate() ? .handled : .ignored }
                 .onKeyPress(characters: CharacterSet(charactersIn: "12345")) { press in
-                    guard let number = Int(press.characters), DateEntryQuickChoice.allCases.indices.contains(number - 1) else { return .ignored }
-                    quick(DateEntryQuickChoice.allCases[number - 1])
+                    guard press.modifiers.isEmpty,
+                          let choice = DateEntryQuickChoice.matching(shortcut: press.characters) else { return .ignored }
+                    quick(choice)
                     return .handled
+                }
+                .onKeyPress(characters: CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ/")) { press in
+                    guard press.modifiers.subtracting(.shift).isEmpty else { return .ignored }
+                    return searchFocus.activate(inserting: press.characters) ? .handled : .ignored
                 }
             if allowsTime {
                 if !requiresTime {
@@ -236,7 +245,7 @@ struct MacDateSelector: View {
                 }
             }
             HStack {
-                Text("Arrows move days · Tab: calendar / 1–5\n↩ choose · esc cancel")
+                Text("1–5 choose a preset · arrows move days\nType a date or Tab to switch · ↩ choose · esc cancel")
                     .font(.caption2).foregroundStyle(.secondary)
                 Spacer()
                 Button("Choose", action: submit)
@@ -245,6 +254,7 @@ struct MacDateSelector: View {
         }
         .padding(12)
         .frame(width: 310)
+        .defaultFocus($gridFocused, true)
         .background(SelectorWindowGuard())
         .onExitCommand(perform: cancel)
         .onAppear {
@@ -327,11 +337,19 @@ struct MacDateSelector: View {
         switch name {
         case "moveLeft:": move(-1)
         case "moveRight:": move(1)
-        case "moveUp:": move(-7)
-        case "moveDown:": move(7)
+        case "moveUp:", "moveDown:":
+            let backward = name == "moveUp:"
+            let choices = DateEntryQuickChoice.allCases.filter { allowsClear || $0 != .none }
+            let current = DateEntryQuickChoice.matching(shortcut: query)
+            if current != nil || query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                query = (current.map { TaskEditorKey.step($0, in: choices, backward: backward) }
+                         ?? (backward ? choices.last : choices.first))?.shortcut ?? ""
+            } else {
+                move(backward ? -7 : 7)
+            }
         case "insertNewline:": submit()
         case "cancelOperation:": cancel()
-        case "insertTab:": gridFocused = true
+        case "insertTab:", "insertBacktab:": gridFocused = true
         default: return false
         }
         return true
@@ -348,18 +366,23 @@ struct MacDateSelector: View {
     }
 
     private func quick(_ choice: DateEntryQuickChoice) {
-        if let date = DateEntry.quickDate(choice, now: now, calendar: calendar) {
-            let result = timed ? withClock(on: date) : .date(date, hasTime: false)
-            guard result != .invalid else { return }
-            choose(result)
-        } else if allowsClear { choose(.clear) }
+        commit(quickResult(choice))
     }
 
-    private func submit() {
-        switch parsed {
+    private func quickResult(_ choice: DateEntryQuickChoice) -> DateEntryResult {
+        if let date = DateEntry.quickDate(choice, now: now, calendar: calendar) {
+            return timed ? withClock(on: date) : .date(date, hasTime: false)
+        }
+        return choice == .none ? .clear : .invalid
+    }
+
+    private func submit() { commit(parsed) }
+
+    private func commit(_ result: DateEntryResult) {
+        switch result {
         case .invalid: return
         case .clear where !allowsClear: return
-        default: choose(parsed)
+        default: choose(result)
         }
     }
 }

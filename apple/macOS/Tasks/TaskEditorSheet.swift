@@ -40,6 +40,7 @@ struct TaskEditorSheet: View {
     @State private var keyboard = TaskEditorKeyboard()
     @State private var openField: TaskEditorKey?
     @State private var saveError: String?
+    @State private var confirmingDelete = false
     @State private var tagInput = ""
     @State private var aiParseState: AIParseSection.ParseState = .idle
 
@@ -240,7 +241,13 @@ struct TaskEditorSheet: View {
                 } label: {
                     KeyLabel("Cancel", key: "esc")
                 }
-                .keyboardShortcut(.cancelAction)
+                .keyboardShortcut(confirmingDelete ? nil : .cancelAction)
+                if !isNew {
+                    Button(role: .destructive, action: requestDelete) {
+                        keyLabel("Delete", .delete)
+                    }
+                    .accessibilityIdentifier("task-delete")
+                }
                 Spacer()
                 Text("Field key: search choices · ↑ ↓ then ↩ · esc leaves without changing")
                     .font(.caption)
@@ -267,6 +274,12 @@ struct TaskEditorSheet: View {
         .background(TaskEditorKeyMonitor(keyboard: keyboard, shortcutRepeats: model.shortcutRepeats,
                                         startsUnfocused: true, onPress: handle,
                                          onPriority: { draft.priority = $0 }))
+        .alert("Delete this occurrence and stop repeating?", isPresented: $confirmingDelete) {
+            Button("Delete and Stop Repeating", role: .destructive, action: delete)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This and future unfinished occurrences will be removed. Completed history is kept. Undo restores one task only, not the repeating series.")
+        }
         .onChange(of: startAt) { keepDueAfterStart() }
         .onChange(of: hasStart) { keepDueAfterStart() }
         .onChange(of: hasDue) { keepDueAfterStart() }
@@ -284,7 +297,11 @@ struct TaskEditorSheet: View {
 
     /// One of the editor's keys. Text keys focus their fields; choice and date keys open selectors.
     private func handle(_ press: TaskEditorKey.Press) {
+        guard !confirmingDelete else { return }
         switch press.key {
+        case .delete:
+            guard openField == nil else { return }
+            requestDelete()
         case .markDone:
             if !isNew, original.isOpen {
                 markDone()
@@ -302,6 +319,21 @@ struct TaskEditorSheet: View {
             guard hasDue else { return }
             openField = .deadline
         }
+    }
+
+    private func requestDelete() {
+        guard !isNew, let task = model.tasksById[original.id] else { return }
+        if task.recurrence != nil {
+            confirmingDelete = true
+        } else {
+            delete()
+        }
+    }
+
+    private func delete() {
+        guard let task = model.tasksById[original.id] else { return }
+        model.editorTask = nil
+        model.deleteTask(task)
     }
 
     private func showing(_ field: TaskEditorKey) -> Binding<Bool> {

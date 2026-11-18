@@ -10,6 +10,19 @@ struct SelectorInput: NSViewRepresentable {
     var caretUTF16: Int?
     var caretRevision: Int?
     var selectionChanged: ((String, NSRange, CGRect) -> Void)?
+    var manualFocus: ManualFocus?
+
+    @MainActor
+    final class ManualFocus {
+        weak var field: SelectorTextField?
+
+        func activate(inserting text: String = "") -> Bool {
+            guard let field, let window = field.window, window.makeFirstResponder(field),
+                  let editor = field.currentEditor() as? NSTextView else { return false }
+            if !text.isEmpty { editor.insertText(text, replacementRange: editor.selectedRange()) }
+            return true
+        }
+    }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -21,6 +34,8 @@ struct SelectorInput: NSViewRepresentable {
         field.bezelStyle = .roundedBezel
         field.font = .systemFont(ofSize: 14)
         field.isPaletteInput = isPaletteInput
+        field.autofocus = manualFocus == nil
+        manualFocus?.field = field
         if isPaletteInput {
             field.isBezeled = false
             field.drawsBackground = false
@@ -50,7 +65,8 @@ struct SelectorInput: NSViewRepresentable {
 
     static func isEditing(in window: NSWindow) -> Bool {
         SelectorWindowHost.counts[ObjectIdentifier(window), default: 0] > 0
-            || ((window.firstResponder as? NSTextView)?.delegate as? SelectorTextField).map { !$0.isPaletteInput } == true
+            || (((window.firstResponder as? NSTextView)?.delegate as? AnyObject) as? SelectorTextField)
+                .map { !$0.isPaletteInput } == true
     }
 
     @MainActor
@@ -85,7 +101,7 @@ struct SelectorInput: NSViewRepresentable {
 
         @objc private func selectionDidChange(_ notification: Notification) {
             guard let editor = notification.object as? NSTextView,
-                  let field = editor.delegate as? NSTextField else { return }
+                  let field = (editor.delegate as? AnyObject) as? NSTextField else { return }
             if !isUpdating { reportSelection(field) }
             scheduleSelectionReport(field)
         }
@@ -139,7 +155,7 @@ final class SelectorOrigin {
     static func finishDismissal(in window: NSWindow?, preservingFocusAt point: NSPoint?, onDismiss: () -> Void) async {
         await Task.yield()
         if let point, let editor = window?.firstResponder as? NSTextView, editor.isEditable,
-           !(editor.delegate is SelectorTextField), let content = window?.contentView {
+           !((editor.delegate as? AnyObject) is SelectorTextField), let content = window?.contentView {
             var hit = content.hitTest(content.superview?.convert(point, from: nil) ?? point)
             while let view = hit {
                 if view === editor || (view as? NSTextField)?.currentEditor() === editor { return }
@@ -199,10 +215,11 @@ final class SelectorWindowHost: NSView {
 
 final class SelectorTextField: NSTextField {
     var isPaletteInput = false
+    var autofocus = true
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        guard window != nil else { return }
+        guard autofocus, window != nil else { return }
         Task { @MainActor [weak self] in
             guard let self, let window else { return }
             window.makeFirstResponder(self)

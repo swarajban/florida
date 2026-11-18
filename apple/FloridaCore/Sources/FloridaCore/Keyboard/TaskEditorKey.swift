@@ -7,7 +7,7 @@ import Foundation
 /// Snooze on the calendar.
 public enum TaskEditorKey: String, CaseIterable, Hashable, Sendable {
     case markDone, title, notes, start, due, deadline, category, duration, priority, context, project
-    case attention, pinnedStart
+    case attention, pinnedStart, delete
 
     /// What has the keyboard in the editor when a key arrives.
     public enum Focus: Hashable, Sendable {
@@ -38,6 +38,7 @@ public enum TaskEditorKey: String, CaseIterable, Hashable, Sendable {
     public var key: String {
         switch self {
         case .markDone: "space"
+        case .delete: "x"
         case .title: "t"
         case .notes: "n"
         case .start: "s"
@@ -62,14 +63,18 @@ public enum TaskEditorKey: String, CaseIterable, Hashable, Sendable {
     public var takesShift: Bool {
         switch self {
         case .start, .due, .pinnedStart, .deadline, .category, .priority, .context, .project, .attention: true
-        case .markDone, .title, .notes, .duration: false
+        case .markDone, .delete, .title, .notes, .duration: false
         }
     }
 
     /// The control `chord` reaches while `focus` has the keyboard; nil when the key is not the
     /// editor's, or belongs to what is focused.
     public static func press(for chord: KeyChord, focus: Focus) -> Press? {
-        guard focus != .text, chord.modifiers.subtracting([.shift]).isEmpty,
+        guard focus != .text else { return nil }
+        if chord == KeyChord("delete") || chord == KeyChord("delete", [.command]) {
+            return Press(key: .delete)
+        }
+        guard chord.modifiers.subtracting([.shift]).isEmpty,
               let key = allCases.first(where: { $0.key == chord.key })
         else { return nil }
         let isShifted = chord.modifiers.contains(.shift)

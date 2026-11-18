@@ -28,6 +28,11 @@ public enum DateEntryQuickChoice: String, CaseIterable, Sendable {
         case .none: "5"
         }
     }
+
+    public static func matching(shortcut text: String) -> Self? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return allCases.first { $0.shortcut == trimmed }
+    }
 }
 
 public enum DateEntry {

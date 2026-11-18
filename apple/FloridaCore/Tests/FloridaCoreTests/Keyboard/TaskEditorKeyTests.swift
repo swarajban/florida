@@ -20,6 +20,17 @@ import Testing
         }
     }
 
+    @Test func deleteShortcutsLeaveTextEditingAlone() {
+        for chord in [KeyChord("x"), KeyChord("delete"), KeyChord("delete", [.command])] {
+            for focus: TaskEditorKey.Focus in [.none, .control, .date] {
+                #expect(TaskEditorKey.press(for: chord, focus: focus) == .init(key: .delete))
+            }
+            #expect(TaskEditorKey.press(for: chord, focus: .text) == nil)
+        }
+        #expect(TaskEditorKey.press(for: KeyChord("x", [.command]), focus: .none) == nil)
+        #expect(TaskEditorKey.press(for: KeyChord("delete", [.option]), focus: .none) == nil)
+    }
+
     /// Typing "p" in a time is PM, and Space must not finish the task from inside a field.
     @Test func aDateFieldKeepsItsOwnKeysAndPassesTheRest() {
         #expect(TaskEditorKey.press(for: KeyChord("a"), focus: .date) == nil)
