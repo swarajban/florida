@@ -38,6 +38,11 @@ extension AppModel {
             return true
         }
 
+        if isCalendarsPopoverOpen, !isCommandChord {
+            if isEscape { isCalendarsPopoverOpen = false }
+            return isEscape
+        }
+
         if event.isARepeat, jump != nil { return true }
         if handleJumpKey(chord) {
             return true
