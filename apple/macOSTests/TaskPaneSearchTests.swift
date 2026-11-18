@@ -36,11 +36,13 @@ struct TaskPaneSearchTests {
         field.focusForClick()
         NotificationCenter.default.post(name: NSWindow.willBeginSheetNotification, object: window)
         #expect(TaskPaneSearchField.editing(in: window) == nil)
-        #expect(!window.makeFirstResponder(field))
+        window.makeFirstResponder(field)
+        #expect(!(window.firstResponder is NSTextView), "Responder after sheet focus restore: \(String(describing: window.firstResponder))")
         field.focusForClick()
         field.removeFromSuperview()
         content.addSubview(field)
-        #expect(!window.makeFirstResponder(field))
+        window.makeFirstResponder(field)
+        #expect(!(window.firstResponder is NSTextView), "Responder after pane focus restore: \(String(describing: window.firstResponder))")
         #expect(field.currentEditor() == nil)
     }
 }
