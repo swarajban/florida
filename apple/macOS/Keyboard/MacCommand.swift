@@ -86,7 +86,7 @@ enum MacCommand: Hashable, Sendable {
         case .respondNo: "RSVP: No"
         case .showProjects: "Projects"
         case .showBrief: "Brief"
-        case .toggleCalendars: "Toggle calendars"
+        case .toggleCalendars: "Calendars…"
         case .explain: "Why here?"
         case .setDayHome: "Set day: Home"
         case .setDayOffice: "Set day: Office"

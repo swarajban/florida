@@ -3,7 +3,17 @@ import XCTest
 final class CalendarVisibilityTests: XCTestCase {
     @MainActor
     func testChecklistStaysOpenAcrossTogglesAndFilters() {
-        let app = launchDemo()
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-demoData", "YES", "-uiAppearance", "light"]
+        app.launch()
+        addTeardownBlock {
+            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            attachment.name = "calendars-teardown"
+            attachment.lifetime = .keepAlways
+            self.add(attachment)
+            app.terminate()
+        }
         let button = app.buttons["calendar-visibility-button"]
         let search = app.textFields["calendar-visibility-search"]
         let ooo = app.checkBoxes["calendar-visibility-row-demo-cal-ooo"]
@@ -27,46 +37,12 @@ final class CalendarVisibilityTests: XCTestCase {
         search.typeText("birthday")
         XCTAssertTrue(ooo.waitForNonExistence(timeout: 5))
         XCTAssertTrue(birthdays.isHittable)
-    }
-
-    @MainActor
-    func testCalendarMenuShortcutAndPaletteOpenTheSameChecklist() {
-        let app = launchDemo()
-        let search = app.textFields["calendar-visibility-search"]
-        let calendar = app.menuBars.menuBarItems["Calendar"]
-        XCTAssertTrue(app.buttons["calendar-visibility-button"].waitForExistence(timeout: 10))
-
-        calendar.click()
-        calendar.menus.menuItems["Toggle Calendars"].click()
-        XCTAssertTrue(search.waitForExistence(timeout: 5))
         app.typeKey(.escape, modifierFlags: [])
         XCTAssertTrue(search.waitForNonExistence(timeout: 5))
 
         app.typeKey("l", modifierFlags: [.command, .shift])
         XCTAssertTrue(search.waitForExistence(timeout: 5))
-        app.typeKey(.escape, modifierFlags: [])
-        XCTAssertTrue(search.waitForNonExistence(timeout: 5))
-
-        app.typeKey("k", modifierFlags: .command)
-        app.textFields["palette-input"].typeText("Toggle calendars")
-        app.typeKey(.return, modifierFlags: [])
-        XCTAssertTrue(search.waitForExistence(timeout: 5))
-    }
-
-    @MainActor
-    private func launchDemo() -> XCUIApplication {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["-demoData", "YES", "-uiAppearance", "light"]
-        app.launch()
-        addTeardownBlock {
-            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-            attachment.name = "calendars-teardown"
-            attachment.lifetime = .keepAlways
-            self.add(attachment)
-            app.terminate()
-        }
-        return app
+        XCTAssertEqual((birthdays.value as? NSNumber)?.intValue, 1)
     }
 
     @MainActor

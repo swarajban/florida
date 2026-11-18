@@ -67,7 +67,7 @@ struct AppCommands: Commands {
                 Button("Follow the Routine") { model.run(.clearDayKind) }
             }
             Divider()
-            Button("Toggle Calendars") { model.run(.toggleCalendars) }
+            Button("Calendars…") { model.run(.toggleCalendars) }
                 .keyboardShortcut("l", modifiers: [.command, .shift])
                 .disabled(!model.canToggleCalendars || mainCalendarWindow != true)
             Button("Toggle Tasks") { model.perform(.toggleTasks) }
