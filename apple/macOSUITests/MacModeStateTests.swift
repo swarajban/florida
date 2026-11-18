@@ -3,6 +3,39 @@ import XCTest
 
 final class MacModeStateTests: XCTestCase {
     @MainActor
+    func testTaskSearchResignsOnEscapeAndOutsideClick() {
+        continueAfterFailure = false
+        let app = launch(taskFixture: false)
+        let search = app.textFields["task-pane-search"]
+        let viewMode = app.staticTexts["mode-calendar-view"]
+        let waiting = app.checkBoxes["Waiting only"]
+        addTeardownBlock {
+            print("Search: frame=\(search.frame), value=\(String(describing: search.value)), mode=\(String(describing: viewMode.value)), waiting=\(String(describing: waiting.value))")
+            self.capture(app, "task-search-resign")
+            app.terminate()
+        }
+
+        app.typeKey("d", modifierFlags: [])
+        waitForValue("day", of: viewMode)
+        search.click()
+        app.typeText("w")
+        XCTAssertEqual(search.value as? String, "w")
+        app.typeKey(.escape, modifierFlags: [])
+        app.typeKey("w", modifierFlags: [])
+        waitForValue("week", of: viewMode)
+
+        search.click()
+        app.typeKey("a", modifierFlags: .command)
+        app.typeText("d")
+        XCTAssertEqual(search.value as? String, "d")
+        waiting.click()
+        XCTAssertEqual((waiting.value as? NSNumber)?.intValue, 1)
+        app.typeKey("d", modifierFlags: [])
+        waitForValue("day", of: viewMode)
+        XCTAssertEqual(search.value as? String, "d")
+    }
+
+    @MainActor
     func testNewEventShortcutAndHelpLabels() {
         continueAfterFailure = false
         let app = launch(taskFixture: false)

@@ -63,9 +63,8 @@ struct TaskPaneView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             VStack(spacing: 6) {
-                TextField("Search tasks, waiting on, or #tag", text: Binding(
+                TaskPaneSearch(text: Binding(
                     get: { model.taskMetadataSearch }, set: { model.taskMetadataSearch = $0 }))
-                    .textFieldStyle(.roundedBorder)
                 Toggle("Waiting only", isOn: Binding(
                     get: { model.taskWaitingOnly }, set: { model.taskWaitingOnly = $0 }))
                     .toggleStyle(.checkbox)
