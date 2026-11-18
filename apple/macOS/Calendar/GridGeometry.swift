@@ -13,6 +13,10 @@ struct GridGeometry {
         dayCount > 0 ? max(0, size.width - gutterWidth) / CGFloat(dayCount) : 0
     }
 
+    private var contentWidth: CGFloat {
+        TimeGrid.eventColumnContentWidth(columnWidth)
+    }
+
     func x(forDay index: Int) -> CGFloat {
         gutterWidth + CGFloat(index) * columnWidth
     }
@@ -34,10 +38,11 @@ struct GridGeometry {
     }
 
     func rect(dayIndex: Int, column: Int, columnCount: Int, startMinute: Int, endMinute: Int) -> CGRect {
-        let width = columnWidth / CGFloat(max(columnCount, 1))
+        let width = contentWidth / CGFloat(max(columnCount, 1))
         let x = x(forDay: dayIndex) + CGFloat(column) * width
         let rows = Self.rows(startMinute: startMinute, endMinute: endMinute, grid: grid)
-        return CGRect(x: x + 1, y: rows.lowerBound, width: max(width - 2, 2), height: rows.upperBound - rows.lowerBound)
+        let inset = min(1, width / 4)
+        return CGRect(x: x + inset, y: rows.lowerBound, width: width - 2 * inset, height: rows.upperBound - rows.lowerBound)
     }
 
     /// Top and bottom of a block's frame. They follow from the grid alone, not from the view's
@@ -48,11 +53,12 @@ struct GridGeometry {
         return top...(top + max(height - 1, 4))
     }
 
-    /// A free gap spans its whole column, inset a little further than blocks.
+    /// A free gap spans the same content area as the blocks, with a slightly larger inset.
     func rect(for gap: GridLayout.Gap) -> CGRect {
         let y = grid.y(forMinute: gap.startMinute)
         let height = grid.y(forMinute: gap.endMinute) - y
-        return CGRect(x: x(forDay: gap.dayIndex) + 3, y: y + 1, width: max(columnWidth - 6, 2), height: max(height - 2, 2))
+        let inset = min(3, contentWidth / 4)
+        return CGRect(x: x(forDay: gap.dayIndex) + inset, y: y + 1, width: contentWidth - 2 * inset, height: max(height - 2, 2))
     }
 
     func gap(at point: CGPoint, in layout: GridLayout) -> GridLayout.Gap? {

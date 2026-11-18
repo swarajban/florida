@@ -8,6 +8,7 @@ enum MacInteraction {
     case calendarsPopover
     case taskDueDate(String)
     case dragging(GridDrag)
+    case draftingEvent(GridEventDraft)
     case palette
     case help
     case availability(AvailabilityShareState, zoneOpen: Bool)
@@ -28,7 +29,7 @@ enum MacInteraction {
     }
 
     enum Kind: String {
-        case browsing, jumping, eventPopover, calendarsPopover, taskDueDate, dragging, palette, help, availability, sheet
+        case browsing, jumping, eventPopover, calendarsPopover, taskDueDate, dragging, draftingEvent, palette, help, availability, sheet
     }
 
     var kind: Kind {
@@ -39,6 +40,7 @@ enum MacInteraction {
         case .calendarsPopover: .calendarsPopover
         case .taskDueDate: .taskDueDate
         case .dragging: .dragging
+        case .draftingEvent: .draftingEvent
         case .palette: .palette
         case .help: .help
         case .availability: .availability
@@ -129,6 +131,11 @@ extension AppModel {
             if let newValue { transitionInteraction(to: .taskDueDate(newValue)) }
             else if dueDateTaskId != nil { transitionInteraction(to: .browsing) }
         }
+    }
+
+    var gridEventDraft: GridEventDraft? {
+        if case .draftingEvent(let draft) = interaction { return draft }
+        return nil
     }
 
     var canBeginGridDrag: Bool {

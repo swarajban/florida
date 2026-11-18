@@ -55,7 +55,8 @@ struct InteractionModeDiagnostics: View {
         injection = Task { @MainActor in
             for _ in 0..<300 {
                 guard !Task.isCancelled else { return }
-                if let drag = model.gridDrag, !drag.isDropped, let window = model.mainWindow {
+                if model.gridDrag?.isDropped == false || model.gridEventDraft != nil,
+                   let window = model.mainWindow {
                     let characters = key == "escape" ? "\u{1b}" : "M"
                     let flags: NSEvent.ModifierFlags = key == "escape" ? [] : [.shift]
                     let code: UInt16 = key == "escape" ? 53 : 46

@@ -3,17 +3,17 @@ import SwiftUI
 
 /// Day / 3-day / week: headers, the all-day strip, and a scrolling `Canvas` time grid that opens
 /// at 07:00 and scrolls to keep the selected block on screen. Clicks select; a double-click on a
-/// block edits it (tasks) or opens its details (events); a double-click on empty grid starts a
-/// quick add pinned to that slot. Dragging an event moves it, in quarter hours and across days,
-/// keeping its length (`GridDrag`).
+/// block edits it (tasks) or opens its details (events). Click or drag on empty grid to compose
+/// an event. Dragging an existing event moves it, keeping its length (`GridDrag`).
 struct CalendarGridView: View {
     @Environment(AppModel.self) private var model
     @AppStorage(JoyPreference.currentProgress.key) private var showsProgress = true
     @State private var position = ScrollPosition(idType: Int.self, y: CalendarGridView.initialY)
     private enum DragSession {
-        case idle, event, availability, cancelled
+        case idle, event, creation, availability, cancelled
     }
     @State private var dragSession: DragSession = .idle
+    @GestureState private var dragIsActive = false
     /// What the last click in the grid selected, until the selection change it caused is handled.
     @State private var clickedItem: ItemID?
     @State private var eventStart: Date?
@@ -42,6 +42,7 @@ struct CalendarGridView: View {
                                 layout: model.gridLayout, selection: model.selection,
                                 jumpLabels: model.jump?.remaining ?? [:],
                                 jumpViewport: model.jump == nil ? nil : model.jumpGridViewport, drag: model.gridDrag,
+                                draft: model.gridEventDraft,
                                 selectedDay: model.selectedDay,
                                 now: model.clockNow, frameDate: timeline.date, transition: model.layoutTransition,
                                 showsProgress: showsProgress, calendar: model.calendar, hourLabels: model.hourLabels,
@@ -52,6 +53,7 @@ struct CalendarGridView: View {
                                 .allowsHitTesting(false)
                         }
                     }
+                    .contentShape(Rectangle())
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("calendar-time-grid")
                     .onClickAt { point, isDouble in
@@ -76,9 +78,15 @@ struct CalendarGridView: View {
                         }
                     }
                     .gesture(
-                        DragGesture(minimumDistance: 4)
+                        DragGesture(minimumDistance: TimeGrid.eventDragMinimumDistance)
+                            .updating($dragIsActive) { _, active, _ in active = true }
                             .onChanged { dragChanged($0, width: geometry.size.width) }
-                            .onEnded { _ in dragEnded() })
+                            .onEnded { dragEnded($0, width: geometry.size.width) })
+                    .onChange(of: dragIsActive) { _, active in
+                        guard !active, dragSession == .creation || dragSession == .cancelled else { return }
+                        if model.gridEventDraft != nil { model.cancel() }
+                        dragSession = .idle
+                    }
                     .eventDetailPopover(
                         model, eventId: detailBlock == nil ? nil : model.eventDetailID,
                         anchor: .rect(.rect(detailBlock.map { gridGeometry(width: geometry.size.width).rect(for: $0) } ?? .zero)))
@@ -138,8 +146,7 @@ struct CalendarGridView: View {
     private func newEventStart(at point: CGPoint, width: CGFloat) -> Date? {
         guard let dayIndex = gridGeometry(width: width).dayIndex(atX: point.x) else { return nil }
         let day = model.gridLayout.days[dayIndex]
-        let minute = Self.grid.snappedMinute(forY: point.y)
-        return model.calendar.date(bySettingHour: minute / 60, minute: minute % 60, second: 0, of: day)
+        return BlockDrag.date(onDay: day, minute: Self.grid.eventStartMinute(forY: point.y), calendar: model.calendar)
     }
 
     /// Scrolls just enough to bring the selected block or gap on the highlighted day on screen;
@@ -194,26 +201,16 @@ struct CalendarGridView: View {
             }
             return
         }
-        if !isDouble, let gap = geometry.gap(at: point, in: layout) {
+        if let gap = geometry.gap(at: point, in: layout), !isDouble {
             clickedItem = gap.item
             model.select(gap.item, in: .calendar)
             return
         }
         let day = layout.days[dayIndex]
-        model.focus = .calendar
-        model.selectDay(day)
-        // The status bar's note was about the block this click deselects.
-        model.statusMessage = nil
-        model.select(nil)
-        if isDouble {
-            let minute = Self.grid.snappedMinute(forY: point.y)
-            model.openQuickAdd(prefill: Self.quickAddPrefix(day: day, minute: minute, calendar: model.calendar))
-        }
+        let start = BlockDrag.date(onDay: day, minute: Self.grid.eventStartMinute(forY: point.y), calendar: model.calendar)
+        composeEvent(on: day, start: start)
     }
 
-    /// A drag in the grid: begins on the block under the point where the button went down, then
-    /// follows the pointer by slots and day columns. The model is told only when the slot
-    /// changes, so the canvas redraws a few times per drag, not once per pointer event.
     private func dragChanged(_ value: DragGesture.Value, width: CGFloat) {
         guard dragSession != .cancelled else { return }
         if dragSession == .event, model.interaction.kind != .dragging {
@@ -235,11 +232,29 @@ struct CalendarGridView: View {
         }
         let layout = model.gridLayout
         let geometry = gridGeometry(width: width)
+        if dragSession == .creation {
+            guard let draft = model.gridEventDraft else {
+                dragSession = .cancelled
+                return
+            }
+            updateDraft(dayIndex: draft.dayIndex, from: value.startLocation.y, to: value.location.y)
+            return
+        }
         var drag: GridDrag
         if let current = model.gridDrag, !current.isDropped {
             drag = current
         } else if dragSession == .idle, model.canBeginGridDrag,
-                  let begun = model.beginDrag(on: geometry.block(at: value.startLocation, in: layout)) {
+                  let dayIndex = geometry.dayIndex(atX: value.startLocation.x) {
+            guard let block = geometry.block(at: value.startLocation, in: layout) else {
+                guard TimeGrid.eventDragHasStarted(dx: value.translation.width, dy: value.translation.height) else { return }
+                dragSession = .creation
+                updateDraft(dayIndex: dayIndex, from: value.startLocation.y, to: value.location.y)
+                return
+            }
+            guard let begun = model.beginDrag(on: block) else {
+                dragSession = .cancelled
+                return
+            }
             drag = begun
             model.gridDrag = begun
             dragSession = .event
@@ -257,10 +272,25 @@ struct CalendarGridView: View {
         model.gridDrag = drag
     }
 
-    private func dragEnded() {
+    private func updateDraft(dayIndex: Int, from startY: CGFloat, to endY: CGFloat) {
+        let minutes = Self.grid.eventMinutes(from: startY, to: endY)
+        guard minutes != model.gridEventDraft?.minutes else { return }
+        let dates = Self.grid.eventDates(on: model.gridLayout.days[dayIndex], minutes: minutes, calendar: model.calendar)
+        model.transitionInteraction(to: .draftingEvent(GridEventDraft(dayIndex: dayIndex, minutes: minutes, dates: dates)))
+    }
+
+    private func dragEnded(_ value: DragGesture.Value, width: CGFloat) {
         defer { dragSession = .idle }
         if dragSession == .availability {
             model.availabilityShare?.paint = nil
+            return
+        }
+        if dragSession == .creation {
+            guard model.gridEventDraft != nil else { return }
+            dragChanged(value, width: width)
+            guard let draft = model.gridEventDraft else { return }
+            model.transitionInteraction(to: .browsing)
+            composeEvent(on: model.gridLayout.days[draft.dayIndex], start: draft.dates.lowerBound, end: draft.dates.upperBound)
             return
         }
         guard dragSession == .event, model.interaction.kind == .dragging,
@@ -268,12 +298,11 @@ struct CalendarGridView: View {
         model.drop(drag)
     }
 
-    /// "11/20/2026 at 2:00pm " — the forms `QuickAddParser` reads as a pinned start.
-    static func quickAddPrefix(day: Date, minute: Int, calendar: Calendar) -> String {
-        let components = calendar.dateComponents([.year, .month, .day], from: day)
-        let hour24 = min(minute / 60, 23)
-        let hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12
-        let clock = String(format: "%d:%02d%@", hour12, minute % 60, hour24 < 12 ? "am" : "pm")
-        return "\(components.month ?? 1)/\(components.day ?? 1)/\(components.year ?? 2000) at \(clock) "
+    private func composeEvent(on day: Date, start: Date, end: Date? = nil) {
+        model.focus = .calendar
+        model.selectDay(day)
+        model.select(nil)
+        model.statusMessage = nil
+        model.openNewEventEditor(start: start, end: end)
     }
 }

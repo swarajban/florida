@@ -19,6 +19,7 @@ struct TimeGridCanvas: View {
     let jumpViewport: JumpViewport?
     /// The event being dragged: its block is drawn where it would land, on top of the others.
     let drag: GridDrag?
+    let draft: GridEventDraft?
     let selectedDay: Date
     let now: Date
     /// The animation frame's time, which drives `transition`.
@@ -57,6 +58,24 @@ struct TimeGridCanvas: View {
             }
             drawSelectionRing(in: &context, geometry: geometry)
             drawNowLine(in: &context, geometry: geometry)
+            if let draft {
+                let rect = geometry.rect(dayIndex: draft.dayIndex, column: 0, columnCount: 1,
+                                         startMinute: draft.minutes.lowerBound, endMinute: draft.minutes.upperBound)
+                let shape = Path(roundedRect: rect, cornerRadius: 5)
+                context.fill(shape, with: .color(FloridaStyle.paper))
+                context.fill(shape, with: .color(Color.accentColor.opacity(0.18)))
+                context.stroke(shape, with: .color(Color.accentColor), lineWidth: 1.5)
+                let style = Date.IntervalFormatStyle(calendar: calendar, timeZone: calendar.timeZone).hour().minute()
+                let label = (draft.dates.lowerBound..<draft.dates.upperBound).formatted(style)
+                var textRect = rect.insetBy(dx: min(4, rect.width / 4), dy: 1)
+                if textRect.height >= 26 {
+                    context.draw(Text("New event").font(.system(size: 11, weight: .semibold)).foregroundStyle(FloridaStyle.ink),
+                                 in: CGRect(x: textRect.minX, y: textRect.minY, width: textRect.width, height: 13))
+                    textRect = CGRect(x: textRect.minX, y: textRect.minY + 13, width: textRect.width, height: textRect.height - 13)
+                }
+                let caption = rect.height < 26 && rect.width >= 145 ? "New event · \(label)" : label
+                context.draw(Text(caption).font(.system(size: 10, weight: .medium)).foregroundStyle(FloridaStyle.ink), in: textRect)
+            }
             drawJumpLabels(in: &context, geometry: geometry)
         }
         .frame(height: grid.dayHeight)

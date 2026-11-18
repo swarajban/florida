@@ -23,6 +23,20 @@ public enum JumpAlphabet {
 /// Jump mode: one key overlays a short label on every item on screen, and typing a label selects
 /// its item. Holds the labels and narrows them as keys arrive.
 public struct JumpLabels<Item: Hashable & Sendable>: Sendable {
+    public struct CalendarTarget: Sendable {
+        public let item: Item
+        public let start: Date
+        public let end: Date
+        public let isCompleted: Bool
+
+        public init(item: Item, start: Date, end: Date, isCompleted: Bool = false) {
+            self.item = item
+            self.start = start
+            self.end = end
+            self.isCompleted = isCompleted
+        }
+    }
+
     public enum Result: Hashable, Sendable {
         /// The keys typed so far spell this item's label.
         case selected(Item)
@@ -43,6 +57,22 @@ public struct JumpLabels<Item: Hashable & Sendable>: Sendable {
         let unique = items.filter { seen.insert($0).inserted }
         let labels = JumpAlphabet.labels(count: unique.count, alphabet: alphabet)
         remaining = Dictionary(uniqueKeysWithValues: zip(unique, labels))
+    }
+
+    /// All-day targets use local day boundaries, with an exclusive end. Visible pane rows
+    /// follow active calendar items, but take priority over past or completed calendar blocks.
+    public init(calendarTargets: [CalendarTarget], paneItems: [Item], now: Date) {
+        let ordered = calendarTargets.sorted { $0.start < $1.start }
+        var active: [Item] = []
+        var past: [Item] = []
+        for target in ordered {
+            if target.end > now && !target.isCompleted {
+                active.append(target.item)
+            } else {
+                past.append(target.item)
+            }
+        }
+        self.init(items: active + paneItems + past)
     }
 
     public var isEmpty: Bool { remaining.isEmpty }

@@ -30,6 +30,41 @@ public struct TimeGrid: Hashable, Sendable {
         return clamp(Int((minutes / slot).rounded() * slot))
     }
 
+    public func eventStartMinute(forY y: Double) -> Int {
+        min(snappedMinute(forY: y), DayLayout.minutesPerDay - eventSlotMinutes)
+    }
+
+    public static let eventDragMinimumDistance = 6.0
+
+    public static func eventDragHasStarted(dx: Double, dy: Double) -> Bool {
+        hypot(dx, dy) >= eventDragMinimumDistance
+    }
+
+    public static func eventColumnContentWidth(_ width: Double) -> Double {
+        width - min(16, width / 3)
+    }
+
+    public func eventMinutes(from startY: Double, to endY: Double) -> ClosedRange<Int> {
+        let anchor = snappedMinute(forY: startY)
+        let edge = snappedMinute(forY: endY)
+        if edge != anchor { return min(anchor, edge)...max(anchor, edge) }
+        if (endY < startY && anchor > 0) || anchor == DayLayout.minutesPerDay {
+            return max(0, anchor - eventSlotMinutes)...anchor
+        }
+        return anchor...min(DayLayout.minutesPerDay, anchor + eventSlotMinutes)
+    }
+
+    public func eventDates(on day: Date, minutes: ClosedRange<Int>, calendar: Calendar) -> ClosedRange<Date> {
+        let start = BlockDrag.date(onDay: day, minute: minutes.lowerBound, calendar: calendar)
+        let midnight = calendar.dateInterval(of: .day, for: day)?.end
+        let end = minutes.upperBound == DayLayout.minutesPerDay
+            ? midnight ?? start
+            : BlockDrag.date(onDay: day, minute: minutes.upperBound, calendar: calendar)
+        return start...max(end, start.addingTimeInterval(Double(eventSlotMinutes) * 60))
+    }
+
+    private var eventSlotMinutes: Int { min(max(slotMinutes, 1), DayLayout.minutesPerDay) }
+
     private func clamp(_ minute: Int) -> Int {
         min(max(minute, 0), DayLayout.minutesPerDay)
     }

@@ -1,4 +1,5 @@
 import FloridaKit
+import Foundation
 
 // Jump mode: `f` puts a short label on every task and event on screen, in the calendar and in the
 // task pane, and typing a label opens its item: a task in its editor, an event in its detail
@@ -19,14 +20,18 @@ extension AppModel {
         jump?.remaining[item]
     }
 
-    /// `f`: labels the calendar's items in `j` / `k` order, then the task pane's, so the calendar
-    /// gets the home row. A task shown in both keeps one label, and so does one on screen in only
-    /// one of them. Free gaps get none: they are neither tasks nor events, and would use up the
-    /// single keys.
+    /// `f`: labels active and upcoming calendar items first, then the task pane, then past blocks.
+    /// A task shown in both keeps one label. Free gaps get none.
     func startJump() {
         let viewport = gridViewport
         let paneItems = isTasksPaneVisible ? orderedTaskItems.filter(paneItemsOnScreen.contains) : []
-        let labels = JumpLabels(items: calendarItems(onScreenIn: viewport) + paneItems)
+        #if DEBUG
+        let now = DemoData.fixedNow ?? Date()
+        #else
+        let now = Date()
+        #endif
+        let labels = JumpLabels(calendarTargets: calendarJumpTargets(onScreenIn: viewport),
+                                paneItems: paneItems, now: now)
         guard !labels.isEmpty else {
             statusMessage = "Nothing on screen to jump to"
             return
@@ -47,21 +52,21 @@ extension AppModel {
         return JumpViewport(top: top, bottom: top + gridVisibleRect.height)
     }
 
-    /// The calendar's items in `j` / `k` order, less the free gaps and the blocks scrolled out of
-    /// `viewport`. All-day bars sit above the scrolling grid, so they always count; a task with
-    /// several blocks counts when one of them can hold a label.
-    private func calendarItems(onScreenIn viewport: JumpViewport?) -> [ItemID] {
-        let items = gridLayout.orderedItems.filter { !$0.isGap }
-        guard let viewport else { return items }
-        var onScreen = Set(gridLayout.allDayBlocks.map(\.item))
-        for block in gridLayout.blocksByDay.joined() {
+    private func calendarJumpTargets(onScreenIn viewport: JumpViewport?) -> [JumpLabels<ItemID>.CalendarTarget] {
+        let layout = gridLayout
+        let selectable = Set(layout.orderedItems)
+        var targets: [JumpLabels<ItemID>.CalendarTarget] = []
+        for block in layout.allDayBlocks where selectable.contains(block.item) {
+            let localStart = AllDayDate.localDays(start: block.start, end: block.start, calendar: calendar).lowerBound
+            targets.append(.init(item: block.item, start: localStart, end: block.localEnd))
+        }
+        for block in layout.blocksByDay.joined() where selectable.contains(block.item) {
             let rows = GridGeometry.rows(
                 startMinute: block.startMinute, endMinute: block.endMinute, grid: CalendarGridView.grid)
-            if JumpBadge.top(onBlockFrom: rows.lowerBound, to: rows.upperBound, in: viewport) != nil {
-                onScreen.insert(block.item)
-            }
+            guard viewport == nil || JumpBadge.top(onBlockFrom: rows.lowerBound, to: rows.upperBound, in: viewport) != nil else { continue }
+            targets.append(.init(item: block.item, start: block.start, end: block.end, isCompleted: block.kind == .completed))
         }
-        return items.filter(onScreen.contains)
+        return targets
     }
 
     /// Leaves jump mode and takes its hint off the status bar.
