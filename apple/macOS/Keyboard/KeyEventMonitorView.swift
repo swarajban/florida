@@ -2,7 +2,7 @@ import AppKit
 import FloridaKit
 import SwiftUI
 
-/// An invisible view that installs one local key-down monitor for the window it lives in and
+/// An invisible view that installs one local event monitor for the window it lives in and
 /// hands every event to `AppModel.handleKeyDown` before AppKit dispatches it. Events the model
 /// consumes are swallowed (nil); the rest continue to menus and text fields. Events from other
 /// windows (Settings) are ignored so their text fields and menu shortcuts behave normally.
@@ -62,7 +62,9 @@ final class KeyMonitorHostView: NSView {
     private func startMonitoring() {
         guard monitor == nil else { return }
         let box = box
-        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
+        let mask: NSEvent.EventTypeMask = isEventPopover ? [.keyDown, .keyUp] :
+            [.keyDown, .keyUp, .leftMouseDown, .rightMouseDown, .otherMouseDown]
+        monitor = NSEvent.addLocalMonitorForEvents(matching: mask) { event in
             let handled = MainActor.assumeIsolated {
                 box.view?.handle(event) ?? false
             }
@@ -72,6 +74,15 @@ final class KeyMonitorHostView: NSView {
 
     private func handle(_ event: NSEvent) -> Bool {
         guard let model = box.model, let window else { return false }
+        if event.type != .keyDown, event.type != .keyUp {
+            if event.window === window,
+               let editor = window.firstResponder as? NSTextView,
+               let search = editor.delegate as? TaskPaneSearchField,
+               !search.bounds.contains(search.convert(event.locationInWindow, from: nil)) {
+                window.makeFirstResponder(nil)
+            }
+            return false
+        }
         if event.type == .keyUp {
             model.shortcutRepeats.gate.keyUp(keyCode: event.keyCode)
             return false
@@ -80,6 +91,14 @@ final class KeyMonitorHostView: NSView {
         guard event.window === window else { return false }
         guard !SelectorInput.isEditing(in: window) else { return false }
         let chord = KeyChord(event: event)
+        if chord == KeyChord("escape"),
+           let editor = window.firstResponder as? NSTextView, editor.delegate is TaskPaneSearchField {
+            guard !editor.hasMarkedText() else { return false }
+            if window.makeFirstResponder(nil) {
+                model.shortcutRepeats.gate.didHandle(keyCode: event.keyCode)
+                return true
+            }
+        }
         let allowsRepeat = model.jump == nil && chord.map(ShortcutKeyRepeat.isNavigation) == true
         let handled = model.handleKeyDown(event, inEventPopover: isEventPopover)
         if handled, !allowsRepeat {

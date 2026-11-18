@@ -3,6 +3,69 @@ import XCTest
 
 final class MacModeStateTests: XCTestCase {
     @MainActor
+    func testTaskSearchResignsOnEscapeAndOutsideClick() {
+        continueAfterFailure = false
+        let app = launch(taskFixture: false)
+        let search = app.textFields["task-pane-search"]
+        let viewMode = app.staticTexts["mode-calendar-view"]
+        let waiting = app.checkBoxes["Waiting only"]
+        addTeardownBlock {
+            print("Search: frame=\(search.frame), value=\(String(describing: search.value)), mode=\(String(describing: viewMode.value)), waiting=\(String(describing: waiting.value))")
+            self.capture(app, "task-search-resign")
+            app.terminate()
+        }
+
+        app.typeKey("d", modifierFlags: [])
+        waitForValue("day", of: viewMode)
+        search.click()
+        app.typeText("w")
+        XCTAssertEqual(search.value as? String, "w")
+        app.typeKey(.escape, modifierFlags: [])
+        app.typeKey("w", modifierFlags: [])
+        waitForValue("week", of: viewMode)
+
+        search.click()
+        app.typeKey("a", modifierFlags: .command)
+        app.typeText("d")
+        XCTAssertEqual(search.value as? String, "d")
+        waiting.click()
+        XCTAssertEqual((waiting.value as? NSNumber)?.intValue, 1)
+        app.typeKey("d", modifierFlags: [])
+        waitForValue("day", of: viewMode)
+        XCTAssertEqual(search.value as? String, "d")
+    }
+
+    @MainActor
+    func testTaskSearchDoesNotTakeFocusAfterPaneToggleOrSheet() {
+        continueAfterFailure = false
+        let app = launch(taskFixture: false)
+        let search = app.textFields["task-pane-search"]
+        let viewMode = app.staticTexts["mode-calendar-view"]
+        let editor = app.textFields["task-title"]
+        addTeardownBlock {
+            print("Search: frame=\(search.frame), value=\(String(describing: search.value)), mode=\(String(describing: viewMode.value)), editor=\(editor.exists)")
+            self.capture(app, "task-search-focus-restoration")
+            app.terminate()
+        }
+
+        search.click()
+        app.typeKey("t", modifierFlags: .command)
+        XCTAssertTrue(search.waitForNonExistence(timeout: 5))
+        app.typeKey("t", modifierFlags: .command)
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        app.typeKey("d", modifierFlags: [])
+        waitForValue("day", of: viewMode)
+
+        search.click()
+        app.typeKey("n", modifierFlags: [.command, .shift])
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(editor.waitForNonExistence(timeout: 5))
+        app.typeKey("w", modifierFlags: [])
+        waitForValue("week", of: viewMode)
+    }
+
+    @MainActor
     func testNewEventShortcutAndHelpLabels() {
         continueAfterFailure = false
         let app = launch(taskFixture: false)
