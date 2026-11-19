@@ -2,6 +2,7 @@ import { schedule } from '@florida/scheduler'
 import { automaticDayReason } from '../src/all-day-blocking.js'
 import { eq, inArray } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
+import { createApp } from '../src/app.js'
 import {
   calendars,
   dayOverrides,
@@ -21,6 +22,7 @@ import type { EventRow, CategoryRow, ProjectPlacementRow, ProjectRow, RoutineBlo
 import { blockingEventInterval, buildSchedulerInput, runScheduling, splitProjectTime } from '../src/scheduling.js'
 import { seed } from '../src/seed.js'
 import { createTestDb } from './db.js'
+import { FakeSync, testConfig } from './fixtures.js'
 
 const NOW = new Date('2026-11-09T17:00:00Z')
 const T0 = new Date('2026-11-01T00:00:00Z')
@@ -645,6 +647,45 @@ describe('runScheduling', () => {
       expect(await db.select({ startAt: placements.startAt, endAt: placements.endAt }).from(placements)).toEqual([
         { startAt: new Date('2026-11-09T17:00:00Z'), endAt: new Date('2026-11-09T18:00:00Z') },
       ])
+    } finally {
+      await close()
+    }
+  })
+
+  it('moves an underway block to next week when the task start is patched', async () => {
+    const { db, close } = await createTestDb()
+    try {
+      await seed(db)
+      let now = new Date('2026-11-18T23:45:00.000Z')
+      const app = createApp({
+        db, config: testConfig, sync: new FakeSync(),
+        reschedule: (reason) => runScheduling(db, testConfig, now, reason),
+      })
+      const url = '/api/tasks/planning'
+      const headers = { authorization: `Bearer ${testConfig.API_TOKEN}`, 'content-type': 'application/json' }
+      const created = await app.request(url, {
+        method: 'PUT', headers,
+        body: JSON.stringify({ categoryId: 'inbox', title: 'Planning', durationMinutes: 30, priority: 'medium', deadlineType: 'soft' }),
+      })
+      expect(created.status).toBe(200)
+      const original = { taskId: 'planning', start: now.toISOString(), end: '2026-11-19T00:15:00.000Z', pinned: false }
+      expect(await created.json()).toMatchObject({ scheduling: { placements: [original] } })
+      const stored = () => db.select({
+        startAt: placements.startAt, endAt: placements.endAt, pinned: placements.pinned,
+      }).from(placements).where(eq(placements.taskId, 'planning'))
+      expect(await stored()).toEqual([{ startAt: now, endAt: new Date(original.end), pinned: false }])
+
+      now = new Date('2026-11-18T23:47:00.000Z')
+      const startAt = '2026-11-23T08:00:00.000Z'
+      const dueAt = '2026-11-25T01:00:00.000Z'
+      const res = await app.request(url, { method: 'PATCH', headers, body: JSON.stringify({ startAt, dueAt }) })
+      expect(res.status).toBe(200)
+      const replacement = { ...original, start: '2026-11-23T17:00:00.000Z', end: '2026-11-23T17:30:00.000Z' }
+      expect(await res.json()).toMatchObject({
+        task: { startAt, dueAt },
+        scheduling: { placements: [replacement], unscheduled: [] },
+      })
+      expect(await stored()).toEqual([{ startAt: new Date(replacement.start), endAt: new Date(replacement.end), pinned: false }])
     } finally {
       await close()
     }
