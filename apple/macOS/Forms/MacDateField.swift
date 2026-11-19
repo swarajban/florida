@@ -157,7 +157,8 @@ struct MacDateSelector: View {
     @State private var timed = false
     @State private var now = Date()
     @State private var searchFocus = SelectorInput.ManualFocus()
-    @FocusState private var gridFocused: Bool
+    @State private var gridFocus = SelectorInput.ManualFocus()
+    private static let textStarters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ/")
 
     private var parsed: DateEntryResult {
         if let choice = DateEntryQuickChoice.matching(shortcut: query) { return quickResult(choice) }
@@ -211,25 +212,7 @@ struct MacDateSelector: View {
             }
             Divider()
             monthGrid
-                .focusable()
-                .focused($gridFocused)
-                .onKeyPress(.leftArrow) { move(-1); return .handled }
-                .onKeyPress(.rightArrow) { move(1); return .handled }
-                .onKeyPress(.upArrow) { move(-7); return .handled }
-                .onKeyPress(.downArrow) { move(7); return .handled }
-                .onKeyPress(.return) { submit(); return .handled }
-                .onKeyPress(.escape) { cancel(); return .handled }
-                .onKeyPress(.tab) { searchFocus.activate() ? .handled : .ignored }
-                .onKeyPress(characters: CharacterSet(charactersIn: "12345")) { press in
-                    guard press.modifiers.isEmpty,
-                          let choice = DateEntryQuickChoice.matching(shortcut: press.characters) else { return .ignored }
-                    quick(choice)
-                    return .handled
-                }
-                .onKeyPress(characters: CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ/")) { press in
-                    guard press.modifiers.subtracting(.shift).isEmpty else { return .ignored }
-                    return searchFocus.activate(inserting: press.characters) ? .handled : .ignored
-                }
+                .background(DateCalendarKeys(focus: gridFocus, route: gridKey))
             if allowsTime {
                 if !requiresTime {
                     Toggle("Add a time", isOn: $timed)
@@ -245,8 +228,9 @@ struct MacDateSelector: View {
                 }
             }
             HStack {
-                Text("1–5 choose a preset · arrows move days\nType a date or Tab to switch · ↩ choose · esc cancel")
+                Text("1–5 presets · arrows move days\nTab or type a date · ↩ choose · esc cancel")
                     .font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer()
                 Button("Choose", action: submit)
                     .accessibilityIdentifier("\(identifier)-choose")
@@ -254,7 +238,6 @@ struct MacDateSelector: View {
         }
         .padding(12)
         .frame(width: 310)
-        .defaultFocus($gridFocused, true)
         .background(SelectorWindowGuard())
         .onExitCommand(perform: cancel)
         .onAppear {
@@ -332,6 +315,29 @@ struct MacDateSelector: View {
         }
     }
 
+    private func gridKey(_ event: NSEvent) -> Bool {
+        guard let chord = KeyChord(event: event), chord.modifiers.subtracting([.shift]).isEmpty else { return false }
+        if chord.key == "tab" { return searchFocus.activate() }
+        switch chord.key {
+        case "left": move(-1)
+        case "right": move(1)
+        case "up": move(-7)
+        case "down": move(7)
+        case "return": submit()
+        case "escape": cancel()
+        default:
+            if chord.modifiers.isEmpty, let choice = DateEntryQuickChoice.matching(shortcut: chord.key) {
+                quick(choice)
+            } else if let text = event.characters, text.count == 1,
+                      text.unicodeScalars.allSatisfy(Self.textStarters.contains) {
+                return searchFocus.activate(inserting: text)
+            } else {
+                return false
+            }
+        }
+        return true
+    }
+
     private func command(_ name: String) -> Bool {
         if !query.isEmpty, name == "moveLeft:" || name == "moveRight:" { return false }
         switch name {
@@ -349,7 +355,7 @@ struct MacDateSelector: View {
             }
         case "insertNewline:": submit()
         case "cancelOperation:": cancel()
-        case "insertTab:", "insertBacktab:": gridFocused = true
+        case "insertTab:", "insertBacktab:": return gridFocus.activate()
         default: return false
         }
         return true
@@ -383,6 +389,39 @@ struct MacDateSelector: View {
         case .invalid: return
         case .clear where !allowsClear: return
         default: choose(result)
+        }
+    }
+}
+
+private struct DateCalendarKeys: NSViewRepresentable {
+    let focus: SelectorInput.ManualFocus
+    let route: (NSEvent) -> Bool
+
+    func makeNSView(context: Context) -> Host {
+        let view = Host()
+        view.route = route
+        focus.view = view
+        return view
+    }
+
+    func updateNSView(_ view: Host, context: Context) { view.route = route }
+
+    final class Host: NSView {
+        var route: ((NSEvent) -> Bool)?
+        override var acceptsFirstResponder: Bool { true }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard window != nil else { return }
+            Task { @MainActor [weak self] in
+                guard let self, let window else { return }
+                window.makeFirstResponder(self)
+            }
+        }
+
+        override func keyDown(with event: NSEvent) {
+            if route?(event) != true { super.keyDown(with: event) }
         }
     }
 }

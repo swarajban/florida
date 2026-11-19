@@ -245,6 +245,7 @@ struct TaskEditorSheet: View {
                 if !isNew {
                     Button(role: .destructive, action: requestDelete) {
                         keyLabel("Delete", .delete)
+                            .foregroundStyle(.red)
                     }
                     .accessibilityIdentifier("task-delete")
                 }

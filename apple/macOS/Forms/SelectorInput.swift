@@ -14,12 +14,14 @@ struct SelectorInput: NSViewRepresentable {
 
     @MainActor
     final class ManualFocus {
-        weak var field: SelectorTextField?
+        weak var view: NSView?
 
         func activate(inserting text: String = "") -> Bool {
-            guard let field, let window = field.window, window.makeFirstResponder(field),
-                  let editor = field.currentEditor() as? NSTextView else { return false }
-            if !text.isEmpty { editor.insertText(text, replacementRange: editor.selectedRange()) }
+            guard let view, let window = view.window, window.makeFirstResponder(view) else { return false }
+            if !text.isEmpty {
+                guard let editor = (view as? NSTextField)?.currentEditor() as? NSTextView else { return false }
+                editor.insertText(text, replacementRange: editor.selectedRange())
+            }
             return true
         }
     }
@@ -35,7 +37,7 @@ struct SelectorInput: NSViewRepresentable {
         field.font = .systemFont(ofSize: 14)
         field.isPaletteInput = isPaletteInput
         field.autofocus = manualFocus == nil
-        manualFocus?.field = field
+        manualFocus?.view = field
         if isPaletteInput {
             field.isBezeled = false
             field.drawsBackground = false

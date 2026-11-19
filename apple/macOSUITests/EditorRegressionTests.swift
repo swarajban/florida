@@ -25,7 +25,15 @@ final class EditorRegressionTests: XCTestCase {
         let search = app.textFields["task-due-search"]
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         app.typeKey("4", modifierFlags: [])
-        XCTAssertTrue(search.waitForNonExistence(timeout: 3), "Search value: \(search.value ?? "nil")")
+        let presetClosed = search.waitForNonExistence(timeout: 3)
+        if !presetClosed {
+            let failure = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            failure.name = "task-editor-preset-assertion"
+            failure.lifetime = .keepAlways
+            add(failure)
+            print("Preset failed: search=\(search.value ?? "nil") frame=\(search.frame), due=\(due.value ?? "nil")")
+        }
+        XCTAssertTrue(presetClosed, "The preset should close the popover without typing into search")
         let calendar = Calendar.current
         let nextSunday = calendar.nextDate(after: calendar.startOfDay(for: Date()),
                                            matching: DateComponents(hour: 0, weekday: 1), matchingPolicy: .nextTime)!
