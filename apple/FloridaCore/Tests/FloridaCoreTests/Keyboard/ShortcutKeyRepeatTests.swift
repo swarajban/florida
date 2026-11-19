@@ -55,4 +55,10 @@ import Testing
         #expect(!ShortcutKeyRepeat.isNavigation(KeyChord("h", [.option])))
         #expect(!ShortcutKeyRepeat.isNavigation(KeyChord("j", [.control])))
     }
+
+    @Test(arguments: ["left", "right"])
+    func commandArrowsAllowNavigationRepeatWithoutClaimingSelectionChords(key: String) {
+        #expect(ShortcutKeyRepeat.isNavigation(KeyChord(key, [.command])))
+        #expect(!ShortcutKeyRepeat.isNavigation(KeyChord(key, [.command, .shift])))
+    }
 }

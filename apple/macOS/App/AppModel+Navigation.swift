@@ -44,17 +44,15 @@ extension AppModel {
         rangeDidChange()
     }
 
-    /// Moves by whole weeks, or by whole months in the month view.
+    /// Moves the highlighted date by whole weeks, regardless of the view.
     func moveWeek(by weeks: Int) {
+        moveAnchor(to: DateNavigation.shift(selectedDay, by: 7 * weeks, calendar: calendar))
+    }
+
+    private func moveAnchor(to day: Date) {
         let carried = carriedMinute()
         defer { carrySelection(minute: carried) }
-        if viewMode == .month {
-            selectedDay = calendar.date(byAdding: .month, value: weeks, to: selectedDay) ?? selectedDay
-        } else {
-            selectedDay = DateNavigation.shift(selectedDay, by: 7 * weeks, calendar: calendar)
-        }
-        anchorDate = selectedDay
-        rangeDidChange()
+        goTo(day: day)
     }
 
     /// Where the calendar selection sits on the highlighted day, so a day move can keep it there.
@@ -76,7 +74,8 @@ extension AppModel {
         switch viewMode {
         case .day: moveDay(by: direction)
         case .threeDays: moveDay(by: 3 * direction)
-        case .week, .month: moveWeek(by: direction)
+        case .week: moveWeek(by: direction)
+        case .month: moveAnchor(to: calendar.date(byAdding: .month, value: direction, to: selectedDay) ?? selectedDay)
         }
     }
 

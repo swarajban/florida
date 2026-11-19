@@ -42,8 +42,12 @@ struct AppCommands: Commands {
             Divider()
             Button("Previous Day") { model.perform(.previousDay) }
             Button("Next Day") { model.perform(.nextDay) }
-            Button("Previous Week") { model.perform(.previousWeek) }
-            Button("Next Week") { model.perform(.nextWeek) }
+            Button("Previous Week (\(MacKeymap.default.shortcut(for: .core(.previousWeek))))") {
+                model.perform(.previousWeek)
+            }
+            Button("Next Week (\(MacKeymap.default.shortcut(for: .core(.nextWeek))))") {
+                model.perform(.nextWeek)
+            }
             Divider()
             Button("Calendar") { model.perform(.goToCalendar) }
             Button("Tasks") { model.perform(.goToTasks) }

@@ -20,7 +20,10 @@ public struct ShortcutKeyRepeat: Sendable {
     }
 
     public static func isNavigation(_ chord: KeyChord) -> Bool {
-        chord.modifiers.isSubset(of: [.shift])
+        if chord.modifiers == [.command] {
+            return chord.key == "left" || chord.key == "right"
+        }
+        return chord.modifiers.isSubset(of: [.shift])
             && ["h", "j", "k", "l", "[", "]", "up", "down", "left", "right"].contains(chord.key)
     }
 }

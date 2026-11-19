@@ -10,6 +10,10 @@ import Testing
         ("k", .focusPrevious),
         ("h", .previousDay),
         ("l", .nextDay),
+        ("[", .previousWeek),
+        ("]", .nextWeek),
+        ("cmd+left", .previousWeek),
+        ("cmd+right", .nextWeek),
         ("shift+h", .previousWeek),
         ("shift+l", .nextWeek),
         ("t", .today),
@@ -141,6 +145,8 @@ import Testing
         }
         let byCommand = Dictionary(uniqueKeysWithValues: items.map { ($0.command, $0) })
         #expect(byCommand[.goToDate]?.shortcut == "G D")
+        #expect(byCommand[.previousWeek]?.shortcuts == ["[", "⌘←", "⇧H"])
+        #expect(byCommand[.nextWeek]?.shortcuts == ["]", "⌘→", "⇧L"])
         #expect(byCommand[.commandPalette]?.shortcut == "⌘K")
         #expect(byCommand[.search]?.shortcuts == ["/", "⌘F"])
         #expect(byCommand[.search]?.shortcut == "/, ⌘F")
