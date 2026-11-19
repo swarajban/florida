@@ -7,7 +7,7 @@ extension AppModel {
     /// lands before the next event arrives.
     ///
     /// A sheet (editor, go to date) owns the keyboard except for Escape. While typing elsewhere
-    /// (the palette or any focused text view) only ⌘ chords and Escape reach the keymap; the
+    /// (the palette or any focused text view) only ⌘ chords (except ⌘←/⌘→) and Escape reach the keymap; the
     /// palette additionally takes ↑ / ↓ for its result list, ⇥ to create quick add's unknown
     /// `#category`, and ⌘↩ to parse quick add's text with AI in the full editor.
     ///
@@ -22,6 +22,14 @@ extension AppModel {
         let isCommandChord = chord.modifiers.contains(.command)
         let isEscape = chord == KeyChord("escape")
         let typing = isPaletteOpen || event.window?.firstResponder is NSTextView
+        if chord == KeyChord("left", [.command]) || chord == KeyChord("right", [.command]) {
+            guard !typing, !inEventPopover, event.window?.attachedSheet == nil,
+                  interaction.kind == .browsing || interaction.kind == .jumping
+            else {
+                resetKeySequence()
+                return false
+            }
+        }
         if event.isARepeat, !typing, !ShortcutKeyRepeat.isNavigation(chord) { return true }
 
         if isAvailabilityZoneOpen {

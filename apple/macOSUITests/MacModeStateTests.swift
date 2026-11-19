@@ -3,6 +3,62 @@ import XCTest
 
 final class MacModeStateTests: XCTestCase {
     @MainActor
+    func testWeekShortcutsLeaveCommandArrowsForTaskSearch() {
+        continueAfterFailure = false
+        let app = launch(taskFixture: false)
+        let title = app.staticTexts["calendar-range-title"]
+        let search = app.textFields["task-pane-search"]
+        let mode = app.staticTexts["mode-calendar-view"]
+        addTeardownBlock {
+            print("Week shortcuts: range=\(title.label), mode=\(String(describing: mode.value)), search=\(String(describing: search.value)), frame=\(search.frame)")
+            self.capture(app, "week-shortcuts-end")
+            app.terminate()
+        }
+
+        app.typeKey("w", modifierFlags: [])
+        waitForValue("week", of: mode)
+        let originalWeek = title.label
+        app.typeKey("]", modifierFlags: [])
+        let nextWeek = title.label
+        XCTAssertNotEqual(nextWeek, originalWeek)
+        app.typeKey("[", modifierFlags: [])
+        XCTAssertEqual(title.label, originalWeek)
+
+        app.typeKey(.rightArrow, modifierFlags: .command)
+        let commandNext = title.label
+        app.typeKey("h", modifierFlags: .shift)
+        XCTAssertEqual([commandNext, title.label], [nextWeek, originalWeek])
+        app.typeKey("l", modifierFlags: .shift)
+        let shiftNext = title.label
+        app.typeKey(.leftArrow, modifierFlags: .command)
+        XCTAssertEqual([shiftNext, title.label], [nextWeek, originalWeek])
+
+        var steppedWeeks: [String: String] = [:]
+        let views: [(String, XCUIElement.KeyModifierFlags)] = [("d", []), ("3", []), ("m", .shift)]
+        for (key, modifiers) in views {
+            app.typeKey(key, modifierFlags: modifiers)
+            let sourceMode = mode.value as? String ?? ""
+            app.typeKey("]", modifierFlags: [])
+            app.typeKey("w", modifierFlags: [])
+            steppedWeeks[sourceMode] = title.label
+            app.typeKey("[", modifierFlags: [])
+        }
+        XCTAssertEqual(steppedWeeks, ["day": nextWeek, "threeDays": nextWeek, "month": nextWeek])
+
+        search.click()
+        app.typeText("middle")
+        app.typeKey(.leftArrow, modifierFlags: .command)
+        app.typeText("a")
+        app.typeKey(.rightArrow, modifierFlags: .command)
+        app.typeText("z")
+        XCTAssertEqual(search.value as? String, "amiddlez")
+        XCTAssertEqual(title.label, originalWeek)
+        app.typeKey(.escape, modifierFlags: [])
+        app.typeKey("?", modifierFlags: [])
+        waitForValue("], ⌘→, ⇧L", of: element("help-command-Next week", in: app))
+    }
+
+    @MainActor
     func testTaskSearchResignsOnEscapeAndOutsideClick() {
         continueAfterFailure = false
         let app = launch(taskFixture: false)

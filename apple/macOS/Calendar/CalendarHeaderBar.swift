@@ -30,7 +30,8 @@ struct CalendarHeaderBar: View {
                 } label: {
                     Image(systemName: "chevron.left")
                 }
-                .help("Previous")
+                .help(model.viewMode == .week
+                    ? "Previous week (\(MacKeymap.default.shortcut(for: .core(.previousWeek))))" : "Previous")
                 Button("Today") {
                     model.goToToday()
                 }
@@ -40,7 +41,8 @@ struct CalendarHeaderBar: View {
                 } label: {
                     Image(systemName: "chevron.right")
                 }
-                .help("Next")
+                .help(model.viewMode == .week
+                    ? "Next week (\(MacKeymap.default.shortcut(for: .core(.nextWeek))))" : "Next")
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
@@ -48,6 +50,7 @@ struct CalendarHeaderBar: View {
             Text(model.viewTitle)
                 .font(.title3.weight(.medium))
                 .lineLimit(1)
+                .accessibilityIdentifier("calendar-range-title")
 
             Spacer()
 
