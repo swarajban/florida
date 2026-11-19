@@ -1361,7 +1361,6 @@ final class SmokeTests: XCTestCase {
             app.typeKey("s", modifierFlags: [])
             let startSearch = app.textFields["task-start-search"]
             XCTAssertTrue(startSearch.waitForExistence(timeout: 5))
-            app.typeKey(.tab, modifierFlags: [])
             app.typeKey("2", modifierFlags: [])
             XCTAssertTrue(startSearch.waitForNonExistence(timeout: 5), "a single number on the calendar must pick its quick date")
             let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!

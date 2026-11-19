@@ -187,8 +187,38 @@ struct TaskEditorKeyboardTests {
         }
     }
 
-    private func event(_ characters: String, code: UInt16, in window: NSWindow, repeats: Bool = false) throws -> NSEvent {
-        try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 1,
+    @Test func deleteShortcutsReachTheSheetOnlyOutsideTextAndSelectors() throws {
+        _ = NSApplication.shared
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 160),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        defer { window.orderOut(nil) }
+        let host = TaskEditorKeyHostView()
+        let field = NSTextField(frame: NSRect(x: 20, y: 80, width: 300, height: 24))
+        let content = try #require(window.contentView)
+        content.addSubview(host)
+        content.addSubview(field)
+        window.makeKeyAndOrderFront(nil)
+        var presses: [TaskEditorKey.Press] = []
+        host.onPress = { presses.append($0) }
+        let keys = try [event("x", code: 7, in: window),
+                        event("\u{7f}", code: 51, in: window),
+                        event("\u{7f}", code: 51, in: window, modifiers: .command)]
+        #expect(window.makeFirstResponder(field))
+        for key in keys { #expect(!host.handle(key)) }
+        #expect(window.makeFirstResponder(nil))
+        do {
+            SelectorWindowHost.register(window)
+            defer { SelectorWindowHost.unregister(window) }
+            for key in keys { #expect(!host.handle(key)) }
+        }
+        #expect(presses.isEmpty)
+        for key in keys { #expect(host.handle(key)) }
+        #expect(presses == Array(repeating: .init(key: .delete), count: keys.count))
+    }
+
+    private func event(_ characters: String, code: UInt16, in window: NSWindow, repeats: Bool = false,
+                       modifiers: NSEvent.ModifierFlags = []) throws -> NSEvent {
+        try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 1,
             windowNumber: window.windowNumber, context: nil, characters: characters,
             charactersIgnoringModifiers: characters, isARepeat: repeats, keyCode: code))
     }

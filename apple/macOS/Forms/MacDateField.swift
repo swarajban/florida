@@ -156,9 +156,12 @@ struct MacDateSelector: View {
     @State private var clock = ""
     @State private var timed = false
     @State private var now = Date()
-    @FocusState private var gridFocused: Bool
+    @State private var searchFocus = SelectorInput.ManualFocus()
+    @State private var gridFocus = SelectorInput.ManualFocus()
+    private static let textStarters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ/")
 
     private var parsed: DateEntryResult {
+        if let choice = DateEntryQuickChoice.matching(shortcut: query) { return quickResult(choice) }
         if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let result = DateEntry.parse(query, now: now, calendar: calendar)
             if case .date(let day, false) = result, timed { return withClock(on: day) }
@@ -184,13 +187,14 @@ struct MacDateSelector: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SelectorInput(text: $query, placeholder: "Type a date…", identifier: "\(identifier)-search", command: command)
+            SelectorInput(text: $query, placeholder: "Type a date…", identifier: "\(identifier)-search",
+                          command: command, manualFocus: searchFocus)
                 .frame(height: 26)
             Text(preview)
                 .font(.callout.weight(.medium))
                 .accessibilityIdentifier("\(identifier)-preview")
             Divider()
-            ForEach(Array(DateEntryQuickChoice.allCases.enumerated()), id: \.element) { index, choice in
+            ForEach(DateEntryQuickChoice.allCases, id: \.self) { choice in
                 if choice != .none || allowsClear {
                     Button {
                         quick(choice)
@@ -198,7 +202,7 @@ struct MacDateSelector: View {
                         HStack {
                             Text(choice.title)
                             Spacer()
-                            Keycap(String(index + 1))
+                            Keycap(choice.shortcut)
                         }
                         .contentShape(Rectangle())
                     }
@@ -208,19 +212,7 @@ struct MacDateSelector: View {
             }
             Divider()
             monthGrid
-                .focusable()
-                .focused($gridFocused)
-                .onKeyPress(.leftArrow) { move(-1); return .handled }
-                .onKeyPress(.rightArrow) { move(1); return .handled }
-                .onKeyPress(.upArrow) { move(-7); return .handled }
-                .onKeyPress(.downArrow) { move(7); return .handled }
-                .onKeyPress(.return) { submit(); return .handled }
-                .onKeyPress(.escape) { cancel(); return .handled }
-                .onKeyPress(characters: CharacterSet(charactersIn: "12345")) { press in
-                    guard let number = Int(press.characters), DateEntryQuickChoice.allCases.indices.contains(number - 1) else { return .ignored }
-                    quick(DateEntryQuickChoice.allCases[number - 1])
-                    return .handled
-                }
+                .background(DateCalendarKeys(focus: gridFocus, route: gridKey))
             if allowsTime {
                 if !requiresTime {
                     Toggle("Add a time", isOn: $timed)
@@ -236,8 +228,9 @@ struct MacDateSelector: View {
                 }
             }
             HStack {
-                Text("Arrows move days · Tab: calendar / 1–5\n↩ choose · esc cancel")
+                Text("1–5 presets · arrows move days\nTab or type a date · ↩ choose · esc cancel")
                     .font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer()
                 Button("Choose", action: submit)
                     .accessibilityIdentifier("\(identifier)-choose")
@@ -322,16 +315,47 @@ struct MacDateSelector: View {
         }
     }
 
+    private func gridKey(_ event: NSEvent) -> Bool {
+        guard let chord = KeyChord(event: event), chord.modifiers.subtracting([.shift]).isEmpty else { return false }
+        if chord.key == "tab" { return searchFocus.activate() }
+        switch chord.key {
+        case "left": move(-1)
+        case "right": move(1)
+        case "up": move(-7)
+        case "down": move(7)
+        case "return": submit()
+        case "escape": cancel()
+        default:
+            if chord.modifiers.isEmpty, let choice = DateEntryQuickChoice.matching(shortcut: chord.key) {
+                quick(choice)
+            } else if let text = event.characters, text.count == 1,
+                      text.unicodeScalars.allSatisfy(Self.textStarters.contains) {
+                return searchFocus.activate(inserting: text)
+            } else {
+                return false
+            }
+        }
+        return true
+    }
+
     private func command(_ name: String) -> Bool {
         if !query.isEmpty, name == "moveLeft:" || name == "moveRight:" { return false }
         switch name {
         case "moveLeft:": move(-1)
         case "moveRight:": move(1)
-        case "moveUp:": move(-7)
-        case "moveDown:": move(7)
+        case "moveUp:", "moveDown:":
+            let backward = name == "moveUp:"
+            let choices = DateEntryQuickChoice.allCases.filter { allowsClear || $0 != .none }
+            let current = DateEntryQuickChoice.matching(shortcut: query)
+            if current != nil || query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                query = (current.map { TaskEditorKey.step($0, in: choices, backward: backward) }
+                         ?? (backward ? choices.last : choices.first))?.shortcut ?? ""
+            } else {
+                move(backward ? -7 : 7)
+            }
         case "insertNewline:": submit()
         case "cancelOperation:": cancel()
-        case "insertTab:": gridFocused = true
+        case "insertTab:", "insertBacktab:": return gridFocus.activate()
         default: return false
         }
         return true
@@ -348,18 +372,56 @@ struct MacDateSelector: View {
     }
 
     private func quick(_ choice: DateEntryQuickChoice) {
-        if let date = DateEntry.quickDate(choice, now: now, calendar: calendar) {
-            let result = timed ? withClock(on: date) : .date(date, hasTime: false)
-            guard result != .invalid else { return }
-            choose(result)
-        } else if allowsClear { choose(.clear) }
+        commit(quickResult(choice))
     }
 
-    private func submit() {
-        switch parsed {
+    private func quickResult(_ choice: DateEntryQuickChoice) -> DateEntryResult {
+        if let date = DateEntry.quickDate(choice, now: now, calendar: calendar) {
+            return timed ? withClock(on: date) : .date(date, hasTime: false)
+        }
+        return choice == .none ? .clear : .invalid
+    }
+
+    private func submit() { commit(parsed) }
+
+    private func commit(_ result: DateEntryResult) {
+        switch result {
         case .invalid: return
         case .clear where !allowsClear: return
-        default: choose(parsed)
+        default: choose(result)
+        }
+    }
+}
+
+private struct DateCalendarKeys: NSViewRepresentable {
+    let focus: SelectorInput.ManualFocus
+    let route: (NSEvent) -> Bool
+
+    func makeNSView(context: Context) -> Host {
+        let view = Host()
+        view.route = route
+        focus.view = view
+        return view
+    }
+
+    func updateNSView(_ view: Host, context: Context) { view.route = route }
+
+    final class Host: NSView {
+        var route: ((NSEvent) -> Bool)?
+        override var acceptsFirstResponder: Bool { true }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard window != nil else { return }
+            Task { @MainActor [weak self] in
+                guard let self, let window else { return }
+                window.makeFirstResponder(self)
+            }
+        }
+
+        override func keyDown(with event: NSEvent) {
+            if route?(event) != true { super.keyDown(with: event) }
         }
     }
 }

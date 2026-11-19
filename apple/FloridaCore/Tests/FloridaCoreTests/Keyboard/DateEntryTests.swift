@@ -99,7 +99,11 @@ import Testing
             PacificTestCalendar.date(2026, 11, 14), PacificTestCalendar.date(2026, 11, 16), nil,
         ]
         for (choice, expected) in zip(DateEntryQuickChoice.allCases, dates) {
+            #expect(DateEntryQuickChoice.matching(shortcut: " \(choice.shortcut)\n") == choice)
             #expect(DateEntry.quickDate(choice, now: now, calendar: calendar) == expected)
+        }
+        for input in ["", "0", "6", "04", "4pm", "11/20"] {
+            #expect(DateEntryQuickChoice.matching(shortcut: input) == nil)
         }
     }
 
