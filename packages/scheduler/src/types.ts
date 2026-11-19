@@ -127,12 +127,13 @@ export interface SchedulerInput {
   busy: Interval[]
   /**
    * Prior run's placements. Pinned tasks ignore these. A block in progress (start ≤ now < end)
-   * keeps its start. Time already spent in it counts as worked unless `completedMinutes` already
+   * keeps its start if it is at or after the task's start date (including any waiting follow-up).
+   * Time already spent in it counts as worked unless `completedMinutes` already
    * covers it, so logging progress mid-block never counts the same minutes twice; the block then
    * runs on only while work remains, and never ends before `now`. Busy intervals starting after
    * `now`, and pinned work that is running or upcoming, cut an active block short; the rest of
-   * its work is rescheduled. Routine and start-date changes do not move active work. Finished
-   * tasks and past blocks are ignored: time in a block that ended unlogged is still owed.
+   * its work is rescheduled. Routine changes do not move eligible active work. Finished tasks
+   * and past blocks are ignored: time in a block that ended unlogged is still owed.
    * Future blocks are reused whole, in task ordering, if they still fit remaining work,
    * the horizon, a routine block allowing the task's context, start date, hard deadline, and
    * time not already occupied. Only work not retained is placed into the earliest free slots.

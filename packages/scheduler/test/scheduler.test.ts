@@ -439,6 +439,35 @@ describe('plan stability', () => {
     ])
   })
 
+  const planningBlock = {
+    taskId: 'planning', start: '2026-11-18T23:45:00.000Z', end: '2026-11-19T00:15:00.000Z', pinned: false,
+  }
+  const planningRun = { now: '2026-11-18T23:47:00.000Z', previous: [planningBlock] }
+
+  it.each([
+    ['2026-11-23T08:00:00.000Z', 0, '2026-11-23T17:00:00.000Z', '2026-11-23T17:30:00.000Z'],
+    ['2026-11-23T08:00:00.000Z', 1, '2026-11-23T17:00:00.000Z', '2026-11-23T17:29:00.000Z'],
+    ['2026-11-18T23:46:00.000Z', 0, '2026-11-19T00:00:00.000Z', '2026-11-19T00:30:00.000Z'],
+  ])('drops the ineligible block when start changes to %s and credits only %i logged minutes', (startAt, completedMinutes, start, end) => {
+    const planning = task({
+      id: planningBlock.taskId, durationMinutes: 30, completedMinutes,
+      startAt, dueAt: '2026-11-25T01:00:00.000Z', deadlineType: 'soft',
+    })
+    const result = run([planning], [], planningRun)
+    expect(result.placements).toEqual([{ ...planningBlock, start, end }])
+    expect(result.unscheduled).toEqual([])
+  })
+
+  it.each(['2026-11-18T08:00:00.000Z', planningBlock.start])(
+    'retains the underway block when the task start %s is at or before it',
+    (startAt) => {
+      const planning = task({ id: planningBlock.taskId, durationMinutes: 30, startAt })
+      const result = run([planning], [], planningRun)
+      expect(result.placements).toEqual([planningBlock])
+      expect(result.unscheduled).toEqual([])
+    },
+  )
+
   it.each([
     [0, '10:00'], // Twenty unlogged minutes count as worked; forty remain and fit the block.
     [10, '10:00'], // Ten logged, twenty elapsed: the unlogged ten are credited, forty remain.
@@ -585,8 +614,8 @@ describe('plan stability', () => {
     expect(result.unscheduled).toEqual([])
   })
 
-  it('preserves active work despite already-started busy time or a changed routine and start date', () => {
-    const result = run([task({ id: 'a', startAt: at('13:00') })], [busy(at('09:30'), at('10:30'))], {
+  it('preserves eligible active work despite already-started busy time or a changed routine', () => {
+    const result = run([task({ id: 'a', startAt: at('08:00') })], [busy(at('09:30'), at('10:30'))], {
       now: at('09:40'), previous: [block('a', '09:00', '10:00')],
       routine: { ...WORK, blocks: [{ id: 'later', days: [1], start: '13:00', end: '17:00', allows: ALL }] },
     })

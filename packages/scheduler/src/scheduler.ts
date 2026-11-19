@@ -215,7 +215,7 @@ export function schedule(input: SchedulerInput): SchedulerResult {
     prior.sort((a, b) => a.start - b.start)
     for (const block of prior) {
       if (remaining <= 0 || block.start > now || block.end <= now) continue
-      if (task.waitingOn?.trim() && task.startAt !== undefined && block.start < parseInstant(task.startAt, 'startAt')) continue
+      if (task.startAt !== undefined && block.start < parseInstant(task.startAt, 'startAt')) continue
       // Time already spent in the block counts as worked unless the logged minutes cover it, so
       // logging progress mid-block never counts the same minutes twice.
       const credit = Math.max(0, now - block.start - logged)
