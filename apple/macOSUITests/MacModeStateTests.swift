@@ -3,35 +3,38 @@ import XCTest
 
 final class MacModeStateTests: XCTestCase {
     @MainActor
-    func testWeekShortcutsLeaveCommandArrowsForTaskSearch() {
+    func testWeekShortcutsLeaveCommandArrowsForTaskSearch() throws {
         continueAfterFailure = false
         let app = launch(taskFixture: false)
         let title = app.staticTexts["calendar-range-title"]
         let search = app.textFields["task-pane-search"]
         let mode = app.staticTexts["mode-calendar-view"]
         addTeardownBlock {
-            print("Week shortcuts: range=\(title.label), mode=\(String(describing: mode.value)), search=\(String(describing: search.value)), frame=\(search.frame)")
+            print("Week shortcuts: range=\(String(describing: title.value)), titleFrame=\(title.frame), mode=\(String(describing: mode.value)), search=\(String(describing: search.value)), searchFrame=\(search.frame)")
             self.capture(app, "week-shortcuts-end")
             app.terminate()
         }
 
         app.typeKey("w", modifierFlags: [])
         waitForValue("week", of: mode)
-        let originalWeek = title.label
+        let originalWeek = try XCTUnwrap(title.value as? String)
         app.typeKey("]", modifierFlags: [])
-        let nextWeek = title.label
-        XCTAssertNotEqual(nextWeek, originalWeek)
+        let nextWeek = title.value as? String ?? ""
+        if nextWeek.isEmpty || nextWeek == originalWeek {
+            self.capture(app, "week-shortcuts-bracket-assertion")
+        }
+        XCTAssertTrue(!nextWeek.isEmpty && nextWeek != originalWeek, "Expected a different week after \(originalWeek); got \(nextWeek)")
         app.typeKey("[", modifierFlags: [])
-        XCTAssertEqual(title.label, originalWeek)
+        XCTAssertEqual(title.value as? String, originalWeek)
 
         app.typeKey(.rightArrow, modifierFlags: .command)
-        let commandNext = title.label
+        let commandNext = title.value as? String
         app.typeKey("h", modifierFlags: .shift)
-        XCTAssertEqual([commandNext, title.label], [nextWeek, originalWeek])
+        XCTAssertEqual([commandNext, title.value as? String], [nextWeek, originalWeek])
         app.typeKey("l", modifierFlags: .shift)
-        let shiftNext = title.label
+        let shiftNext = title.value as? String
         app.typeKey(.leftArrow, modifierFlags: .command)
-        XCTAssertEqual([shiftNext, title.label], [nextWeek, originalWeek])
+        XCTAssertEqual([shiftNext, title.value as? String], [nextWeek, originalWeek])
 
         var steppedWeeks: [String: String] = [:]
         let views: [(String, XCUIElement.KeyModifierFlags)] = [("d", []), ("3", []), ("m", .shift)]
@@ -40,7 +43,7 @@ final class MacModeStateTests: XCTestCase {
             let sourceMode = mode.value as? String ?? ""
             app.typeKey("]", modifierFlags: [])
             app.typeKey("w", modifierFlags: [])
-            steppedWeeks[sourceMode] = title.label
+            steppedWeeks[sourceMode] = title.value as? String
             app.typeKey("[", modifierFlags: [])
         }
         XCTAssertEqual(steppedWeeks, ["day": nextWeek, "threeDays": nextWeek, "month": nextWeek])
@@ -52,7 +55,7 @@ final class MacModeStateTests: XCTestCase {
         app.typeKey(.rightArrow, modifierFlags: .command)
         app.typeText("z")
         XCTAssertEqual(search.value as? String, "amiddlez")
-        XCTAssertEqual(title.label, originalWeek)
+        XCTAssertEqual(title.value as? String, originalWeek)
         app.typeKey(.escape, modifierFlags: [])
         app.typeKey("?", modifierFlags: [])
         waitForValue("], ⌘→, ⇧L", of: element("help-command-Next week", in: app))

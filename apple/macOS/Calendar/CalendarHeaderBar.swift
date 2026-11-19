@@ -51,6 +51,7 @@ struct CalendarHeaderBar: View {
                 .font(.title3.weight(.medium))
                 .lineLimit(1)
                 .accessibilityIdentifier("calendar-range-title")
+                .accessibilityValue(model.viewTitle)
 
             Spacer()
 
