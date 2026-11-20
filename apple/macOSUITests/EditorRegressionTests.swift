@@ -2,6 +2,60 @@ import XCTest
 
 final class EditorRegressionTests: XCTestCase {
     @MainActor
+    func testTaskEditorPutsSchedulingAboveMetadata() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-demoData", "YES", "-uiAppearance", "light", "-joy.ghosts", "YES"]
+        app.launch()
+        addTeardownBlock { @MainActor in
+            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            attachment.name = "task-editor-order-teardown"
+            attachment.lifetime = .keepAlways
+            self.add(attachment)
+            app.terminate()
+        }
+
+        let row = app.staticTexts["Renew VPN certificate"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.click()
+        let title = app.textFields["task-title"]
+        let due = app.buttons["task-due"]
+        let category = app.buttons["task-category"]
+        XCTAssertTrue(due.waitForExistence(timeout: 5))
+        XCTAssertTrue(title.isHittable && due.isHittable && category.isHittable)
+        XCTAssertTrue(title.frame.midY < due.frame.midY && due.frame.midY < category.frame.midY)
+
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "task-editor-section-order"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        app.typeKey("d", modifierFlags: [])
+        let dueSearch = app.textFields["task-due-search"]
+        XCTAssertTrue(dueSearch.waitForExistence(timeout: 3))
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(dueSearch.waitForNonExistence(timeout: 3))
+        app.typeKey("c", modifierFlags: [])
+        let categorySearch = app.textFields["task-category-search"]
+        XCTAssertTrue(categorySearch.waitForExistence(timeout: 3))
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(categorySearch.waitForNonExistence(timeout: 3))
+
+        let waiting = app.textFields["task-waiting-on"]
+        let tags = app.textFields["task-tags-input"]
+        let form = app.sheets.scrollViews.firstMatch
+        for _ in 0..<4 where !waiting.exists || !tags.exists {
+            form.scroll(byDeltaX: 0, deltaY: -100)
+        }
+        let ordered = waiting.exists && tags.exists && waiting.frame.midY < tags.frame.midY
+            && (!category.exists || category.frame.midY < waiting.frame.midY)
+        if !ordered {
+            print("EDITOR_ORDER form=\(form.frame) due=\(due.frame) category=\(category.frame) waiting=\(waiting.frame) tags=\(tags.frame)")
+        }
+        XCTAssertTrue(ordered, "Waiting and Tags must follow Category")
+    }
+
+    @MainActor
     func testImmediateDatePresetAndUndoableDelete() {
         continueAfterFailure = false
         let app = XCUIApplication()

@@ -111,8 +111,7 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(app.buttons["quick-add-remove-source"].exists)
             capture(app, "capture-source-\(appearance)")
             app.buttons["Details"].tap()
-            let url = app.textFields["task-source-url"]
-            XCTAssertTrue(url.waitForExistence(timeout: 5))
+            let url = revealTaskEditorControl(app.textFields["task-source-url"], in: app)
             XCTAssertEqual(url.value as? String, "https://github.com/example/florida/pull/123")
             app.buttons["task-editor-cancel"].tap()
             XCTAssertTrue(input.waitForExistence(timeout: 5))
@@ -126,7 +125,7 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(input.waitForExistence(timeout: 5))
             XCTAssertFalse(app.buttons["quick-add-remove-source"].exists, "Removing a source survives edits and cancellation")
             app.buttons["Details"].tap()
-            XCTAssertTrue(app.buttons["task-source-add"].waitForExistence(timeout: 5))
+            revealTaskEditorControl(app.buttons["task-source-add"], in: app)
             XCTAssertFalse(url.exists)
             app.buttons["task-editor-cancel"].tap()
             XCTAssertTrue(input.waitForExistence(timeout: 5))
@@ -136,7 +135,7 @@ final class SmokeTests: XCTestCase {
             XCTAssertTrue(row.waitForExistence(timeout: 5))
             XCTAssertFalse(element(startingWith: "task-source-open-", in: app).exists)
             row.tap()
-            XCTAssertTrue(app.buttons["task-source-add"].waitForExistence(timeout: 5))
+            revealTaskEditorControl(app.buttons["task-source-add"], in: app)
             XCTAssertFalse(url.exists, "The removed source must not be saved")
             app.terminate()
         }
@@ -152,8 +151,7 @@ final class SmokeTests: XCTestCase {
         XCTAssertTrue(input.waitForExistence(timeout: 5))
         input.typeText("Review source https://github.com/example/florida/pull/456")
         app.buttons["Details"].tap()
-        let url = app.textFields["task-source-url"]
-        XCTAssertTrue(url.waitForExistence(timeout: 5))
+        let url = revealTaskEditorControl(app.textFields["task-source-url"], in: app)
         XCTAssertEqual(url.value as? String, "https://github.com/example/florida/pull/456")
         app.buttons["Add"].tap()
         XCTAssertTrue(input.waitForNonExistence(timeout: 5))
@@ -170,8 +168,7 @@ final class SmokeTests: XCTestCase {
         XCTAssertFalse(app.navigationBars["Edit Task"].exists, "Opening the source must not also open the editor")
 
         row.tap()
-        XCTAssertTrue(url.waitForExistence(timeout: 5))
-        for _ in 0..<3 where !url.isHittable { app.swipeUp() }
+        revealTaskEditorControl(url, in: app)
         replaceText(in: url, with: "javascript:alert(1)", in: app)
         XCTAssertFalse(app.buttons["Save"].isEnabled)
         XCTAssertTrue(app.staticTexts["task-source-error"].exists)
@@ -187,7 +184,7 @@ final class SmokeTests: XCTestCase {
         XCTAssertEqual(opened.label, "mailto:review@example.com")
         XCTAssertFalse(app.navigationBars["Edit Task"].exists)
         row.tap()
-        XCTAssertTrue(url.waitForExistence(timeout: 5))
+        revealTaskEditorControl(url, in: app)
         XCTAssertEqual(url.value as? String, "mailto:review@example.com")
         XCTAssertEqual(app.textFields["task-source-title"].value as? String, "Release discussion")
         let remove = app.buttons["task-source-remove"]
@@ -196,14 +193,14 @@ final class SmokeTests: XCTestCase {
         app.buttons["task-editor-cancel"].tap()
         XCTAssertTrue(sourceButton.waitForExistence(timeout: 5), "Cancel must discard source edits")
         row.tap()
-        XCTAssertTrue(url.waitForExistence(timeout: 5))
+        revealTaskEditorControl(url, in: app)
         for _ in 0..<3 where !remove.isHittable { app.swipeUp() }
         remove.tap()
         app.buttons["Save"].tap()
         XCTAssertTrue(app.navigationBars["Edit Task"].waitForNonExistence(timeout: 5))
         XCTAssertFalse(sourceButton.exists, "Removing a source must persist after Save")
         row.tap()
-        XCTAssertTrue(app.buttons["task-source-add"].waitForExistence(timeout: 5))
+        revealTaskEditorControl(app.buttons["task-source-add"], in: app)
         XCTAssertFalse(url.exists)
         app.terminate()
     }

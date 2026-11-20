@@ -113,8 +113,6 @@ struct TaskEditorView: View {
                     }
                 }
 
-                TaskMetadataEditor(task: $draft, tagInput: $tagInput)
-
                 Section("Dates") {
                     TaskDateRow(title: "Start", identifier: "task-start", isOn: hasStart, date: startAt, hasTime: hasStartTime)
                     TaskDateRow(title: "Due", identifier: "task-due", isOn: hasDue, date: dueAt, hasTime: hasDueTime)
@@ -151,8 +149,6 @@ struct TaskEditorView: View {
                 .environment(\.calendar, model.taskListCalendar)
                 .environment(\.timeZone, model.taskListCalendar.timeZone)
 
-                sourceSection
-
                 Section("Category") {
                     Picker("Category", selection: $draft.categoryId) {
                         ForEach(model.categories) { category in
@@ -186,6 +182,8 @@ struct TaskEditorView: View {
 
                 TaskPlanSection(task: $draft, original: original, isNew: isNew, explanation: $explanation)
 
+                TaskMetadataEditor(task: $draft, tagInput: $tagInput)
+
                 Section {
                     Toggle("Pin to a time", isOn: hasPin)
                         .disabled(draft.isWaiting)
@@ -197,6 +195,8 @@ struct TaskEditorView: View {
                 } footer: {
                     Text("A pinned task is placed at exactly that time as one block; otherwise the scheduler picks the time.")
                 }
+
+                sourceSection
 
                 TaskRecurrenceSection(
                     recurrence: $draft.recurrence, anchorDate: draft.dueAt ?? draft.startAt,
