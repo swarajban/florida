@@ -128,14 +128,18 @@ enum TimelineRow: Identifiable, Hashable {
     }
 
     /// `now` is nil on days other than today: no marker, and every gap counts.
-    static func rows(for items: [AgendaItem], now: Date?, showsGaps: Bool) -> [TimelineRow] {
+    static func rows(for items: [AgendaItem], now: Date?, showsGaps: Bool, showsTasks: Bool = true) -> [TimelineRow] {
         var rows: [TimelineRow] = []
         var busyUntil: Date?
         for item in items {
             if showsGaps, let busyUntil, let gap = gap(from: busyUntil, to: item.start, now: now) {
                 rows.append(.gap(gap))
             }
-            rows.append(.item(item))
+            switch item {
+            case .event, .plan: rows.append(.item(item))
+            case .block, .ghost:
+                if showsTasks { rows.append(.item(item)) }
+            }
             busyUntil = max(busyUntil ?? item.end, item.end)
         }
         guard let now else { return rows }

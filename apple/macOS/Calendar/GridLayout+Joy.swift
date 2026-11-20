@@ -73,9 +73,9 @@ extension GridLayout {
             .map(\.item)
     }
 
-    /// The free stretches of each `working` range on one day, around `blocks`.
-    static func gaps(dayIndex: Int, day: Date, working: [Range<Int>], blocks: [Block], calendar: Calendar) -> [Gap] {
-        let busy = blocks.map { $0.startMinute..<$0.endMinute }.sorted { $0.lowerBound < $1.lowerBound }
+    /// The free stretches of each `working` range on one day, around occupied minutes.
+    static func gaps(dayIndex: Int, day: Date, working: [Range<Int>], busy: [Range<Int>], calendar: Calendar) -> [Gap] {
+        let busy = busy.sorted { $0.lowerBound < $1.lowerBound }
         var result: [Gap] = []
         func add(_ start: Int, _ end: Int) {
             guard end - start >= minimumGapMinutes else { return }

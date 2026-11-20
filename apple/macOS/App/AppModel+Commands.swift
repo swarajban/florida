@@ -21,6 +21,9 @@ extension AppModel {
         case .toggleCalendars:
             guard canToggleCalendars else { return }
             isCalendarsPopoverOpen.toggle()
+        case .toggleTasksOnCalendar:
+            guard !isSheetOpen else { return }
+            showTasksOnCalendar.toggle()
         case .undo, .move, .acceptSuggestion, .newCategory, .showRoutine, .newTaskEditor,
              .doNow, .doneForNow, .repeatLast, .centerOnNow, .jumpToFirst, .jumpToLast,
              .editEvent, .respondYes, .respondMaybe, .respondNo,
@@ -68,7 +71,7 @@ extension AppModel {
             case .toggleTaskGrouping:
                 taskListGrouping = taskListGrouping == .dueDate ? .category : .dueDate
                 statusMessage = "Grouped tasks by \(taskListGrouping.title.lowercased())"
-            case .core, .toggleCalendars: break
+            case .core, .toggleCalendars, .toggleTasksOnCalendar: break
             }
         }
     }

@@ -34,7 +34,7 @@ enum MacCommand: Hashable, Sendable {
     case showProjects
     /// `g b`: today's brief and the weekly review.
     case showBrief
-    case toggleCalendars
+    case toggleCalendars, toggleTasksOnCalendar
     /// `y`: asks why the selected task is planned where it is.
     case explain
     /// Makes the highlighted day a home, office or off day, or puts it back on the routine.
@@ -60,7 +60,7 @@ enum MacCommand: Hashable, Sendable {
             .editing
         case .newCategory, .showRoutine, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind, .shareAvailability: .actions
         case .centerOnNow, .jumpToFirst, .jumpToLast, .jump: .navigation
-        case .showProjects, .showBrief, .toggleTaskGrouping, .toggleCalendars: .panels
+        case .showProjects, .showBrief, .toggleTaskGrouping, .toggleCalendars, .toggleTasksOnCalendar: .panels
         }
     }
 
@@ -87,6 +87,7 @@ enum MacCommand: Hashable, Sendable {
         case .showProjects: "Projects"
         case .showBrief: "Brief"
         case .toggleCalendars: "Calendars…"
+        case .toggleTasksOnCalendar: "Show/Hide Tasks on Calendar"
         case .explain: "Why here?"
         case .setDayHome: "Set day: Home"
         case .setDayOffice: "Set day: Office"
@@ -122,7 +123,7 @@ enum MacCommand: Hashable, Sendable {
         .editEvent, .respondYes, .respondMaybe, .respondNo, .joinMeeting, .openEventResources, .cycleEventDayBlocking, .openTaskSource,
         .newCategory, .showRoutine, .centerOnNow, .jumpToFirst, .jumpToLast, .jump,
         .showProjects, .showBrief, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind,
-        .shareAvailability, .setDueDate, .someday, .toggleTaskGrouping, .toggleCalendars,
+        .shareAvailability, .setDueDate, .someday, .toggleTaskGrouping, .toggleCalendars, .toggleTasksOnCalendar,
     ]
 
     /// The palette lists everything except Escape.

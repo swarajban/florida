@@ -237,6 +237,8 @@ targets:
     platform: iOS
     sources:
       - iOSTests
+      - iOS/Agenda/AgendaItem.swift
+      - iOS/Support/GhostStore.swift
       - iOS/Support/Toast.swift
     dependencies:
       - package: FloridaKit
@@ -263,7 +265,15 @@ targets:
     platform: macOS
     sources:
       - macOSTests
+      - Design/FloridaStyle.swift
+      - Design/Plan+Display.swift
+      - macOS/App/ClockTime.swift
+      - macOS/App/ColorHex.swift
+      - macOS/App/ItemSelection.swift
       - macOS/App/JoyPreferences.swift
+      - macOS/Calendar/GridLayout.swift
+      - macOS/Calendar/GridLayout+Joy.swift
+      - macOS/Calendar/ScheduleHours.swift
       - macOS/Tasks/TaskEditorKeys.swift
       - macOS/Tasks/TaskPaneSearch.swift
       - macOS/Keyboard/ShortcutRepeatState.swift

@@ -103,6 +103,7 @@ struct DayGridLayout: Equatable {
     /// a commitment is drawn in ink, the color of no calendar and no category.
     static func build(
         days: [Date], agendas: [DayAgenda], ghosts: [GhostBlock], suggestions: [OptionalPicks.Pick] = [],
+        showTasksOnCalendar: Bool = true,
         blooming: Set<String>, minimumMinutes: Int, calendar: Calendar,
         eventStyle: (CalendarEvent) -> EventStyle, categoryTint: (String) -> Color,
         projectTint: (String) -> Color
@@ -126,7 +127,7 @@ struct DayGridLayout: Equatable {
             for event in agenda.events where seenEvents.insert(event.id).inserted {
                 events.append(event)
             }
-            for block in agenda.placements where seenPlacements.insert(block.placement.id).inserted {
+            for block in agenda.placements where showTasksOnCalendar && seenPlacements.insert(block.placement.id).inserted {
                 placements.append(block)
             }
             for block in agenda.planBlocks where seenPlanBlocks.insert(block.id).inserted {
@@ -203,9 +204,10 @@ struct DayGridLayout: Equatable {
         }
 
         // Completions come from synced task timestamps, not the task's former scheduled slot.
-        let completed = agendas.flatMap(\.completedTasks)
+        let completed = showTasksOnCalendar ? agendas.flatMap(\.completedTasks) : []
         let completedIDs = Set(completed.map(\.id))
-        let visibleGhosts = ghosts.filter { !completedIDs.contains($0.taskId) } + completed.compactMap(GhostBlock.completion)
+        let visibleGhosts = showTasksOnCalendar
+            ? ghosts.filter { !completedIDs.contains($0.taskId) } + completed.compactMap(GhostBlock.completion) : []
         // A partial-work ghost whose placement is still live is drawn once, as the placement.
         for ghost in visibleGhosts {
             let id = "ghost-\(ghost.id)"
@@ -216,7 +218,7 @@ struct DayGridLayout: Equatable {
             timed.append(LayoutItem(id: id, start: ghost.start, end: ghost.end))
         }
 
-        for pick in suggestions {
+        for pick in suggestions where showTasksOnCalendar {
             let placement = pick.placement
             let id = "suggestion-\(placement.id)"
             guard placement.endAt > range.lowerBound, placement.startAt < range.upperBound else { continue }

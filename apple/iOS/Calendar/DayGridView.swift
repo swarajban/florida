@@ -12,6 +12,7 @@ import UIKit
 /// Plan blocks stay where the scheduler put them: no hold, no drag.
 struct DayGridView: View {
     let dayCount: Int
+    let showTasksOnCalendar: Bool
     let onSelectEvent: (CalendarEvent) -> Void
     let onEditTask: (TaskItem) -> Void
     /// Tapping an empty slot: the caller opens a new-event editor starting there.
@@ -92,6 +93,10 @@ struct DayGridView: View {
             observeDays()
         }
         .onChange(of: inputs, initial: true) { _, inputs in
+            if !inputs.showTasksOnCalendar {
+                if let drag, case .task = drag.block.item { cancelDrag() }
+                takingSuggestion = nil
+            }
             rebuildLayout(inputs)
         }
         .onChange(of: locale) { _, _ in
@@ -303,6 +308,7 @@ struct DayGridView: View {
     /// values), rebuilt only when something in it changed.
     private struct Inputs: Equatable {
         var days: [Date]
+        var showTasksOnCalendar: Bool
         var agendas: [DayAgenda]
         var ghosts: [GhostBlock]
         var optionalPlacements: [OptionalPlacement]
@@ -320,7 +326,7 @@ struct DayGridView: View {
     private var inputs: Inputs {
         let somedayIDs = model.somedayTaskIDs
         return Inputs(
-            days: days, agendas: model.gridDays,
+            days: days, showTasksOnCalendar: showTasksOnCalendar, agendas: model.gridDays,
             // Today's finished blocks, on whichever column today is (`visibleGhosts` assumes the
             // selected day is today, which a 3-day grid opened on yesterday breaks).
             ghosts: JoySetting.ghosts.isOn ? model.ghostBlocks.filter { !somedayIDs.contains($0.taskId) } : [],
@@ -333,7 +339,8 @@ struct DayGridView: View {
     private func rebuildLayout(_ inputs: Inputs) {
         layout = DayGridLayout.build(
             days: inputs.days, agendas: inputs.agendas, ghosts: inputs.ghosts,
-            suggestions: inputs.days.flatMap { model.optionalPicks(on: $0).flatMap(\.picks) },
+            suggestions: inputs.showTasksOnCalendar ? inputs.days.flatMap { model.optionalPicks(on: $0).flatMap(\.picks) } : [],
+            showTasksOnCalendar: inputs.showTasksOnCalendar,
             blooming: inputs.blooming, minimumMinutes: inputs.minimumMinutes, calendar: model.calendar,
             eventStyle: { EventStyle(event: $0, calendars: inputs.calendars, accounts: inputs.accounts) },
             categoryTint: { id in Color.category(inputs.categories.first { $0.id == id }) },

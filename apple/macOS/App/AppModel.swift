@@ -11,7 +11,7 @@ import Observation
 /// handling live in the `AppModel+*.swift` extensions.
 @Observable @MainActor
 final class AppModel {
-    private static var taskListDefaults: UserDefaults {
+    private static var viewDefaults: UserDefaults {
         UserDefaults(suiteName: Florida.appGroup) ?? .standard
     }
 
@@ -90,10 +90,23 @@ final class AppModel {
     var selection: ItemID?
     var focus: Panel = .calendar
     var isTasksPaneVisible = true
-    var taskListGrouping = TaskListGrouping(
-        rawValue: AppModel.taskListDefaults.string(forKey: "taskListGrouping") ?? "") ?? .dueDate {
+    var showTasksOnCalendar = AppModel.viewDefaults.object(forKey: "showTasksOnCalendar") as? Bool ?? true {
         didSet {
-            Self.taskListDefaults.set(taskListGrouping.rawValue, forKey: "taskListGrouping")
+            guard oldValue != showTasksOnCalendar else { return }
+            Self.viewDefaults.set(showTasksOnCalendar, forKey: "showTasksOnCalendar")
+            endJump()
+            if !showTasksOnCalendar, focus == .calendar, let selection,
+               selection.isTask || selection.isSuggestion, gridLayout.day(of: selection) != nil {
+                self.selection = nil
+                statusMessage = nil
+            }
+            rebuildLayout()
+        }
+    }
+    var taskListGrouping = TaskListGrouping(
+        rawValue: AppModel.viewDefaults.string(forKey: "taskListGrouping") ?? "") ?? .dueDate {
+        didSet {
+            Self.viewDefaults.set(taskListGrouping.rawValue, forKey: "taskListGrouping")
             endJump()
         }
     }
@@ -289,6 +302,7 @@ final class AppModel {
             suggestions: viewMode == .month ? [] : visibleDays.flatMap { optionalPicks(on: $0).flatMap(\.picks) },
             // The gym is a fixed part of a day; held project time is detail a month cell can skip.
             planBlocks: viewMode == .month ? planBlocks.filter(\.isCommitment) : planBlocks, projectsById: projectsById,
+            showTasksOnCalendar: showTasksOnCalendar,
             tasksById: tasksById,
             categoriesById: categoriesById, calendarsById: calendarsById, schedules: activeSchedules,
             options: layoutOptions, lineLimit: viewMode == .month ? MonthGridView.maxLinesPerCell : nil,
