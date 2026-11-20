@@ -17,6 +17,13 @@ struct GridLayout {
             case commitment
             /// Time the scheduler holds for a project without a task.
             case projectTime
+
+            var isTaskDerived: Bool {
+                switch self {
+                case .task, .completed, .suggestion: true
+                case .event, .commitment, .projectTime: false
+                }
+            }
         }
 
         /// Placement id or event id; unique per block, unlike `item` for multi-block tasks.
@@ -135,6 +142,7 @@ struct GridLayout {
     static func build(
         days: [Date], events: [CalendarEvent], placements: [Placement], suggestions: [OptionalPicks.Pick] = [],
         planBlocks: [PlanBlock] = [], projectsById: [String: Project] = [:],
+        showTasksOnCalendar: Bool = true,
         tasksById: [String: TaskItem],
         categoriesById: [String: TaskCategory], calendarsById: [String: CalendarInfo], schedules: [Schedule],
         options: Options, lineLimit: Int?, now: Date, calendar: Calendar, reservedLinesByDay: [Date: Int] = [:]
@@ -183,7 +191,7 @@ struct GridLayout {
             timed.append(LayoutItem(id: placement.id, start: placement.startAt, end: placement.endAt))
             lanes[placement.id] = placement.lane
         }
-        for task in tasksById.values {
+        for task in tasksById.values where showTasksOnCalendar {
             guard let at = task.completedAt, task.deletedAt == nil, (firstDay..<rangeEnd).contains(at) else { continue }
             let id = "completed-\(task.id)"
             // Layout gives this instant a minimum tap target; it is not a duration of work.
@@ -224,7 +232,8 @@ struct GridLayout {
             timed.append(LayoutItem(id: id, start: placement.startAt, end: placement.endAt))
         }
 
-        let companions = ParallelWork.companionTitles(placements: placements, tasksById: tasksById, planBlocks: planBlocks)
+        let companions = ParallelWork.companionTitles(
+            placements: showTasksOnCalendar ? placements : [], tasksById: tasksById, planBlocks: planBlocks)
 
         let rows = AllDayLayout.rows(allDay, days: days, calendar: calendar)
         layout.allDayRowCount = rows.count
@@ -244,11 +253,18 @@ struct GridLayout {
             }
         }
 
-        layout.blocksByDay = days.enumerated().map { index, day in
+        layout.options = options
+        layout.hasSchedules = !schedules.isEmpty
+        let needsHours = !schedules.isEmpty && lineLimit == nil && (options.dimsOffHours || options.freeGaps)
+        layout.workingByDay = days.map { day in
+            needsHours ? ScheduleHours.workingMinutes(on: day, schedules: schedules, calendar: calendar) : []
+        }
+        for (index, day) in days.enumerated() {
             let dayEnd = DateNavigation.shift(day, by: 1, calendar: calendar)
             let items = timed.filter { $0.start < dayEnd && $0.end > day }
-            let frames = DayLayout.layout(items, day: day, calendar: calendar)
-            return LaneColumns.ordered(frames, lanes: lanes).compactMap { frame in
+            let visibleItems = showTasksOnCalendar ? items : items.filter { sources[$0.id]?.kind.isTaskDerived == false }
+            let frames = DayLayout.layout(visibleItems, day: day, calendar: calendar)
+            let blocks: [Block] = LaneColumns.ordered(frames, lanes: lanes).compactMap { frame in
                 guard let source = sources[frame.id] else { return nil }
                 let beside = companions[frame.id] ?? []
                 return Block(
@@ -258,20 +274,18 @@ struct GridLayout {
                     slotKey: source.slotKey, rim: source.rim, companions: beside,
                     alongside: beside.isEmpty ? nil : PlanText.alongside(beside))
             }
-        }
-
-        layout.options = options
-        layout.hasSchedules = !schedules.isEmpty
-        let needsHours = !schedules.isEmpty && lineLimit == nil && (options.dimsOffHours || options.freeGaps)
-        layout.workingByDay = days.map { day in
-            needsHours ? ScheduleHours.workingMinutes(on: day, schedules: schedules, calendar: calendar) : []
-        }
-        layout.gapsByDay = days.enumerated().map { index, day in
-            guard needsHours, options.freeGaps else { return [] }
-            let ahead = upcoming(layout.workingByDay[index], on: day, now: now, calendar: calendar)
-            return gaps(
-                dayIndex: index, day: day, working: ahead,
-                blocks: layout.blocksByDay[index].filter { $0.kind != .completed }, calendar: calendar)
+            layout.blocksByDay.append(blocks)
+            if needsHours, options.freeGaps {
+                let ahead = upcoming(layout.workingByDay[index], on: day, now: now, calendar: calendar)
+                let occupied = showTasksOnCalendar || items.count == visibleItems.count
+                    ? frames : DayLayout.layout(items, day: day, calendar: calendar)
+                let busy = occupied.compactMap { frame in
+                    sources[frame.id]?.kind == .completed ? nil : frame.startMinute..<frame.endMinute
+                }
+                layout.gapsByDay.append(gaps(dayIndex: index, day: day, working: ahead, busy: busy, calendar: calendar))
+            } else {
+                layout.gapsByDay.append([])
+            }
         }
 
         var seen: Set<ItemID> = []

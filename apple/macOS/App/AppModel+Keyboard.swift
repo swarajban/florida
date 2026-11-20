@@ -22,7 +22,8 @@ extension AppModel {
         let isCommandChord = chord.modifiers.contains(.command)
         let isEscape = chord == KeyChord("escape")
         let typing = isPaletteOpen || event.window?.firstResponder is NSTextView
-        if chord == KeyChord("left", [.command]) || chord == KeyChord("right", [.command]) {
+        if chord == KeyChord("left", [.command]) || chord == KeyChord("right", [.command])
+            || chord == KeyChord("t", [.command, .shift]) {
             guard !typing, !inEventPopover, event.window?.attachedSheet == nil,
                   interaction.kind == .browsing || interaction.kind == .jumping
             else {

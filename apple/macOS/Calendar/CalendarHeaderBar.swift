@@ -67,13 +67,25 @@ struct CalendarHeaderBar: View {
             CalendarsToolbarButton()
 
             Button {
+                model.run(.toggleTasksOnCalendar)
+            } label: {
+                Image(systemName: model.showTasksOnCalendar ? "checklist" : "eye.slash")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help("\(model.showTasksOnCalendar ? "Hide" : "Show") Tasks on Calendar (\(MacKeymap.default.shortcut(for: .toggleTasksOnCalendar)))")
+            .accessibilityLabel("Tasks on Calendar")
+            .accessibilityValue(model.showTasksOnCalendar ? "Shown" : "Hidden")
+            .accessibilityIdentifier("calendar-task-visibility")
+
+            Button {
                 model.perform(.toggleTasks)
             } label: {
                 Image(systemName: "sidebar.right")
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .help("Toggle tasks (⌘T)")
+            .help("Toggle Tasks Pane (⌘T)")
         }
     }
 

@@ -27,4 +27,16 @@ struct CalendarShortcutTests {
         let help = keymap.helpSections().flatMap(\.items).first { $0.command == .toggleCalendars }
         #expect(help?.shortcut == "⇧⌘L")
     }
+
+    @Test func calendarTaskVisibilityHasAnIndependentShortcutAndIsDiscoverable() {
+        let keymap = MacKeymap.default
+        let chord = KeyChord("t", [.command, .shift])
+        #expect(keymap.problems().isEmpty)
+        #expect(keymap.command(for: [chord]) == .toggleTasksOnCalendar)
+        #expect(keymap.command(for: [KeyChord("t", [.command])]) == .core(.toggleTasks))
+        let paletteResults = FuzzyMatch.filter(MacCommand.paletteCommands, query: "tasks on calendar", label: \.label)
+        #expect(paletteResults.first == .toggleTasksOnCalendar)
+        let help = keymap.helpSections().flatMap(\.items).first { $0.command == .toggleTasksOnCalendar }
+        #expect(help?.shortcut == "⇧⌘T")
+    }
 }

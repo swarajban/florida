@@ -27,6 +27,7 @@ struct AgendaView: View {
     @State private var movingTask: TaskItem?
     @State private var now = Date()
     @AppStorage(AgendaMode.storageKey, store: .florida) private var mode: AgendaMode = .list
+    @AppStorage("showTasksOnCalendar", store: .florida) private var showTasksOnCalendar = true
     @AppStorage(JoySetting.blockProgress.rawValue, store: .florida) private var showsProgress = true
     @AppStorage(JoySetting.freeGaps.rawValue, store: .florida) private var showsGaps = true
     @AppStorage(JoySetting.ghosts.rawValue, store: .florida) private var showsGhosts = true
@@ -80,7 +81,7 @@ struct AgendaView: View {
             DayPickerSheet(selectedDay: model.selectedDay, isPresented: $showsDayPicker)
         }
         .sheet(isPresented: $showsCalendars) {
-            CalendarChecklistSheet(onDone: { showsCalendars = false })
+            CalendarChecklistSheet(showTasksOnCalendar: $showTasksOnCalendar, onDone: { showsCalendars = false })
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
                 .onDisappear {
@@ -186,6 +187,13 @@ struct AgendaView: View {
     private var headerActions: some View {
         HStack(spacing: 0) {
             calendarMenu
+            Button { showTasksOnCalendar.toggle() } label: {
+                Label("Tasks on Calendar", systemImage: showTasksOnCalendar ? "checklist" : "eye.slash")
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityValue(showTasksOnCalendar ? "Shown" : "Hidden")
+            .accessibilityIdentifier("agenda-task-visibility")
             addMenu
         }
         .labelStyle(.iconOnly)
@@ -278,7 +286,7 @@ struct AgendaView: View {
     private var content: some View {
         if let dayCount = mode.dayCount {
             DayGridView(
-                dayCount: dayCount,
+                dayCount: dayCount, showTasksOnCalendar: showTasksOnCalendar,
                 onSelectEvent: { selectedEvent = $0 },
                 onEditTask: { editingTask = $0 },
                 onCreateAt: { newEvent = model.newEventTemplate(start: $0) })
@@ -307,19 +315,23 @@ struct AgendaView: View {
         let allDayItems = AllDayPresentation.items(for: allDayEvents) { id in
             model.calendars.first { $0.id == id }?.summary
         }
-        let rows = TimelineRow.rows(for: items, now: isToday ? now : nil, showsGaps: showsGaps)
-        let picks = model.optionalPicks(on: day, now: now)
-        let isEmptyDay = items.isEmpty && allDayEvents.isEmpty && picks.isEmpty
+        let rows = TimelineRow.rows(
+            for: items, now: isToday ? now : nil, showsGaps: showsGaps, showsTasks: showTasksOnCalendar)
+        let picks = showTasksOnCalendar ? model.optionalPicks(on: day, now: now) : []
+        let isEmptyDay = allDayEvents.isEmpty && picks.isEmpty && !rows.contains {
+            if case .item = $0 { return true }
+            return false
+        }
         let freeText = model.freeMinutes(on: day).flatMap { PlanText.free($0.computer) }
         let missed = isToday ? model.missedCommitments(inWeekOf: day) : []
         let missedText = missed.isEmpty ? nil : PlanText.missed(missed)
-        let open = agenda?.placements.filter { $0.task.completedAt == nil } ?? []
+        let open = showTasksOnCalendar ? agenda?.placements.filter { $0.task.completedAt == nil } ?? [] : []
         let beside = ParallelWork.companionTitles(
             placements: open.map(\.placement),
             tasksById: Dictionary(open.map { ($0.task.id, $0.task) }, uniquingKeysWith: { first, _ in first }),
             planBlocks: agenda?.planBlocks ?? [])
         let unfinished = open.filter { model.blooming[$0.task.id] == nil }
-        let isDayCleared = isToday && unfinished.isEmpty
+        let isDayCleared = showTasksOnCalendar && isToday && unfinished.isEmpty
             && (agenda?.placements.count ?? 0) - unfinished.count + ghosts.count > 0
         return List {
             if model.hasProblem {
@@ -438,9 +450,9 @@ struct AgendaView: View {
 
     private var nothingScheduled: some View {
         ContentUnavailableView(
-            "Nothing scheduled",
+            showTasksOnCalendar ? "Nothing scheduled" : "No visible items",
             systemImage: "calendar",
-            description: Text("No events or task blocks on this day."))
+            description: Text(showTasksOnCalendar ? "No events or task blocks on this day." : "Tasks are hidden from the calendar."))
     }
 
     /// A task block: tap to edit, long-press for its actions. A block of a task that is
@@ -518,6 +530,7 @@ struct AgendaView: View {
 
 private struct CalendarChecklistSheet: View {
     @Environment(AppModel.self) private var model
+    @Binding var showTasksOnCalendar: Bool
     let onDone: () -> Void
 
     var body: some View {
@@ -527,6 +540,20 @@ private struct CalendarChecklistSheet: View {
                 Spacer()
                 Button("Done", action: onDone)
             }.padding(12)
+            Button { showTasksOnCalendar.toggle() } label: {
+                HStack(spacing: 8) {
+                    Text("Tasks on Calendar")
+                    Spacer()
+                    Image(systemName: showTasksOnCalendar ? "checkmark.circle.fill" : "circle")
+                }
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityValue(showTasksOnCalendar ? "Shown" : "Hidden")
+            .accessibilityIdentifier("calendar-choice-tasks")
+            .padding(.horizontal, 12)
+            Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     if model.calendars.isEmpty {

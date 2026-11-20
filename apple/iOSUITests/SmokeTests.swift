@@ -4,6 +4,29 @@ import UIKit
 /// Wait for real content before capturing; a fixed launch delay can silently save a blank screen.
 final class SmokeTests: XCTestCase {
     @MainActor
+    func testHideTasksFromCalendar() throws {
+        continueAfterFailure = false
+        let time = try XCTUnwrap(Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 12, hour: 10)))
+        let app = launch(mode: "day", demoNow: time)
+        let toggle = app.buttons["agenda-task-visibility"]
+        let task = app.staticTexts["Rotate AWS access keys"].firstMatch
+        let event = app.staticTexts["Standup"].firstMatch
+        addTeardownBlock { @MainActor [weak self] in
+            guard let self, (self.testRun?.failureCount ?? 0) > 0 else { return }
+            self.captureFailure(app, "iphone-calendar-task-visibility-failure")
+            print("Task visibility: \(String(describing: toggle.value)); toggle=\(toggle.frame), task=\(task.frame), event=\(event.frame)")
+        }
+        XCTAssertTrue(waitForHittable(toggle))
+        XCTAssertTrue(task.waitForExistence(timeout: 10))
+        toggle.tap()
+        XCTAssertTrue(task.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(event.exists)
+        capture(app, "iphone-calendar-tasks-hidden")
+        toggle.tap()
+        XCTAssertTrue(task.waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testCalendarActivationChecklist() {
         continueAfterFailure = false
         let app = XCUIApplication()

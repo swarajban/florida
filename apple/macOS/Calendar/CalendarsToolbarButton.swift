@@ -42,6 +42,7 @@ private struct CalendarVisibilityChecklist: View {
     @FocusState private var searchFocused: Bool
 
     var body: some View {
+        @Bindable var model = model
         let calendars = model.calendars.filter { $0.matchesSearch(query) }
         let byAccount = Dictionary(grouping: calendars, by: \.accountId)
         let accounts = model.accounts.filter { byAccount[$0.id] != nil }
@@ -55,6 +56,10 @@ private struct CalendarVisibilityChecklist: View {
                 Button("Done") { model.isCalendarsPopoverOpen = false }
                     .buttonStyle(.borderless)
             }
+            Toggle("Tasks on Calendar", isOn: $model.showTasksOnCalendar)
+                .toggleStyle(.checkbox)
+                .accessibilityIdentifier("calendar-visibility-row-tasks")
+            Divider()
             TextField("Filter calendars", text: $query)
                 .focused($searchFocused)
                 .accessibilityIdentifier("calendar-visibility-search")

@@ -75,7 +75,11 @@ struct AppCommands: Commands {
             Button("Calendars…") { model.run(.toggleCalendars) }
                 .keyboardShortcut("l", modifiers: [.command, .shift])
                 .disabled(!model.canToggleCalendars || mainCalendarWindow != true)
-            Button("Toggle Tasks") { model.perform(.toggleTasks) }
+            Button("\(model.showTasksOnCalendar ? "Hide" : "Show") Tasks on Calendar (\(MacKeymap.default.shortcut(for: .toggleTasksOnCalendar)))") {
+                model.run(.toggleTasksOnCalendar)
+            }
+            .disabled(model.isSheetOpen || model.availabilityShare != nil || mainCalendarWindow != true)
+            Button("Toggle Tasks Pane") { model.perform(.toggleTasks) }
                 .keyboardShortcut("t")
             Button("Command Palette") { model.perform(.commandPalette) }
                 .keyboardShortcut("k")
