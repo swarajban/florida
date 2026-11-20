@@ -118,7 +118,6 @@ struct TaskEditorSheet: View {
                     .accessibilityIdentifier("task-notes")
                     .lineLimit(3...8)
                 }
-                TaskMetadataEditor(task: $draft, tagInput: $tagInput)
                 Section("Dates") {
                     MacDateField("Start", date: dateSelection($startAt, field: .start), isOn: dateEnabled($hasStart, field: .start), hasTime: startHasTime,
                                  key: TaskEditorKey.start.keycap, isPresented: showing(.start), identifier: "task-start",
@@ -198,6 +197,7 @@ struct TaskEditorSheet: View {
                                  identifier: "task-pinned-start", onDismiss: leaveField, requiresTime: true)
                         .disabled(draft.isWaiting)
                 }
+                TaskMetadataEditor(task: $draft, tagInput: $tagInput)
                 TaskRecurrenceSection(
                     recurrence: $draft.recurrence,
                     anchorDate: hasDue ? dueAt : (hasStart ? startAt : nil),

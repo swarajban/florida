@@ -99,7 +99,6 @@ final class TaskGroupingTests: XCTestCase {
             row.tap()
             let someday = app.switches["task-someday"]
             XCTAssertTrue(someday.waitForExistence(timeout: 5))
-            XCTAssertEqual(app.textFields["task-source-url"].value as? String, "https://example.com/inbox")
             app.buttons["task-start-add"].tap()
             let startControl = app.datePickers["task-start-date"].buttons.firstMatch
             XCTAssertTrue(startControl.waitForExistence(timeout: 5))
@@ -110,6 +109,8 @@ final class TaskGroupingTests: XCTestCase {
             XCTAssertEqual(someday.value as? String, "0")
             setTaskEditorSwitch("task-someday", on: true, in: app)
             XCTAssertEqual(someday.value as? String, "1")
+            let sourceURL = revealTaskEditorControl(app.textFields["task-source-url"], in: app)
+            XCTAssertEqual(sourceURL.value as? String, "https://example.com/inbox")
             app.buttons["Save"].tap()
             XCTAssertTrue(app.navigationBars["Edit Task"].waitForNonExistence(timeout: 5))
             reveal(row, in: app)
@@ -131,8 +132,8 @@ final class TaskGroupingTests: XCTestCase {
             app.buttons["Remove the time"].tap()
             XCTAssertEqual(someday.value as? String, "0", "A same-date action must explicitly leave Someday")
             XCTAssertEqual(try XCTUnwrap(startControl.value as? String), start)
-            XCTAssertEqual(app.textFields["task-source-url"].value as? String, "https://example.com/inbox")
             capture(app, "task-grouping-same-date-leaves-someday-\(appearance)")
+            XCTAssertEqual(revealTaskEditorControl(sourceURL, in: app).value as? String, "https://example.com/inbox")
             app.buttons["Save"].tap()
             XCTAssertTrue(app.navigationBars["Edit Task"].waitForNonExistence(timeout: 5))
             reveal(row, in: app)

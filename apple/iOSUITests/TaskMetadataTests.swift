@@ -38,10 +38,11 @@ final class TaskMetadataTests: XCTestCase {
 
     @MainActor
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
-        for _ in 0..<4 {
+        for _ in 0..<6 {
             if element.isHittable { return }
             app.collectionViews["task-editor-form"].swipeUp()
         }
+        if element.isHittable { return }
         capture(app, "metadata-control-state")
         print("METADATA_CONTROL \(element.debugDescription) frame=\(element.frame)")
     }
