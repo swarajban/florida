@@ -2,6 +2,28 @@ import XCTest
 
 final class SmartAddTests: XCTestCase {
     @MainActor
+    func testQuickAddSavesOneTask() {
+        continueAfterFailure = false
+        let app = launch("light")
+        let title = "Essential capture proof"
+        addTeardownBlock {
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = "iphone-essential-capture"
+            attachment.lifetime = .keepAlways
+            self.add(attachment)
+            app.terminate()
+        }
+        openComposer(app).typeText(title)
+        app.buttons["quick-add-save"].tap()
+        let filter = app.textFields["tasks-metadata-search"]
+        filter.tap()
+        filter.typeText(title)
+        let row = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH 'tasks-row-' AND label BEGINSWITH %@", title)).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testQuickAddSavesTheFirstWordWithAndWithoutCompletion() {
         continueAfterFailure = false
         let app = launch("light")
