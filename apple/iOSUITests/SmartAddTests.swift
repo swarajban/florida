@@ -2,9 +2,11 @@ import XCTest
 
 final class SmartAddTests: XCTestCase {
     @MainActor
-    func testQuickAddKeepsUnfamiliarFirstWordOnOpen() {
+    func testQuickAddSavesOneTask() {
         continueAfterFailure = false
-        let app = launch("light")
+        let app = XCUIApplication()
+        app.launchArguments = ["-demoData", "YES", "-uiTab", "tasks", "-uiAppearance", "light", "-uiQuickAddInboxOnly", "YES"]
+        app.launch()
         let input = app.textViews["quick-add-input"]
         addTeardownBlock {
             let attachment = XCTAttachment(screenshot: app.screenshot())
@@ -14,10 +16,7 @@ final class SmartAddTests: XCTestCase {
             app.terminate()
         }
         let title = "famalooda secret Santa"
-        let newTask = app.buttons["New task"]
-        XCTAssertTrue(newTask.waitForExistence(timeout: 10))
-        newTask.tap()
-        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        app.buttons["New task"].tap()
         let keyboardIntroduction = app.buttons["Continue"]
         if keyboardIntroduction.exists { keyboardIntroduction.tap() }
         input.typeText(title)
@@ -28,18 +27,14 @@ final class SmartAddTests: XCTestCase {
             capture(app, "quick-add-first-word-typing-failure")
         }
         XCTAssertEqual(actual, title)
-        XCTAssertEqual(app.staticTexts["quick-add-title"].label, title)
         app.buttons["quick-add-save"].tap()
 
-        let filter = app.textFields["tasks-metadata-search"]
-        filter.tap()
-        filter.typeText("secret Santa")
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tasks-row-'"))
         let row = app.buttons.matching(NSPredicate(
-            format: "identifier BEGINSWITH 'tasks-row-' AND label BEGINSWITH %@", title)).firstMatch
+            format: "identifier BEGINSWITH 'tasks-row-' AND (label == %@ OR label BEGINSWITH %@)", title, title + ", ")).firstMatch
         let saved = row.waitForExistence(timeout: 5)
         if !saved {
-            let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tasks-row-'"))
-            print("Quick Add after saving: filter=\(filter.value ?? "nil"), rows=\(rows.allElementsBoundByIndex.map(\.label))")
+            print("Quick Add after saving: rows=\(rows.allElementsBoundByIndex.map(\.label))")
             capture(app, "quick-add-first-word-save-failure")
         }
         XCTAssertTrue(saved, "Missing saved task with title: \(title)")

@@ -74,7 +74,7 @@ jobs:
   apple:
     name: Apple apps (Xcode)
     needs: changes
-    if: needs.changes.outputs.apple == 'true'
+    if: github.event_name == 'pull_request' && needs.changes.outputs.apple == 'true'
     uses: ./.github/workflows/apple-checks.yml
     with:
       run_ui: false

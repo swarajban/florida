@@ -10,7 +10,7 @@ Single-user personal calendar + auto-scheduled tasks (Motion replacement). Speed
   - `apple/FloridaCore/` — dependency-free models (wire-compatible with the server JSON), quick-add parser, keyboard engine, calendar layout math. Pure logic, no I/O.
   - `apple/FloridaKit/` — GRDB/SQLite store, sync client, token store; re-exports FloridaCore. Depends on GRDB 7.
   - Both packages build and test on Linux (`swift build --build-tests && swift test` inside each; Swift 6.4 via swiftly). No paired Mac is available; native compilation and UI checks run on GitHub Actions. PR CI compiles both apps, extensions and test bundles on every Apple-changing push. Before merge, require Linux checks, both Swift package suites, that compile-only job, and (for a UI change) one focused job with at most 1–3 relevant UI methods on the current head: `gh workflow run ios.yml --ref <PR-branch> -f ui_only=true -f iphone_test_selector='<selectors>'` (or `mac_test_selector`). No full UI suite is required before merge. See `apple/README.md` for commands.
-  - On main, full Mac/iPhone UI suites still run, but **the TestFlight UI gate is off for now by Swaraj's choice**. Archive/sign/upload jobs do not depend on UI results; UI failures remain failed checks and are summarized after one failed-test retry. The single switch is `APPLE_UI_GATE` in `.github/workflows/apple-release-policy.yml`; set it to `'true'` to gate both uploads again. Never cancel an upload.
+  - Full Mac/iPhone UI suites run only on manual dispatch. TestFlight still uploads on Apple-changing pushes to main, without waiting for UI tests. To gate both uploads on the essential plans, set `APPLE_UI_GATE` in `.github/workflows/apple-release-policy.yml` to `'true'`. Never cancel an upload.
 
 ## Commands
 

@@ -18,6 +18,15 @@ enum DemoData {
         if UserDefaults.standard.bool(forKey: "demoUnsynced") {
             return SyncResponse(cursor: now.ISO8601Format())
         }
+        if UserDefaults.standard.bool(forKey: "uiQuickAddInboxOnly") {
+            let schedule = Schedule(
+                id: "demo-work-hours", name: "Work hours", timeZone: calendar.timeZone.identifier,
+                windows: [ScheduleWindow(days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00")],
+                createdAt: now, updatedAt: now)
+            let inbox = TaskCategory(
+                id: TaskCategory.inboxId, name: "Inbox", scheduleId: schedule.id, createdAt: now, updatedAt: now)
+            return SyncResponse(cursor: now.ISO8601Format(), schedules: [schedule], categories: [inbox])
+        }
         let today = calendar.startOfDay(for: now)
         let evening = "demo-routine-evening"
         func at(_ dayOffset: Int, _ hour: Int, _ minute: Int = 0) -> Date {

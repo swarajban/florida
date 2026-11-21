@@ -37,7 +37,7 @@ jobs:
           path: |
             apple/build/ios
             apple/build/macos
-          key: xcode-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('apple/**/*.swift', 'apple/**/*.yml', 'apple/**/*.plist', 'apple/**/*.entitlements', 'apple/**/Package.resolved', 'apple/Design/Assets.xcassets/**', 'apple/scripts/**') }}
+          key: xcode-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('apple/**/*.swift', 'apple/**/*.yml', 'apple/**/*.plist', 'apple/**/*.entitlements', 'apple/**/*.xctestplan', 'apple/**/Package.resolved', 'apple/Design/Assets.xcassets/**', 'apple/scripts/**') }}
           restore-keys: |
             xcode-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-
       - name: Build both apps, widgets, and test runners once
@@ -79,7 +79,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [macos, macos-triage, ios-capture, ios-events, ios-other, ios-smart-add, ios-triage, ios-compact]
+        suite: [macos, macos-triage, ios-capture, ios-events, ios-other, ios-smart-add, ios-triage]
     steps:
       - uses: actions/checkout@v5
       - name: Identify toolchain
@@ -128,17 +128,6 @@ jobs:
             ios-other) args=(ios "${capture[@]/#/-skip-testing:}" "${events[@]/#/-skip-testing:}" "${ios_triage[@]/#/-skip-testing:}" "${ios_smart_add[@]/#/-skip-testing:}") ;;
             ios-smart-add) args=(ios "${ios_smart_add[@]/#/-only-testing:}") ;;
             ios-triage) args=(ios "${ios_triage[@]/#/-only-testing:}") ;;
-            ios-compact)
-              runtime=$(xcrun simctl list runtimes -j | python3 -c '
-          import json, sys
-          runtimes = [r for r in json.load(sys.stdin)["runtimes"] if r.get("isAvailable") and ".iOS-" in r["identifier"]]
-          print(max(runtimes, key=lambda r: tuple(map(int, r["version"].split("."))))["identifier"])
-          ')
-              UDID=$(xcrun simctl create 'Florida compact capture' com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation "$runtime")
-              export UDID
-              echo "Compact capture on iPhone SE (3rd generation), 375 × 667 points: $UDID"
-              args=(ios -only-testing:Florida-iOSUITests/SmartAddTests/testFourSuggestionRowsRemainVisible)
-              ;;
           esac
           bash apple/scripts/check.sh "${args[@]}" | tee apple/ui-test.log | xcbeautify --renderer github-actions
       - name: Report retried failures

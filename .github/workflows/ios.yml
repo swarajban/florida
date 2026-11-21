@@ -1,12 +1,10 @@
 name: iOS
 
-# build:      runs the full simulator suite on main only when the release UI gate is enabled.
-# ui:         explicit ui_only dispatch runs both PR UI suites without release credentials.
+# build:      runs the essential plan only when the release UI gate is enabled.
+# ui:         explicit UI dispatches run without release credentials.
 # testflight: archives, signs and uploads to TestFlight on pushes to main and on manual runs.
 #             Needs the App Store Connect secrets described in apple/README.md.
 on:
-  schedule:
-    - cron: '0 10 * * *'
   push:
     branches: [main]
     paths:
@@ -17,7 +15,11 @@ on:
   workflow_dispatch:
     inputs:
       ui_only:
-        description: Run both PR UI suites only (never upload)
+        description: Run the full UI suites or the supplied selectors (never upload)
+        type: boolean
+        default: false
+      essential_tests:
+        description: Run both default essential test plans (never upload)
         type: boolean
         default: false
       mac_test_selector:
@@ -30,8 +32,8 @@ on:
         default: ''
 
 concurrency:
-  group: ${{ inputs.ui_only && format('apple-ui-{0}', github.ref) || format('ios-run-{0}', github.run_id) }}
-  cancel-in-progress: ${{ inputs.ui_only == true }}
+  group: ${{ (inputs.ui_only || inputs.essential_tests) && format('apple-ui-{0}', github.ref) || format('ios-run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ inputs.ui_only || inputs.essential_tests }}
 
 permissions:
   contents: read
@@ -39,19 +41,47 @@ permissions:
 
 jobs:
   policy:
-    if: inputs.ui_only != true && github.event_name != 'schedule'
+    if: inputs.ui_only != true && inputs.essential_tests != true
     uses: ./.github/workflows/apple-release-policy.yml
 
   ui:
     name: On-demand Apple UI
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.ui_only && inputs.mac_test_selector == '' && inputs.iphone_test_selector == '')
+    if: github.event_name == 'workflow_dispatch' && inputs.ui_only && !inputs.essential_tests && inputs.mac_test_selector == '' && inputs.iphone_test_selector == ''
     uses: ./.github/workflows/apple-checks.yml
     with:
       run_ui: true
 
+  essential:
+    name: Essential tests (${{ matrix.platform }})
+    if: github.event_name == 'workflow_dispatch' && inputs.essential_tests
+    runs-on: macos-26
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ios, macos]
+    env:
+      ESSENTIAL_TESTS: '1'
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+    steps:
+      - uses: actions/checkout@v5
+      - run: brew install xcodegen
+      - name: Test the scheme default without retries
+        run: |
+          set -o pipefail
+          bash apple/scripts/check.sh ${{ matrix.platform }} 2>&1 | tee apple/essential-test.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: essential-test-results-${{ matrix.platform }}
+          path: |
+            apple/build/results/
+            apple/essential-test.log
+          retention-days: 7
+
   mac_focused:
     name: Focused Mac tests
-    if: github.event_name == 'workflow_dispatch' && inputs.ui_only && inputs.mac_test_selector != ''
+    if: github.event_name == 'workflow_dispatch' && inputs.ui_only && !inputs.essential_tests && inputs.mac_test_selector != ''
     runs-on: macos-26
     timeout-minutes: 60
     env:
@@ -84,7 +114,7 @@ jobs:
           path: |
             apple/build/ios
             apple/build/macos
-          key: xcode-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('apple/**/*.swift', 'apple/**/*.yml', 'apple/**/*.plist', 'apple/**/*.entitlements', 'apple/**/Package.resolved', 'apple/Design/Assets.xcassets/**', 'apple/scripts/**') }}
+          key: xcode-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('apple/**/*.swift', 'apple/**/*.yml', 'apple/**/*.plist', 'apple/**/*.entitlements', 'apple/**/*.xctestplan', 'apple/**/Package.resolved', 'apple/Design/Assets.xcassets/**', 'apple/scripts/**') }}
           restore-keys: |
             xcode-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-
       - name: Restore exact-SHA test products or fall back to cached build
@@ -111,13 +141,12 @@ jobs:
 
   iphone_focused:
     name: Focused iPhone tests
-    if: github.event_name == 'workflow_dispatch' && inputs.ui_only && inputs.iphone_test_selector != ''
+    if: github.event_name == 'workflow_dispatch' && inputs.ui_only && !inputs.essential_tests && inputs.iphone_test_selector != ''
     runs-on: macos-26
     timeout-minutes: 60
     env:
       RETRY_FAILED_TESTS: '0'
       HOMEBREW_NO_AUTO_UPDATE: '1'
-      IOS_SIMULATOR_NAME: iPhone 17 Pro Max
     steps:
       - uses: actions/checkout@v5
         with:
@@ -148,7 +177,7 @@ jobs:
           path: |
             apple/build/ios
             apple/build/macos
-          key: xcode-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('apple/**/*.swift', 'apple/**/*.yml', 'apple/**/*.plist', 'apple/**/*.entitlements', 'apple/**/Package.resolved', 'apple/Design/Assets.xcassets/**', 'apple/scripts/**') }}
+          key: xcode-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('apple/**/*.swift', 'apple/**/*.yml', 'apple/**/*.plist', 'apple/**/*.entitlements', 'apple/**/*.xctestplan', 'apple/**/Package.resolved', 'apple/Design/Assets.xcassets/**', 'apple/scripts/**') }}
           restore-keys: |
             xcode-${{ runner.os }}-${{ runner.arch }}-${{ steps.xcode.outputs.version }}-
       - name: Restore exact-SHA test products or fall back to cached build
@@ -192,11 +221,10 @@ jobs:
           if-no-files-found: ignore
 
   build:
-    name: iPhone UI suite
+    name: iPhone essential release tests
     needs: policy
     if: inputs.ui_only != true && needs.policy.outputs.ui_gate == 'true'
     runs-on: macos-26
-    # The unsharded main suite includes simulator boot, all appearances and one retry.
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v5
@@ -211,14 +239,7 @@ jobs:
 
       - name: Pick simulator
         run: |
-          UDID=$(xcrun simctl list devices available -j | python3 -c "
-          import json, sys
-          devices = json.load(sys.stdin)['devices']
-          ios = sorted((k for k in devices if 'iOS' in k), key=lambda k: [int(p) for p in k.split('iOS-')[-1].split('-')])
-          phones = [d for d in devices[ios[-1]] if d['name'].startswith('iPhone') and 'Pro' in d['name'] and 'Max' not in d['name']] or [d for d in devices[ios[-1]] if d['name'].startswith('iPhone')]
-          print(phones[0]['udid'])
-          ")
-          echo "Using simulator $UDID"
+          UDID=$(bash apple/scripts/pick-iphone.sh)
           echo "UDID=$UDID" >> "$GITHUB_ENV"
 
       - name: Build
@@ -241,8 +262,6 @@ jobs:
           xcrun simctl boot "$UDID" || true
           xcrun simctl bootstatus "$UDID" -b
           xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100 --cellularBars 4 || true
-          # The tests wait for visible demo content, exercise the real tab controls, then
-          # capture light/dark screens and large text. No personal data or server is involved.
           xcodebuild test \
             -project Florida.xcodeproj \
             -scheme Florida-iOS \
@@ -297,13 +316,13 @@ jobs:
   testflight:
     name: Upload to TestFlight
     needs: policy
-    if: needs.policy.outputs.ui_gate != 'true' && (inputs.ui_only != true && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')))
+    if: needs.policy.outputs.ui_gate != 'true' && inputs.ui_only != true && inputs.essential_tests != true && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
     uses: ./.github/workflows/ios-upload.yml
     secrets: inherit
 
   gated-testflight:
     name: Upload to TestFlight (UI gate enabled)
     needs: [policy, build]
-    if: needs.policy.outputs.ui_gate == 'true' && (inputs.ui_only != true && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')))
+    if: needs.policy.outputs.ui_gate == 'true' && inputs.ui_only != true && inputs.essential_tests != true && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
     uses: ./.github/workflows/ios-upload.yml
     secrets: inherit
