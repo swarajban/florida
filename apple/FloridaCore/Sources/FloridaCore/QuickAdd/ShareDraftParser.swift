@@ -26,7 +26,7 @@ public enum ShareDraftParser {
         let body = pageTitle.isEmpty ? text : pageTitle
         let lines = body.components(separatedBy: .newlines)
         let firstLine = lines.first ?? ""
-        var draft = QuickAddParser.parse(firstLine, now: now, calendar: calendar, source: source)
+        var draft = QuickAddParser.parse(firstLine, now: now, calendar: calendar, source: source, parseStandaloneMetadata: true)
         if lines.count > 1 {
             let remainder = lines.dropFirst().joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
             if !remainder.isEmpty { draft.notes = [draft.notes, remainder].compactMap { $0 }.joined(separator: "\n") }

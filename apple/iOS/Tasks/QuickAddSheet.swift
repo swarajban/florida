@@ -316,12 +316,9 @@ struct QuickAddSheet: View {
     }
 
     private func insert(_ symbol: String) {
-        guard let range = Range(selection, in: model.quickAddText) else { return }
-        let needsSpace = range.lowerBound > model.quickAddText.startIndex
-            && !model.quickAddText[model.quickAddText.index(before: range.lowerBound)].isWhitespace
-        let insertion = (needsSpace ? " " : "") + symbol
-        model.quickAddText.replaceSubrange(range, with: insertion)
-        selection = NSRange(location: selection.location + insertion.utf16.count, length: 0)
+        guard let result = QuickAddCompletion.insertTrigger(symbol, in: model.quickAddText, selection: selection) else { return }
+        model.quickAddText = result.text
+        selection = NSRange(location: result.caretUTF16, length: 0)
         selectionRevision += 1
         completionSession = QuickAddCompletionSession()
         focused = true
@@ -556,10 +553,7 @@ struct QuickAddSheet: View {
             let pattern = "(?<!\\S)#\(NSRegularExpression.escapedPattern(for: hint))(?!\\S)"
             return text.range(of: pattern, options: .regularExpression)
         }
-        if draft.notes == nil, text == "#" || text.hasSuffix(" #") {
-            return text.index(before: text.endIndex)..<text.endIndex
-        }
-        return nil
+        return QuickAddCompletion.bareCategoryTrigger(in: text)
     }
 
     private func choose(_ category: TaskCategory) {
@@ -567,10 +561,9 @@ struct QuickAddSheet: View {
         parsing = nil
         // A bare # is a launcher, not a parser token. Keep real hints in the text so resolving
         // the first one never promotes a later literal hashtag into a new category hint.
-        if draft.categoryHint == nil, let range = categoryToken {
-            model.quickAddText.removeSubrange(range)
-            model.quickAddText = model.quickAddText.trimmingCharacters(in: .whitespacesAndNewlines)
-            selection = NSRange(location: min(selection.location, model.quickAddText.utf16.count), length: 0)
+        if draft.categoryHint == nil, let result = QuickAddCompletion.removeBareCategoryTrigger(in: model.quickAddText) {
+            model.quickAddText = result.text
+            selection = NSRange(location: result.caretUTF16, length: 0)
             selectionRevision += 1
         }
         model.quickAddCategory = category

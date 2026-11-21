@@ -103,6 +103,7 @@ extension AppModel {
 
     /// ⌘↩ in quick add: hands the text to the full editor, which sends it to the AI parser.
     func parsePaletteWithAI() {
+        paletteTextDidChange()
         let draft = palette.draft
         let parsed = QuickAddParser.parse(palette.text, now: Date(), calendar: taskListCalendar)
         var text = QuickAddParser.removingSource(from: palette.text)
@@ -126,6 +127,7 @@ extension AppModel {
     func submitPalette() {
         switch palette.mode {
         case .quickAdd:
+            paletteTextDidChange()
             if createTask(from: palette.draft, categoryId: palette.completedCategoryId) {
                 closePalette()
             }

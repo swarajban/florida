@@ -2,6 +2,48 @@ import XCTest
 
 final class SmartAddTests: XCTestCase {
     @MainActor
+    func testQuickAddSavesTheFirstWordWithAndWithoutCompletion() {
+        continueAfterFailure = false
+        let app = launch("light")
+        addTeardownBlock {
+            let input = app.textViews["quick-add-input"]
+            if input.exists {
+                print("Quick Add: text=\(input.value ?? "nil"), label=\(input.label), frame=\(input.frame)")
+            }
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = "quick-add-saved-titles"
+            attachment.lifetime = .keepAlways
+            self.add(attachment)
+            app.terminate()
+        }
+        let plainTitle = "Urgent capture proof"
+        let completedTitle = "Buy capture proof"
+        let input = openComposer(app)
+        input.typeText(plainTitle)
+        app.buttons["quick-add-save"].tap()
+
+        app.buttons["New task"].tap()
+        input.typeText(completedTitle)
+        app.typeKey(.leftArrow, modifierFlags: .command)
+        app.buttons["quick-add-symbol-^"].tap()
+        input.typeText("tom")
+        app.typeKey(.rightArrow, modifierFlags: [])
+        app.buttons["quick-add-suggestion-^tomorrow"].tap()
+        app.buttons["Details"].tap()
+        XCTAssertEqual(app.textFields["Title"].value as? String, completedTitle)
+        app.buttons["Add"].tap()
+
+        let filter = app.textFields["tasks-metadata-search"]
+        filter.tap()
+        filter.typeText("capture proof")
+        for title in [plainTitle, completedTitle] {
+            let row = app.buttons.matching(NSPredicate(
+                format: "identifier BEGINSWITH 'tasks-row-' AND label BEGINSWITH %@", title)).firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 5), "Missing saved task with title: \(title)")
+        }
+    }
+
+    @MainActor
     func testTriggerDeletionAndAttentionCapture() {
         continueAfterFailure = false
         let app = launch("light")

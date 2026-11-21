@@ -371,8 +371,10 @@ Symbols must start a whitespace-separated token; symbols inside words and URLs
 are not shortcut syntax. The first supported URL remains the task's source link;
 later URLs stay literal. Only the first `#category` is syntax; later hashtags remain in the
 title. Existing `2h`, `by fri`, `p1`, `after mon`, pinned times, `~2h` estimates,
-and ` -- ` notes retain their meanings. `someday`, `^someday`, or `^none` turns
-on Someday: no due date and no scheduling until that choice is turned off.
+and ` -- ` notes retain their meanings. Bare words such as `Sun` and `Urgent`
+start the title, so use `^sun` or `urgent:` to put those fields first.
+`someday` after title text, `^someday`, or `^none` turns on Someday: no due date
+and no scheduling until that choice is turned off.
 
 Inspired by Remember The Milk's [Smart Add guide](https://www.rememberthemilk.com/help/answer/basics-smartadd-howdoiuse)
 and [one-line examples](https://www.rememberthemilk.com/help/answer/basics-smartadd-whatis).
