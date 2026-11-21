@@ -22,10 +22,32 @@ project=(-project Florida.xcodeproj -configuration Debug)
 ios_signing=(CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO)
 mac_signing=(CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=)
 if [[ $command == build ]]; then
+  python3 - <<'PY'
+import json
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+for scheme, suffix in [("Florida-iOS", "iOS"), ("Florida-macOS", "Mac")]:
+    root = ET.parse(f"Florida.xcodeproj/xcshareddata/xcschemes/{scheme}.xcscheme")
+    plan = f"FloridaEssential{suffix}"
+    defaults = root.findall("./TestAction/TestPlans/TestPlanReference[@default='YES']")
+    if [element.get("reference") for element in defaults] != [f"container:{plan}.xctestplan"]:
+        raise SystemExit(f"{scheme} did not declare {plan} as its default test plan")
+    expected = {
+        ref.get("BlueprintName"): ref.get("BlueprintIdentifier")
+        for ref in root.findall("./TestAction/Testables/TestableReference/BuildableReference")
+    }
+    for filename in (f"{plan}.xctestplan", f"FloridaFull{suffix}.xctestplan"):
+        targets = json.loads(Path(filename).read_text())["testTargets"]
+        if {entry["target"]["name"]: entry["target"]["identifier"] for entry in targets} != expected:
+            raise SystemExit(f"{filename} does not match the generated test target IDs in {scheme}")
+PY
   xcodebuild build-for-testing "${project[@]}" -scheme Florida-iOS \
+    -testPlan FloridaFulliOS \
     -destination 'generic/platform=iOS Simulator' -derivedDataPath build/ios \
     -clonedSourcePackagesDirPath build/SourcePackages "${ios_signing[@]}"
   xcodebuild build-for-testing "${project[@]}" -scheme Florida-macOS \
+    -testPlan FloridaFullMac \
     -destination 'platform=macOS' -derivedDataPath build/macos \
     -clonedSourcePackagesDirPath build/SourcePackages "${mac_signing[@]}"
   exit 0
@@ -33,19 +55,14 @@ fi
 
 action='test'
 input=("${project[@]}" -scheme Florida-macOS -derivedDataPath build/macos -clonedSourcePackagesDirPath build/SourcePackages)
+full_plan=FloridaFullMac
 destination='platform=macOS'
 signing=("${mac_signing[@]}")
 if [[ $command == ios ]]; then
   input=("${project[@]}" -scheme Florida-iOS -derivedDataPath build/ios -clonedSourcePackagesDirPath build/SourcePackages)
+  full_plan=FloridaFulliOS
   signing=("${ios_signing[@]}")
-  UDID=${UDID:-$(xcrun simctl list devices available -j | python3 -c '
-import json, sys
-devices = json.load(sys.stdin)["devices"]
-ios = sorted((k for k in devices if "iOS-" in k), key=lambda k: [int(p) for p in k.split("iOS-")[-1].split("-")])
-phones = [d for d in devices[ios[-1]] if d["name"].startswith("iPhone")]
-pro = [d for d in phones if "Pro" in d["name"] and "Max" not in d["name"]]
-print((pro or phones)[0]["udid"])
-')}
+  UDID=${UDID:-$(bash scripts/pick-iphone.sh)}
   destination="id=$UDID"
   if ! xcrun simctl list devices booted | grep -Fq "$UDID"; then
     xcrun simctl boot "$UDID"
@@ -58,6 +75,8 @@ if [[ ${TEST_WITHOUT_BUILDING:-0} == 1 ]]; then
   runs=(build/"$command"/Build/Products/*.xctestrun)
   [[ ${#runs[@]} == 1 && -f ${runs[0]} ]] || { echo 'Expected one compiled xctestrun file; run build first.' >&2; exit 1; }
   input=(-xctestrun "${runs[0]}")
+elif [[ ${ESSENTIAL_TESTS:-0} != 1 ]]; then
+  input+=(-testPlan "$full_plan")
 fi
 mkdir -p build/results
 result="build/results/$command-$(date +%Y%m%d-%H%M%S)-$$.xcresult"
@@ -67,3 +86,7 @@ if [[ ${RETRY_FAILED_TESTS:-0} == 1 ]]; then
 fi
 xcodebuild "$action" "${input[@]}" -destination "$destination" \
   "${test_args[@]}" "${signing[@]}" "$@"
+if [[ ${ESSENTIAL_TESTS:-0} == 1 ]]; then
+  CI_XCODEBUILD_ACTION=test-without-building CI_XCODEBUILD_EXIT_CODE=0 \
+    CI_RESULT_BUNDLE_PATH="$result" ./ci_scripts/ci_post_xcodebuild.sh
+fi

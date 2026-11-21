@@ -4,6 +4,41 @@ import XCTest
 /// Kept screenshots are exported from the result bundle by CI for light/dark visual review.
 final class SmokeTests: XCTestCase {
     @MainActor
+    func testCalendarOpensEventComposer() {
+        continueAfterFailure = false
+        let app = launchEssentialFixture("mac-essential-calendar")
+        XCTAssertTrue(app.staticTexts["calendar-range-title"].waitForExistence(timeout: 10))
+        app.typeKey("n", modifierFlags: [.command, .option])
+        XCTAssertTrue(app.textFields["event-quick-add-input"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testQuickAddSavesOneTask() {
+        continueAfterFailure = false
+        let app = launchEssentialFixture("mac-essential-capture")
+        XCTAssertTrue(app.staticTexts["Book dentist appointment"].waitForExistence(timeout: 10))
+        app.typeKey("c", modifierFlags: [])
+        let input = app.textFields["palette-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 5))
+        let title = "Essential capture proof"
+        input.typeText(title)
+        app.typeKey(.return, modifierFlags: [])
+        XCTAssertTrue(app.staticTexts[title].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    private func launchEssentialFixture(_ screenshot: String) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-demoData", "YES", "-uiAppearance", "light"]
+        addTeardownBlock {
+            self.capture(app.windows.firstMatch, screenshot)
+            app.terminate()
+        }
+        app.launch()
+        return app
+    }
+
+    @MainActor
     func testQuickAddTriggerDeletionDismissesSuggestions() {
         continueAfterFailure = false
         let app = XCUIApplication()

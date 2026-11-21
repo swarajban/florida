@@ -1,0 +1,34 @@
+{
+  "configurations": [
+    {
+      "id": "E3316217-8424-4DE4-A0F5-DF630CA28812",
+      "name": "Default",
+      "options": {}
+    }
+  ],
+  "defaultOptions": {},
+  "testTargets": [
+    {
+      "target": {
+        "containerPath": "container:Florida.xcodeproj",
+        "identifier": "E586BDAC34F08C6B35A40EE7",
+        "name": "FloridaWidgetsTests"
+      }
+    },
+    {
+      "target": {
+        "containerPath": "container:Florida.xcodeproj",
+        "identifier": "D277B70E3CAB4BD96EE068A4",
+        "name": "Florida-iOSTests"
+      }
+    },
+    {
+      "target": {
+        "containerPath": "container:Florida.xcodeproj",
+        "identifier": "40ACCE2BAAB36C8FE396C07E",
+        "name": "Florida-iOSUITests"
+      }
+    }
+  ],
+  "version": 1
+}

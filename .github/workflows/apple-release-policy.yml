@@ -11,7 +11,7 @@ jobs:
     name: UI release gate
     runs-on: ubuntu-latest
     env:
-      # Swaraj chose non-blocking UI for now; set this one value true to gate both uploads.
+      # Set to true to gate both uploads on their essential test plans.
       APPLE_UI_GATE: 'false'
     outputs:
       ui_gate: ${{ steps.gate.outputs.ui_gate }}

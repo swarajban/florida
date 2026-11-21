@@ -33,6 +33,10 @@ schemes:
     test:
       config: Debug
       targets: [FloridaWidgetsTests, Florida-iOSTests, Florida-iOSUITests]
+      testPlans:
+        - path: FloridaEssentialiOS.xctestplan
+          defaultPlan: true
+        - path: FloridaFulliOS.xctestplan
       preferredScreenCaptureFormat: screenRecording
       deleteScreenshotsWhenEachTestSucceeds: false
     archive:
@@ -46,6 +50,10 @@ schemes:
     test:
       config: Debug
       targets: [Florida-macOSKeyboardTests, Florida-macOSUITests]
+      testPlans:
+        - path: FloridaEssentialMac.xctestplan
+          defaultPlan: true
+        - path: FloridaFullMac.xctestplan
       preferredScreenCaptureFormat: screenRecording
       deleteScreenshotsWhenEachTestSucceeds: false
     archive:

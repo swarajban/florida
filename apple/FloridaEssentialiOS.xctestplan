@@ -1,0 +1,38 @@
+{
+  "configurations": [
+    {
+      "id": "DEFB040E-5351-4E28-B4C4-2631680CFA94",
+      "name": "Default",
+      "options": {}
+    }
+  ],
+  "defaultOptions": {},
+  "testTargets": [
+    {
+      "target": {
+        "containerPath": "container:Florida.xcodeproj",
+        "identifier": "E586BDAC34F08C6B35A40EE7",
+        "name": "FloridaWidgetsTests"
+      }
+    },
+    {
+      "target": {
+        "containerPath": "container:Florida.xcodeproj",
+        "identifier": "D277B70E3CAB4BD96EE068A4",
+        "name": "Florida-iOSTests"
+      }
+    },
+    {
+      "selectedTests": [
+        "SmokeTests/testSingleDayCoworkerOOO",
+        "SmartAddTests/testQuickAddSavesOneTask"
+      ],
+      "target": {
+        "containerPath": "container:Florida.xcodeproj",
+        "identifier": "40ACCE2BAAB36C8FE396C07E",
+        "name": "Florida-iOSUITests"
+      }
+    }
+  ],
+  "version": 1
+}

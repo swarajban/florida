@@ -1,0 +1,27 @@
+{
+  "configurations": [
+    {
+      "id": "EDF57CF1-B1D4-485A-81C7-ABEF818396D1",
+      "name": "Default",
+      "options": {}
+    }
+  ],
+  "defaultOptions": {},
+  "testTargets": [
+    {
+      "target": {
+        "containerPath": "container:Florida.xcodeproj",
+        "identifier": "82BA827A566E64A05840BC81",
+        "name": "Florida-macOSKeyboardTests"
+      }
+    },
+    {
+      "target": {
+        "containerPath": "container:Florida.xcodeproj",
+        "identifier": "863492102EB5244BBDADB257",
+        "name": "Florida-macOSUITests"
+      }
+    }
+  ],
+  "version": 1
+}

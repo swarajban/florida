@@ -131,8 +131,7 @@ both selectors runs one focused job per platform instead of the full gate.
 The focused iPhone job reserves 55 minutes for compilation and tests and two
 minutes for result upload, so long capture flows retain a completed result or
 an explicit timeout with native artifacts.
-Both Mac-only selector jobs and the reusable full Mac UI job have a 60-minute limit,
-matching main's standalone Mac job; the iPhone shard limits are unchanged.
+The Mac selector job and the full Mac shards have a 60-minute limit.
 
 This explicit dispatch uses the existing iOS workflow's `ui_only` mode: it never
 starts a release or reads release secrets. It runs against the branch head, so
@@ -146,13 +145,12 @@ the same branch automatically cancels a superseded request. UI-only requests
 have a separate concurrency group, so they cannot cancel or replace a queued
 release, even if dispatched on main.
 
-The on-demand run uses the same cached build recipe as the compile gate, builds both
+The full on-demand run uses the same cached build recipe as the compile gate, builds both
 schemes once and runs Darwin package tests, then uploads the compiled products.
-Eight independent jobs use `test-without-building`: the Mac suite plus a separate
+Seven independent jobs use `test-without-building`: the Mac suite plus a separate
 Mac Inbox/Someday shard, iPhone capture/plan/resource and task-grouping tests, event capture/calendar
 tests, a separate Smart Add shard, the remaining iPhone tests (including the drag matrix) plus unit/widget tests,
-a separate iPhone Inbox/Someday shard, and a focused
-capture-layout check on an iPhone SE (3rd generation, 375 × 667 points). The event shard
+a separate iPhone Inbox/Someday shard. The event shard
 selects the whole `EventQuickAddTests` class
 and three calendar/recurrence smoke tests. The remaining shard excludes exactly
 the explicit capture, event, Smart Add and triage selections. The Mac remainder excludes its
@@ -160,14 +158,12 @@ triage selection too, so each existing test belongs to one shard and new tests
 still join the gate. Each shard is serial to avoid desktop and simulator
 interaction races; failure in one does not cancel the others.
 
-The Smart Add shard keeps its seven methods out of the remainder, which exceeded
+The Smart Add shard keeps its methods out of the remainder, which exceeded
 the 45-minute execution limit in the first Someday gate and could not finish uploading
 its results. The two task-grouping methods join the roughly 20-minute capture shard
 after the reduced remainder also exhausted its budget with its final method unfinished.
-Unit/widget tests remain in the remainder. On-demand jobs have a 45-minute hard
-budget for retries and result upload, not a target runtime. Main's unsharded
-iPhone and Mac UI jobs have 75- and 60-minute budgets respectively; their upload
-jobs remain independent. A dispatch uses its branch's workflow definitions:
+Unit/widget tests remain in the remainder. On-demand iPhone shards have a 45-minute hard
+budget for retries and result upload, not a target runtime. A dispatch uses its branch's workflow definitions:
 incorporate these changes before requesting UI checks on an older branch;
 already-started runs keep their original partitions and limits.
 
@@ -176,16 +172,18 @@ only, without weakening assertions. First failures remain in the raw log and
 xcresult and are listed in the run summary even if the retry passes. Results
 and logs are artifacts for seven days; a passing retry is not a flake fix.
 
-Main's release workflows remain separate. After an Apple-changing merge,
-`ios.yml` runs the complete iPhone/widget suite and `macos.yml` runs the full
-Mac suite, **without gating TestFlight for now, by Swaraj's choice**. Independent
-archive/sign/upload jobs compile the apps and can upload before UI tests finish
-or even when they fail. A persistent UI failure is still a failed check and is
-listed in that job's run summary; it is not hidden with `continue-on-error`.
+For the same essential plans used in [Xcode Cloud](../docs/xcode-cloud.md), dispatch
+`gh workflow run ios.yml --ref <branch> -f essential_tests=true`. This runs the
+scheme defaults on Mac and iPhone (preferring iPhone 17 Pro Max) without retries
+or uploads. Focused selectors and full manual suites use the unrestricted plans.
+
+Main's release workflows remain separate. After an Apple-changing merge, both
+apps still archive, sign and upload automatically, without starting any UI tests.
+Full UI suites are available only via manual dispatch.
 
 The single checked-in switch is `APPLE_UI_GATE: 'false'` in
 `.github/workflows/apple-release-policy.yml`. Change that value to `'true'` to
-make both upload paths depend on successful full UI suites again. With it off,
+make both upload paths depend on their essential test plans. With it off,
 uploads depend only on the small Linux policy job, never on a UI job. Release
 serialization applies only to the upload job, so an earlier run's slow UI suite
 cannot hold up the next upload. Active uploads are never cancelled by later runs.
