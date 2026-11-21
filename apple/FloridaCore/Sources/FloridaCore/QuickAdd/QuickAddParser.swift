@@ -59,8 +59,8 @@ public struct QuickAddDraft: Hashable, Sendable {
 /// - Duration: `2h`, `30m`, `45min`, `1h30m`, `1h30`, `1h 30m`, `1.5h`, `90 min`, `2 hours`,
 ///   `for 2h`, `~2h`. Only the first duration counts; later ones stay in the title.
 /// - Priority: `!asap` `!urgent` `!high` `!h` `!med` `!medium` `!m` `!low` `!l`, or `p1`…`p4`
-///   (asap, high, medium, low). A bare `asap` / `urgent` as the first or last word of the title
-///   also means asap; in the middle of a sentence it is left alone.
+///   (asap, high, medium, low). `asap:` / `urgent:` at the start or a bare `asap` / `urgent`
+///   after title text also mean asap.
 /// - Category: `#slug` (letters, digits, `_`, `-`). The first one wins and is returned as `categoryHint`.
 /// - Context: `@computer` `@errand` `@home` `@office`. The first one wins; any other `@word`
 ///   (a mention such as `@sam`) stays in the title.
@@ -69,6 +69,7 @@ public struct QuickAddDraft: Hashable, Sendable {
 ///   `11/20/2026`, `2026-11-20`, `nov 20`, `nov 20th`, `20 nov`, `nov 20 2026`. Month/day dates
 ///   without a year that already passed this year roll to next year.
 /// - Soft deadline: `by <date>` or a bare date → `dueAt` at 17:00 on that day, `deadlineType = .soft`.
+///   A bare date starting with a word is literal at the start of a title; use `by` or `^` there.
 /// - Hard deadline: `due <date>` / `deadline <date>` → `.hard`. `by` and `due` take an optional
 ///   clock time: `by fri 3pm`, `by fri at 3pm`, `due tomorrow 9:30`, `by 5pm` (today if still
 ///   ahead, otherwise tomorrow).
@@ -113,7 +114,10 @@ public enum QuickAddParser {
         parse(text, now: now, calendar: calendar, source: nil)
     }
 
-    static func parse(_ text: String, now: Date, calendar: Calendar, source suppliedSource: TaskSource?) -> QuickAddDraft {
+    static func parse(
+        _ text: String, now: Date, calendar: Calendar, source suppliedSource: TaskSource?,
+        parseStandaloneMetadata: Bool = false
+    ) -> QuickAddDraft {
         let (body, notes) = QuickAddScanner.splitNotes(text)
         var tokens = body.split(whereSeparator: \.isWhitespace).map(String.init)
         var source = suppliedSource
@@ -124,6 +128,7 @@ public enum QuickAddParser {
             source = source ?? extracted
         }
         let scanner = QuickAddScanner(tokens: tokens, now: now, calendar: calendar)
+        let preserveLeadingWords = !parseStandaloneMetadata || tokens.count != 1
         var draft = QuickAddDraft(notes: notes, source: source)
         var title: [String] = []
         var i = 0
@@ -137,7 +142,7 @@ public enum QuickAddParser {
                 continue
             }
 
-            if word == "someday", !draft.someday {
+            if word == "someday", !title.isEmpty || !preserveLeadingWords, !draft.someday {
                 draft.someday = true
                 draft.clearsDueAndPin = true
                 draft.dueAt = nil
@@ -239,7 +244,13 @@ public enum QuickAddParser {
                 i += 1 + moment.consumed
                 continue
             }
-            if let moment = scanner.parseMoment(at: i, bareHourFirst: false) {
+            let leadingWord = preserveLeadingWords && title.isEmpty && word.first?.isLetter == true
+            if let moment = scanner.parseMoment(at: i, bareHourFirst: false, bareHourAfterDate: !leadingWord) {
+                if leadingWord, moment.day == nil || moment.clock == nil {
+                    title.append(contentsOf: tokens[i..<(i + moment.consumed)])
+                    i += moment.consumed
+                    continue
+                }
                 if moment.clock != nil {
                     if draft.pinnedStart == nil {
                         draft.pinnedStart = scanner.resolve(moment, defaultClock: .startOfDay)
@@ -261,8 +272,8 @@ public enum QuickAddParser {
         }
 
         // "asap: reply to Jane", "reply to Jane asap" — but not "the asap category".
-        if draft.priority == nil, let first = title.first, let last = title.last {
-            if QuickAddScanner.isBareUrgency(first) {
+        if draft.priority == nil, title.count > 1 || !preserveLeadingWords, let first = title.first, let last = title.last {
+            if first.hasSuffix(":") || !preserveLeadingWords, QuickAddScanner.isBareUrgency(first) {
                 title.removeFirst()
                 draft.priority = .asap
             } else if QuickAddScanner.isBareUrgency(last) {
@@ -561,12 +572,12 @@ struct QuickAddScanner {
 
     /// `<date> [at] <clock>`, `<date>`, or `<clock> [<date>]`. A bare hour counts as a clock
     /// after a date, or at the front when `bareHourFirst` is set (used after `at`).
-    func parseMoment(at i: Int, bareHourFirst: Bool) -> Moment? {
+    func parseMoment(at i: Int, bareHourFirst: Bool, bareHourAfterDate: Bool = true) -> Moment? {
         if let date = parseDate(at: i) {
             var moment = Moment(day: date.day, clock: nil, consumed: date.consumed)
             var j = i + date.consumed
             if word(j) == "at" { j += 1 }
-            if parseDuration(at: j) == nil, let clock = parseClock(at: j, allowBareHour: true) {
+            if parseDuration(at: j) == nil, let clock = parseClock(at: j, allowBareHour: bareHourAfterDate) {
                 moment.clock = clock.clock
                 moment.consumed = j + clock.consumed - i
             }

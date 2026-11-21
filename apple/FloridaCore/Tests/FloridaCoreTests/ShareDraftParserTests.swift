@@ -59,6 +59,12 @@ import Testing
         #expect(draft.dueAt != nil)
     }
 
+    @Test func sharedProseKeepsTheFirstTitleWord() throws {
+        let draft = try #require(ShareDraftParser.parse(ShareInput(text: "Sun roof repair"), now: now, calendar: calendar))
+        #expect(draft.title == "Sun roof repair")
+        #expect(draft.dueAt == nil)
+    }
+
     @Test func multilineTextPreservesNotesAndFindsTheirLink() throws {
         let notes = "Read this background\nhttps://example.com/article"
         let draft = try #require(ShareDraftParser.parse(ShareInput(text: "Review 30m\n" + notes), now: now, calendar: calendar))

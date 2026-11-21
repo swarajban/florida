@@ -242,6 +242,33 @@ private func parse(_ text: String, now: Date = sundayMorning, calendar: Calendar
         #expect(parse("Form 2 teams").durationMinutes == nil)
     }
 
+    @Test(arguments: [
+        "Sun roof repair", "Sat prep checklist", "Mon 9 planning", "Mon report review", "Today show notes", "Tomorrow planning",
+        "Next week planning notes", "In 2 days progress memo", "May 4 planning notes", "Mar report review",
+        "May renew passport", "Noon briefing notes", "Midnight launch checklist", "Someday reading list",
+        "Urgent support issue", "ASAP rollout plan", "Plan offsite", "Call the office", "In the office",
+        "At the office", "For the team", "Next steps", "Work budget review", "Urgent", "Sun",
+    ])
+    func leadingTitleWordsAreNotMetadata(_ text: String) {
+        #expect(parse(text) == QuickAddDraft(title: text))
+        #expect(parse("#work " + text) == QuickAddDraft(title: text, categoryHint: "work"))
+    }
+
+    @Test func explicitLeadingAndImplicitTrailingMetadataStillWork() {
+        #expect(parse("^sun Roof repair").dueAt == local(2026, 11, 15, 17))
+        #expect(parse("by sun Roof repair").title == "Roof repair")
+        #expect(parse("Roof repair sun").dueAt == local(2026, 11, 15, 17))
+        #expect(parse("Sun roof repair by fri").title == "Sun roof repair")
+        #expect(parse("Sun roof repair by fri").dueAt == local(2026, 11, 13, 17))
+        #expect(parse("fri at 3pm Roof repair").pinnedStart == local(2026, 11, 13, 15))
+        #expect(parse("11/20/2026 at 2pm Roof repair").title == "Roof repair")
+        #expect(parse("11/20/2026 at 2pm Roof repair").pinnedStart == local(2026, 11, 20, 14))
+        #expect(parse("!urgent Support issue").priority == .asap)
+        #expect(parse("urgENT: Support issue").title == "Support issue")
+        #expect(parse("Read someday").someday)
+        #expect(parse("^someday Reading list").someday)
+    }
+
     @Test func forPrefixAndTwoTokenDurations() {
         #expect(parse("Nap for 2h").durationMinutes == 120)
         #expect(parse("Nap for 2h").title == "Nap")

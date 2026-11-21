@@ -142,6 +142,96 @@ import Testing
         #expect(QuickAddCompletion.complete(choice, in: text)?.text == "Work *every 2 weeks #work")
     }
 
+    @Test(arguments: ["^tom", "~tom", "=45", "*every 2 wee"], ["Buy milk", "👩🏽‍💻 Buy milk"])
+    func completionAtTitleStartPreservesTheTitle(_ query: String, _ title: String) throws {
+        let text = query + " " + title
+        let choice = try #require(suggestions(text, caret: (query + " ").utf16.count).first)
+        #expect(choice.replacementRange == NSRange(location: 0, length: query.utf16.count))
+        let result = try #require(QuickAddCompletion.complete(choice, in: text))
+        #expect(result.text == choice.replacement + " " + title)
+        #expect(result.caretUTF16 == (choice.replacement + " ").utf16.count)
+        #expect(QuickAddParser.parse(result.text, now: .distantPast, calendar: PacificTestCalendar.calendar).title == title)
+    }
+
+    @Test func incompleteClauseDoesNotOverwriteAWordThatOnlyStartsLikeACompletion() {
+        #expect(suggestions("^next Work orders", caret: "^next W".utf16.count).isEmpty)
+        #expect(suggestions("*every 2 Weekly chores", caret: "*every 2 Wee".utf16.count).isEmpty)
+    }
+
+    @Test func bareTriggerDoesNotReplaceAParsableWordBeyondItsCaret() throws {
+        let text = "^ Tomorrow planning"
+        let choice = try #require(suggestions(text, caret: 1).first { $0.replacement == "^fri" })
+        let result = try #require(QuickAddCompletion.complete(choice, in: text))
+        #expect(result.text == "^fri Tomorrow planning")
+        #expect(result.caretUTF16 == "^fri ".utf16.count)
+    }
+
+    @Test func canonicallyEquivalentTextCanHaveAnIncompatibleReplacementRange() throws {
+        let text = "Cafe\u{301} ^tom Buy milk"
+        let updated = "Café ^tom Buy milk"
+        let selection = NSRange(location: "Cafe\u{301} ^tom".utf16.count, length: 0)
+        var session = QuickAddCompletionSession()
+        let choice = try #require(session.suggestions(in: text, selection: selection, categories: []).first)
+        #expect(QuickAddCompletion.complete(choice, in: updated) == nil)
+        session.dismiss(in: text, selection: selection)
+        #expect(!session.isDismissed(in: updated, selection: selection))
+    }
+
+    @Test(arguments: ["#", "@", "^", "!", "*", "=", "&", "~"])
+    func insertingToolbarTriggerKeepsTitleAndCaretSeparate(_ symbol: String) throws {
+        let text = "Cafe\u{301} 👩🏽‍💻 Buy milk"
+        let emoji = (text as NSString).range(of: "👩🏽‍💻")
+        let insideWord = NSRange(location: (text as NSString).range(of: "Buy").location + 1, length: 2)
+        for (selection, prefix) in [(emoji, "Cafe\u{301} "), (insideWord, "Cafe\u{301} 👩🏽‍💻 ")] {
+            let suffix = String(text.dropFirst(prefix.count))
+            let result = try #require(QuickAddCompletion.insertTrigger(symbol, in: text, selection: selection))
+            #expect(result.text == prefix + symbol + " " + suffix)
+            #expect(result.caretUTF16 == (prefix + symbol).utf16.count)
+        }
+    }
+
+    @Test func triggerInsertionReusesWhitespaceAndRejectsInvalidUTF16Selection() throws {
+        let text = "Buy\tmilk"
+        let result = try #require(QuickAddCompletion.insertTrigger("!", in: text, selection: NSRange(location: 3, length: 0)))
+        #expect(result.text == "Buy !\tmilk")
+        #expect(result.caretUTF16 == 5)
+        #expect(QuickAddCompletion.insertTrigger("#", in: "😀 milk", selection: NSRange(location: 1, length: 0)) == nil)
+    }
+
+    @Test func notesToolbarTriggerKeepsTheTitleAndExistingNotes() throws {
+        for text in ["Buy milk", "Buy milk //", "Buy milk -- existing note"] {
+            let result = try #require(QuickAddCompletion.insertTrigger("//", in: text, selection: NSRange(location: 0, length: 0)))
+            #expect(result.text == (text == "Buy milk" ? "Buy milk //" : text))
+            #expect(result.caretUTF16 == result.text.utf16.count)
+            #expect(QuickAddParser.parse(result.text, now: .distantPast, calendar: PacificTestCalendar.calendar).title == "Buy milk")
+        }
+    }
+
+    @Test func bareCategoryTriggerOnlyMatchesAStandaloneBodyToken() throws {
+        for text in ["# Buy milk", "👩🏽‍💻 # Buy milk", "Buy milk #", "Buy milk # // Notes"] {
+            let range = try #require(QuickAddCompletion.bareCategoryTrigger(in: text))
+            #expect(text[range] == "#")
+            #expect(NSRange(range, in: text) == (text as NSString).range(of: "#"))
+        }
+        for text in ["Buy milk #word", "Buy milk // #", "Buy milk -- #", "C# notes"] {
+            #expect(QuickAddCompletion.bareCategoryTrigger(in: text) == nil)
+        }
+    }
+
+    @Test func removingBareCategoryTriggerRestoresTheCaretOutsideTheTitle() throws {
+        let cases = [
+            ("# Buy milk", "Buy milk", ""),
+            ("👩🏽‍💻 # Buy milk", "👩🏽‍💻 Buy milk", "👩🏽‍💻 "),
+            ("Buy milk #", "Buy milk", "Buy milk"),
+            ("Buy milk # // Notes", "Buy milk // Notes", "Buy milk "),
+        ]
+        for (text, expected, prefix) in cases {
+            let result = try #require(QuickAddCompletion.removeBareCategoryTrigger(in: text))
+            #expect(result.text == expected)
+            #expect(result.caretUTF16 == prefix.utf16.count)
+        }
+    }
+
     @Test func tokenBoundariesDoNotReopenCompletedClauses() {
         for token in ["#work", "@office", "!1", "^tomorrow", "^next week", "*weekly", "*every 2 weeks", "=45m", "~tomorrow", "//"] {
             #expect(suggestions("Work " + token + " ").isEmpty, "\(token)")

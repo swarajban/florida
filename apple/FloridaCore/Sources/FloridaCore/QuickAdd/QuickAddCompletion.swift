@@ -7,7 +7,7 @@ public struct QuickAddCompletionSession: Sendable {
     public init() {}
 
     public func isDismissed(in text: String, selection: NSRange) -> Bool {
-        dismissedText == text && dismissedSelection == selection
+        dismissedSelection == selection && dismissedText?.utf16.elementsEqual(text.utf16) == true
     }
 
     public mutating func dismiss(in text: String, selection: NSRange) {
@@ -50,6 +50,46 @@ public enum QuickAddCompletion {
         public let caretUTF16: Int
     }
 
+    public static func insertTrigger(_ symbol: String, in text: String, selection: NSRange) -> Result? {
+        guard let range = Range(selection, in: text) else { return nil }
+        var anchor = range.lowerBound
+        if symbol == "//" {
+            if QuickAddScanner.splitNotes(text).body.endIndex != text.endIndex {
+                return Result(text: text, caretUTF16: text.utf16.count)
+            }
+            anchor = text.endIndex
+        } else if anchor < text.endIndex, !text[anchor].isWhitespace {
+            while anchor > text.startIndex, !text[text.index(before: anchor)].isWhitespace {
+                anchor = text.index(before: anchor)
+            }
+        }
+        let leading = anchor > text.startIndex && !text[text.index(before: anchor)].isWhitespace ? " " : ""
+        let trailing = anchor < text.endIndex && !text[anchor].isWhitespace ? " " : ""
+        let offset = NSRange(text.startIndex..<anchor, in: text).length
+        return Result(
+            text: text.replacingCharacters(in: anchor..<anchor, with: leading + symbol + trailing),
+            caretUTF16: offset + leading.utf16.count + symbol.utf16.count)
+    }
+
+    public static func bareCategoryTrigger(in text: String) -> Range<String.Index>? {
+        let body = QuickAddScanner.splitNotes(text).body
+        guard let token = body.split(whereSeparator: \.isWhitespace).first(where: { $0 == "#" }) else { return nil }
+        return token.startIndex..<token.endIndex
+    }
+
+    public static func removeBareCategoryTrigger(in text: String) -> Result? {
+        guard let token = bareCategoryTrigger(in: text) else { return nil }
+        var range = token
+        if range.upperBound < text.endIndex, text[range.upperBound].isWhitespace {
+            range = range.lowerBound..<text.index(after: range.upperBound)
+        } else if range.lowerBound > text.startIndex {
+            range = text.index(before: range.lowerBound)..<range.upperBound
+        }
+        return Result(
+            text: text.replacingCharacters(in: range, with: ""),
+            caretUTF16: NSRange(text.startIndex..<range.lowerBound, in: text).length)
+    }
+
     public static func suggestions(
         in text: String, caretUTF16: Int, categories: [TaskCategory]
     ) -> [QuickAddSuggestion] {
@@ -71,22 +111,24 @@ public enum QuickAddCompletion {
         if symbol == "/", token != "/", token != "//" { return [] }
         let queryStart = symbol == "/" ? token.endIndex : text.index(after: token.startIndex)
         guard queryStart <= caret else { return [] }
-        let query = normalize(String(text[queryStart..<caret]))
-        if caret > token.endIndex, query.isEmpty { return [] }
+        var queryEnd = caret
         var end = token.endIndex
         if "^*=~".contains(symbol) {
             var calendar = Calendar(identifier: .gregorian)
             calendar.timeZone = TimeZone(secondsFromGMT: 0)!
             let scanner = QuickAddScanner(
                 tokens: tokens.map(String.init), now: Date(timeIntervalSince1970: 0), calendar: calendar)
-            if let clause = scanner.symbolClause(at: index) {
+            if (token.count > 1 || caret > token.endIndex), let clause = scanner.symbolClause(at: index) {
                 end = tokens[index + clause.consumed - 1].endIndex
                 if caret > end, text[text.index(before: caret)].isWhitespace { return [] }
             }
-            if let editing = tokens[index...].first(where: { $0.startIndex <= caret && caret <= $0.endIndex }) {
-                end = max(end, editing.endIndex)
+            if let editing = tokens[index...].last(where: { $0.startIndex < caret }), editing.endIndex > end {
+                end = editing.endIndex
+                queryEnd = max(caret, end)
             }
         }
+        let query = normalize(String(text[queryStart..<queryEnd]))
+        if caret > token.endIndex, query.isEmpty { return [] }
         let range = NSRange(token.startIndex..<end, in: text)
         let choices: [(id: String, title: String, value: String, aliases: [String], categoryId: String?)]
         switch symbol {
@@ -149,7 +191,7 @@ public enum QuickAddCompletion {
     }
 
     public static func complete(_ suggestion: QuickAddSuggestion, in text: String) -> Result? {
-        guard suggestion.sourceText == text,
+        guard suggestion.sourceText.utf16.elementsEqual(text.utf16),
               let range = Range(suggestion.replacementRange, in: text) else { return nil }
         var replacement = suggestion.replacement
         var caret = suggestion.replacementRange.location + replacement.utf16.count
