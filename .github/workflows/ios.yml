@@ -117,6 +117,7 @@ jobs:
     env:
       RETRY_FAILED_TESTS: '0'
       HOMEBREW_NO_AUTO_UPDATE: '1'
+      IOS_SIMULATOR_NAME: iPhone 17 Pro Max
     steps:
       - uses: actions/checkout@v5
         with:

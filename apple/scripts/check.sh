@@ -39,14 +39,23 @@ if [[ $command == ios ]]; then
   input=("${project[@]}" -scheme Florida-iOS -derivedDataPath build/ios -clonedSourcePackagesDirPath build/SourcePackages)
   signing=("${ios_signing[@]}")
   UDID=${UDID:-$(xcrun simctl list devices available -j | python3 -c '
-import json, sys
+import json, os, sys
 devices = json.load(sys.stdin)["devices"]
 ios = sorted((k for k in devices if "iOS-" in k), key=lambda k: [int(p) for p in k.split("iOS-")[-1].split("-")])
+target = os.environ.get("IOS_SIMULATOR_NAME")
+if target:
+    for runtime in reversed(ios):
+        for device in devices[runtime]:
+            if device["name"] == target:
+                print(device["udid"])
+                sys.exit(0)
+    sys.exit(f"No available simulator named {target}")
 phones = [d for d in devices[ios[-1]] if d["name"].startswith("iPhone")]
 pro = [d for d in phones if "Pro" in d["name"] and "Max" not in d["name"]]
 print((pro or phones)[0]["udid"])
 ')}
   destination="id=$UDID"
+  echo "Using iOS simulator: $(xcrun simctl list devices available | grep -F "$UDID")"
   if ! xcrun simctl list devices booted | grep -Fq "$UDID"; then
     xcrun simctl boot "$UDID"
   fi
