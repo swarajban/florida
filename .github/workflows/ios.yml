@@ -33,7 +33,7 @@ on:
 
 concurrency:
   group: ${{ (inputs.ui_only || inputs.essential_tests) && format('apple-ui-{0}', github.ref) || format('ios-run-{0}', github.run_id) }}
-  cancel-in-progress: ${{ inputs.ui_only || inputs.essential_tests }}
+  cancel-in-progress: ${{ inputs.ui_only == true || inputs.essential_tests == true }}
 
 permissions:
   contents: read
