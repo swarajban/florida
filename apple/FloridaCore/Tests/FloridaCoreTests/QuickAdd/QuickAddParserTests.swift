@@ -24,6 +24,14 @@ private func parse(_ text: String, now: Date = sundayMorning, calendar: Calendar
 }
 
 @Suite struct QuickAddParserTests {
+    @Test func preservesUnfamiliarFirstWordAndTitleCase() {
+        let title = "famalooda secret Santa"
+        let draft = parse(title)
+        #expect(draft.title == title)
+        #expect(draft.categoryHint == nil)
+        #expect(draft.notes == nil)
+    }
+
     @Test func fullLineWithDurationCategoryDeadlineAndPriority() {
         let draft = parse("Write design doc 2h #work by fri !high")
         #expect(draft.title == "Write design doc")

@@ -4,23 +4,40 @@ final class SmartAddTests: XCTestCase {
     @MainActor
     func testQuickAddSavesOneTask() {
         continueAfterFailure = false
-        let app = launch("light")
-        let title = "Essential capture proof"
+        let app = XCUIApplication()
+        app.launchArguments = ["-demoData", "YES", "-uiTab", "tasks", "-uiAppearance", "light", "-uiQuickAddInboxOnly", "YES"]
+        app.launch()
+        let input = app.textViews["quick-add-input"]
         addTeardownBlock {
             let attachment = XCTAttachment(screenshot: app.screenshot())
-            attachment.name = "iphone-essential-capture"
+            attachment.name = "quick-add-first-word-saved"
             attachment.lifetime = .keepAlways
             self.add(attachment)
             app.terminate()
         }
-        openComposer(app).typeText(title)
+        let title = "famalooda secret Santa"
+        app.buttons["New task"].tap()
+        let keyboardIntroduction = app.buttons["Continue"]
+        if keyboardIntroduction.exists { keyboardIntroduction.tap() }
+        input.typeText(title)
+
+        let actual = input.value as? String
+        if actual != title {
+            print("Quick Add after typing: text=\(actual ?? "nil"), label=\(input.label), frame=\(input.frame)")
+            capture(app, "quick-add-first-word-typing-failure")
+        }
+        XCTAssertEqual(actual, title)
         app.buttons["quick-add-save"].tap()
-        let filter = app.textFields["tasks-metadata-search"]
-        filter.tap()
-        filter.typeText(title)
+
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tasks-row-'"))
         let row = app.buttons.matching(NSPredicate(
-            format: "identifier BEGINSWITH 'tasks-row-' AND label BEGINSWITH %@", title)).firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 5))
+            format: "identifier BEGINSWITH 'tasks-row-' AND (label == %@ OR label BEGINSWITH %@)", title, title + ", ")).firstMatch
+        let saved = row.waitForExistence(timeout: 5)
+        if !saved {
+            print("Quick Add after saving: rows=\(rows.allElementsBoundByIndex.map(\.label))")
+            capture(app, "quick-add-first-word-save-failure")
+        }
+        XCTAssertTrue(saved, "Missing saved task with title: \(title)")
     }
 
     @MainActor
