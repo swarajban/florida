@@ -172,7 +172,7 @@ only, without weakening assertions. First failures remain in the raw log and
 xcresult and are listed in the run summary even if the retry passes. Results
 and logs are artifacts for seven days; a passing retry is not a flake fix.
 
-For the same essential plans used in [Xcode Cloud](../docs/xcode-cloud.md), dispatch
+To run both essential test plans, dispatch
 `gh workflow run ios.yml --ref <branch> -f essential_tests=true`. This runs the
 scheme defaults on Mac and iPhone (preferring iPhone 17 Pro Max) without retries
 or uploads. Focused selectors and full manual suites use the unrestricted plans.

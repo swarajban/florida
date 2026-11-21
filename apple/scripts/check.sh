@@ -86,7 +86,3 @@ if [[ ${RETRY_FAILED_TESTS:-0} == 1 ]]; then
 fi
 xcodebuild "$action" "${input[@]}" -destination "$destination" \
   "${test_args[@]}" "${signing[@]}" "$@"
-if [[ ${ESSENTIAL_TESTS:-0} == 1 ]]; then
-  CI_XCODEBUILD_ACTION=test-without-building CI_XCODEBUILD_EXIT_CODE=0 \
-    CI_RESULT_BUNDLE_PATH="$result" ./ci_scripts/ci_post_xcodebuild.sh
-fi
