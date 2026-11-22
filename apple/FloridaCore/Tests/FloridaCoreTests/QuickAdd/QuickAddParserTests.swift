@@ -32,6 +32,23 @@ private func parse(_ text: String, now: Date = sundayMorning, calendar: Calendar
         #expect(draft.notes == nil)
     }
 
+    @Test(arguments: ["F", "Famalooda", "Famalooda s", "Famalooda secret Santa", "famalooda secret Santa",
+                      "Buy famalooda secret Santa", "secret Santa famalooda"])
+    func keepsFirstWordInFoundationBridgedText(_ input: String) {
+        let text = NSMutableString(string: input) as String
+        var calendar = Calendar.autoupdatingCurrent
+        calendar.timeZone = losAngeles.timeZone
+        let draft = parse(text, calendar: calendar)
+        #expect(draft.title == input)
+        #expect(draft.source == nil)
+    }
+
+    @Test func onlyTrimsTitleSeparatorsAtItsEdges() {
+        #expect(parse("—~famalooda secret Santa/").title == "~famalooda secret Santa/")
+        #expect(parse("— famalooda secret Santa / ~").title == "famalooda secret Santa")
+        #expect(parse("~famalooda — secret Santa").title == "~famalooda — secret Santa")
+    }
+
     @Test func fullLineWithDurationCategoryDeadlineAndPriority() {
         let draft = parse("Write design doc 2h #work by fri !high")
         #expect(draft.title == "Write design doc")
