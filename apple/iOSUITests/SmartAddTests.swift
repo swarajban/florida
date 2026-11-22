@@ -15,9 +15,7 @@ final class SmartAddTests: XCTestCase {
             app.terminate()
         }
         let settings = app.tabBars.buttons["Settings"]
-        let start = app.buttons["Start Quick Add trace"]
-        if !start.isHittable { app.swipeUp() }
-        start.tap()
+        traceButton("Start Quick Add trace", in: app).tap()
         app.tabBars.buttons["Tasks"].tap()
         app.buttons["New task"].tap()
         let keyboardIntroduction = app.buttons["Continue"]
@@ -40,10 +38,25 @@ final class SmartAddTests: XCTestCase {
             format: "identifier BEGINSWITH 'tasks-row-' AND label BEGINSWITH %@", title)).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         settings.tap()
-        let copy = app.buttons["Copy Quick Add trace"]
-        if !copy.isHittable { app.swipeUp() }
-        copy.tap()
+        traceButton("Copy Quick Add trace", in: app).tap()
         XCTAssertTrue(app.staticTexts["Quick Add trace copied."].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    private func traceButton(_ title: String, in app: XCUIApplication) -> XCUIElement {
+        let form = app.collectionViews.firstMatch
+        let button = form.buttons[title]
+        for _ in 0..<3 where !button.isHittable {
+            let from = form.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))
+            let to = form.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35))
+            from.press(forDuration: 0.05, thenDragTo: to)
+        }
+        if !button.isHittable {
+            capture(app, "quick-add-trace-action-unreachable")
+            print("Quick Add trace Settings: action=\(title), exists=\(button.exists), form=\(form.frame), settings=\(app.navigationBars["Settings"].exists)")
+        }
+        XCTAssertTrue(button.isHittable, "Settings action is out of reach: \(title)")
+        return button
     }
 
     @MainActor
