@@ -21,7 +21,11 @@ final class TaskMetadataTests: XCTestCase {
         row.tap()
         reveal(toggle, in: app)
         XCTAssertEqual(toggle.value as? String, "0")
-        toggle.tap()
+        let control = toggle.switches.firstMatch
+        XCTAssertTrue(control.waitForExistence(timeout: 5))
+        print("Required day tap: row=\(toggle.frame), control=\(control.frame), enabled=\(control.isEnabled)")
+        control.tap()
+        XCTAssertEqual(toggle.value as? String, "1")
         let editor = app.navigationBars["Edit Task"]
         editor.buttons["Save"].tap()
         XCTAssertTrue(editor.waitForNonExistence(timeout: 5))
