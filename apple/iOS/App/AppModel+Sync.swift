@@ -100,7 +100,7 @@ extension AppModel {
         }
         serverConfig = config
         if let database {
-            syncClient = SyncClient(database: database, config: config)
+            syncClient = SyncClient(database: database, config: config, quickAddTrace: quickAddTrace)
         }
         aiClient = AIClient(config: config)
         triageUnavailable = nil

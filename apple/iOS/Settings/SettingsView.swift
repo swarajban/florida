@@ -1,5 +1,6 @@
 import FloridaKit
 import SwiftUI
+import UIKit
 
 /// The Settings tab: server connection, sync controls and status (with the refused and waiting
 /// changes), the Delight switches, the connected Google accounts with a toggle per calendar,
@@ -72,6 +73,26 @@ struct SettingsView: View {
                 }
 
                 SyncQueueSections()
+
+                Section {
+                    Button("Start Quick Add trace") {
+                        model.quickAddTrace.start()
+                        model.showToast(Toast(message: "Trace started. Save a task directly from Quick Add.", systemImage: "waveform.path", style: .info))
+                    }
+                    Button("Copy Quick Add trace") {
+                        guard let report = model.quickAddTrace.report() else {
+                            model.showToast(Toast(message: "No Quick Add activity recorded yet.", systemImage: "waveform.path", style: .info))
+                            return
+                        }
+                        let version = "Florida \(Self.appVersion) · iOS \(UIDevice.current.systemVersion)"
+                        UIPasteboard.general.setItems([["public.utf8-plain-text": version + "\n" + report]], options: [.localOnly: true])
+                        model.showToast(Toast(message: "Quick Add trace copied.", systemImage: "doc.on.doc", style: .success))
+                    }
+                } header: {
+                    Text("Quick Add diagnostics")
+                } footer: {
+                    Text("Records the next direct Quick Add save until you quit the app. The trace keeps lengths and matching tags, without words, notes, or credentials.")
+                }
 
                 Section {
                     NavigationLink {

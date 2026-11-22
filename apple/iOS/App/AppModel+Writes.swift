@@ -58,7 +58,13 @@ extension AppModel {
             throw LocalWriteError("There are no categories yet. Connect to the server in Settings and sync first.")
         }
         let task = QuickAddTaskBuilder.makeTask(from: draft, category: category, now: Date())
-        try perform { try $0.saveTask(task, original: nil) }
+        quickAddTrace.track(taskID: task.id, title: task.title)
+        do {
+            try perform { try $0.saveTask(task, original: nil) }
+        } catch {
+            quickAddTrace.localSaveFailed(taskID: task.id)
+            throw error
+        }
         return task
     }
 

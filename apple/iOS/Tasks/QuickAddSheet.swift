@@ -14,6 +14,7 @@ struct QuickAddSheet: View {
     @State private var editor: TaskEditorRequest?
     @State private var reviewedTaskID: String?
     @State private var inputSelection: NSRange?
+    @State private var nativeInput = QuickAddInputReference()
     @State private var editRevision = 0
     @State private var highlightedSuggestion = 0
     @State private var completionSession = QuickAddCompletionSession()
@@ -193,7 +194,7 @@ struct QuickAddSheet: View {
             HStack(alignment: .top, spacing: 12) {
                 QuickAddInput(
                     text: model.quickAddText, focused: $focused, selection: selection,
-                    editRevision: editRevision, composing: $composing,
+                    editRevision: editRevision, composing: $composing, reference: nativeInput, trace: model.quickAddTrace,
                     activeChoiceCount: activeChoiceIDs.count, onEdit: mirrorInput, onSubmit: submit,
                     onMoveSuggestion: moveSuggestion, onDismissSuggestions: dismissSuggestions)
                     .overlay(alignment: .topLeading) {
@@ -314,7 +315,10 @@ struct QuickAddSheet: View {
     }
 
     private func mirrorInput(_ revision: Int, _ text: String, _ range: NSRange) {
-        guard revision == editRevision else { return }
+        guard revision == editRevision else {
+            nativeInput.view?.recordTrace("mirror.ignoredRevision")
+            return
+        }
         if inputSelection != range { inputSelection = range }
         if model.quickAddText != text { model.quickAddText = text }
     }
@@ -362,7 +366,7 @@ struct QuickAddSheet: View {
         if !choices.isEmpty {
             complete(choices[min(highlightedSuggestion, choices.count - 1)])
         } else {
-            add()
+            add(from: "keyboard")
         }
     }
 
@@ -372,10 +376,14 @@ struct QuickAddSheet: View {
     }
 
     private var preview: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(draft.title)
+        let title = draft.title
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(title)
                 .font(.body.weight(.medium))
                 .accessibilityIdentifier("quick-add-title")
+                .onChange(of: title, initial: true) { _, title in
+                    model.quickAddTrace.preview(title)
+                }
             if let source = draft.source {
                 HStack(spacing: 8) {
                     Label(source.title, systemImage: source.symbolName)
@@ -541,7 +549,7 @@ struct QuickAddSheet: View {
                 Label("Details", systemImage: "slider.horizontal.3")
             }
             .disabled(!canAdd)
-            Button(action: add) {
+            Button { add(from: "toolbar.plus") } label: {
                 Label("Add task", systemImage: "plus")
             }
             .buttonStyle(.borderedProminent)
@@ -576,8 +584,11 @@ struct QuickAddSheet: View {
         focused = true
     }
 
-    private func add() {
+    private func add(from control: String) {
         guard canAdd, let category else { return }
+        let draft = draft
+        nativeInput.view?.recordTrace("native.submit")
+        model.quickAddTrace.submit(from: control, mirror: model.quickAddText, title: draft.title)
         do { finished(try model.createTask(from: draft, in: category)) }
         catch { self.error = error.localizedDescription }
     }
@@ -653,6 +664,11 @@ struct QuickAddSheet: View {
     }
 }
 
+@MainActor
+private final class QuickAddInputReference {
+    weak var view: QuickAddTextView?
+}
+
 /// A growing text view whose Done key submits, while paste always remains an edit. SwiftUI's
 /// vertical TextField inserts newlines for both, so string-diff heuristics cannot distinguish them.
 private struct QuickAddInput: UIViewRepresentable {
@@ -661,6 +677,8 @@ private struct QuickAddInput: UIViewRepresentable {
     var selection: NSRange
     var editRevision: Int
     @Binding var composing: Bool
+    var reference: QuickAddInputReference
+    var trace: QuickAddTrace
     var activeChoiceCount: Int
     private var hasSuggestions: Bool { activeChoiceCount > 0 }
     var onEdit: (Int, String, NSRange) -> Void
@@ -672,6 +690,8 @@ private struct QuickAddInput: UIViewRepresentable {
 
     func makeUIView(context: Context) -> QuickAddTextView {
         let view = QuickAddTextView()
+        view.trace = trace
+        reference.view = view
         context.coordinator.sync = QuickAddInputSync(revision: editRevision)
         view.backgroundColor = .clear
         view.textContainerInset = UIEdgeInsets(top: 4, left: 0, bottom: 4, right: 0)
@@ -685,6 +705,7 @@ private struct QuickAddInput: UIViewRepresentable {
         view.accessibilityLabel = "Quick add"
         view.accessibilityIdentifier = "quick-add-input"
         applyInput(to: view)
+        view.recordTrace("native.mount")
         view.delegate = context.coordinator
         view.pasteDelegate = context.coordinator
         return view
@@ -696,7 +717,9 @@ private struct QuickAddInput: UIViewRepresentable {
         coordinator.isUpdating = true
         defer { coordinator.isUpdating = false }
         if coordinator.sync.takeEdit(revision: editRevision, hasMarkedText: view.markedTextRange != nil) {
+            view.recordTrace("app.apply.before")
             applyInput(to: view)
+            view.recordTrace("app.apply.after")
             view.scrollRangeToVisible(view.selectedRange)
         }
         view.activeChoiceCount = activeChoiceCount
@@ -735,26 +758,30 @@ private struct QuickAddInput: UIViewRepresentable {
             sync = QuickAddInputSync(revision: parent.editRevision)
         }
 
-        private func publishInput(_ textView: UITextView) {
+        private func publishInput(_ textView: UITextView, from stage: String) {
+            (textView as? QuickAddTextView)?.recordTrace(isUpdating ? stage + ".suppressed" : stage)
             guard !isUpdating else { return }
             let composing = textView.markedTextRange != nil
             if parent.composing != composing { parent.composing = composing }
             parent.onEdit(sync.appliedRevision, textView.text ?? "", textView.selectedRange)
         }
 
-        func textViewDidChange(_ textView: UITextView) { publishInput(textView) }
-        func textViewDidChangeSelection(_ textView: UITextView) { publishInput(textView) }
+        func textViewDidChange(_ textView: UITextView) { publishInput(textView, from: "delegate.change") }
+        func textViewDidChangeSelection(_ textView: UITextView) { publishInput(textView, from: "delegate.selection") }
         func textViewDidBeginEditing(_ textView: UITextView) {
+            (textView as? QuickAddTextView)?.recordTrace("delegate.focus")
             if !parent.focused { parent.focused = true }
         }
         func textViewDidEndEditing(_ textView: UITextView) {
+            (textView as? QuickAddTextView)?.recordTrace("delegate.blur")
             if parent.focused { parent.focused = false }
         }
 
         func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+            (textView as? QuickAddTextView)?.recordTrace("delegate.shouldChange", replacement: text, range: range)
             guard textView.markedTextRange == nil else { return true }
             if !isPasting, text == "\n" || (text == "\t" && parent.hasSuggestions) {
-                publishInput(textView)
+                publishInput(textView, from: "delegate.returnOrTab")
                 parent.onSubmit()
                 return false
             }
@@ -771,7 +798,7 @@ private struct QuickAddInput: UIViewRepresentable {
             defer { isPasting = false }
             let start = view.offset(from: view.beginningOfDocument, to: textRange.start)
             view.replace(textRange, withText: attributedString.string)
-            publishInput(view)
+            publishInput(view, from: "delegate.paste")
             let from = view.position(from: view.beginningOfDocument, offset: start)!
             let to = view.position(from: from, offset: attributedString.length)!
             return view.textRange(from: from, to: to)!
@@ -788,6 +815,37 @@ private final class QuickAddTextView: UITextView {
     var onComplete: (() -> Void)?
     var onMoveSuggestion: ((Int) -> Void)?
     var onDismissSuggestions: (() -> Void)?
+    var trace: QuickAddTrace?
+
+    func recordTrace(_ stage: String, replacement: String? = nil, range: NSRange? = nil) {
+        guard let trace, trace.isCapturingInput else { return }
+        trace.input(stage, buffer: text ?? "", selection: selectedRange, marked: markedTextRange != nil,
+                    replacement: replacement, range: range)
+    }
+
+    override func insertText(_ text: String) {
+        recordTrace("input.insert.before", replacement: text)
+        super.insertText(text)
+        recordTrace("input.insert.after")
+    }
+
+    override func replace(_ range: UITextRange, withText text: String) {
+        if trace?.isCapturingInput == true {
+            let start = offset(from: beginningOfDocument, to: range.start)
+            let length = offset(from: range.start, to: range.end)
+            if start >= 0, length >= 0 {
+                recordTrace("input.replace.before", replacement: text, range: NSRange(location: start, length: length))
+            }
+        }
+        super.replace(range, withText: text)
+        recordTrace("input.replace.after")
+    }
+
+    override func unmarkText() {
+        recordTrace("input.unmark.before")
+        super.unmarkText()
+        recordTrace("input.unmark.after")
+    }
 
     override var accessibilityLabel: String? {
         get {
