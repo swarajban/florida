@@ -338,7 +338,12 @@ extension AppModel {
                 editorQuickAddCategoryId = nil
             }
         }
-        if oldKind != next.kind { resetKeySequence() }
+        if oldKind != next.kind {
+            DiagnosticsRecorder.shared.record("mac.screen", "interaction", [
+                "from": .value(oldKind.rawValue), "to": .value(next.kind.rawValue),
+            ])
+            resetKeySequence()
+        }
         interaction = next
     }
 }

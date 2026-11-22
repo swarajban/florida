@@ -59,6 +59,7 @@ extension AppModel {
 
         if event.isARepeat, jump != nil { return true }
         if handleJumpKey(chord) {
+            DiagnosticsRecorder.shared.record("mac.keyboard", "jump")
             return true
         }
 
@@ -86,6 +87,7 @@ extension AppModel {
                     return true
                 }
                 if chord == KeyChord("tab") || chord == KeyChord("return") {
+                    DiagnosticsRecorder.shared.record("mac.keyboard", "acceptSuggestion")
                     completePaletteSuggestion()
                     return true
                 }
@@ -104,6 +106,7 @@ extension AppModel {
                 return true
             }
             if chord == KeyChord("return", [.command]), palette.mode == .quickAdd {
+                DiagnosticsRecorder.shared.record("mac.keyboard", "parseQuickAddWithAI")
                 parsePaletteWithAI()
                 return true
             }
@@ -126,6 +129,7 @@ extension AppModel {
             if inEventPopover, !command.actsOnOpenEvent {
                 return false
             }
+            DiagnosticsRecorder.shared.record("mac.keyboard", "shortcut", ["action": .value(command.label)])
             run(command)
             return true
         case .pending:

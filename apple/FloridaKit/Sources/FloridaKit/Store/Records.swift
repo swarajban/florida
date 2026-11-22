@@ -98,6 +98,11 @@ public struct PendingWrite: Codable, Hashable, Sendable, FetchableRecord, Mutabl
     public var body: Data?
     public var createdAt: Date
 
+    var diagnosticFields: [String: DiagnosticsRecorder.Field] {
+        ["entity": .value(entity.rawValue), "op": .value(op.rawValue),
+         "seq": .value(seq.map(String.init) ?? "-")]
+    }
+
     public init(seq: Int64? = nil, entity: Entity, entityId: String, op: Op, body: Data?, createdAt: Date) {
         self.seq = seq
         self.entity = entity

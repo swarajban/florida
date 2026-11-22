@@ -24,6 +24,8 @@ extension AppModel {
         case .toggleTasksOnCalendar:
             guard !isSheetOpen else { return }
             showTasksOnCalendar.toggle()
+        case .showDiagnostics:
+            openSettings(.diagnostics)
         case .undo, .move, .acceptSuggestion, .newCategory, .showRoutine, .newTaskEditor,
              .doNow, .doneForNow, .repeatLast, .centerOnNow, .jumpToFirst, .jumpToLast,
              .editEvent, .respondYes, .respondMaybe, .respondNo,
@@ -71,7 +73,7 @@ extension AppModel {
             case .toggleTaskGrouping:
                 taskListGrouping = taskListGrouping == .dueDate ? .category : .dueDate
                 statusMessage = "Grouped tasks by \(taskListGrouping.title.lowercased())"
-            case .core, .toggleCalendars, .toggleTasksOnCalendar: break
+            case .core, .toggleCalendars, .toggleTasksOnCalendar, .showDiagnostics: break
             }
         }
     }

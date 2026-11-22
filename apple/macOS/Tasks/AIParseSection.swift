@@ -115,10 +115,15 @@ struct AIParseSection: View {
         Task {
             do {
                 let parsed = try await client.parseTask(input)
+                DiagnosticsRecorder.shared.record("mac.taskAI", "parsed", [
+                    "titleLength": .value(String(parsed.title.utf16.count)),
+                ])
                 state = .parsed(parsed)
             } catch SyncError.http(let status, _) where status == 503 {
+                DiagnosticsRecorder.shared.record("mac.taskAI", "unavailable")
                 state = .failed("AI isn't set up on the server")
             } catch {
+                DiagnosticsRecorder.shared.error("mac.taskAI", "parseFailed", error)
                 state = .failed(AppModel.describe(error))
             }
         }

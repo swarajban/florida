@@ -52,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
+        DiagnosticsRecorder.shared.record("mac.screen", "appActivated")
         model.database?.refreshExternalChanges()
     }
 

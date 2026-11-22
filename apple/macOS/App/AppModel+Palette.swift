@@ -81,7 +81,12 @@ extension AppModel {
         case .eventResources(let eventId):
             let resources = eventForDetail(id: eventId)?.resources ?? []
             palette.resourceResults = FuzzyMatch.filter(resources, query: palette.query, label: \.title)
-        case .quickAdd, .command:
+        case .quickAdd:
+            DiagnosticsRecorder.shared.record("mac.quickAdd", "previewParsed", [
+                "input": .redactedText(palette.text),
+                "title": .redactedText(palette.draft.title),
+            ])
+        case .command:
             break
         }
     }
@@ -119,6 +124,11 @@ extension AppModel {
             statusMessage = "The chosen category was deleted. Choose a current category."
             return
         }
+        DiagnosticsRecorder.shared.record("mac.quickAdd", "handoffToAI", [
+            "inputLength": .value(String(text.utf16.count)),
+            "titleLength": .value(String(draft.title.utf16.count)),
+            "title": .text(draft.title),
+        ])
         closePalette()
         openNewTaskEditor(aiText: text.isEmpty ? nil : text, source: draft.source, quickAdd: draft, categoryId: categoryId)
     }
@@ -128,6 +138,7 @@ extension AppModel {
         switch palette.mode {
         case .quickAdd:
             paletteTextDidChange()
+            DiagnosticsRecorder.shared.record("mac.quickAdd", "submitInput", ["input": .text(palette.text)])
             if createTask(from: palette.draft, categoryId: palette.completedCategoryId) {
                 closePalette()
             }
