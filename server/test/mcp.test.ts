@@ -1012,3 +1012,26 @@ describe('task tags and waiting follow-ups', () => {
     expect(mixed.results[1]?.task).toMatchObject({ tags: ['mixed'], waitingUntil: '2026-11-13T08:00:00.000Z' })
   })
 })
+
+describe('tasks with a required day', () => {
+  it('previews the same Saturday fallback as a committed write, and supports clearing the option', async () => {
+    const id = randomUUID()
+    const args = {
+      id, categoryId: 'personal', title: 'Saturday task', dueAt: '2026-11-15T01:00:00.000Z',
+      mustHappenOnDay: true, durationMinutes: 5,
+    }
+    const beforeNotices = notices
+    const preview = await data<{ task: TaskView }>('create_task', { ...args, dryRun: true })
+    expect(preview.task).toMatchObject({
+      mustHappenOnDay: true,
+      placements: [{ startAt: '2026-11-14T15:00:00.000Z', endAt: '2026-11-14T15:05:00.000Z', pinned: false }],
+    })
+    expect(await db.select().from(tasks).where(eq(tasks.id, id))).toEqual([])
+    expect(notices).toBe(beforeNotices)
+    const committed = await data<{ task: TaskView }>('create_task', args)
+    expect(committed.task.placements).toEqual(preview.task.placements)
+    expect(await data('get_task', { id })).toMatchObject({ task: { mustHappenOnDay: true } })
+    expect(await data('update_task', { id, mustHappenOnDay: false })).toMatchObject({ task: { mustHappenOnDay: false } })
+    expect((await call('update_task', { id, mustHappenOnDay: 'yes' })).isError).toBe(true)
+  })
+})

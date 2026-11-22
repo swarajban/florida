@@ -158,6 +158,7 @@ export const tasks = pgTable(
     someday: boolean('someday').notNull().default(false),
     startAt: ts('start_at'),
     scheduleId: text('schedule_id').references(() => schedules.id),
+    mustHappenOnDay: boolean('must_happen_on_day').notNull().default(false),
     context: text('context').$type<TaskContext>().notNull().default('computer'),
     projectId: text('project_id').references(() => projects.id),
     /** Null follows the project: shared when it is `parallel`, otherwise full. */

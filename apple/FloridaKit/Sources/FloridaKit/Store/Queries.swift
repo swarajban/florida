@@ -461,7 +461,7 @@ extension AppDatabase {
         }
     }
 
-    private static let taskSchedulingFields: Set<String> = ["categoryId", "durationMinutes", "minChunkMinutes", "priority", "deadlineType", "dueAt", "startAt", "scheduleId", "context", "projectId", "attention", "pinnedStart", "completedMinutes", "completedAt", "recurrence", "someday", "waitingOn", "waitingUntil"]
+    private static let taskSchedulingFields: Set<String> = ["categoryId", "durationMinutes", "minChunkMinutes", "priority", "deadlineType", "dueAt", "startAt", "scheduleId", "mustHappenOnDay", "context", "projectId", "attention", "pinnedStart", "completedMinutes", "completedAt", "recurrence", "someday", "waitingOn", "waitingUntil"]
 
     /// A pinned task sits at exactly its pinned start for its remaining minutes, so its block does
     /// not have to wait for the server: pinning shows it there at once, and unpinning takes it off
@@ -515,6 +515,7 @@ extension AppDatabase {
         track("someday", \.someday)
         trackDate("startAt", \.startAt)
         track("scheduleId", \.scheduleId)
+        track("mustHappenOnDay", \.mustHappenOnDay)
         track("context", \.context)
         track("projectId", \.projectId)
         track("attention", \.attention)

@@ -257,8 +257,9 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
     public var dueAt: Date?
     public var someday: Bool
     public var startAt: Date?
-    /// Overrides the category's schedule when set.
+    /// Legacy schedule reference, still used for editor time zone defaults.
     public var scheduleId: String?
+    public var mustHappenOnDay: Bool
     /// Where the task can be done; the scheduler only uses routine blocks that allow it.
     public var context: TaskContext
     /// The project the task belongs to, if any. Tasks of a project that is not active are not scheduled.
@@ -287,7 +288,7 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
         updatedAt: Date, deletedAt: Date? = nil, recurrence: TaskRecurrence? = nil,
         recurrenceSeriesId: String? = nil, recurrenceDate: String? = nil, recurrenceRevision: String? = nil,
         projectId: String? = nil, attention: TaskAttention? = nil, source: TaskSource? = nil, someday: Bool = false,
-        tags: [String] = [], waitingOn: String? = nil, waitingUntil: Date? = nil
+        tags: [String] = [], waitingOn: String? = nil, waitingUntil: Date? = nil, mustHappenOnDay: Bool = false
     ) {
         self.id = id
         self.categoryId = categoryId
@@ -305,6 +306,7 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
         self.someday = someday
         self.startAt = startAt
         self.scheduleId = scheduleId
+        self.mustHappenOnDay = mustHappenOnDay
         self.context = context
         self.projectId = projectId
         self.attention = attention
@@ -320,8 +322,7 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
         self.deletedAt = deletedAt
     }
 
-    /// Hand-written only so `context` can default to `.computer` when the JSON (an older server)
-    /// or the row (a store that predates the column) lacks it; everything else is as synthesized.
+    /// Defaults newer fields when decoding older server or store data.
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -340,6 +341,7 @@ public struct TaskItem: Codable, Hashable, Sendable, Identifiable {
         someday = try c.decodeIfPresent(Bool.self, forKey: .someday) ?? false
         startAt = try c.decodeIfPresent(Date.self, forKey: .startAt)
         scheduleId = try c.decodeIfPresent(String.self, forKey: .scheduleId)
+        mustHappenOnDay = try c.decodeIfPresent(Bool.self, forKey: .mustHappenOnDay) ?? false
         context = try c.decodeIfPresent(TaskContext.self, forKey: .context) ?? .computer
         projectId = try c.decodeIfPresent(String.self, forKey: .projectId)
         attention = try c.decodeIfPresent(TaskAttention.self, forKey: .attention)
@@ -890,8 +892,8 @@ public struct CalendarInfo: Codable, Hashable, Sendable, Identifiable {
 /// list with every sync, like placements.
 public struct UnscheduledTask: Codable, Hashable, Sendable, Identifiable {
     public var taskId: String
-    /// "no_fit_in_horizon", "no_fit_before_hard_deadline", "unknown_schedule", or
-    /// "no_allowed_block" (no routine block allows the task's context).
+    /// "no_fit_in_horizon", "no_fit_before_hard_deadline", "unknown_schedule",
+    /// "no_fit_on_required_day", or "no_allowed_block" (no routine block allows the task's context).
     public var reason: String
     public var unplacedMinutes: Int
     public var computedAt: Date
@@ -1019,7 +1021,8 @@ public struct SchedulingResult: Codable, Hashable, Sendable {
 
     public struct Unscheduled: Codable, Hashable, Sendable {
         public var taskId: String
-        /// "no_fit_in_horizon", "no_fit_before_hard_deadline", "unknown_schedule", or "no_allowed_block".
+        /// "no_fit_in_horizon", "no_fit_before_hard_deadline", "no_fit_on_required_day",
+        /// "unknown_schedule", or "no_allowed_block".
         public var reason: String
         public var unplacedMinutes: Int
 
@@ -1194,6 +1197,7 @@ public struct TaskWrite: Codable, Hashable, Sendable {
     public var someday: Bool?
     public var startAt: Date?
     public var scheduleId: String?
+    public var mustHappenOnDay: Bool?
     public var context: TaskContext
     /// Left out when nil, which the server reads as "keep"; an edit that clears either sends an
     /// explicit null through the changed-fields PATCH (`AppDatabase.saveTask`).
@@ -1208,7 +1212,7 @@ public struct TaskWrite: Codable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case categoryId, title, notes, source, tags, waitingOn, waitingUntil, durationMinutes, minChunkMinutes
-        case priority, deadlineType, dueAt, someday, startAt, scheduleId, context, projectId, attention
+        case priority, deadlineType, dueAt, someday, startAt, scheduleId, mustHappenOnDay, context, projectId, attention
         case pinnedStart, completedMinutes, completedAt, recurrence, expectedRecurrenceRevision
     }
 
@@ -1228,6 +1232,7 @@ public struct TaskWrite: Codable, Hashable, Sendable {
         someday = task.someday
         startAt = task.startAt
         scheduleId = task.scheduleId
+        mustHappenOnDay = task.mustHappenOnDay
         context = task.context
         projectId = task.projectId
         attention = task.attention
@@ -1255,6 +1260,7 @@ public struct TaskWrite: Codable, Hashable, Sendable {
         someday = try c.decodeIfPresent(Bool.self, forKey: .someday)
         startAt = try c.decodeIfPresent(Date.self, forKey: .startAt)
         scheduleId = try c.decodeIfPresent(String.self, forKey: .scheduleId)
+        mustHappenOnDay = try c.decodeIfPresent(Bool.self, forKey: .mustHappenOnDay)
         context = try c.decode(TaskContext.self, forKey: .context)
         projectId = try c.decodeIfPresent(String.self, forKey: .projectId)
         attention = try c.decodeIfPresent(TaskAttention.self, forKey: .attention)
@@ -1282,6 +1288,7 @@ public struct TaskWrite: Codable, Hashable, Sendable {
         try container.encodeIfPresent(someday, forKey: .someday)
         try container.encodeIfPresent(startAt, forKey: .startAt)
         try container.encodeIfPresent(scheduleId, forKey: .scheduleId)
+        try container.encodeIfPresent(mustHappenOnDay, forKey: .mustHappenOnDay)
         try container.encode(context, forKey: .context)
         try container.encodeIfPresent(projectId, forKey: .projectId)
         try container.encodeIfPresent(attention, forKey: .attention)

@@ -446,6 +446,12 @@ public final class AppDatabase: Sendable {
                 t.add(column: "lastSyncedAt", .datetime)
             }
         }
+        migrator.registerMigration("v14-task-required-day") { db in
+            try db.alter(table: "task") { t in
+                t.add(column: "mustHappenOnDay", .boolean).notNull().defaults(to: false)
+            }
+            try db.execute(sql: "DELETE FROM syncState WHERE key = 'cursor'")
+        }
         return migrator
     }
 }

@@ -103,6 +103,7 @@ const INSTRUCTIONS = [
   'independently. Editing a recurring task changes this and future unfinished occurrences; setting',
   'recurrence to null stops repeats and keeps this task. Deleting a recurring task stops the series',
   'and deletes this and future unfinished occurrences. Completed history is preserved.',
+  'Set mustHappenOnDay to keep a flexible task on its repeat, due, or start date, even outside normal routine hours.',
   'Tasks can carry source: {url, title?, kind?}, or null to clear it. Only safe http, https and mailto',
   'URLs are accepted. Kind always follows the URL; a short title is derived without a network call',
   'when omitted. Omitting source on an edit keeps it.',

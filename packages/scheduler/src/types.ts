@@ -103,6 +103,8 @@ export interface Task {
   dueAt?: string
   /** ISO 8601 instant before which the task must not be placed. */
   startAt?: string
+  /** Local calendar day as an instant range. Only this range may use the task's routine or fallback hours. */
+  requiredDay?: Interval
   /** Minutes already worked, subtracted from `durationMinutes`. */
   completedMinutes?: number
   /** When set, the task is placed exactly here as one block and never moved. ISO 8601. */
@@ -207,6 +209,7 @@ export interface OptionalPlacement {
 
 export type UnscheduledReason =
   | 'no_fit_in_horizon'
+  | 'no_fit_on_required_day'
   | 'no_fit_before_hard_deadline'
   /** No planned (non-optional) routine block allows the task's context, so the plan has nowhere for it. */
   | 'no_allowed_block'

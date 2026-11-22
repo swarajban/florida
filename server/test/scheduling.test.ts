@@ -78,6 +78,7 @@ function taskRow(id: string, categoryId: string, over: Partial<TaskRow> = {}): T
     someday: false,
     startAt: null,
     scheduleId: null,
+    mustHappenOnDay: false,
     context: 'computer',
     projectId: null,
     attention: null,
@@ -248,6 +249,32 @@ describe('buildSchedulerInput', () => {
         completedMinutes: 15,
         createdAt: '2026-11-01T00:00:00.000Z',
       },
+    ])
+  })
+
+  it('resolves required days from the occurrence zone, then the effective due or start date', () => {
+    const shared = { mustHappenOnDay: true, startAt: new Date('2026-11-10T00:00:00Z') }
+    const input = buildSchedulerInput({
+      ...base,
+      categories: [categoryRow('work')],
+      events: [],
+      tasks: [
+        taskRow('repeat', 'work', {
+          ...shared, recurrenceDate: '2026-11-13', deadlineType: 'soft', dueAt: new Date('2026-11-16T00:00:00Z'),
+          recurrence: { frequency: 'week', interval: 1, startDate: '2026-11-13', timeZone: 'Asia/Tokyo' },
+        }),
+        taskRow('due', 'work', { ...shared, deadlineType: 'soft', dueAt: new Date('2026-11-12T00:00:00Z') }),
+        taskRow('start', 'work', { ...shared, dueAt: new Date('2026-11-12T00:00:00Z') }),
+        taskRow('undated', 'work', { mustHappenOnDay: true }),
+        taskRow('not-opted-in', 'work', { ...shared, mustHappenOnDay: false }),
+      ],
+    })
+    expect(input.tasks.map((task) => task.requiredDay)).toEqual([
+      { start: '2026-11-12T15:00:00.000Z', end: '2026-11-13T15:00:00.000Z' },
+      { start: '2026-11-11T08:00:00.000Z', end: '2026-11-12T08:00:00.000Z' },
+      { start: '2026-11-09T08:00:00.000Z', end: '2026-11-10T08:00:00.000Z' },
+      undefined,
+      undefined,
     ])
   })
 
