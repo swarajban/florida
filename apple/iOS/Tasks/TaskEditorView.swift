@@ -148,7 +148,7 @@ struct TaskEditorView: View {
                     Toggle(isOn: $draft.mustHappenOnDay) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Must happen that day")
-                            Text("Use free time outside your routine. Busy events and days off still apply.")
+                            Text("Use free time outside your routine, even on days off. Timed events still apply.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }

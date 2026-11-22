@@ -350,9 +350,39 @@ describe('buildSchedulerInput', () => {
     })
     expect(input.busy).toEqual([
       { start: '2026-11-10T18:00:00.000Z', end: '2026-11-10T19:00:00.000Z' },
-      { start: '2026-11-10T08:00:00.000Z', end: '2026-11-11T08:00:00.000Z' },
+      { start: '2026-11-10T08:00:00.000Z', end: '2026-11-11T08:00:00.000Z', allDay: true },
       { start: '2026-11-09T16:30:00.000Z', end: '2026-11-09T17:30:00.000Z' },
       { start: '2026-11-10T18:00:00.000Z', end: '2026-11-10T19:00:00.000Z' },
+    ])
+  })
+
+  it('schedules only the required occurrence on the auto-blocked Friday after Thanksgiving, around its meeting', () => {
+    const occurrence = {
+      recurrenceDate: '2026-11-27',
+      startAt: new Date('2026-11-27T08:00:00Z'),
+      dueAt: new Date('2026-11-28T01:00:00Z'),
+      deadlineType: 'soft' as const,
+      durationMinutes: 5,
+    }
+    const input = buildSchedulerInput({
+      ...base,
+      now: new Date('2026-11-27T16:00:00Z'),
+      categories: [categoryRow('inbox')],
+      tasks: [
+        taskRow('anurati-picture', 'inbox', { ...occurrence, mustHappenOnDay: true }),
+        taskRow('unflagged', 'inbox', occurrence),
+      ],
+      events: [
+        eventRow('holiday', {
+          title: 'Day after Thanksgiving', allDay: true, autoBlocksDay: true, blockingReason: 'Company holiday',
+          transparency: 'transparent', startAt: new Date('2026-11-27T00:00:00Z'), endAt: new Date('2026-11-28T00:00:00Z'),
+        }),
+        eventRow('meeting', { startAt: new Date('2026-11-27T17:00:00Z'), endAt: new Date('2026-11-27T18:00:00Z') }),
+      ],
+    })
+    expect(schedule(input).placements).toEqual([
+      { taskId: 'anurati-picture', start: '2026-11-27T18:00:00.000Z', end: '2026-11-27T18:05:00.000Z', pinned: false },
+      { taskId: 'unflagged', start: '2026-11-30T17:00:00.000Z', end: '2026-11-30T17:05:00.000Z', pinned: false },
     ])
   })
 
@@ -472,8 +502,8 @@ describe('buildSchedulerInput', () => {
       categories: [categoryRow('inbox')], tasks: [taskRow('task', 'inbox')], events: stays,
     })
     expect(input.busy).toEqual([
-      { start: '2026-11-13T08:00:00.000Z', end: '2026-11-16T08:00:00.000Z' },
-      { start: '2026-11-13T08:00:00.000Z', end: '2026-11-15T08:00:00.000Z' },
+      { start: '2026-11-13T08:00:00.000Z', end: '2026-11-16T08:00:00.000Z', allDay: true },
+      { start: '2026-11-13T08:00:00.000Z', end: '2026-11-15T08:00:00.000Z', allDay: true },
     ])
     expect(schedule(input).placements[0]?.start).toBe('2026-11-16T17:00:00.000Z')
   })

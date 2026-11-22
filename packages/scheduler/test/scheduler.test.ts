@@ -71,18 +71,37 @@ describe('required days', () => {
     expect(spansOf(run([dueFriday], [], { routine: CLOSED }), dueFriday.id)[0]?.[0]).toBe(iso('2026-11-13T07:00:00-08:00'))
   })
 
-  it('leaves the task unscheduled on an explicitly off or fully booked date, even with a hard deadline', () => {
+  it('uses normal Friday hours even when Friday is explicitly Off, without opening it to other tasks', () => {
+    const required = task({ id: 'required', requiredDay: friday })
+    const normal = task({ id: 'normal' })
+    const result = run([required, normal], [], {
+      now: '2026-11-13T06:00:00-08:00',
+      dayOverrides: [{ date: '2026-11-13', kind: 'off' }],
+    })
+    expect(spansOf(result, required.id)).toEqual([[iso('2026-11-13T09:00:00-08:00'), iso('2026-11-13T10:00:00-08:00')]])
+    expect(spansOf(result, normal.id)[0]?.[0]).toBe(iso('2026-11-16T09:00:00-08:00'))
+  })
+
+  it('leaves the task unscheduled on a date fully booked by a timed event, even with a hard deadline', () => {
     const required = task({
       id: 'required', requiredDay: friday, deadlineType: 'hard', dueAt: '2026-11-16T17:00:00-08:00',
     })
-    for (const result of [
-      run([required], [friday]),
-      run([required], [], { dayOverrides: [{ date: '2026-11-13', kind: 'off' }] }),
-    ]) {
-      expect(result.placements).toEqual([])
-      expect(result.optional).toEqual([])
-      expect(result.unscheduled).toEqual([{ taskId: required.id, reason: 'no_fit_on_required_day', unplacedMinutes: 60 }])
-    }
+    const result = run([required], [friday])
+    expect(result.placements).toEqual([])
+    expect(result.optional).toEqual([])
+    expect(result.unscheduled).toEqual([{ taskId: required.id, reason: 'no_fit_on_required_day', unplacedMinutes: 60 }])
+  })
+
+  it('clips retained work before an already-started meeting and places the remainder that day', () => {
+    const required = task({ id: 'required', requiredDay: friday })
+    const result = run([required], [{ ...friday, allDay: true }, busy('2026-11-13T09:30:00-08:00', '2026-11-13T10:30:00-08:00')], {
+      now: '2026-11-13T09:45:00-08:00',
+      previous: [{ taskId: required.id, start: iso('2026-11-13T09:00:00-08:00'), end: iso('2026-11-13T10:00:00-08:00'), pinned: false }],
+    })
+    expect(spansOf(result, required.id)).toEqual([
+      [iso('2026-11-13T09:00:00-08:00'), iso('2026-11-13T09:30:00-08:00')],
+      [iso('2026-11-13T10:30:00-08:00'), iso('2026-11-13T11:00:00-08:00')],
+    ])
   })
 
   it('respects the hard deadline within the required day', () => {

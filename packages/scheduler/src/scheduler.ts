@@ -61,6 +61,7 @@ interface SharedSpan extends Span {
 interface Capacity {
   /** Sorted and merged. */
   solid: Span[]
+  dayBlocks: Span[]
   lanes: SharedSpan[][]
 }
 
@@ -69,16 +70,18 @@ const groupOf = (task: Task): string => task.projectId ?? task.id
 const overlaps = (a: Span, b: Span): boolean => a.start < b.end && b.start < a.end
 
 /** Every occupied instant in any lane: what full-attention work has to avoid. */
-function occupied(cap: Capacity): Span[] {
-  return mergeSpans([...cap.solid, ...cap.lanes.flat()])
+function occupied(cap: Capacity, dayBlocks = cap.dayBlocks): Span[] {
+  return mergeSpans([...cap.solid, ...dayBlocks, ...cap.lanes.flat()])
 }
 
 /** What `task` has to avoid in `lane`. Full-attention work has a single lane and avoids everything. */
 function takenIn(cap: Capacity, task: Task, lane: number): Span[] {
-  if (!isShared(task)) return occupied(cap)
+  const dayBlocks = task.requiredDay === undefined ? cap.dayBlocks : []
+  if (!isShared(task)) return occupied(cap, dayBlocks)
   const group = groupOf(task)
   return mergeSpans([
     ...cap.solid,
+    ...dayBlocks,
     ...cap.lanes.flatMap((spans, index) => (index === lane ? spans : spans.filter((s) => s.group === group))),
   ])
 }
@@ -160,10 +163,12 @@ export function schedule(input: SchedulerInput): SchedulerResult {
   const routine = input.routine
   const maxParallel = Math.max(1, Math.floor(input.maxParallel ?? 3))
 
-  const busySpans = input.busy.map((i) => ({
-    start: parseInstant(i.start, 'busy.start'),
-    end: parseInstant(i.end, 'busy.end'),
-  }))
+  const timedBusy: Span[] = []
+  const dayBlocks: Span[] = []
+  for (const i of input.busy) {
+    const spans = i.allDay ? dayBlocks : timedBusy
+    spans.push({ start: parseInstant(i.start, 'busy.start'), end: parseInstant(i.end, 'busy.end') })
+  }
   const open = input.tasks.flatMap((task) => {
     if (remainingMinutes(task) <= 0) return []
     if (!task.waitingOn?.trim()) return [task]
@@ -181,11 +186,13 @@ export function schedule(input: SchedulerInput): SchedulerResult {
   const pinnedSpans = pinned.map((p) => p.span)
 
   // A pinned task takes its time as a meeting does, so a commitment's alternate goes elsewhere.
-  const committed = commitments(routine, ctx, [...busySpans, ...pinnedSpans])
+  const committed = commitments(routine, ctx, [...timedBusy, ...dayBlocks, ...pinnedSpans])
   // What an in-progress block gives way to: meetings and commitments that start while it runs.
-  const fixedSpans = [...busySpans, ...committed.occurrences]
+  const timedFixed = [...timedBusy, ...committed.occurrences]
+  const fixedSpans = [...timedFixed, ...dayBlocks]
   const cap: Capacity = {
-    solid: mergeSpans([...fixedSpans, ...pinnedSpans]),
+    solid: mergeSpans([...timedFixed, ...pinnedSpans]),
+    dayBlocks: mergeSpans(dayBlocks),
     lanes: Array.from({ length: maxParallel }, () => []),
   }
   const placements: Placement[] = pinned.map(({ task, span }) => toPlacement(task, { ...span, lane: 0 }, true))
@@ -208,6 +215,7 @@ export function schedule(input: SchedulerInput): SchedulerResult {
   // Reserve work already underway before new tasks can claim its time.
   const active = new Map<string, Retained>()
   for (const task of flexible) {
+    const required = task.requiredDay !== undefined
     const logged = (task.completedMinutes ?? 0) * MINUTE
     let remaining = remainingMinutes(task) * MINUTE
     const retained: Retained = { spans: [], work: 0 }
@@ -220,19 +228,23 @@ export function schedule(input: SchedulerInput): SchedulerResult {
         block.start < parseInstant(task.requiredDay.start, 'requiredDay.start') ||
         block.end > parseInstant(task.requiredDay.end, 'requiredDay.end')
       )) continue
+      let stop = block.end
+      for (const b of required ? timedFixed : fixedSpans) {
+        if (b.end > b.start && b.start < stop && (b.start > now || (required && b.end > block.start))) {
+          stop = Math.max(block.start, b.start)
+        }
+      }
+      if (stop === block.start) continue
       // Time already spent in the block counts as worked unless the logged minutes cover it, so
       // logging progress mid-block never counts the same minutes twice.
-      const credit = Math.max(0, now - block.start - logged)
+      const credit = Math.max(0, Math.min(now, stop) - block.start - logged)
       remaining = Math.max(0, remaining - credit)
-      const span = { start: block.start, end: Math.max(now, Math.min(block.end, now + remaining)) }
-      for (const b of fixedSpans) {
-        if (b.end > b.start && b.start > now && b.start < span.end) span.end = b.start
-      }
+      const span = { start: block.start, end: Math.min(stop, now + remaining) }
       // Pinned work is the user's explicit choice: a flexible block never runs over it.
       for (const p of pinnedSpans) {
-        if (p.end > now && p.start < span.end) span.end = Math.max(now, p.start)
+        if (p.end > now && p.start < span.end) span.end = Math.min(span.end, Math.max(now, p.start))
       }
-      const ahead = span.end - now
+      const ahead = Math.max(0, span.end - now)
       const piece = { ...span, lane: activeLane(cap, task, span, block.lane) }
       retained.spans.push(piece)
       retained.work += credit + ahead
@@ -511,6 +523,7 @@ function placeTask(
   const hardDue = task.deadlineType === 'hard' ? effectiveDue(task)?.ms : undefined
   const dayEnd = task.requiredDay === undefined ? Number.POSITIVE_INFINITY : parseInstant(task.requiredDay.end, 'requiredDay.end')
   const limit = Math.min(ctx.horizonEnd, dayEnd, hardDue ?? Number.POSITIVE_INFINITY)
+  const normalWindows = (date: LocalDate) => blocksOn(routine, ctx, task.context, date, task.requiredDay !== undefined)
 
   let remaining = Math.max(0, remainingMinutes(task) * MINUTE - retained.work)
   const spans: Piece[] = [...retained.spans]
@@ -518,7 +531,7 @@ function placeTask(
   for (const span of previous) {
     const duration = span.end - span.start
     if (duration <= 0 || duration > remaining || span.start < earliest || span.end > limit) continue
-    const windows = blocksOn(routine, ctx, task.context, localDate(span.start, routine.timeZone))
+    const windows = normalWindows(localDate(span.start, routine.timeZone))
     if (!windows.some((window) => window.start <= span.start && span.end <= window.end)) continue
     const lane = freeLane(cap, task, span, span.lane)
     if (lane === undefined) continue
@@ -552,10 +565,8 @@ function placeTask(
     }
   }
 
-  fill((date) => blocksOn(routine, ctx, task.context, date))
-  if (remaining > 0 && task.requiredDay !== undefined) {
-    fill((date) => ctx.weekdayFor(date) === undefined ? [] : [windowSpan(date, ctx.overflow.start, ctx.overflow.end, routine.timeZone)])
-  } else if (remaining > 0 && hardDue !== undefined) {
+  fill(normalWindows)
+  if (remaining > 0 && (task.requiredDay !== undefined || hardDue !== undefined)) {
     fill((date) => [windowSpan(date, ctx.overflow.start, ctx.overflow.end, routine.timeZone)])
   }
 
@@ -571,8 +582,8 @@ function placeTask(
  * routine blocks that allow it, for the weekday the date follows. Overlapping or touching blocks
  * merge, so a task can span them as one piece.
  */
-function blocksOn(routine: Routine, ctx: Context, context: TaskContext, date: LocalDate): Span[] {
-  const weekday = ctx.weekdayFor(date)
+function blocksOn(routine: Routine, ctx: Context, context: TaskContext, date: LocalDate, ignoreOff = false): Span[] {
+  const weekday = ctx.weekdayFor(date) ?? (ignoreOff ? weekdayOf(date) : undefined)
   if (weekday === undefined) return []
   return mergeSpans(
     routine.blocks

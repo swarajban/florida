@@ -38,7 +38,7 @@ export const taskBody = z.object({
   someday: z.boolean().optional().describe('Keeps a task off the plan, with no due date or pin. Explicit true clears dueAt and pinnedStart but keeps startAt. When omitted, setting a changed nonnull due/start/pin turns it off; unrelated edits and same-value retries preserve it. A same-date scheduling action must send false. Defaults to false on creation.'),
   startAt: isoInstant.nullish(),
   scheduleId: z.string().min(1).nullish(),
-  mustHappenOnDay: z.boolean().optional().describe('Restrict scheduling to the repeat date, otherwise the due date or start date. Free time outside the routine can be used on that day; calendar blocks, explicit days off and hard deadlines still apply.'),
+  mustHappenOnDay: z.boolean().optional().describe('Restrict scheduling to the repeat date, otherwise the due date or start date. Can use free time outside the routine and on days off. Timed events, commitments and hard deadlines still apply.'),
   context: taskContext
     .optional()
     .describe(
