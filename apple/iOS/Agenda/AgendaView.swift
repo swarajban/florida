@@ -50,6 +50,9 @@ struct AgendaView: View {
             }
             .background(FloridaStyle.paper)
             .toolbar(.hidden, for: .navigationBar)
+            .onChange(of: mode) { _, mode in
+                DiagnosticsRecorder.shared.record("navigation", "agenda-mode", ["mode": .value(mode.rawValue)])
+            }
             .onChange(of: model.agenda, initial: true) { _, agenda in
                 // Screenshot runs (`-uiSheet event`): open the demo design review once it loads.
                 guard LaunchOptions.initialSheet == "event", !openedLaunchSheet,

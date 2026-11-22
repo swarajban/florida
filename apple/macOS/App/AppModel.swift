@@ -88,7 +88,12 @@ final class AppModel {
     /// The highlighted day and the cursor `h` / `l` move.
     var selectedDay: Date
     var selection: ItemID?
-    var focus: Panel = .calendar
+    var focus: Panel = .calendar {
+        didSet {
+            guard oldValue != focus else { return }
+            DiagnosticsRecorder.shared.record("mac.screen", "focus", ["pane": .value(focus == .calendar ? "calendar" : "tasks")])
+        }
+    }
     var isTasksPaneVisible = true
     var showTasksOnCalendar = AppModel.viewDefaults.object(forKey: "showTasksOnCalendar") as? Bool ?? true {
         didSet {
@@ -175,6 +180,7 @@ final class AppModel {
 
     var lastSyncAt: Date?
     var lastSyncError: String?
+    var rejectedWriteCount = 0
     var syncsInFlight = 0
     var isSyncing: Bool { syncsInFlight > 0 }
     #if DEBUG
@@ -245,12 +251,14 @@ final class AppModel {
             rangeDidChange()
             startClock()
         } catch {
+            DiagnosticsRecorder.shared.error("mac.store", "open", error)
             startupError = "Could not open the local store: \(error.localizedDescription)"
         }
         var saved: ServerConfig?
         do {
             saved = try tokenStore.load()
         } catch {
+            DiagnosticsRecorder.shared.error("mac.store", "loadServerSettings", error)
             lastSyncError = "Could not read the saved server settings: \(error.localizedDescription)"
         }
         applyConfig(saved)
@@ -280,6 +288,9 @@ final class AppModel {
         resetKeySequence()
         let visible = visibleRange
         let covered = loadedRange.map { $0.lowerBound <= visible.lowerBound && visible.upperBound <= $0.upperBound } ?? false
+        DiagnosticsRecorder.shared.record("mac.navigation", "rangeChanged", [
+            "view": .value(viewMode.rawValue), "reloaded": .value(String(!covered)),
+        ])
         if !covered {
             // One line: a leading `..<` on a continuation line parses as the prefix operator.
             let lower = DateNavigation.shift(visible.lowerBound, by: -28, calendar: calendar)
@@ -440,6 +451,7 @@ final class AppModel {
                     apply(self, value)
                 }
             } catch {
+                DiagnosticsRecorder.shared.error("mac.store", "observe", error)
                 self?.statusMessage = "Live query failed: \(error.localizedDescription)"
             }
         }

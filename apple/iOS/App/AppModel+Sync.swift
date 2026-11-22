@@ -16,6 +16,7 @@ extension AppModel {
         stopChangeStream()
         stopMidnightWatcher()
         sceneIsActive = phase == .active
+        DiagnosticsRecorder.shared.record("navigation", "scene-phase", ["active": .value(String(sceneIsActive))])
         guard sceneIsActive else { return }
         database?.refreshExternalChanges()
         anchorToTodayIfDayChanged()
@@ -67,9 +68,11 @@ extension AppModel {
         do {
             try database.setCalendarSelected(id: id, selected: selected)
         } catch {
+            DiagnosticsRecorder.shared.error("calendar", "selection-failed", error)
             lastError = "Could not update the calendar: \(error.localizedDescription)"
             return
         }
+        DiagnosticsRecorder.shared.record("calendar", "visibility-changed", ["selected": .value(String(selected))])
         calendarActivation.setSelected(selected, calendar: calendar) { [weak self] in
             guard let self, self.sceneIsActive else { return }
             self.requestSync()
@@ -83,9 +86,11 @@ extension AppModel {
         do {
             try database.setCalendarBlocksScheduling(id: id, blocksScheduling: blocksScheduling)
         } catch {
+            DiagnosticsRecorder.shared.error("calendar", "blocks-scheduling-failed", error)
             lastError = "Could not update the calendar: \(error.localizedDescription)"
             return
         }
+        DiagnosticsRecorder.shared.record("calendar", "blocks-scheduling-changed", ["enabled": .value(String(blocksScheduling))])
         WidgetCenter.shared.reloadAllTimelines()
         requestSync()
     }
@@ -95,12 +100,13 @@ extension AppModel {
         do {
             try tokenStore.save(config)
         } catch {
+            DiagnosticsRecorder.shared.error("settings", "save-server-failed", error)
             lastError = "Could not save to the keychain: \(error.localizedDescription)"
             return
         }
         serverConfig = config
         if let database {
-            syncClient = SyncClient(database: database, config: config, quickAddTrace: quickAddTrace)
+            syncClient = SyncClient(database: database, config: config)
         }
         aiClient = AIClient(config: config)
         triageUnavailable = nil
@@ -190,6 +196,7 @@ extension AppModel {
                 self?.lastError = nil
                 WidgetCenter.shared.reloadAllTimelines()
             } catch {
+                DiagnosticsRecorder.shared.error("sync", "server-action-failed", error)
                 self?.lastError = Self.describe(error)
             }
         }

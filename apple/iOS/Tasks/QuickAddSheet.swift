@@ -166,17 +166,21 @@ struct QuickAddSheet: View {
                     actions
                 }
             }
-            .onAppear { focused = true }
+            .onAppear {
+                focused = true
+                DiagnosticsRecorder.shared.record("quick-add", "opened")
+            }
             .onChange(of: activeChoiceIDs) { _, _ in highlightedSuggestion = 0 }
             .onChange(of: model.quickAddText) { _, _ in
                 error = nil
                 parsing?.cancel()
                 parsing = nil
-                let parsedSource = QuickAddParser.parse(model.quickAddText, now: Date(), calendar: model.taskListCalendar).source
-                if parsedSource?.url != model.quickAddRemovedSourceURL {
+                let parsed = QuickAddParser.parse(model.quickAddText, now: Date(), calendar: model.taskListCalendar)
+                DiagnosticsRecorder.shared.record("quick-add", "parser", ["title": .redactedText(parsed.title)])
+                if parsed.source?.url != model.quickAddRemovedSourceURL {
                     model.quickAddRemovedSourceURL = nil
                 }
-                if draft.categoryHint != model.quickAddCategoryHint {
+                if parsed.categoryHint != model.quickAddCategoryHint {
                     model.quickAddCategory = nil
                     model.quickAddCategoryHint = nil
                 }
@@ -194,7 +198,7 @@ struct QuickAddSheet: View {
             HStack(alignment: .top, spacing: 12) {
                 QuickAddInput(
                     text: model.quickAddText, focused: $focused, selection: selection,
-                    editRevision: editRevision, composing: $composing, reference: nativeInput, trace: model.quickAddTrace,
+                    editRevision: editRevision, composing: $composing, reference: nativeInput,
                     activeChoiceCount: activeChoiceIDs.count, onEdit: mirrorInput, onSubmit: submit,
                     onMoveSuggestion: moveSuggestion, onDismissSuggestions: dismissSuggestions)
                     .overlay(alignment: .topLeading) {
@@ -382,7 +386,7 @@ struct QuickAddSheet: View {
                 .font(.body.weight(.medium))
                 .accessibilityIdentifier("quick-add-title")
                 .onChange(of: title, initial: true) { _, title in
-                    model.quickAddTrace.preview(title)
+                    DiagnosticsRecorder.shared.record("quick-add", "preview", ["title": .redactedText(title)])
                 }
             if let source = draft.source {
                 HStack(spacing: 8) {
@@ -533,7 +537,10 @@ struct QuickAddSheet: View {
             choose(category)
         case .create(let hint):
             do { choose(try model.createCategory(fromHint: hint)) }
-            catch { self.error = error.localizedDescription }
+            catch {
+                DiagnosticsRecorder.shared.error("quick-add", "create-category-failed", error)
+                self.error = error.localizedDescription
+            }
         case .inbox(let category):
             choose(category)
         }
@@ -588,9 +595,14 @@ struct QuickAddSheet: View {
         guard canAdd, let category else { return }
         let draft = draft
         nativeInput.view?.recordTrace("native.submit")
-        model.quickAddTrace.submit(from: control, mirror: model.quickAddText, title: draft.title)
+        DiagnosticsRecorder.shared.record("quick-add", "submit", [
+            "control": .value(control), "mirror": .text(model.quickAddText), "title": .text(draft.title),
+        ])
         do { finished(try model.createTask(from: draft, in: category)) }
-        catch { self.error = error.localizedDescription }
+        catch {
+            DiagnosticsRecorder.shared.error("quick-add", "submit-failed", error)
+            self.error = error.localizedDescription
+        }
     }
 
     private func review(_ request: TaskEditorRequest) {
@@ -651,6 +663,7 @@ struct QuickAddSheet: View {
                     // parseWithAI wraps transport cancellations. An old request must not clear
                     // a newer request's handle, or that newer request could publish stale text.
                     guard !Task.isCancelled, model.quickAddText == text else { return }
+                    DiagnosticsRecorder.shared.error("quick-add", "AI-parse-failed", error)
                     self.error = error.localizedDescription
                 }
                 parsing = nil
@@ -678,7 +691,6 @@ private struct QuickAddInput: UIViewRepresentable {
     var editRevision: Int
     @Binding var composing: Bool
     var reference: QuickAddInputReference
-    var trace: QuickAddTrace
     var activeChoiceCount: Int
     private var hasSuggestions: Bool { activeChoiceCount > 0 }
     var onEdit: (Int, String, NSRange) -> Void
@@ -690,7 +702,6 @@ private struct QuickAddInput: UIViewRepresentable {
 
     func makeUIView(context: Context) -> QuickAddTextView {
         let view = QuickAddTextView()
-        view.trace = trace
         reference.view = view
         context.coordinator.sync = QuickAddInputSync(revision: editRevision)
         view.backgroundColor = .clear
@@ -815,12 +826,12 @@ private final class QuickAddTextView: UITextView {
     var onComplete: (() -> Void)?
     var onMoveSuggestion: ((Int) -> Void)?
     var onDismissSuggestions: (() -> Void)?
-    var trace: QuickAddTrace?
 
     func recordTrace(_ stage: String, replacement: String? = nil, range: NSRange? = nil) {
-        guard let trace, trace.isCapturingInput else { return }
-        trace.input(stage, buffer: text ?? "", selection: selectedRange, marked: markedTextRange != nil,
-                    replacement: replacement, range: range)
+        let diagnostics = DiagnosticsRecorder.shared
+        guard diagnostics.isRecording else { return }
+        diagnostics.input(stage, buffer: text ?? "", selection: selectedRange, marked: markedTextRange != nil,
+                          replacement: replacement, range: range)
     }
 
     override func insertText(_ text: String) {
@@ -830,7 +841,7 @@ private final class QuickAddTextView: UITextView {
     }
 
     override func replace(_ range: UITextRange, withText text: String) {
-        if trace?.isCapturingInput == true {
+        if DiagnosticsRecorder.shared.isRecording {
             let start = offset(from: beginningOfDocument, to: range.start)
             let length = offset(from: range.start, to: range.end)
             if start >= 0, length >= 0 {

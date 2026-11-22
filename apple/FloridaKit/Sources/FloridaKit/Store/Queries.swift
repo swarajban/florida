@@ -804,7 +804,7 @@ extension AppDatabase {
     }
 
     /// Replaces any queued write for (entity, id) with a new one, so the queue holds one row per entity id.
-    static func enqueue(_ db: Database, entity: PendingWrite.Entity, id: String, op: PendingWrite.Op, body: Data?, now: Date) throws {
+    static func enqueue(_ db: Database, entity: PendingWrite.Entity, id: String, op: PendingWrite.Op, body: Data?, now: Date, diagnosticEvent: String = "queued") throws {
         if op != .delete {
             try db.execute(sql: "DELETE FROM syncState WHERE key = ?", arguments: ["creation-delete:\(entity.rawValue):\(id)"])
         }
@@ -816,6 +816,11 @@ extension AppDatabase {
             arguments: [entity.rawValue, id])
         var write = PendingWrite(entity: entity, entityId: id, op: op, body: body, createdAt: now)
         try write.insert(db)
+        let diagnostics = DiagnosticsRecorder.shared
+        if diagnostics.isRecording {
+            let fields = write.diagnosticFields
+            db.afterNextTransaction(onCommit: { _ in diagnostics.record("write", diagnosticEvent, fields) })
+        }
     }
 }
 
@@ -1090,7 +1095,7 @@ extension AppDatabase {
     public func requeue(_ write: PendingWrite, now: Date = Date()) throws {
         try writer.write { db in
             guard !(try Self.pendingEntityIds(db).contains(.init(entity: write.entity, id: write.entityId))) else { return }
-            try Self.enqueue(db, entity: write.entity, id: write.entityId, op: write.op, body: write.body, now: now)
+            try Self.enqueue(db, entity: write.entity, id: write.entityId, op: write.op, body: write.body, now: now, diagnosticEvent: "requeued")
         }
     }
 

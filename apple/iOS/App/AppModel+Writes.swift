@@ -22,11 +22,13 @@ extension AppModel {
     /// Applies `change` to the store, then requests a sync. Throws `LocalWriteError`.
     func perform(_ change: (AppDatabase) throws -> Void) throws {
         guard let database else {
+            DiagnosticsRecorder.shared.record("write", "store-unavailable")
             throw LocalWriteError(storeError ?? "The local store is unavailable.")
         }
         do {
             try change(database)
         } catch {
+            DiagnosticsRecorder.shared.error("write", "local-save-failed", error)
             throw LocalWriteError("Could not save locally: \(error.localizedDescription)")
         }
         if JoySetting.widgetReloadOnWrite.isOn {
@@ -58,13 +60,8 @@ extension AppModel {
             throw LocalWriteError("There are no categories yet. Connect to the server in Settings and sync first.")
         }
         let task = QuickAddTaskBuilder.makeTask(from: draft, category: category, now: Date())
-        quickAddTrace.track(taskID: task.id, title: task.title)
-        do {
-            try perform { try $0.saveTask(task, original: nil) }
-        } catch {
-            quickAddTrace.localSaveFailed(taskID: task.id)
-            throw error
-        }
+        DiagnosticsRecorder.shared.record("quick-add", "create", ["title": .text(task.title)])
+        try perform { try $0.saveTask(task, original: nil) }
         return task
     }
 

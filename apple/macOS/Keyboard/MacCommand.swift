@@ -49,6 +49,7 @@ enum MacCommand: Hashable, Sendable {
     case setDueDate, someday
     case openTaskSource
     case toggleTaskGrouping
+    case showDiagnostics
 
     /// Grouping in the help overlay, reusing the shared sections.
     var section: AppCommand.Section {
@@ -60,7 +61,7 @@ enum MacCommand: Hashable, Sendable {
             .editing
         case .newCategory, .showRoutine, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind, .shareAvailability: .actions
         case .centerOnNow, .jumpToFirst, .jumpToLast, .jump: .navigation
-        case .showProjects, .showBrief, .toggleTaskGrouping, .toggleCalendars, .toggleTasksOnCalendar: .panels
+        case .showProjects, .showBrief, .toggleTaskGrouping, .toggleCalendars, .toggleTasksOnCalendar, .showDiagnostics: .panels
         }
     }
 
@@ -102,6 +103,7 @@ enum MacCommand: Hashable, Sendable {
         case .someday: "Someday"
         case .openTaskSource: "Open task source"
         case .toggleTaskGrouping: "Group by due date / category"
+        case .showDiagnostics: "Diagnostics"
         }
     }
 
@@ -124,6 +126,7 @@ enum MacCommand: Hashable, Sendable {
         .newCategory, .showRoutine, .centerOnNow, .jumpToFirst, .jumpToLast, .jump,
         .showProjects, .showBrief, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind,
         .shareAvailability, .setDueDate, .someday, .toggleTaskGrouping, .toggleCalendars, .toggleTasksOnCalendar,
+        .showDiagnostics,
     ]
 
     /// The palette lists everything except Escape.

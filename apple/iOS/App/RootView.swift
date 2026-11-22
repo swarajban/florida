@@ -34,6 +34,12 @@ struct RootView: View {
         .onChange(of: scenePhase, initial: true) { _, phase in
             model.scenePhaseChanged(to: phase)
         }
+        .onChange(of: model.selectedTab) { _, tab in
+            DiagnosticsRecorder.shared.record("navigation", "tab", ["name": .value(tab.rawValue)])
+        }
+        .onChange(of: model.calendarActivation.syncingCalendarIds.count) { _, count in
+            DiagnosticsRecorder.shared.record("calendar", "activation-pending", ["count": .value(String(count))])
+        }
         .onOpenURL { url in
             open(url)
         }
@@ -50,9 +56,14 @@ struct RootView: View {
     }
 
     private func open(_ url: URL) {
-        guard let link = DeepLink(url: url) else { return }
+        let diagnostics = DiagnosticsRecorder.shared
+        guard let link = DeepLink(url: url) else {
+            diagnostics.record("navigation", "deep-link-ignored")
+            return
+        }
         switch link {
         case .agenda:
+            diagnostics.record("navigation", "deep-link-agenda")
             model.selectedTab = .agenda
             if let date = link.agendaDate(timeZone: model.calendar.timeZone) {
                 model.select(day: date)
@@ -60,19 +71,26 @@ struct RootView: View {
                 model.selectToday()
             }
         case .tasks, .newTask:
+            diagnostics.record("navigation", link == .newTask ? "deep-link-new-task" : "deep-link-tasks")
             model.selectedTab = .tasks
             model.showingQuickAdd = link == .newTask
         case .task(let id):
             model.selectedTab = .tasks
-            if let task = model.task(id: id.uuidString.lowercased()) {
+            let task = model.task(id: id.uuidString.lowercased())
+            diagnostics.record("navigation", "deep-link-task", ["found": .value(String(task != nil))])
+            if let task {
                 linkedTask = TaskEditorRequest(task: task, isNew: false)
             }
         case .project(let id):
             model.selectedTab = .tasks
-            if let project = try? model.database?.project(id: id.uuidString.lowercased()), project.deletedAt == nil {
+            let project = try? model.database?.project(id: id.uuidString.lowercased())
+            let found = project.map { $0.deletedAt == nil } ?? false
+            diagnostics.record("navigation", "deep-link-project", ["found": .value(String(found))])
+            if let project, found {
                 linkedProject = ProjectEditorRequest(project: project, isNew: false)
             }
         case .settings:
+            diagnostics.record("navigation", "deep-link-settings")
             model.selectedTab = .settings
         }
     }

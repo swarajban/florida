@@ -15,7 +15,8 @@ final class SmartAddTests: XCTestCase {
             app.terminate()
         }
         let settings = app.tabBars.buttons["Settings"]
-        traceButton("Start Quick Add trace", in: app).tap()
+        openDiagnostics(app)
+        app.buttons["Start recording"].tap()
         app.tabBars.buttons["Tasks"].tap()
         app.buttons["New task"].tap()
         let keyboardIntroduction = app.buttons["Continue"]
@@ -38,25 +39,50 @@ final class SmartAddTests: XCTestCase {
             format: "identifier BEGINSWITH 'tasks-row-' AND label BEGINSWITH %@", title)).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         settings.tap()
-        traceButton("Copy Quick Add trace", in: app).tap()
-        XCTAssertTrue(app.staticTexts["Quick Add trace copied."].waitForExistence(timeout: 5))
+        openDiagnostics(app)
+        app.buttons["Stop recording"].tap()
+        app.buttons["Copy report"].tap()
+        XCTAssertTrue(app.staticTexts["Diagnostics report copied."].waitForExistence(timeout: 5))
     }
 
     @MainActor
-    private func traceButton(_ title: String, in app: XCUIApplication) -> XCUIElement {
-        let form = app.collectionViews.firstMatch
-        let button = form.buttons[title]
-        for _ in 0..<3 where !button.isHittable {
-            let from = form.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))
-            let to = form.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35))
-            from.press(forDuration: 0.05, thenDragTo: to)
+    func testDiagnosticsRecordsQueuedWrite() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-demoData", "YES", "-uiTab", "settings", "-uiAppearance", "light", "-uiQuickAddInboxOnly", "YES"]
+        app.launch()
+        addTeardownBlock {
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = "diagnostics-queued-write"
+            attachment.lifetime = .keepAlways
+            self.add(attachment)
+            app.terminate()
         }
-        if !button.isHittable {
-            capture(app, "quick-add-trace-action-unreachable")
-            print("Quick Add trace Settings: action=\(title), exists=\(button.exists), form=\(form.frame), settings=\(app.navigationBars["Settings"].exists)")
-        }
-        XCTAssertTrue(button.isHittable, "Settings action is out of reach: \(title)")
-        return button
+        openDiagnostics(app)
+        app.buttons["Start recording"].tap()
+        app.tabBars.buttons["Tasks"].tap()
+        app.buttons["New task"].tap()
+        let keyboardIntroduction = app.buttons["Continue"]
+        if keyboardIntroduction.exists { keyboardIntroduction.tap() }
+        let title = "Smoke zebras"
+        app.textViews["quick-add-input"].typeText(title)
+        app.navigationBars["New Task"].buttons["quick-add-save"].tap()
+        app.tabBars.buttons["Settings"].tap()
+        openDiagnostics(app)
+        app.buttons["Stop recording"].tap()
+        app.buttons["Preview report"].tap()
+        let report = app.staticTexts["diagnostics-report"]
+        XCTAssertTrue(report.waitForExistence(timeout: 5))
+        let text = report.label
+        let lines = text.split(whereSeparator: \.isNewline)
+        XCTAssertTrue(lines.contains { $0.contains(#"write.queued entity="task""#) },
+                      "Expected a queued task write in the report (\(lines.count) lines)")
+        XCTAssertFalse(text.contains(title), "Quick Add title must be redacted by default")
+    }
+
+    @MainActor
+    private func openDiagnostics(_ app: XCUIApplication) {
+        if !app.navigationBars["Diagnostics"].exists { app.buttons["Diagnostics"].tap() }
     }
 
     @MainActor

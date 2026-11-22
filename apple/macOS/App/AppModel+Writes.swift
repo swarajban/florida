@@ -18,6 +18,7 @@ extension AppModel {
                 try database.saveTask(task, original: original, somedayIntent: somedayIntent, dateEdits: dateEdits)
             }
         } catch {
+            DiagnosticsRecorder.shared.error("mac.store", "saveTask", error)
             statusMessage = "Could not save: \(error.localizedDescription)"
             return false
         }
@@ -198,6 +199,9 @@ extension AppModel {
     @discardableResult
     func createTask(from draft: QuickAddDraft, categoryId: String? = nil) -> Bool {
         let title = draft.title.trimmingCharacters(in: .whitespaces)
+        DiagnosticsRecorder.shared.record("mac.quickAdd", "submit", [
+            "titleLength": .value(String(title.utf16.count)), "title": .text(title),
+        ])
         guard !title.isEmpty else {
             statusMessage = "Type a title for the task"
             return false
@@ -233,7 +237,9 @@ extension AppModel {
         if task.recurrence != nil {
             task.prepareToEnableRecurrence()
         }
-        guard save(task, undoLabel: "Added \(Self.quoted(task.title))") else { return false }
+        let saved = save(task, undoLabel: "Added \(Self.quoted(task.title))")
+        DiagnosticsRecorder.shared.record("mac.quickAdd", saved ? "saved" : "saveFailed")
+        guard saved else { return false }
         selection = .task(task.id)
         showGhost(task.needsTriage && !category.isInbox ? "Added to Inbox · \(category.name)" : "Added to \(category.name)")
         return true

@@ -36,7 +36,7 @@ public struct RejectedWrite: Hashable, Sendable {
 public actor SyncClient {
     let database: AppDatabase
     let api: ServerAPI
-    private let quickAddTrace: QuickAddTrace?
+    private let diagnostics: DiagnosticsRecorder
     private var syncInProgress = false
     private var syncWaiters: [CheckedContinuation<Void, Never>] = []
 
@@ -45,11 +45,11 @@ public actor SyncClient {
 
     public init(
         database: AppDatabase, config: ServerConfig, transport: any HTTPTransport = URLSessionTransport(),
-        quickAddTrace: QuickAddTrace? = nil
+        diagnostics: DiagnosticsRecorder = .shared
     ) {
         self.database = database
         api = ServerAPI(config: config, transport: transport)
-        self.quickAddTrace = quickAddTrace
+        self.diagnostics = diagnostics
     }
 
     /// Pushes queued writes, then pulls and applies the server's changes even when a push failed,
@@ -109,13 +109,21 @@ public actor SyncClient {
         do {
             try await recoverCategoryDeletions()
         } catch SyncError.unauthorized {
+            diagnostics.error("write", "recovery-error", SyncError.unauthorized)
             throw SyncError.unauthorized
         } catch {
+            diagnostics.error("write", "recovery-error", error)
             return (0, error)
         }
         var pushed = 0
         var projectsLeftQueued: Set<String> = []
-        let queue = try database.pendingWrites().sorted { ($0.pushRank, $0.seq ?? .max) < ($1.pushRank, $1.seq ?? .max) }
+        let queue: [PendingWrite]
+        do {
+            queue = try database.pendingWrites().sorted { ($0.pushRank, $0.seq ?? .max) < ($1.pushRank, $1.seq ?? .max) }
+        } catch {
+            diagnostics.error("write", "queue-error", error)
+            throw error
+        }
         for entry in queue {
             do {
                 if entry.entity == .task || entry.entity == .project {
@@ -130,33 +138,38 @@ public actor SyncClient {
                 }
                 let deletedCreation = write.op == .delete ? try database.deletedQueuedCreation(write) : false
                 let request = request(for: write)
-                if write.entity == .task {
-                    quickAddTrace?.request(taskID: write.entityId, operation: write.op, body: request.httpBody)
-                }
-                let (data, response) = try await api.send(request)
+                let (data, response) = try await sendWrite(write, request)
                 switch response.statusCode {
                 case 200..<300:
                     try applyAccepted(write, data: data)
+                    diagnostics.record("write", "accepted", write.diagnosticFields)
+                    diagnostics.record("scheduler", "write-placement-refresh", write.diagnosticFields)
                     pushed += 1
                 case 401:
                     throw SyncError.unauthorized
                 case 404 where api.serverError(data) == nil:
+                    diagnostics.record("write", "retry-pending", write.diagnosticFields.merging(["status": .value("404")]) { _, new in new })
                     if write.entity == .project {
                         projectsLeftQueued.insert(write.entityId)
                     }
                     continue
                 case 404 where deletedCreation:
                     try database.resolveDroppedWrite(write, serverCopy: .missing)
+                    diagnostics.record("write", "already-deleted", write.diagnosticFields)
                     pushed += 1
                 case 400..<500:
+                    diagnostics.record("write", "rejected", write.diagnosticFields.merging(["status": .value(String(response.statusCode))]) { _, new in new })
                     try database.resolveDroppedWrite(write, serverCopy: try await fetchServerCopy(of: write))
                     lastRejectedWrites.append(RejectedWrite(write: write, status: response.statusCode, message: api.errorMessage(data)))
                 default:
                     throw SyncError.http(status: response.statusCode, body: api.errorMessage(data))
                 }
             } catch SyncError.unauthorized {
+                diagnostics.error("write", "blocked", SyncError.unauthorized)
                 throw SyncError.unauthorized
             } catch {
+                diagnostics.record("write", "retry-pending", entry.diagnosticFields)
+                diagnostics.error("write", "push-error", error)
                 return (pushed, error)
             }
         }
@@ -185,6 +198,7 @@ public actor SyncClient {
             try database.removePendingWrite(seq: seq)
         }
         try database.resolveDroppedWrite(write, serverCopy: try await fetchServerCopy(of: write))
+        diagnostics.record("write", "discarded", write.diagnosticFields)
     }
 
     /// `GET /api/sync?since=<cursor>` and applies the response.
@@ -195,25 +209,59 @@ public actor SyncClient {
     }
 
     private func pullChanges() async throws {
-        var queryItems: [URLQueryItem] = []
-        if let cursor = try database.cursor() {
-            queryItems.append(URLQueryItem(name: "since", value: cursor))
+        do {
+            let cursor = try database.cursor()
+            diagnostics.record("sync", "pull-start", ["cursor": .value(Self.diagnosticCursor(cursor))])
+            let queryItems = cursor.map { [URLQueryItem(name: "since", value: $0)] } ?? []
+            let request = api.makeRequest(method: "GET", path: "api/sync", queryItems: queryItems)
+            let response: SyncResponse = try await api.perform(request)
+            try database.apply(response)
+            diagnostics.record("sync", "pull-end", [
+                "cursor": .value(Self.diagnosticCursor(response.cursor)),
+                "tasks": .value(String(response.tasks.count)), "events": .value(String(response.events.count)),
+                "categories": .value(String(response.categories.count)), "schedules": .value(String(response.schedules.count)),
+                "projects": .value(String(response.projects.count)), "accounts": .value(String(response.accounts.count)),
+                "calendars": .value(String(response.calendars.count)), "overrides": .value(String(response.dayOverrides.count)),
+                "placements": .value(String(response.placements.count)), "unscheduled": .value(String(response.unscheduled.count)),
+            ])
+        } catch {
+            diagnostics.error("sync", "pull-error", error)
+            throw error
         }
-        let request = api.makeRequest(method: "GET", path: "api/sync", queryItems: queryItems)
-        let response: SyncResponse = try await api.perform(request)
-        try database.apply(response)
+    }
+
+    private static func diagnosticCursor(_ cursor: String?) -> String {
+        guard let cursor else { return "-" }
+        guard cursor.utf8.count <= 32,
+              cursor.range(of: #"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$"#, options: .regularExpression) != nil else {
+            return "invalid"
+        }
+        return cursor
     }
 
     /// `POST /api/schedule/run` and applies the resulting placements.
     public func runScheduler() async throws {
-        let result: SchedulingResult = try await api.perform(api.makeRequest(method: "POST", path: "api/schedule/run"))
-        try database.apply(result, computedAt: Date())
+        try await refreshPlacements("scheduler", path: "api/schedule/run")
     }
 
     /// `POST /api/google/sync` (refresh calendars, then reschedule) and applies the resulting placements.
     public func triggerGoogleSync() async throws {
-        let result: SchedulingResult = try await api.perform(api.makeRequest(method: "POST", path: "api/google/sync"))
-        try database.apply(result, computedAt: Date())
+        try await refreshPlacements("calendar", path: "api/google/sync")
+    }
+
+    private func refreshPlacements(_ subsystem: String, path: String) async throws {
+        diagnostics.record(subsystem, "refresh-start")
+        do {
+            let result: SchedulingResult = try await api.perform(api.makeRequest(method: "POST", path: path))
+            try database.apply(result, computedAt: Date())
+            diagnostics.record(subsystem, "refresh-end", [
+                "placements": .value(String(result.placements.count)),
+                "unscheduled": .value(String(result.unscheduled.count)),
+            ])
+        } catch {
+            diagnostics.error(subsystem, "refresh-error", error)
+            throw error
+        }
     }
 
     // MARK: - Push helpers
@@ -242,13 +290,51 @@ public actor SyncClient {
         }
     }
 
+    private func sendWrite(_ write: PendingWrite, _ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        guard diagnostics.isRecording else { return try await api.send(request) }
+        var fields = write.diagnosticFields
+        fields["method"] = .value(write.op.rawValue.uppercased())
+        fields["path"] = .value("/\(collection(for: write.entity))/:id")
+        if write.entity == .task || write.entity == .event,
+           let body = request.httpBody,
+           let object = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any],
+           let title = object[write.entity == .task ? "title" : "summary"] as? String {
+            fields["title"] = titleField(title)
+        }
+        diagnostics.record("http", "write-send", fields)
+        fields["title"] = nil
+        let sent = ContinuousClock.now
+        do {
+            let result = try await api.send(request)
+            fields["status"] = .value(String(result.1.statusCode))
+            fields["ms"] = .value(Self.elapsedMilliseconds(since: sent))
+            diagnostics.record("http", "write-end", fields)
+            return result
+        } catch {
+            fields["status"] = .value("no-response")
+            fields["ms"] = .value(Self.elapsedMilliseconds(since: sent))
+            diagnostics.record("http", "write-end", fields)
+            throw error
+        }
+    }
+
+    private static func elapsedMilliseconds(since start: ContinuousClock.Instant) -> String {
+        let duration = start.duration(to: .now).components
+        return String(duration.seconds * 1_000 + duration.attoseconds / 1_000_000_000_000_000)
+    }
+
+    private func titleField(_ title: String) -> DiagnosticsRecorder.Field {
+        let token = api.config.token
+        return token.isEmpty || !title.contains(token) ? .text(title) : .value("[credential omitted]")
+    }
+
     private func applyAccepted(_ write: PendingWrite, data: Data) throws {
         let now = Date()
         switch (write.entity, write.op) {
         case (.task, .put), (.task, .patch):
             let response = try api.decode(TaskWriteResponse.self, from: data)
-            quickAddTrace?.accepted(taskID: write.entityId, title: response.task.title)
             try database.completePendingWrite(write, record: response.task, scheduling: response.scheduling, computedAt: now)
+            diagnostics.record("write", "accepted-title", write.diagnosticFields.merging(["title": titleField(response.task.title)]) { _, new in new })
         case (.category, .put), (.category, .patch):
             let response = try api.decode(CategoryWriteResponse.self, from: data)
             try database.completePendingWrite(write, record: response.category, scheduling: response.scheduling, computedAt: now)
@@ -258,6 +344,9 @@ public actor SyncClient {
         case (.event, .put), (.event, .patch):
             let response = try api.decode(EventWriteResponse.self, from: data)
             try database.completePendingWrite(write, record: response.event, scheduling: response.scheduling, computedAt: now)
+            if let summary = response.event.summary {
+                diagnostics.record("write", "accepted-title", write.diagnosticFields.merging(["title": titleField(summary)]) { _, new in new })
+            }
         case (.project, .put), (.project, .patch):
             let response = try api.decode(ProjectWriteResponse.self, from: data)
             try database.completePendingWrite(write, record: response.project, scheduling: response.scheduling, computedAt: now)

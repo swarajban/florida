@@ -1,7 +1,8 @@
+import FloridaKit
 import SwiftUI
 
 enum SettingsTab: Hashable {
-    case server, calendars, categories, routine, feel
+    case server, calendars, categories, routine, feel, diagnostics
 }
 
 /// The ⌘, window: server settings, the Google calendars to mirror, categories, the read-only
@@ -37,6 +38,14 @@ struct SettingsView: View {
                     Label("Feel", systemImage: "sparkles")
                 }
                 .tag(SettingsTab.feel)
+            DiagnosticsSettingsView()
+                .tabItem {
+                    Label("Diagnostics", systemImage: "waveform.path.ecg")
+                }
+                .tag(SettingsTab.diagnostics)
+        }
+        .onChange(of: model.settingsTab) { _, tab in
+            DiagnosticsRecorder.shared.record("mac.screen", "settingsTab", ["tab": .value(String(describing: tab))])
         }
         .accessibilityIdentifier("settings-tabs")
         .frame(width: 680, height: 520)

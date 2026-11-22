@@ -11,6 +11,7 @@ extension AppModel {
     /// Replaces the sync client and change stream for `config` (nil disconnects) and syncs.
     func applyConfig(_ config: ServerConfig?) {
         self.config = config
+        rejectedWriteCount = 0
         changeStream?.cancel()
         changeStream = nil
         for task in backgroundTasks {
@@ -55,15 +56,20 @@ extension AppModel {
     /// Flips and queues a calendar flag locally before asking for sync.
     func setCalendarSelected(id: String, selected: Bool) {
         guard let database else { return }
-        guard let calendar = try? database.calendars().first(where: { $0.id == id }) else { return }
+        let calendar: CalendarInfo
         do {
+            guard let current = try database.calendars().first(where: { $0.id == id }) else { return }
+            calendar = current
             try database.setCalendarSelected(id: id, selected: selected)
         } catch {
+            DiagnosticsRecorder.shared.error("mac.calendar", "setSelected", error)
             statusMessage = "Could not update the calendar: \(error.localizedDescription)"
             return
         }
+        DiagnosticsRecorder.shared.record("mac.calendar", selected ? "activated" : "deactivated")
         calendarActivation.setSelected(selected, calendar: calendar) { [weak self] in
             guard NSApplication.shared.isActive else { return }
+            DiagnosticsRecorder.shared.record("mac.calendar", "activationPull")
             self?.scheduleSync()
         }
         scheduleSync()
@@ -74,6 +80,7 @@ extension AppModel {
         do {
             try database.setCalendarBlocksScheduling(id: id, blocksScheduling: blocksScheduling)
         } catch {
+            DiagnosticsRecorder.shared.error("mac.calendar", "setBlocksScheduling", error)
             statusMessage = "Could not update the calendar: \(error.localizedDescription)"
             return
         }
@@ -87,11 +94,18 @@ extension AppModel {
             try await client.sync()
             lastSyncAt = Date()
             let rejected = await client.lastRejectedWrites.count
+            if client === syncClient { rejectedWriteCount = rejected }
             lastSyncError = rejected == 0 ? nil : "The server rejected \(rejected) change\(rejected == 1 ? "" : "s")"
         } catch {
             lastSyncError = Self.describe(error)
+            let rejected = await client.lastRejectedWrites.count
+            if client === syncClient { rejectedWriteCount = rejected }
         }
-        if let calendars = try? database?.calendars() { calendarActivation.reconcile(calendars) }
+        do {
+            if let calendars = try database?.calendars() { calendarActivation.reconcile(calendars) }
+        } catch {
+            DiagnosticsRecorder.shared.error("mac.calendar", "reconcileActivation", error)
+        }
     }
 
     private func startChangeStream(_ config: ServerConfig) {
