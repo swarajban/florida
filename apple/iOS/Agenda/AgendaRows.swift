@@ -16,30 +16,47 @@ struct EventRow: View {
     let style: EventStyle
     let continuation: String?
     let now: Date
+    let onOpen: () -> Void
 
     var body: some View {
+        let location = event.location?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let place = location.flatMap(GoogleMapsLocation.init)
         HStack(alignment: .top, spacing: 12) {
             TimeColumn(start: event.startAt, end: event.endAt)
                 .padding(.top, Self.cardPadding)
             HStack(alignment: .top, spacing: 12) {
                 EventBar(style: style)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(AgendaItem.event(event).title)
-                        .font(.body.weight(.medium))
-                    if let location = event.location, !location.isEmpty {
-                        Label(location, systemImage: "mappin.and.ellipse")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                    Button(action: onOpen) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(AgendaItem.event(event).title)
+                                .font(.body.weight(.medium))
+                            if place == nil, let location, !location.isEmpty {
+                                Label(location, systemImage: "mappin.and.ellipse")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            if let continuation {
+                                Text(continuation)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .accessibilityElement(children: .combine)
                     }
-                    if let continuation {
-                        Text(continuation)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Shows the event")
+                    .accessibilityValue(style.accessibilityDescription)
+                    if let place {
+                        EventLocationMenu(location: place, eventID: event.id)
+                            .font(.caption)
+                            .lineLimit(1)
                     }
                 }
                 .padding(.vertical, Self.cardPadding)
-                Spacer(minLength: 0)
                 if event.joinURL != nil {
                     Image(systemName: "video")
                         .font(.caption)
@@ -54,8 +71,6 @@ struct EventRow: View {
         }
         .padding(.vertical, 3)
         .opacity(AgendaItem.event(event).isOver(at: now) ? 0.55 : 1)
-        .accessibilityElement(children: .combine)
-        .accessibilityValue(style.accessibilityDescription)
     }
 
     /// Space above and below the text inside the card. With the row's own padding it keeps an
@@ -157,36 +172,52 @@ struct AllDayEventRow: View {
     let style: EventStyle
     let continuation: String?
     let protectsDay: Bool
+    let onOpen: () -> Void
 
     var body: some View {
+        let location = event.location?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let place = location.flatMap(GoogleMapsLocation.init)
         HStack(spacing: 10) {
-            EventBar(style: style)
-                .frame(height: 18)
-            if protectsDay {
-                Image(systemName: "shield.lefthalf.filled")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
+            Button(action: onOpen) {
+                HStack(spacing: 10) {
+                    EventBar(style: style)
+                        .frame(height: 18)
+                    if protectsDay {
+                        Image(systemName: "shield.lefthalf.filled")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                    }
+                    Text(AgendaItem.event(event).title)
+                        .font(.subheadline)
+                        .lineLimit(1)
+                    if let continuation {
+                        Text(continuation)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    if place == nil, let location, !location.isEmpty {
+                        Text(location)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                .contentShape(Rectangle())
+                .accessibilityElement(children: .combine)
             }
-            Text(AgendaItem.event(event).title)
-                .font(.subheadline)
-                .lineLimit(1)
-            if let continuation {
-                Text(continuation)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-            if let location = event.location, !location.isEmpty {
-                Text(location)
+            .buttonStyle(.plain)
+            .accessibilityHint("Shows the event")
+            .accessibilityIdentifier("all-day-event-\(event.id)")
+            .accessibilityValue("All day, \(style.accessibilityDescription)\(protectsDay ? ", Protected. " + AllDayBlocking.explanation(for: event) : "")")
+            if let place {
+                EventLocationMenu(location: place, eventID: event.id)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
         }
         .padding(.vertical, 1)
-        .accessibilityElement(children: .combine)
-        .accessibilityValue("All day, \(style.accessibilityDescription)\(protectsDay ? ", Protected. " + AllDayBlocking.explanation(for: event) : "")")
     }
 }
 

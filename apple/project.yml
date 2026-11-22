@@ -98,6 +98,7 @@ targets:
         # Only HTTPS; skips the export-compliance questions on every TestFlight build.
         ITSAppUsesNonExemptEncryption: false
         UILaunchScreen: {}
+        LSApplicationQueriesSchemes: [comgooglemaps]
         CFBundleURLTypes:
           - CFBundleURLName: com.swarajban.florida
             CFBundleURLSchemes: [florida]

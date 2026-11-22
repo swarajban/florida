@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Sheet for one calendar event, timed or all day: title and time (with a "Day 2 of 3" cue for
 /// multi-day events), a Join button when the event has a meeting link, calendar and account,
-/// location (opens Maps), description with live links, guests and your own response, which is
+/// location (with Google Maps actions), description with live links, guests and your own response, which is
 /// Yes / Maybe / No buttons when you are a guest. On a calendar you can write to, Edit opens the
 /// editor and the ⋯ menu (which also opens the event in Google Calendar) deletes the event.
 struct EventDetailView: View {
@@ -122,15 +122,17 @@ struct EventDetailView: View {
                         }
                     }
                     .accessibilityElement(children: .combine)
-                    if let location = event.location, !location.isEmpty {
-                        Button {
-                            if let url = Self.mapsURL(for: location) {
-                                openURL(url)
+                    if let location = event.location?.trimmingCharacters(in: .whitespacesAndNewlines), !location.isEmpty {
+                        if let place = GoogleMapsLocation(location) {
+                            EventLocationMenu(location: place, eventID: event.id)
+                        } else if let url = GoogleMapsLocation.webLink(location) {
+                            Link(destination: url) {
+                                Label(location, systemImage: "link")
                             }
-                        } label: {
+                        } else {
                             Label(location, systemImage: "mappin.and.ellipse")
+                                .foregroundStyle(.secondary)
                         }
-                        .accessibilityHint("Opens in Maps")
                     }
                     if model.canRespond(to: event) {
                         responseRow(event)
@@ -292,15 +294,5 @@ struct EventDetailView: View {
         if event.status == "tentative" { return "Tentative" }
         if event.transparency == "transparent" { return "Shown as free" }
         return nil
-    }
-
-    /// A location that is itself a link (a video room) opens as is; anything else is a Maps search.
-    static func mapsURL(for location: String) -> URL? {
-        if let url = URL(string: location), let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http" {
-            return url
-        }
-        var components = URLComponents(string: "https://maps.apple.com/")
-        components?.queryItems = [URLQueryItem(name: "q", value: location)]
-        return components?.url
     }
 }

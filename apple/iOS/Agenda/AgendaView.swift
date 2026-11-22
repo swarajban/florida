@@ -369,21 +369,23 @@ struct AgendaView: View {
                 Section {
                     ForEach(allDayItems) { item in
                         let event = item.events[0]
-                        Button {
-                            if item.isGroup { selectedOOO = item } else { selectedEvent = event }
-                        } label: {
+                        Group {
                             if item.isGroup {
-                                CoworkerOOOLabel(item: item)
+                                Button {
+                                    selectedOOO = item
+                                } label: {
+                                    CoworkerOOOLabel(item: item)
+                                }
+                                .accessibilityHint("Shows the event")
+                                .accessibilityIdentifier("all-day-coworker-ooo")
                             } else {
                                 AllDayEventRow(
                                     event: event, style: model.eventStyle(event),
                                     continuation: EventTiming.continuation(of: event, on: day, calendar: model.calendar),
-                                    protectsDay: agenda?.blockingAllDayEvents.contains(where: { $0.id == event.id }) == true)
-                                    .foregroundStyle(.primary)
+                                    protectsDay: agenda?.blockingAllDayEvents.contains(where: { $0.id == event.id }) == true,
+                                    onOpen: { selectedEvent = event })
                             }
                         }
-                        .accessibilityHint("Shows the event")
-                        .accessibilityIdentifier(item.isGroup ? "all-day-coworker-ooo" : "all-day-event-\(event.id)")
                         .listRowInsets(EdgeInsets(top: 3, leading: 20, bottom: 3, trailing: 20))
                         .listRowBackground(FloridaStyle.paper)
                     }
@@ -519,15 +521,10 @@ struct AgendaView: View {
 
     /// Tapping an event opens its detail sheet.
     private func eventRow(_ event: CalendarEvent, on day: Date) -> some View {
-        Button {
-            selectedEvent = event
-        } label: {
-            EventRow(
-                event: event, style: model.eventStyle(event),
-                continuation: EventTiming.continuation(of: event, on: day, calendar: model.calendar), now: now)
-                .foregroundStyle(.primary)
-        }
-        .accessibilityHint("Shows the event")
+        EventRow(
+            event: event, style: model.eventStyle(event),
+            continuation: EventTiming.continuation(of: event, on: day, calendar: model.calendar), now: now,
+            onOpen: { selectedEvent = event })
     }
 }
 
