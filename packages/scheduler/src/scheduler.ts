@@ -216,6 +216,10 @@ export function schedule(input: SchedulerInput): SchedulerResult {
     for (const block of prior) {
       if (remaining <= 0 || block.start > now || block.end <= now) continue
       if (task.startAt !== undefined && block.start < parseInstant(task.startAt, 'startAt')) continue
+      if (task.requiredDay !== undefined && (
+        block.start < parseInstant(task.requiredDay.start, 'requiredDay.start') ||
+        block.end > parseInstant(task.requiredDay.end, 'requiredDay.end')
+      )) continue
       // Time already spent in the block counts as worked unless the logged minutes cover it, so
       // logging progress mid-block never counts the same minutes twice.
       const credit = Math.max(0, now - block.start - logged)
@@ -241,7 +245,7 @@ export function schedule(input: SchedulerInput): SchedulerResult {
   /** Per task: the blocks the plan gave it and the work (ms) it found no room for. */
   const plan = new Map<string, Planned>()
   for (const task of flexible) {
-    const allowed = routine.blocks.some(
+    const allowed = task.requiredDay !== undefined || routine.blocks.some(
       (b) => b.optional !== true && b.allows.includes(task.context) && b.days.length > 0,
     )
     const retained = active.get(task.id) ?? { spans: [], work: 0 }
@@ -255,7 +259,9 @@ export function schedule(input: SchedulerInput): SchedulerResult {
       unscheduled.push({
         taskId: task.id,
         reason: !allowed ? 'no_allowed_block'
-          : fit.hardLimited ? 'no_fit_before_hard_deadline' : 'no_fit_in_horizon',
+          : fit.hardLimited ? 'no_fit_before_hard_deadline'
+          : task.requiredDay !== undefined && parseInstant(task.requiredDay.start, 'requiredDay.start') < ctx.horizonEnd
+            ? 'no_fit_on_required_day' : 'no_fit_in_horizon',
         unplacedMinutes: fit.remaining / MINUTE,
       })
     }
@@ -396,7 +402,8 @@ function suggestOptional(
 ): OptionalPlacement[] {
   // `sort` is stable, so tasks keep their `compareTasks` order within an area.
   const personalFirst = (task: Task): number => (task.area === 'personal' ? 0 : 1)
-  const ordered = [...flexible].sort((a, b) => personalFirst(a) - personalFirst(b))
+  const ordered = flexible.filter((task) => task.requiredDay === undefined)
+    .sort((a, b) => personalFirst(a) - personalFirst(b))
   const suggestions: OptionalPlacement[] = []
   const firstDay = dayNumber(localDate(ctx.now, routine.timeZone))
 
@@ -498,10 +505,12 @@ function placeTask(
   const earliest = Math.max(
     ctx.now,
     task.startAt === undefined ? ctx.now : parseInstant(task.startAt, 'startAt'),
+    task.requiredDay === undefined ? ctx.now : parseInstant(task.requiredDay.start, 'requiredDay.start'),
     ...retained.spans.map((span) => span.end),
   )
   const hardDue = task.deadlineType === 'hard' ? effectiveDue(task)?.ms : undefined
-  const limit = Math.min(ctx.horizonEnd, hardDue ?? Number.POSITIVE_INFINITY)
+  const dayEnd = task.requiredDay === undefined ? Number.POSITIVE_INFINITY : parseInstant(task.requiredDay.end, 'requiredDay.end')
+  const limit = Math.min(ctx.horizonEnd, dayEnd, hardDue ?? Number.POSITIVE_INFINITY)
 
   let remaining = Math.max(0, remainingMinutes(task) * MINUTE - retained.work)
   const spans: Piece[] = [...retained.spans]
@@ -544,14 +553,16 @@ function placeTask(
   }
 
   fill((date) => blocksOn(routine, ctx, task.context, date))
-  if (remaining > 0 && hardDue !== undefined) {
+  if (remaining > 0 && task.requiredDay !== undefined) {
+    fill((date) => ctx.weekdayFor(date) === undefined ? [] : [windowSpan(date, ctx.overflow.start, ctx.overflow.end, routine.timeZone)])
+  } else if (remaining > 0 && hardDue !== undefined) {
     fill((date) => [windowSpan(date, ctx.overflow.start, ctx.overflow.end, routine.timeZone)])
   }
 
   return {
     spans,
     remaining,
-    hardLimited: hardDue !== undefined && hardDue <= ctx.horizonEnd,
+    hardLimited: hardDue !== undefined && hardDue <= Math.min(ctx.horizonEnd, dayEnd),
   }
 }
 

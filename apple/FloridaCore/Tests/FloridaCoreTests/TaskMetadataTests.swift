@@ -10,6 +10,22 @@ import Testing
                  createdAt: now, updatedAt: now)
     }
 
+    @Test func requiredDayRoundTripsAndOlderSnapshotsDefaultOff() throws {
+        let original = task()
+        var optedIn = original
+        optedIn.mustHappenOnDay = true
+        let encoded = try JSONCoding.encoder.encode(optedIn)
+        #expect(try JSONCoding.decoder.decode(TaskItem.self, from: encoded) == optedIn)
+        var oldWire = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        oldWire.removeValue(forKey: "mustHappenOnDay")
+        let olderPayload = try JSONSerialization.data(withJSONObject: oldWire)
+        #expect(try JSONCoding.decoder.decode(TaskItem.self, from: olderPayload) == original)
+        let write = TaskWrite(optedIn)
+        #expect(try JSONCoding.decoder.decode(TaskWrite.self, from: JSONCoding.encoder.encode(write)).mustHappenOnDay == true)
+        let undo = try #require(TaskUndo(from: original, to: optedIn))
+        #expect(undo.reverted(optedIn) == original)
+    }
+
     @Test func legacyTaskAndWriteDecodeMissingAndNullMetadata() throws {
         for null in [false, true] {
             for write in [false, true] {

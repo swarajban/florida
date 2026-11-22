@@ -145,6 +145,17 @@ struct TaskEditorView: View {
                             }
                         }
                     }
+                    Toggle(isOn: $draft.mustHappenOnDay) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Must happen that day")
+                            Text("Use free time outside your routine. Busy events and days off still apply.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .disabled(!draft.mustHappenOnDay && (draft.someday || hasPin.wrappedValue
+                        || (draft.recurrence == nil && !hasDue.wrappedValue && !hasStart.wrappedValue)))
+                    .accessibilityIdentifier("task-must-happen-on-day")
                 }
                 .environment(\.calendar, model.taskListCalendar)
                 .environment(\.timeZone, model.taskListCalendar.timeZone)

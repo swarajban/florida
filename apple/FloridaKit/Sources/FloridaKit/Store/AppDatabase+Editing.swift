@@ -70,6 +70,7 @@ extension AppDatabase {
             apply(\.someday)
             applyDate(\.startAt)
             apply(\.scheduleId)
+            apply(\.mustHappenOnDay)
             apply(\.context)
             apply(\.projectId)
             apply(\.attention)

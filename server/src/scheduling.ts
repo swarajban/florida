@@ -218,6 +218,18 @@ export function buildSchedulerInput(src: SchedulerSources): SchedulerInput {
     if (t.dueAt !== null) task.dueAt = t.dueAt.toISOString()
     if (t.startAt !== null) task.startAt = t.startAt.toISOString()
     if (t.pinnedStart !== null) task.pinnedStart = t.pinnedStart.toISOString()
+    if (t.mustHappenOnDay) {
+      const instant = (t.deadlineType === 'none' ? null : t.dueAt) ?? t.startAt
+      const occurrence = t.recurrenceDate === null ? undefined : parseCalendarDate(t.recurrenceDate)
+      const zone = occurrence === undefined ? src.timeZone : t.recurrence?.timeZone ?? src.timeZone
+      const day = occurrence ?? (instant === null ? undefined : localDate(instant.getTime(), zone))
+      if (day !== undefined) {
+        task.requiredDay = {
+          start: new Date(zonedToUtc(day, 0, zone)).toISOString(),
+          end: new Date(zonedToUtc(dateFromDayNumber(dayNumber(day) + 1), 0, zone)).toISOString(),
+        }
+      }
+    }
     openTasks.push(task)
   }
   openTasks.push(...projectTimeTasks(src, [...liveProjects.values()], liveCategories, openMinutes))

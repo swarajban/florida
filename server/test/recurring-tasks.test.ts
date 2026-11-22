@@ -96,6 +96,19 @@ async function get(id: string): Promise<WireTask> {
 }
 
 describe('recurring tasks through the API and real scheduler', () => {
+  it('preserves the required-day option on older writes and copies edits to future repeats and sync', async () => {
+    const first = await put('required-day-series', { ...base, recurrence: MONTHLY, mustHappenOnDay: true })
+    const initial = await series(first.recurrenceSeriesId)
+    expect(initial).toHaveLength(5)
+    expect(initial.every((task) => task.mustHappenOnDay)).toBe(true)
+    const { mustHappenOnDay: omitted, ...oldClient } = first
+    expect((await put(first.id, { ...oldClient, title: 'Older client edit' })).mustHappenOnDay).toBe(true)
+    const current = await get(initial[1]!.id)
+    const response = await request(`/api/tasks/${current.id}`, 'PATCH', { mustHappenOnDay: false })
+    expect(response.status).toBe(200)
+    expect((await series(first.recurrenceSeriesId)).map((task) => task.mustHappenOnDay)).toEqual([true, false, false, false, false])
+  })
+
   it('copies sources to occurrences, preserves older edits, and propagates source edits and clearing', async () => {
     const source = { url: 'https://linear.app/acme/issue/ENG-12/fix', title: 'Linear ENG-12', kind: 'linear' as const }
     const first = await put('source-series', { ...base, source, recurrence: MONTHLY })

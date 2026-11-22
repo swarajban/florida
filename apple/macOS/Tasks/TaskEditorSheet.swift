@@ -150,6 +150,12 @@ struct TaskEditorSheet: View {
                                    key: TaskEditorKey.deadline.keycap, isPresented: showing(.deadline),
                                    identifier: "task-deadline", onDismiss: leaveField)
                     .disabled(!hasDue)
+                    Toggle("Must happen that day", isOn: $draft.mustHappenOnDay)
+                        .toggleStyle(.checkbox)
+                        .disabled(!draft.mustHappenOnDay && (draft.someday || hasPinnedStart
+                            || (draft.recurrence == nil && !hasDue && !hasStart)))
+                        .help("Use free time outside your routine. Busy events and days off still apply.")
+                        .accessibilityIdentifier("task-must-happen-on-day")
                 }
                 .environment(\.calendar, model.taskListCalendar)
                 .environment(\.timeZone, model.taskListCalendar.timeZone)

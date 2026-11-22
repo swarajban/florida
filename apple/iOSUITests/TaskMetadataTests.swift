@@ -2,6 +2,36 @@ import XCTest
 
 final class TaskMetadataTests: XCTestCase {
     @MainActor
+    func testMustHappenThatDayPersistsInEditor() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-demoData", "YES", "-uiTaskGroupingDemo", "YES", "-demoNow", "2026-11-18T12:00:00Z",
+            "-uiTab", "tasks", "-uiAppearance", "light",
+        ]
+        let toggle = app.switches["task-must-happen-on-day"]
+        addTeardownBlock { @MainActor in
+            self.capture(app, "must-happen-that-day")
+            print("Required day toggle: exists=\(toggle.exists), frame=\(toggle.frame), value=\(String(describing: toggle.value))")
+            app.terminate()
+        }
+        app.launch()
+        let row = app.buttons["tasks-row-group-overdue"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.tap()
+        reveal(toggle, in: app)
+        XCTAssertEqual(toggle.value as? String, "0")
+        toggle.tap()
+        let editor = app.navigationBars["Edit Task"]
+        editor.buttons["Save"].tap()
+        XCTAssertTrue(editor.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        reveal(toggle, in: app)
+        XCTAssertEqual(toggle.value as? String, "1")
+    }
+
+    @MainActor
     func testTagsAndWaitingEditAndFilter() {
         continueAfterFailure = false
         let app = XCUIApplication()

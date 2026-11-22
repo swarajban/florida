@@ -1,0 +1,1 @@
+ALTER TABLE "tasks" ADD COLUMN "must_happen_on_day" boolean DEFAULT false NOT NULL;

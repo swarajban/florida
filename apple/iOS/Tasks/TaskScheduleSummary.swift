@@ -99,6 +99,7 @@ struct TaskScheduleSummary: Hashable {
     static func describe(reason: String) -> String {
         switch reason {
         case "no_fit_in_horizon": "No free time in the scheduling window"
+        case "no_fit_on_required_day": "No free time on the required day"
         case "no_fit_before_hard_deadline": "No free time before the hard deadline"
         case "unknown_schedule": "Its schedule no longer exists"
         case "no_allowed_block": "No routine block allows its context"

@@ -51,6 +51,7 @@ public struct TaskUndo: Equatable, Sendable {
         track(\.someday)
         track(\.startAt, isSame: Self.same)
         track(\.scheduleId)
+        track(\.mustHappenOnDay)
         track(\.context)
         track(\.projectId)
         track(\.attention)

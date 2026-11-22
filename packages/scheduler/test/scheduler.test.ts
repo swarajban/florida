@@ -45,6 +45,56 @@ function spansOf(result: SchedulerResult, taskId: string): [string, string][] {
 
 const MONDAY_FULL = [busy('2026-11-09T09:00:00-08:00', '2026-11-09T17:00:00-08:00')]
 
+describe('required days', () => {
+  const friday = busy('2026-11-13T00:00:00-08:00', '2026-11-14T00:00:00-08:00')
+
+  it('keeps a Friday occurrence on Friday, working around the gym and a calendar event', () => {
+    const routine: Routine = { ...WORK, blocks: [...WORK.blocks,
+      { id: 'gym', days: [5], start: '17:00', end: '18:00', allows: [] },
+    ] }
+    const occurrence = task({
+      id: 'weekly-photo', context: 'home', startAt: '2026-11-13T17:00:00-08:00',
+      dueAt: '2026-11-13T23:00:00-08:00', deadlineType: 'soft', durationMinutes: 5,
+    })
+    const normal = task({ id: 'normal' })
+    const events = [busy('2026-11-13T18:00:00-08:00', '2026-11-13T19:00:00-08:00')]
+    const baseline = run([occurrence, normal], events, { routine })
+    const optedIn = run([{ ...occurrence, requiredDay: friday }, normal], events, { routine })
+    expect(spansOf(baseline, occurrence.id)[0]?.[0]).toBe(iso('2026-11-16T09:00:00-08:00'))
+    expect(spansOf(optedIn, occurrence.id)).toEqual([[iso('2026-11-13T19:00:00-08:00'), iso('2026-11-13T19:05:00-08:00')]])
+    expect(spansOf(optedIn, normal.id)).toEqual(spansOf(baseline, normal.id))
+  })
+
+  it('tries regular Friday hours before fallback and uses the fallback when there is no routine', () => {
+    const dueFriday = task({ id: 'due', deadlineType: 'soft', dueAt: friday.end, requiredDay: friday })
+    expect(spansOf(run([dueFriday]), dueFriday.id)[0]?.[0]).toBe(iso('2026-11-13T09:00:00-08:00'))
+    expect(spansOf(run([dueFriday], [], { routine: CLOSED }), dueFriday.id)[0]?.[0]).toBe(iso('2026-11-13T07:00:00-08:00'))
+  })
+
+  it('leaves the task unscheduled on an explicitly off or fully booked date, even with a hard deadline', () => {
+    const required = task({
+      id: 'required', requiredDay: friday, deadlineType: 'hard', dueAt: '2026-11-16T17:00:00-08:00',
+    })
+    for (const result of [
+      run([required], [friday]),
+      run([required], [], { dayOverrides: [{ date: '2026-11-13', kind: 'off' }] }),
+    ]) {
+      expect(result.placements).toEqual([])
+      expect(result.optional).toEqual([])
+      expect(result.unscheduled).toEqual([{ taskId: required.id, reason: 'no_fit_on_required_day', unplacedMinutes: 60 }])
+    }
+  })
+
+  it('respects the hard deadline within the required day', () => {
+    const required = task({
+      id: 'hard', requiredDay: friday, deadlineType: 'hard', dueAt: '2026-11-13T07:30:00-08:00',
+    })
+    const result = run([required])
+    expect(result.placements).toEqual([])
+    expect(result.unscheduled).toEqual([{ taskId: required.id, reason: 'no_fit_before_hard_deadline', unplacedMinutes: 60 }])
+  })
+})
+
 describe('waiting tasks', () => {
   it('parks an indefinite wait without problems, optional suggestions, or a contradictory pin', () => {
     const result = run([task({ id: 'waiting', waitingOn: 'Approval', pinnedStart: NOW })])

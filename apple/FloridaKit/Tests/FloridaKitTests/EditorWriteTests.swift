@@ -18,6 +18,37 @@ import Testing
         Fixtures.event(id: "event", start: "2026-11-09T17:00:00Z", end: "2026-11-09T18:00:00Z")
     }
 
+    @Test func requiredDayMigratesAndQueuesExplicitEditorChanges() throws {
+        let queue = try DatabaseQueue()
+        try AppDatabase.migrator.migrate(queue, upTo: "v13-calendar-last-sync")
+        try queue.write { db in
+            try db.execute(sql: """
+                INSERT INTO task (id, categoryId, title, durationMinutes, priority, deadlineType,
+                                  completedMinutes, createdAt, updatedAt)
+                VALUES ('task', 'work', 'Keep', 5, 'medium', 'none', 0, ?, ?);
+                INSERT INTO syncState (key, value) VALUES ('cursor', 'before');
+                """, arguments: [Fixtures.t0, Fixtures.t0])
+        }
+        let db = try AppDatabase(writer: queue)
+        #expect(try db.cursor() == nil)
+        try db.apply(SyncResponse(cursor: "after", categories: [Fixtures.category(id: "work")]))
+        let original = try #require(try db.task(id: "task"))
+        #expect(!original.mustHappenOnDay)
+        var draft = original
+        draft.mustHappenOnDay = true
+        let edited = try db.saveTask(draft, original: original, now: Fixtures.t0).after
+        #expect(edited.mustHappenOnDay)
+        #expect(try body(db)["mustHappenOnDay"] as? Bool == true)
+        var stale = original
+        stale.title = "Renamed"
+        let renamed = try db.saveTask(stale, original: original, now: Fixtures.t0).after
+        #expect(renamed.mustHappenOnDay)
+        stale = renamed
+        stale.mustHappenOnDay = false
+        _ = try db.saveTask(stale, original: renamed, now: Fixtures.t0)
+        #expect(try body(db)["mustHappenOnDay"] as? Bool == false)
+    }
+
     @Test func rsvpUpdatesLiveSelfAttendeeWithoutRevertingOtherGuests() throws {
         let db = try store()
         var original = event()

@@ -38,6 +38,7 @@ export const taskBody = z.object({
   someday: z.boolean().optional().describe('Keeps a task off the plan, with no due date or pin. Explicit true clears dueAt and pinnedStart but keeps startAt. When omitted, setting a changed nonnull due/start/pin turns it off; unrelated edits and same-value retries preserve it. A same-date scheduling action must send false. Defaults to false on creation.'),
   startAt: isoInstant.nullish(),
   scheduleId: z.string().min(1).nullish(),
+  mustHappenOnDay: z.boolean().optional().describe('Restrict scheduling to the repeat date, otherwise the due date or start date. Free time outside the routine can be used on that day; calendar blocks, explicit days off and hard deadlines still apply.'),
   context: taskContext
     .optional()
     .describe(
@@ -121,6 +122,7 @@ function taskFields(body: TaskBody, now: Date, current: TaskRow | undefined) {
     someday,
     startAt,
     scheduleId: body.scheduleId ?? null,
+    mustHappenOnDay: body.mustHappenOnDay ?? current?.mustHappenOnDay ?? false,
     // Older shipped clients omit context; their edits must not reset a task to the default.
     context: body.context ?? current?.context ?? 'computer',
     // Likewise: absent keeps, null clears.
@@ -152,6 +154,7 @@ function seriesTemplate(fields: Pick<TaskRow, keyof ReturnType<typeof taskFields
     someday: fields.someday,
     startAt: fields.startAt?.toISOString() ?? null,
     scheduleId: fields.scheduleId,
+    mustHappenOnDay: fields.mustHappenOnDay,
     context: fields.context,
     projectId: fields.projectId,
     attention: fields.attention,
@@ -212,7 +215,7 @@ async function writeTask(db: Db, id: string, body: TaskBody, now: Date): Promise
       // A retried creation still contains dates relative to the original rule anchor. Normalize
       // that request exactly as the first write; omitted dates otherwise mean local day bounds.
       const incoming = seriesTemplate(fields, series.template.anchorDate)
-      const stored = { ...series.template, source: series.template.source ?? null, tags: series.template.tags ?? [], waitingOn: series.template.waitingOn ?? null, waitingUntil: series.template.waitingUntil ?? null }
+      const stored = { ...series.template, source: series.template.source ?? null, tags: series.template.tags ?? [], waitingOn: series.template.waitingOn ?? null, waitingUntil: series.template.waitingUntil ?? null, mustHappenOnDay: series.template.mustHappenOnDay ?? false }
       const source = isDeepStrictEqual(incoming, stored) && isDeepStrictEqual(recurrence, series.rule)
         ? stored
         : seriesTemplate(fields, recurrenceDate)
@@ -293,6 +296,7 @@ export async function patchTask(db: Db, id: string, patch: TaskPatch, now: Date 
       ...(patch.someday === undefined ? {} : { someday: patch.someday }),
       startAt: keep(patch.startAt, iso(current.startAt)),
       scheduleId: keep(patch.scheduleId, current.scheduleId),
+      mustHappenOnDay: keep(patch.mustHappenOnDay, current.mustHappenOnDay),
       context: keep(patch.context, current.context),
       projectId: keep(patch.projectId, current.projectId),
       attention: keep(patch.attention, current.attention),
