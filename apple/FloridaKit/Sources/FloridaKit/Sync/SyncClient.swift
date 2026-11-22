@@ -36,15 +36,20 @@ public struct RejectedWrite: Hashable, Sendable {
 public actor SyncClient {
     let database: AppDatabase
     let api: ServerAPI
+    private let quickAddTrace: QuickAddTrace?
     private var syncInProgress = false
     private var syncWaiters: [CheckedContinuation<Void, Never>] = []
 
     /// Writes the server refused with a 4xx during the most recent push; the UI can show them.
     public private(set) var lastRejectedWrites: [RejectedWrite] = []
 
-    public init(database: AppDatabase, config: ServerConfig, transport: any HTTPTransport = URLSessionTransport()) {
+    public init(
+        database: AppDatabase, config: ServerConfig, transport: any HTTPTransport = URLSessionTransport(),
+        quickAddTrace: QuickAddTrace? = nil
+    ) {
         self.database = database
         api = ServerAPI(config: config, transport: transport)
+        self.quickAddTrace = quickAddTrace
     }
 
     /// Pushes queued writes, then pulls and applies the server's changes even when a push failed,
@@ -124,7 +129,11 @@ public actor SyncClient {
                     continue
                 }
                 let deletedCreation = write.op == .delete ? try database.deletedQueuedCreation(write) : false
-                let (data, response) = try await api.send(request(for: write))
+                let request = request(for: write)
+                if write.entity == .task {
+                    quickAddTrace?.request(taskID: write.entityId, operation: write.op, body: request.httpBody)
+                }
+                let (data, response) = try await api.send(request)
                 switch response.statusCode {
                 case 200..<300:
                     try applyAccepted(write, data: data)
@@ -238,6 +247,7 @@ public actor SyncClient {
         switch (write.entity, write.op) {
         case (.task, .put), (.task, .patch):
             let response = try api.decode(TaskWriteResponse.self, from: data)
+            quickAddTrace?.accepted(taskID: write.entityId, title: response.task.title)
             try database.completePendingWrite(write, record: response.task, scheduling: response.scheduling, computedAt: now)
         case (.category, .put), (.category, .patch):
             let response = try api.decode(CategoryWriteResponse.self, from: data)

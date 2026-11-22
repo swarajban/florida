@@ -32,6 +32,7 @@ final class AppModel {
     /// One capture draft for the app and widget shortcut. Closing the composer keeps it until
     /// a local save succeeds or the user clears it.
     var showingQuickAdd = false
+    let quickAddTrace = QuickAddTrace()
     var quickAddText = ""
     var quickAddRemovedSourceURL: String?
     var quickAddCategory: TaskCategory?
@@ -194,7 +195,7 @@ final class AppModel {
             lastError = "Could not read the saved server settings: \(error.localizedDescription)"
         }
         if let serverConfig, let database {
-            syncClient = SyncClient(database: database, config: serverConfig)
+            syncClient = SyncClient(database: database, config: serverConfig, quickAddTrace: quickAddTrace)
             aiClient = AIClient(config: serverConfig)
         }
     }

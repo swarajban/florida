@@ -2,6 +2,51 @@ import XCTest
 
 final class SmartAddTests: XCTestCase {
     @MainActor
+    func testQuickAddTraceCapturesTypingAndPaste() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-demoData", "YES", "-uiTab", "settings", "-uiAppearance", "light", "-uiQuickAddInboxOnly", "YES"]
+        app.launch()
+        addTeardownBlock {
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = "quick-add-trace-result"
+            attachment.lifetime = .keepAlways
+            self.add(attachment)
+            app.terminate()
+        }
+        let settings = app.tabBars.buttons["Settings"]
+        let start = app.buttons["Start Quick Add trace"]
+        if !start.isHittable { app.swipeUp() }
+        start.tap()
+        app.tabBars.buttons["Tasks"].tap()
+        app.buttons["New task"].tap()
+        let keyboardIntroduction = app.buttons["Continue"]
+        if keyboardIntroduction.exists { keyboardIntroduction.tap() }
+        let input = app.textViews["quick-add-input"]
+        for key in "famalooda" { input.typeText(String(key)) }
+        input.typeText(" secret Santa")
+        let title = "famalooda secret Santa"
+        XCTAssertEqual(input.value as? String, title)
+
+        UIPasteboard.general.string = title + " "
+        input.press(forDuration: 1)
+        app.menuItems["Select All"].tap()
+        app.menuItems["Paste"].tap()
+        if app.buttons["Allow Paste"].waitForExistence(timeout: 2) { app.buttons["Allow Paste"].tap() }
+        XCTAssertEqual(input.value as? String, title + " ")
+        XCTAssertEqual(app.staticTexts["quick-add-title"].label, title)
+        app.navigationBars["New Task"].buttons["quick-add-save"].tap()
+        let row = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH 'tasks-row-' AND label BEGINSWITH %@", title)).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        settings.tap()
+        let copy = app.buttons["Copy Quick Add trace"]
+        if !copy.isHittable { app.swipeUp() }
+        copy.tap()
+        XCTAssertTrue(app.staticTexts["Quick Add trace copied."].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testQuickAddSavesOneTask() {
         continueAfterFailure = false
         let app = XCUIApplication()
