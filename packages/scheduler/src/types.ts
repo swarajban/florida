@@ -103,7 +103,7 @@ export interface Task {
   dueAt?: string
   /** ISO 8601 instant before which the task must not be placed. */
   startAt?: string
-  /** Local calendar day as an instant range. Only this range may use the task's routine or fallback hours. */
+  /** Local calendar day as an instant range. Routine or fallback hours ignore all-day blocks and days off in this range. */
   requiredDay?: Interval
   /** Minutes already worked, subtracted from `durationMinutes`. */
   completedMinutes?: number
@@ -126,7 +126,7 @@ export interface SchedulerInput {
   /** Open tasks only; completed tasks must not be passed. */
   tasks: Task[]
   /** Time that is unavailable: calendar events and anything else that blocks. */
-  busy: Interval[]
+  busy: (Interval & { allDay?: boolean })[]
   /**
    * Prior run's placements. Pinned tasks ignore these. A block in progress (start ≤ now < end)
    * keeps its start if it is at or after the task's start date (including any waiting follow-up).

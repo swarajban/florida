@@ -234,11 +234,11 @@ export function buildSchedulerInput(src: SchedulerSources): SchedulerInput {
   }
   openTasks.push(...projectTimeTasks(src, [...liveProjects.values()], liveCategories, openMinutes))
 
-  const busy: Interval[] = []
+  const busy: SchedulerInput['busy'] = []
   for (const e of src.events) {
     const interval = blockingEventInterval(e, src.timeZone)
     if (interval === undefined || Date.parse(interval.end) <= weekStart || Date.parse(interval.start) >= horizonEnd) continue
-    busy.push(interval)
+    busy.push(e.allDay ? { ...interval, allDay: true } : interval)
   }
 
   const input: SchedulerInput = {

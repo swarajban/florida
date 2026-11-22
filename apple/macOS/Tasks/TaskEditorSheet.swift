@@ -154,7 +154,7 @@ struct TaskEditorSheet: View {
                         .toggleStyle(.checkbox)
                         .disabled(!draft.mustHappenOnDay && (draft.someday || hasPinnedStart
                             || (draft.recurrence == nil && !hasDue && !hasStart)))
-                        .help("Use free time outside your routine. Busy events and days off still apply.")
+                        .help("Use free time outside your routine, even on days off. Timed events still apply.")
                         .accessibilityIdentifier("task-must-happen-on-day")
                 }
                 .environment(\.calendar, model.taskListCalendar)
