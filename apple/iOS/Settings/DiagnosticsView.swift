@@ -33,9 +33,9 @@ struct DiagnosticsView: View {
                 Text("Recording stays in memory and stops after 15 minutes. Include text can show submitted Quick Add text and task or event titles in the next report. Review it before sharing.")
             }
 
-            if let status {
+            if status != nil {
                 Section {
-                    if !status.isRecording, let report {
+                    if status?.isRecording == false, let report {
                         NavigationLink("Preview report") {
                             ScrollView {
                                 Text(verbatim: report)

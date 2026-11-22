@@ -111,6 +111,11 @@ harness = r'''
 import FloridaKit
 import Foundation
 
+struct DiagnosticsRecorder {
+    static let shared = Self()
+    func error(_ subsystem: String, _ event: String, _ error: any Error) {}
+}
+
 extension Priority { var displayName: String { rawValue } }
 final class AppDatabase {
     __EVENT_SERIES_MEMBER__
