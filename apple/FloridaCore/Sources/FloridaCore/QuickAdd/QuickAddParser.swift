@@ -420,17 +420,25 @@ struct QuickAddScanner {
     }
 
     static func joinTitle(_ tokens: [String]) -> String {
-        let trim = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "-–—:;,./|~"))
-        var leadingTrim = trim
-        var trailingTrim = trim
-        if tokens.first?.unicodeScalars.contains(where: CharacterSet.alphanumerics.contains) == true {
-            leadingTrim.remove(charactersIn: "/~")
+        guard let first = tokens.first, let last = tokens.last else { return "" }
+        let separators = "-–—:;,./|~"
+        let keepLeadingSlashes = first.unicodeScalars.contains(where: CharacterSet.alphanumerics.contains)
+        let joined = tokens.joined(separator: " ").unicodeScalars
+        var start = joined.startIndex
+        while start != joined.endIndex {
+            let scalar = joined[start]
+            if !scalar.properties.isWhitespace {
+                guard separators.unicodeScalars.contains(scalar),
+                      !keepLeadingSlashes || (scalar != "/" && scalar != "~") else { break }
+            }
+            joined.formIndex(after: &start)
         }
-        if tokens.last?.unicodeScalars.contains(where: CharacterSet.alphanumerics.contains) == true {
+        let title = String(joined[start...])
+        if last.contains("://") || TaskSource.from(url: last) != nil { return title }
+        var trailingTrim = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: separators))
+        if last.unicodeScalars.contains(where: CharacterSet.alphanumerics.contains) {
             trailingTrim.remove(charactersIn: "/~")
         }
-        let title = String(tokens.joined(separator: " ").drop { $0.unicodeScalars.allSatisfy(leadingTrim.contains) })
-        if let last = tokens.last, last.contains("://") || TaskSource.from(url: last) != nil { return title }
         return title.trimmingCharacters(in: trailingTrim)
     }
 
