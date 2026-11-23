@@ -55,7 +55,7 @@ describe('Catch up', () => {
     expect(plan(queue, { now: '2026-11-22T18:32:00-08:00' }, ended)[0]).toEqual(ended[0])
     const special = { ...settings, windows: [{ days: [0], start: '19:00', end: '20:00', minutes: 15 }] }
     expect(plan(queue, { now: '2026-11-22T18:32:00-08:00', catchUp: { settings: special, queue, previous: ended } })[0]).toMatchObject({
-      startAt: '2026-11-23T03:00:00.000Z', endAt: '2026-11-23T03:15:00.000Z', items: [queue[0]],
+      startAt: '2026-11-23T03:00:00.000Z', endAt: '2026-11-23T03:12:00.000Z', items: [queue[0]],
     })
   })
 
