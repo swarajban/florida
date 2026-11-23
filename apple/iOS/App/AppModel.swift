@@ -49,6 +49,7 @@ final class AppModel {
     /// The server's settings row (the routine's time zone); nil until the first sync.
     var userSettings: UserSettings?
     var openTasks: [TaskItem] = []
+    var later = LaterPresentation(items: [])
     /// Every scheduler placement, grouped by task; drives the "scheduled at" line of task rows.
     var placementsByTask: [String: [Placement]] = [:]
     /// The scheduler's unplaced remainders, by task id.
@@ -61,6 +62,7 @@ final class AppModel {
     var dayOverrides: [DayOverride] = []
     /// Commitments with no slot and each day's free time, from the scheduler's last run.
     var planSummary = PlanSummary()
+    var catchUpBlocks: [CatchUpBlock] { planSummary.catchUpBlocks }
     /// The latest daily brief and weekly review, newest first.
     var briefs: [Brief] = []
     /// The briefs the server is writing right now.

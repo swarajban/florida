@@ -8,15 +8,23 @@ extension AppDatabase {
 
     public func laterItems(status: LaterItem.Status? = .queue) throws -> [LaterItem] {
         try writer.read { db in
-            let live = LaterItem.filter(Column("deletedAt") == nil)
+            let live = Self.liveLaterItems
             let request = switch status {
             case .queue: live.filter(Column("archivedAt") == nil && Column("readAt") == nil)
             case .read: live.filter(Column("archivedAt") == nil && Column("readAt") != nil)
             case .archived: live.filter(Column("archivedAt") != nil)
             case nil: live
             }
-            return try request.order(Column("savedAt"), Column("id")).fetchAll(db)
+            return try request.fetchAll(db)
         }
+    }
+
+    public func observeLaterItems() -> AsyncValueObservation<[LaterItem]> {
+        observe { db in try Self.liveLaterItems.fetchAll(db) }
+    }
+
+    private static var liveLaterItems: QueryInterfaceRequest<LaterItem> {
+        LaterItem.filter(Column("deletedAt") == nil).order(Column("savedAt"), Column("id"))
     }
 
     @discardableResult

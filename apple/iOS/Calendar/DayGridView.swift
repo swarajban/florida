@@ -21,6 +21,7 @@ struct DayGridView: View {
     /// (`.project(projectId:)`). Nothing happens until a caller passes this, for example to open
     /// the project's editor.
     var onSelectPlanBlock: (PlanBlock) -> Void = { _ in }
+    let onSelectCatchUp: (CatchUpBlock) -> Void
 
     @Environment(AppModel.self) private var model
     @Environment(\.locale) private var locale
@@ -258,7 +259,8 @@ struct DayGridView: View {
                     DayGridBlockView(
                         block: block, timeText: block.timeText, showsTime: rect.height >= geometry.timeTextHeight,
                         isPast: block.end <= now, showsSymbol: rect.width >= Self.planSymbolWidth,
-                        showsThirdLine: rect.height >= geometry.timeTextHeight * 2)
+                        showsThirdLine: rect.height >= geometry.timeTextHeight * 2,
+                        showsCompactTimeLine: rect.height >= geometry.timeTextHeight * 0.8)
                         .frame(width: rect.width, height: rect.height)
                         // Clip each block's hit area too; empty slots still belong to the canvas.
                         .contentShape(Path(CGRect(
@@ -310,6 +312,7 @@ struct DayGridView: View {
         var days: [Date]
         var showTasksOnCalendar: Bool
         var agendas: [DayAgenda]
+        var catchUpBlocks: [CatchUpBlock]
         var ghosts: [GhostBlock]
         var optionalPlacements: [OptionalPlacement]
         var openTasks: [TaskItem]
@@ -327,6 +330,7 @@ struct DayGridView: View {
         let somedayIDs = model.somedayTaskIDs
         return Inputs(
             days: days, showTasksOnCalendar: showTasksOnCalendar, agendas: model.gridDays,
+            catchUpBlocks: model.catchUpBlocks,
             // Today's finished blocks, on whichever column today is (`visibleGhosts` assumes the
             // selected day is today, which a 3-day grid opened on yesterday breaks).
             ghosts: JoySetting.ghosts.isOn ? model.ghostBlocks.filter { !somedayIDs.contains($0.taskId) } : [],
@@ -340,6 +344,7 @@ struct DayGridView: View {
         layout = DayGridLayout.build(
             days: inputs.days, agendas: inputs.agendas, ghosts: inputs.ghosts,
             suggestions: inputs.showTasksOnCalendar ? inputs.days.flatMap { model.optionalPicks(on: $0).flatMap(\.picks) } : [],
+            catchUpBlocks: inputs.catchUpBlocks,
             showTasksOnCalendar: inputs.showTasksOnCalendar,
             blooming: inputs.blooming, minimumMinutes: inputs.minimumMinutes, calendar: model.calendar,
             eventStyle: { EventStyle(event: $0, calendars: inputs.calendars, accounts: inputs.accounts) },
@@ -389,6 +394,8 @@ struct DayGridView: View {
             takingSuggestion = pick
         case .plan(let plan):
             onSelectPlanBlock(plan)
+        case .catchUp(let block):
+            onSelectCatchUp(block)
         }
     }
 
@@ -439,7 +446,7 @@ struct DayGridView: View {
         case .event(let event):
             guard model.canEdit(event) else { return }
             model.reschedule(event, start: current.start, end: current.end)
-        case .ghost, .suggestion, .plan:
+        case .ghost, .suggestion, .plan, .catchUp:
             break
         }
     }

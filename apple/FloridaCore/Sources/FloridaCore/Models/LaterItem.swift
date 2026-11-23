@@ -9,7 +9,7 @@ public struct LaterItem: Codable, Hashable, Identifiable, Sendable {
         case share, mcp, manual
     }
 
-    public enum Status: String, Codable, Sendable {
+    public enum Status: String, Codable, CaseIterable, Sendable {
         case queue, read, archived
     }
 

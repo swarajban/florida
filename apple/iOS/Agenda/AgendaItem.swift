@@ -2,12 +2,13 @@ import FloridaKit
 import Foundation
 
 /// One row of the day timeline: a calendar event, a scheduled task block, a plan block (a
-/// commitment such as the gym, or time held for a project), or the ghost of a block finished
-/// today, with a common start and end so the kinds can be merged and sorted.
+/// commitment such as the gym, or time held for a project), a Catch up block, or the ghost of a
+/// block finished today, with a common start and end so the kinds can be merged and sorted.
 enum AgendaItem: Identifiable, Hashable {
     case event(CalendarEvent)
     case block(ScheduledBlock)
     case plan(PlanBlock)
+    case catchUp(CatchUpBlock)
     case ghost(GhostBlock)
 
     var id: String {
@@ -15,6 +16,7 @@ enum AgendaItem: Identifiable, Hashable {
         case .event(let event): "event-\(event.id)"
         case .block(let block): "block-\(block.placement.id)"
         case .plan(let block): "plan-\(block.id)"
+        case .catchUp(let block): "catch-up-\(block.id)"
         case .ghost(let ghost): "ghost-\(ghost.id)"
         }
     }
@@ -24,6 +26,7 @@ enum AgendaItem: Identifiable, Hashable {
         case .event(let event): event.startAt ?? .distantPast
         case .block(let block): block.placement.startAt
         case .plan(let block): block.startAt
+        case .catchUp(let block): block.startAt
         case .ghost(let ghost): ghost.start
         }
     }
@@ -33,6 +36,7 @@ enum AgendaItem: Identifiable, Hashable {
         case .event(let event): event.endAt ?? start
         case .block(let block): block.placement.endAt
         case .plan(let block): block.endAt
+        case .catchUp(let block): block.endAt
         case .ghost(let ghost): ghost.end
         }
     }
@@ -42,7 +46,7 @@ enum AgendaItem: Identifiable, Hashable {
         switch self {
         case .block(let block): block.placement.lane
         case .plan(let block): block.lane
-        case .event, .ghost: nil
+        case .event, .catchUp, .ghost: nil
         }
     }
 
@@ -55,6 +59,8 @@ enum AgendaItem: Identifiable, Hashable {
             return block.task.title
         case .plan(let block):
             return block.title
+        case .catchUp(let block):
+            return block.laterDisplayTitle
         case .ghost(let ghost):
             return ghost.title
         }
@@ -68,16 +74,19 @@ enum AgendaItem: Identifiable, Hashable {
         end <= now
     }
 
-    /// Timed events, task blocks, plan blocks and ghosts of the day, by start then end. Work in
+    /// Timed events, task blocks, plan blocks, Catch up and ghosts of the day, by start then end. Work in
     /// lanes that starts together reads in lane order whatever its ends, as the day grid draws it.
-    static func timed(from agenda: DayAgenda, ghosts: [GhostBlock] = []) -> [AgendaItem] {
-        let events = agenda.events.filter { !$0.allDay }.map(AgendaItem.event)
-        let blocks = agenda.placements.map(AgendaItem.block)
-        let plan = agenda.planBlocks.map(AgendaItem.plan)
-        let completions = agenda.completedTasks.compactMap(GhostBlock.completion)
-        let completedIDs = Set(agenda.completedTasks.map(\.id))
+    static func timed(from agenda: DayAgenda?, ghosts: [GhostBlock], catchUpBlocks: [CatchUpBlock]) -> [AgendaItem] {
+        let events = (agenda?.events ?? []).filter { !$0.allDay }.map(AgendaItem.event)
+        let blocks = (agenda?.placements ?? []).map(AgendaItem.block)
+        let plan = (agenda?.planBlocks ?? []).map(AgendaItem.plan)
+        let catchUp = catchUpBlocks.map(AgendaItem.catchUp)
+        let completed = agenda?.completedTasks ?? []
+        let completions = completed.compactMap(GhostBlock.completion)
+        let completedIDs = Set(completed.map(\.id))
         let visibleGhosts = ghosts.filter { !completedIDs.contains($0.taskId) } + completions
-        var items = (events + blocks + plan + visibleGhosts.map(AgendaItem.ghost)).sorted { lhs, rhs in
+        var items = events + blocks + plan + catchUp + visibleGhosts.map(AgendaItem.ghost)
+        items.sort { lhs, rhs in
             if lhs.start != rhs.start { return lhs.start < rhs.start }
             if lhs.end != rhs.end { return lhs.end < rhs.end }
             return (lhs.lane ?? -1) < (rhs.lane ?? -1)
@@ -136,7 +145,7 @@ enum TimelineRow: Identifiable, Hashable {
                 rows.append(.gap(gap))
             }
             switch item {
-            case .event, .plan: rows.append(.item(item))
+            case .event, .plan, .catchUp: rows.append(.item(item))
             case .block, .ghost:
                 if showsTasks { rows.append(.item(item)) }
             }

@@ -16,6 +16,7 @@ struct DayGridLayout: Equatable {
         case suggestion(OptionalPicks.Pick)
         /// A commitment (the gym) or time held for a project: on the plan, but not a task.
         case plan(PlanBlock)
+        case catchUp(CatchUpBlock)
     }
 
     /// A timed block in one day column.
@@ -46,11 +47,6 @@ struct DayGridLayout: Equatable {
             return false
         }
 
-        var isGhost: Bool {
-            if case .ghost = item { return true }
-            return false
-        }
-
         var isSuggestion: Bool {
             if case .suggestion = item { return true }
             return false
@@ -64,8 +60,13 @@ struct DayGridLayout: Equatable {
 
         var isPlan: Bool { planBlock != nil }
 
-        /// Plan blocks never move: the scheduler places them.
-        var canMove: Bool { !isDone && !isGhost && !isSuggestion && !isPlan }
+        /// The scheduler places plan and Catch up blocks; only events and tasks can move.
+        var canMove: Bool {
+            switch item {
+            case .event, .task: !isDone
+            case .ghost, .suggestion, .plan, .catchUp: false
+            }
+        }
 
         /// Minutes the block is drawn as in its column.
         var spanMinutes: Int { endMinute - startMinute }
@@ -103,6 +104,7 @@ struct DayGridLayout: Equatable {
     /// a commitment is drawn in ink, the color of no calendar and no category.
     static func build(
         days: [Date], agendas: [DayAgenda], ghosts: [GhostBlock], suggestions: [OptionalPicks.Pick] = [],
+        catchUpBlocks: [CatchUpBlock] = [],
         showTasksOnCalendar: Bool = true,
         blooming: Set<String>, minimumMinutes: Int, calendar: Calendar,
         eventStyle: (CalendarEvent) -> EventStyle, categoryTint: (String) -> Color,
@@ -201,6 +203,14 @@ struct DayGridLayout: Equatable {
                 isPinned: false, isDone: false)
             timed.append(LayoutItem(id: plan.id, start: plan.startAt, end: plan.endAt))
             lanes[plan.id] = plan.lane
+        }
+
+        for block in catchUpBlocks where block.endAt > range.lowerBound && block.startAt < range.upperBound {
+            let id = "catch-up-\(block.id)"
+            sources[id] = Source(
+                item: .catchUp(block), start: block.startAt, end: block.endAt, title: block.laterDisplayTitle,
+                tint: .secondary, rim: nil, isPinned: false, isDone: false)
+            timed.append(LayoutItem(id: id, start: block.startAt, end: block.endAt))
         }
 
         // Completions come from synced task timestamps, not the task's former scheduled slot.

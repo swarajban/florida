@@ -166,6 +166,34 @@ struct BlockRow: View {
     }
 }
 
+struct CatchUpRow: View {
+    let block: CatchUpBlock
+    let onOpen: () -> Void
+
+    var body: some View {
+        Button(action: onOpen) {
+            HStack(spacing: 12) {
+                TimeColumn(start: block.startAt, end: block.endAt)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Label(block.laterDisplayTitle, systemImage: "bookmark")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(FloridaStyle.ink)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(.secondary.opacity(0.09), in: RoundedRectangle(cornerRadius: 6))
+            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(block.laterDisplayTitle)
+        .accessibilityValue(Formatting.timeRange(block.startAt, block.endAt))
+        .accessibilityHint("Opens Later")
+        .accessibilityIdentifier("agenda-catch-up-\(block.id)")
+    }
+}
+
 /// An all-day event in the section above the timeline.
 struct AllDayEventRow: View {
     let event: CalendarEvent
