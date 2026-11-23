@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../src/app.js'
 import { ChangeBus } from '../src/changes.js'
 import type { Db } from '../src/db/client.js'
-import { briefs, calendars, dayOverrides, events, googleAccounts, placements, projectPlacements, projects, routineBlocks, routineOccurrences, scheduleChanges, tasks } from '../src/db/schema.js'
+import { briefs, calendars, categories as categoryTable, dayOverrides, events, googleAccounts, placements, projectPlacements, projects, routineBlocks, routineOccurrences, scheduleChanges, tasks } from '../src/db/schema.js'
 import type { TaskDraft, ParseTaskContext } from '../src/ai/parse-task.js'
 import { GoogleApiError } from '../src/google/client.js'
 import { mountMcp } from '../src/mcp.js'
@@ -287,6 +287,21 @@ describe('task tools', () => {
       expect.objectContaining({ id: 'work', scheduleId: 'work' }),
       expect.objectContaining({ id: 'personal', scheduleId: 'personal' }),
     ])
+  })
+
+  it('lists a new category with no area alphabetically alongside personal categories', async () => {
+    const id = 'mcp-category-order-family'
+    try {
+      const res = await app.request(`/api/categories/${id}`, {
+        method: 'PUT', headers, body: JSON.stringify({ name: 'family', scheduleId: 'work' }),
+      })
+      expect(res.status).toBe(200)
+      expect(await res.json()).toMatchObject({ category: { area: null, sortOrder: 0 } })
+      const { categories } = await data<{ categories: { id: string }[] }>('list_categories')
+      expect(categories.map((category) => category.id)).toEqual(['inbox', 'work', id, 'personal'])
+    } finally {
+      await db.delete(categoryTable).where(eq(categoryTable.id, id))
+    }
   })
 
   it('create_task generates an id, derives the deadline type, schedules, and notifies clients', async () => {

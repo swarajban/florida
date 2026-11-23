@@ -2,6 +2,32 @@ import XCTest
 
 final class SmartAddTests: XCTestCase {
     @MainActor
+    func testHashReopensCategoriesInSharedOrder() {
+        continueAfterFailure = false
+        let app = launch("light")
+        addTeardownBlock {
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = "quick-add-category-order"
+            attachment.lifetime = .keepAlways
+            self.add(attachment)
+            app.terminate()
+        }
+        let input = openComposer(app)
+        let inbox = app.buttons["quick-add-category-inbox"]
+        let engineering = app.buttons["quick-add-category-demo-eng"]
+        let infosec = app.buttons["quick-add-category-demo-infosec"]
+        input.typeText("Buy#")
+        XCTAssertTrue(inbox.waitForExistence(timeout: 5), input.label)
+        input.typeText(XCUIKeyboardKey.delete.rawValue)
+        XCTAssertTrue(inbox.waitForNonExistence(timeout: 5), input.label)
+        input.typeText("#")
+        XCTAssertTrue(infosec.waitForExistence(timeout: 5), input.label)
+        let state = "input=\(input.label), inbox=\(inbox.frame), engineering=\(engineering.frame), infosec=\(infosec.frame)"
+        XCTAssertLessThan(inbox.frame.minY, engineering.frame.minY, state)
+        XCTAssertLessThan(engineering.frame.minY, infosec.frame.minY, state)
+    }
+
+    @MainActor
     func testQuickAddTraceCapturesTypingAndPaste() {
         continueAfterFailure = false
         let app = XCUIApplication()

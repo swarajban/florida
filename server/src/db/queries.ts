@@ -11,6 +11,12 @@ export const SETTINGS_ID = 'default'
 /** Id of the only `plan_summary` row. */
 export const PLAN_SUMMARY_ID = 'default'
 
+export const categoryListOrder = [
+  sql`case when ${categories.id} = ${INBOX_CATEGORY_ID} then 0 when ${categories.area} = 'work' then 1 else 2 end`,
+  sql`lower(${categories.name}) collate "C"`,
+  sql`${categories.id} collate "C"`,
+]
+
 /** True when a live (not soft-deleted) category has this id. */
 export async function categoryExists(db: Db, id: string): Promise<boolean> {
   const rows = await db
@@ -60,7 +66,7 @@ export async function categoriesWithExamples(
     .select({ id: categories.id, name: categories.name })
     .from(categories)
     .where(isNull(categories.deletedAt))
-    .orderBy(categories.sortOrder, categories.name)
+    .orderBy(...categoryListOrder)
   const ranked = db
     .select({
       categoryId: tasks.categoryId,

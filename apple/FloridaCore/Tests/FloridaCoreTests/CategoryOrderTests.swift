@@ -32,16 +32,18 @@ import Testing
         #expect(categories.inListOrder().map(\.name) == ["admin", "Mail", "Zoo"])
     }
 
-    @Test func aCategoryWithoutAnAreaComesAfterPersonal() {
+    @Test func anUnassignedFamilySortsByNameAlongsidePersonalWithoutChangingArea() {
         // Only the category with the inbox id is the inbox: another one named "Inbox" or with no
         // area is an ordinary category that has not been given an area yet.
         let categories = [
-            Self.category("old", "Archive", nil),
-            Self.category("p", "Zen", .personal),
+            Self.category("family", "Family", nil, sortOrder: 17),
+            Self.category("p", "Travel", .personal, sortOrder: 15),
+            Self.category("events", "Events / gifts", .personal),
             Self.category("w", "Work", .work),
             Self.category("inbox", "Inbox", nil),
         ]
-        #expect(categories.inListOrder().map(\.id) == ["inbox", "w", "p", "old"])
+        #expect(categories.inListOrder().map(\.id) == ["inbox", "w", "events", "family", "p"])
+        #expect(categories.inListOrder()[3].area == nil)
     }
 
     @Test func equalNamesFallBackToTheId() {
@@ -71,10 +73,10 @@ import Testing
             Self.category("legacy-z", "Zoo", nil),
             Self.category("legacy-a", "admin", nil),
         ]
-        #expect(categories.inListOrder().map(\.id) == ["inbox", "deals", "engineering", "personal", "legacy-a", "legacy-z"])
+        #expect(categories.inListOrder().map(\.id) == ["inbox", "deals", "engineering", "legacy-a", "personal", "legacy-z"])
         categories[4].area = .work
         categories[4].name = "accounting"
         categories[2].area = .personal
-        #expect(categories.inListOrder().map(\.id) == ["inbox", "legacy-z", "engineering", "deals", "personal", "legacy-a"])
+        #expect(categories.inListOrder().map(\.id) == ["inbox", "legacy-z", "engineering", "legacy-a", "deals", "personal"])
     }
 }
