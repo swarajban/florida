@@ -119,6 +119,27 @@ export interface Interval {
   end: string
 }
 
+export interface CatchUpSettings {
+  enabled: boolean
+  minutes: number
+  windows: { days: number[]; start: string; end: string; minutes?: number | undefined }[]
+}
+
+export interface CatchUpItem {
+  id: string
+  title: string
+  site: string
+  url: string
+  estMinutes: number
+}
+
+export interface CatchUpBlock {
+  id: string
+  startAt: string
+  endAt: string
+  items: CatchUpItem[]
+}
+
 export interface SchedulerInput {
   /** ISO 8601 instant. New flexible blocks never start before it; in-progress blocks may. */
   now: string
@@ -157,6 +178,7 @@ export interface SchedulerInput {
   dayOverrides?: DayOverride[]
   /** How many shared tasks may run side by side. Default 3. */
   maxParallel?: number
+  catchUp?: { settings: CatchUpSettings; queue: CatchUpItem[]; previous?: CatchUpBlock[] }
 }
 
 export interface Placement {
@@ -244,4 +266,5 @@ export interface SchedulerResult {
   missed: MissedCommitment[]
   /** The next 7 local days, today first. */
   capacity: DayCapacity[]
+  catchUpBlocks?: CatchUpBlock[]
 }

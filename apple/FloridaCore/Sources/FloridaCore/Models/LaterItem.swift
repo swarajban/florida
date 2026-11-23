@@ -24,6 +24,7 @@ public struct LaterItem: Codable, Hashable, Identifiable, Sendable {
     public var site: String
     public var kind: Kind
     public var estMinutes: Int?
+    public var enrichedAt: Date?
     public var savedAt: Date
     public var readAt: Date?
     public var archivedAt: Date?
@@ -34,7 +35,7 @@ public struct LaterItem: Codable, Hashable, Identifiable, Sendable {
     public init(
         id: String, url: String, canonicalUrl: String, title: String, site: String, kind: Kind,
         estMinutes: Int? = nil, savedAt: Date, readAt: Date? = nil, archivedAt: Date? = nil,
-        source: Source, updatedAt: Date, deletedAt: Date? = nil
+        source: Source, updatedAt: Date, deletedAt: Date? = nil, enrichedAt: Date? = nil
     ) {
         self.id = id
         self.url = url
@@ -43,6 +44,7 @@ public struct LaterItem: Codable, Hashable, Identifiable, Sendable {
         self.site = site
         self.kind = kind
         self.estMinutes = estMinutes
+        self.enrichedAt = enrichedAt
         self.savedAt = savedAt
         self.readAt = readAt
         self.archivedAt = archivedAt

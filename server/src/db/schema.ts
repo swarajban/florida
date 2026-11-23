@@ -1,6 +1,7 @@
-import type { Attention, DayCapacity, DayKind, DeadlineType, MissedCommitment, Priority, RoutineSlot, TaskContext, UnscheduledReason } from '@florida/scheduler'
+import type { Attention, CatchUpBlock, CatchUpSettings, DayCapacity, DayKind, DeadlineType, MissedCommitment, Priority, RoutineSlot, TaskContext, UnscheduledReason } from '@florida/scheduler'
 import { sql } from 'drizzle-orm'
 import { boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core'
+import { DEFAULT_CATCH_UP } from '../config.js'
 import type { RecurrenceRule, RecurringTaskTemplate } from '../recurrence.js'
 import type { TaskSource } from '../task-source.js'
 
@@ -14,6 +15,7 @@ export const laterItems = pgTable('later_items', {
   site: text('site').notNull(),
   kind: text('kind', { enum: ['article', 'video', 'other'] }).notNull(),
   estMinutes: integer('est_minutes'),
+  enrichedAt: ts('enriched_at'),
   savedAt: ts('saved_at').notNull(),
   readAt: ts('read_at'),
   archivedAt: ts('archived_at'),
@@ -43,6 +45,7 @@ export type CategoryArea = 'work' | 'personal'
 export const settings = pgTable('settings', {
   id: text('id').primaryKey(),
   timeZone: text('time_zone').notNull(),
+  catchUp: jsonb('catch_up').$type<CatchUpSettings>().notNull().default(DEFAULT_CATCH_UP),
   updatedAt: ts('updated_at').notNull().defaultNow(),
 })
 
@@ -246,6 +249,7 @@ export const planSummary = pgTable('plan_summary', {
   id: text('id').primaryKey(),
   missed: jsonb('missed').$type<MissedCommitment[]>().notNull(),
   capacity: jsonb('capacity').$type<DayCapacity[]>().notNull(),
+  catchUpBlocks: jsonb('catch_up_blocks').$type<CatchUpBlock[]>().notNull().default([]),
   computedAt: ts('computed_at').notNull(),
 })
 

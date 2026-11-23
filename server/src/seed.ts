@@ -1,4 +1,5 @@
 import { pathToFileURL } from 'node:url'
+import { sql } from 'drizzle-orm'
 import { createDb } from './db/client.js'
 import type { Db } from './db/client.js'
 import { writeTimestamp } from './db/sync-clock.js'
@@ -8,8 +9,6 @@ import type { ScheduleWindow } from './db/schema.js'
 
 const LA = 'America/Los_Angeles'
 const WEEKDAYS = [1, 2, 3, 4, 5]
-
-const SETTINGS = { id: SETTINGS_ID, timeZone: LA }
 
 /**
  * Home days Mon/Thu/Fri end when the gym run starts at 15:30; office days are Tue and Wed, until
@@ -71,7 +70,8 @@ const STARTER_CATEGORIES: (typeof categories.$inferInsert)[] = [
  * categories when missing, so the user's edits to those survive. Safe to run repeatedly.
  */
 export async function seed(db: Db): Promise<void> {
-  await db.insert(settings).values({ ...SETTINGS, updatedAt: writeTimestamp }).onConflictDoNothing({ target: settings.id })
+  await db.execute(sql`insert into ${settings} (id, time_zone, updated_at)
+    values (${SETTINGS_ID}, ${LA}, ${writeTimestamp}) on conflict (id) do nothing`)
   await db
     .insert(routineBlocks)
     .values(SEED_ROUTINE.map((b) => ({ ...b, updatedAt: writeTimestamp })))

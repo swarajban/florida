@@ -2,6 +2,8 @@ export { schedule, weekdayResolver } from './scheduler.js'
 export { findFreeSlots } from './free-slots.js'
 export type {
   Attention,
+  CatchUpBlock,
+  CatchUpSettings,
   DayCapacity,
   DayKind,
   DayOverride,

@@ -12,6 +12,8 @@ export interface JobDeps {
   ensureBriefs?: () => Promise<BriefRow[]>
   refreshAllDayJudgments?: () => Promise<void>
   repairJudgmentCursors?: () => Promise<void>
+  refreshLater?: () => Promise<void>
+  archiveLater?: () => Promise<boolean>
 }
 
 const MINUTE = 60_000
@@ -61,6 +63,9 @@ export function startJobs(deps: JobDeps): () => void {
     const written = (await deps.ensureBriefs?.()) ?? []
     if (written.length > 0) deps.changes?.publish()
   }
+  const archiveLater = async (): Promise<void> => {
+    if (await deps.archiveLater?.()) await reschedule()
+  }
 
   const timers: NodeJS.Timeout[] = [
     setTimeout(() => {
@@ -81,6 +86,14 @@ export function startJobs(deps: JobDeps): () => void {
     setInterval(() => void run('reschedule', reschedule), RESCHEDULE_INTERVAL),
     setInterval(() => void run('briefs', briefs), BRIEF_INTERVAL),
   ]
+  if (deps.archiveLater !== undefined) {
+    timers.push(setTimeout(() => void run('later archive', archiveLater), STARTUP_DELAY))
+    timers.push(setInterval(() => void run('later archive', archiveLater), 24 * HOUR))
+  }
+  if (deps.refreshLater !== undefined) {
+    const refreshLater = deps.refreshLater
+    timers.push(setInterval(() => void run('later refresh', refreshLater), MINUTE))
+  }
 
   return () => {
     for (const timer of timers) clearTimeout(timer)

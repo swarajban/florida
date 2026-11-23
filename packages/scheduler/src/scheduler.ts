@@ -28,6 +28,7 @@ import {
   zonedToUtc,
 } from './time.js'
 import { type Span, addSpan, mergeSpans, subtractSpans } from './intervals.js'
+import { scheduleCatchUp } from './catch-up.js'
 
 const PRIORITY_RANK: Record<Priority, number> = { asap: 0, high: 1, medium: 2, low: 3 }
 
@@ -286,7 +287,13 @@ export function schedule(input: SchedulerInput): SchedulerResult {
   }
 
   placements.sort((a, b) => a.start.localeCompare(b.start) || a.taskId.localeCompare(b.taskId))
-  const taken = occupied(cap)
+  const taskSpans = occupied(cap)
+  const catchUpBlocks = input.catchUp === undefined ? undefined
+    : scheduleCatchUp(input.catchUp, routine.timeZone, now, ctx.horizonEnd, taskSpans)
+  const taken = catchUpBlocks === undefined ? taskSpans : mergeSpans([
+    ...taskSpans, ...catchUpBlocks.filter((block) => block.items.length > 0)
+      .map((block) => ({ start: Date.parse(block.startAt), end: Date.parse(block.endAt) })),
+  ])
   const optional = suggestOptional(flexible, routine, ctx, taken, plan, input.optionalDays ?? 7)
   const routineOccurrences: RoutineOccurrence[] = committed.occurrences
     .map((o) => ({ blockId: o.blockId, start: toIso(o.start), end: toIso(o.end) }))
@@ -299,6 +306,7 @@ export function schedule(input: SchedulerInput): SchedulerResult {
     routine: routineOccurrences,
     missed: committed.missed,
     capacity: capacityByDay(routine, ctx, taken),
+    ...(catchUpBlocks?.length ? { catchUpBlocks } : {}),
   }
 }
 

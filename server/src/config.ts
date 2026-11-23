@@ -1,4 +1,11 @@
 import { z } from 'zod'
+import type { CatchUpSettings } from '@florida/scheduler'
+
+export const DEFAULT_CATCH_UP: CatchUpSettings = {
+  enabled: true,
+  minutes: 30,
+  windows: [{ days: [0, 1, 2, 3, 4, 5, 6], start: '18:00', end: '21:00' }],
+}
 
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1),

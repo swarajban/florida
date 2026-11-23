@@ -4,6 +4,34 @@ import Testing
 @testable import FloridaKit
 
 @Suite struct LaterStoreTests {
+    @Test func storesAndReplacesCatchUpBlocksWhileKeepingLaterRows() throws {
+        let db = try AppDatabase.inMemory()
+        let now = Fixtures.t0
+        let item = LaterItem(id: "later", url: "https://example.com/story", canonicalUrl: "https://example.com/story",
+            title: "Story", site: "Example", kind: .article, estMinutes: 5, savedAt: now, source: .mcp, updatedAt: now, enrichedAt: now)
+        let block = CatchUpBlock(id: "2026-11-22", startAt: now, endAt: now.addingTimeInterval(600), items: [
+            .init(id: item.id, title: item.title, site: item.site, url: item.url, estMinutes: 5)
+        ])
+        let settings = UserSettings(id: "default", timeZone: "America/Los_Angeles", updatedAt: now,
+            catchUp: .init(enabled: true, minutes: 30, windows: [.init(days: [0], start: "18:00", end: "21:00")]))
+        try db.apply(SyncResponse(cursor: "one", settings: settings, laterItems: [item], catchUpBlocks: [block]))
+        #expect(try db.planSummary().catchUpBlocks == [block])
+        #expect(try db.userSettings() == settings)
+        try db.apply(SyncResponse(cursor: "two", settings: settings))
+        #expect(try db.planSummary().catchUpBlocks.isEmpty)
+        #expect(try db.laterItems() == [item])
+    }
+
+    @Test func catchUpMigrationResetsCursorToBackfillExistingEnrichment() throws {
+        let queue = try DatabaseQueue()
+        try AppDatabase.migrator.migrate(queue, upTo: "v15-later-items")
+        try queue.write { db in
+            try db.execute(sql: "INSERT INTO syncState (key, value) VALUES ('cursor', 'already-synced')")
+        }
+        let db = try AppDatabase(writer: queue)
+        #expect(try db.cursor() == nil)
+    }
+
     @Test func upgradeResetsCursorSoPreviouslySavedLinksBackfill() throws {
         let queue = try DatabaseQueue()
         try AppDatabase.migrator.migrate(queue, upTo: "v14-task-required-day")
