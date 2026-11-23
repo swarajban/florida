@@ -4,6 +4,60 @@ import XCTest
 /// Kept screenshots are exported from the result bundle by CI for light/dark visual review.
 final class SmokeTests: XCTestCase {
     @MainActor
+    func testLaterShortcutReadAndCatchUp() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-demoData", "YES", "-uiAppearance", "light", "-uiLaterFixture", "YES"]
+        addTeardownBlock {
+            let shot = XCTAttachment(screenshot: app.screenshot())
+            shot.name = "mac-later-catch-up"
+            shot.lifetime = .keepAlways
+            self.add(shot)
+            app.terminate()
+        }
+        app.launch()
+        XCTAssertTrue(app.staticTexts["calendar-range-title"].waitForExistence(timeout: 10))
+        app.typeKey("g", modifierFlags: [])
+        app.typeKey("l", modifierFlags: [])
+        let link = app.buttons["later-item-test-story"]
+        XCTAssertTrue(link.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["later-mark-read"].isEnabled)
+        app.typeKey("r", modifierFlags: [.command, .shift])
+        XCTAssertTrue(link.waitForNonExistence(timeout: 5))
+        app.buttons["later-close"].click()
+        XCTAssertTrue(app.buttons["later-close"].waitForNonExistence(timeout: 5))
+        app.typeKey("m", modifierFlags: .shift)
+        let block = app.buttons["catch-up-block"]
+        let showsBlockTitle = block.waitForExistence(timeout: 5) && block.label == "Catch up, 2 items"
+        if !showsBlockTitle {
+            capture(app.windows.firstMatch, "mac-later-month-assertion")
+            print("Catch up month: exists=\(block.exists), label=\(block.exists ? block.label : "missing"), frame=\(block.frame)")
+        }
+        XCTAssertTrue(showsBlockTitle)
+        block.click()
+        let second = app.buttons["later-item-test-story-two"]
+        let showsUnreadTitle = second.waitForExistence(timeout: 5) && second.label == "Another story for Later"
+        if !showsUnreadTitle {
+            capture(app.windows.firstMatch, "mac-later-popover-title-assertion")
+            print("Catch up link: exists=\(second.exists), label=\(second.exists ? second.label : "missing"), blockFrame=\(block.frame)")
+        }
+        XCTAssertTrue(showsUnreadTitle)
+        XCTAssertFalse(link.exists)
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "mac-later-popover"
+        shot.lifetime = .keepAlways
+        add(shot)
+        app.buttons["catch-up-mark-read-test-story-two"].click()
+        let empty = app.staticTexts["catch-up-empty"]
+        let showsEmptyPopover = empty.waitForExistence(timeout: 5)
+        if !showsEmptyPopover {
+            capture(app.windows.firstMatch, "mac-later-popover-assertion")
+            print("Catch up popover: blockFrame=\(block.frame), emptyExists=\(empty.exists), windowFrame=\(app.windows.firstMatch.frame)")
+        }
+        XCTAssertTrue(showsEmptyPopover)
+    }
+
+    @MainActor
     func testCalendarOpensEventComposer() {
         continueAfterFailure = false
         let app = launchEssentialFixture("mac-essential-calendar")

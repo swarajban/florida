@@ -35,6 +35,7 @@ struct CalendarGridView: View {
                 .disabled(model.availabilityShare != nil)
             ScrollView(.vertical) {
                 GeometryReader { geometry in
+                    let frames = gridGeometry(width: geometry.size.width)
                     // Paused except while blocks slide; `clockNow` redraws the now line each minute.
                     ZStack {
                         TimelineView(.animation(minimumInterval: nil, paused: model.layoutTransition == nil)) { timeline in
@@ -47,6 +48,9 @@ struct CalendarGridView: View {
                                 now: model.clockNow, frameDate: timeline.date, transition: model.layoutTransition,
                                 showsProgress: showsProgress, calendar: model.calendar, hourLabels: model.hourLabels,
                                 grid: Self.grid, gutterWidth: Self.gutterWidth)
+                        }
+                        .accessibilityChildren {
+                            catchUpAccessibility(frames: frames)
                         }
                         if model.availabilityShare != nil {
                             AvailabilityGridOverlay()
@@ -89,7 +93,10 @@ struct CalendarGridView: View {
                     }
                     .eventDetailPopover(
                         model, eventId: detailBlock == nil ? nil : model.eventDetailID,
-                        anchor: .rect(.rect(detailBlock.map { gridGeometry(width: geometry.size.width).rect(for: $0) } ?? .zero)))
+                        anchor: .rect(.rect(detailBlock.map { frames.rect(for: $0) } ?? .zero)))
+                    .catchUpPopover(
+                        model, id: catchUpBlock == nil ? nil : model.catchUpDetailID,
+                        anchor: .rect(.rect(catchUpBlock.map { frames.rect(for: $0) } ?? .zero)))
                 }
                 .frame(height: Self.grid.dayHeight)
             }
@@ -135,6 +142,32 @@ struct CalendarGridView: View {
         let blocks = layout.blocksByDay.joined().filter { $0.item == .event(id) }
         let dayIndex = layout.days.firstIndex(of: model.selectedDay)
         return blocks.first { $0.dayIndex == dayIndex } ?? blocks.first
+    }
+
+    private var catchUpBlock: GridLayout.Block? {
+        guard let id = model.catchUpDetailID else { return nil }
+        let layout = model.gridLayout
+        let day = layout.days.firstIndex(of: model.selectedDay)
+        let blocks = layout.blocksByDay.joined().filter { $0.item == .catchUp(id) }
+        return blocks.first { $0.dayIndex == day } ?? blocks.first
+    }
+
+    private func catchUpAccessibility(frames: GridGeometry) -> some View {
+        ForEach(model.gridLayout.blocksByDay.joined().filter { $0.kind == .catchUp }, id: \.self) { block in
+            if case .catchUp(let id) = block.item,
+               let data = model.planSummary.catchUpBlocks.first(where: { $0.id == id }) {
+                let rect = frames.rect(for: block)
+                Button(block.title) {
+                    guard model.availabilityShare == nil else { return }
+                    model.select(block.item, in: .calendar)
+                    model.editSelection()
+                }
+                .catchUpBlockAccessibility(itemCount: data.items.count)
+                .accessibilityValue(Text(DateText.timeRange(block.start, block.end)))
+                .frame(width: rect.width, height: rect.height)
+                .position(x: rect.midX, y: rect.midY)
+            }
+        }
     }
 
     private func gridGeometry(width: CGFloat) -> GridGeometry {
@@ -196,7 +229,7 @@ struct CalendarGridView: View {
             }
             clickedItem = block.item
             model.select(block.item, in: .calendar)
-            if isDouble {
+            if block.kind == .catchUp || isDouble {
                 model.editSelection()
             }
             return

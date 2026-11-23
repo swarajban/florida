@@ -39,4 +39,12 @@ struct CalendarShortcutTests {
         let help = keymap.helpSections().flatMap(\.items).first { $0.command == .toggleTasksOnCalendar }
         #expect(help?.shortcut == "⇧⌘T")
     }
+
+    @Test func laterIsReachableFromTheKeymapPaletteAndHelp() {
+        let keymap = MacKeymap.default
+        #expect(keymap.problems().isEmpty)
+        #expect(keymap.command(for: [KeyChord("g"), KeyChord("l")]) == .showLater)
+        #expect(FuzzyMatch.filter(MacCommand.paletteCommands, query: "later", label: \.label).first == .showLater)
+        #expect(keymap.helpSections().flatMap(\.items).first { $0.command == .showLater }?.shortcut == "g l")
+    }
 }

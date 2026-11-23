@@ -137,6 +137,8 @@ extension AppModel {
         case .projectTime:
             return (["Time held for \(block.title)"] + [alongside].compactMap { $0 } + ["Return: projects"])
                 .joined(separator: " · ")
+        case .catchUp:
+            return "\(block.title) · Return: open links"
         case .event, .task, .suggestion:
             return alongside
         }

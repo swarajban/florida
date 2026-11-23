@@ -17,11 +17,12 @@ struct GridLayout {
             case commitment
             /// Time the scheduler holds for a project without a task.
             case projectTime
+            case catchUp
 
             var isTaskDerived: Bool {
                 switch self {
                 case .task, .completed, .suggestion: true
-                case .event, .commitment, .projectTime: false
+                case .event, .commitment, .projectTime, .catchUp: false
                 }
             }
         }
@@ -141,7 +142,7 @@ struct GridLayout {
     /// its lanes in order, left to right, and each block knows what runs beside it.
     static func build(
         days: [Date], events: [CalendarEvent], placements: [Placement], suggestions: [OptionalPicks.Pick] = [],
-        planBlocks: [PlanBlock] = [], projectsById: [String: Project] = [:],
+        planBlocks: [PlanBlock] = [], projectsById: [String: Project] = [:], catchUpBlocks: [CatchUpBlock] = [],
         showTasksOnCalendar: Bool = true,
         tasksById: [String: TaskItem],
         categoriesById: [String: TaskCategory], calendarsById: [String: CalendarInfo], schedules: [Schedule],
@@ -219,6 +220,13 @@ struct GridLayout {
                 tint: tint, slotKey: block.id, rim: nil)
             timed.append(LayoutItem(id: block.id, start: block.startAt, end: block.endAt))
             lanes[block.id] = block.lane
+        }
+        for block in catchUpBlocks where block.endAt > firstDay && block.startAt < rangeEnd {
+            let id = "catch-up-\(block.id)"
+            sources[id] = Source(
+                item: .catchUp(block.id), kind: .catchUp, start: block.startAt, end: block.endAt,
+                title: block.laterDisplayTitle, tint: .secondary, slotKey: id, rim: nil)
+            timed.append(LayoutItem(id: id, start: block.startAt, end: block.endAt))
         }
         for pick in suggestions {
             let placement = pick.placement

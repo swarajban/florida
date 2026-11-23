@@ -52,8 +52,8 @@ extension AppModel {
             return true
         }
 
-        if isCalendarsPopoverOpen, !isCommandChord {
-            if isEscape { isCalendarsPopoverOpen = false }
+        if isCalendarsPopoverOpen || catchUpDetailID != nil, !isCommandChord {
+            if isEscape { cancel() }
             return isEscape
         }
 

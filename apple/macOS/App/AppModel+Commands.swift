@@ -29,7 +29,7 @@ extension AppModel {
         case .undo, .move, .acceptSuggestion, .newCategory, .showRoutine, .newTaskEditor,
              .doNow, .doneForNow, .repeatLast, .centerOnNow, .jumpToFirst, .jumpToLast,
              .editEvent, .respondYes, .respondMaybe, .respondNo,
-             .showProjects, .showBrief, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind,
+             .showProjects, .showBrief, .showLater, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind,
              .jump, .joinMeeting, .openEventResources, .cycleEventDayBlocking, .shareAvailability,
              .setDueDate, .someday, .openTaskSource, .toggleTaskGrouping:
             guard !isSheetOpen else { return }
@@ -53,6 +53,8 @@ extension AppModel {
             case .respondMaybe: respondToEvent("tentative")
             case .respondNo: respondToEvent("declined")
             case .showProjects: isProjectsOpen = true
+            case .showLater:
+                if config != nil { isLaterOpen = true }
             case .showBrief:
                 // An earlier failure is stale by the time the sheet is reopened.
                 briefErrors = [:]
@@ -162,7 +164,7 @@ extension AppModel {
             else { isProjectsOpen = false }
         case .sheet(.eventMove):
             cancelEventMove()
-        case .help, .eventPopover, .calendarsPopover, .taskDueDate, .sheet:
+        case .help, .eventPopover, .catchUpPopover, .calendarsPopover, .taskDueDate, .sheet:
             transitionInteraction(to: .browsing)
         case .browsing:
             selection = nil
@@ -173,7 +175,9 @@ extension AppModel {
     /// an event whose popover is already open its editor sheet. Project time opens Projects and
     /// the gym its routine, which is where each is changed.
     func editSelection() {
-        if case .gap(let id)? = selection, let gap = gridLayout.gap(id: id) {
+        if case .catchUp(let id)? = selection {
+            catchUpDetailID = id
+        } else if case .gap(let id)? = selection, let gap = gridLayout.gap(id: id) {
             openFitPicker(gap)
         } else if let block = selectedPlanBlock {
             if block.isCommitment {

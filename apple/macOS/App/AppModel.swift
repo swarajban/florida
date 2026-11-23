@@ -66,6 +66,7 @@ final class AppModel {
     private(set) var planBlocks: [PlanBlock] = []
     /// Commitments with no slot and each day's free time, from the scheduler's last run.
     private(set) var planSummary = PlanSummary()
+    private(set) var later = LaterPresentation(items: [])
     /// The latest daily brief and weekly review, newest first.
     private(set) var briefs: [Brief] = []
     /// The briefs the server is writing right now.
@@ -95,7 +96,13 @@ final class AppModel {
         }
     }
     var isTasksPaneVisible = true
-    var showTasksOnCalendar = AppModel.viewDefaults.object(forKey: "showTasksOnCalendar") as? Bool ?? true {
+    var showTasksOnCalendar: Bool = {
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "demoData"),
+           UserDefaults.standard.bool(forKey: "uiLaterFixture") { return false }
+        #endif
+        return AppModel.viewDefaults.object(forKey: "showTasksOnCalendar") as? Bool ?? true
+    }() {
         didSet {
             guard oldValue != showTasksOnCalendar else { return }
             Self.viewDefaults.set(showTasksOnCalendar, forKey: "showTasksOnCalendar")
@@ -230,7 +237,11 @@ final class AppModel {
                 clockNow = now
                 anchorDate = calendar.startOfDay(for: now)
                 selectedDay = anchorDate
-                try database.apply(DemoData.syncResponse(now: now, calendar: calendar))
+                if UserDefaults.standard.bool(forKey: "uiLaterFixture") {
+                    try database.apply(Self.laterFixture(now: now, calendar: calendar))
+                } else {
+                    try database.apply(DemoData.syncResponse(now: now, calendar: calendar))
+                }
                 self.database = database
                 try installEditorDiagnosticsIfNeeded()
                 config = ServerConfig(token: "demo")
@@ -283,6 +294,7 @@ final class AppModel {
     /// it and rebuilds the grid layout.
     func rangeDidChange() {
         endJump()
+        catchUpDetailID = nil
         gridDrag = nil
         if gridEventDraft != nil { transitionInteraction(to: .browsing) }
         resetKeySequence()
@@ -313,6 +325,7 @@ final class AppModel {
             suggestions: viewMode == .month ? [] : visibleDays.flatMap { optionalPicks(on: $0).flatMap(\.picks) },
             // The gym is a fixed part of a day; held project time is detail a month cell can skip.
             planBlocks: viewMode == .month ? planBlocks.filter(\.isCommitment) : planBlocks, projectsById: projectsById,
+            catchUpBlocks: planSummary.catchUpBlocks,
             showTasksOnCalendar: showTasksOnCalendar,
             tasksById: tasksById,
             categoriesById: categoriesById, calendarsById: calendarsById, schedules: activeSchedules,
@@ -382,7 +395,18 @@ final class AppModel {
                 model.dayOverrides = overrides
             },
             observe(database.observePlanSummary()) { model, summary in
+                let changed = model.planSummary.catchUpBlocks != summary.catchUpBlocks
                 model.planSummary = summary
+                if changed {
+                    if let id = model.catchUpDetailID, !summary.catchUpBlocks.contains(where: { $0.id == id }) {
+                        model.catchUpDetailID = nil
+                    }
+                    model.rebuildLayout()
+                    model.clearHiddenSelection()
+                }
+            },
+            observe(database.observeLaterItems()) { model, items in
+                model.later = LaterPresentation(items: items)
             },
             observe(database.observeBriefs()) { model, briefs in
                 model.briefs = briefs

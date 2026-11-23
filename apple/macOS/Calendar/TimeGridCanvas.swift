@@ -177,6 +177,9 @@ struct TimeGridCanvas: View {
         case .commitment:
             context.fill(shape, with: .color(block.tint.opacity(0.07 * alpha)))
             context.stroke(shape, with: .color(block.tint.opacity(0.45 * alpha)), lineWidth: 1)
+        case .catchUp:
+            context.fill(shape, with: .color(block.tint.opacity(0.12 * alpha)))
+            context.stroke(shape, with: .color(block.tint.opacity(0.4 * alpha)), lineWidth: 1)
         case .projectTime:
             context.fill(shape, with: .color(block.tint.opacity(0.04 * alpha)))
             context.stroke(
@@ -185,7 +188,8 @@ struct TimeGridCanvas: View {
 
         var inner = context
         inner.clip(to: shape)
-        let isCurrent = showsProgress && !block.isSuggestion && block.kind != .completed && block.start <= now && now < block.end
+        let isCurrent = showsProgress && !block.isSuggestion && block.kind != .completed
+            && block.kind != .catchUp && block.start <= now && now < block.end
         if isCurrent {
             drawProgressFill(of: block, in: &inner, rect: rect)
         }
@@ -201,7 +205,7 @@ struct TimeGridCanvas: View {
         // A dragged block says where it would land, in place of its title when it has one line.
         let dragTimes = drag.flatMap { $0.applies(to: block) ? DateText.timeRange($0.start, $0.end) : nil }
         let title = Text(rect.height < 34 ? dragTimes ?? block.title : block.title)
-            .font(.system(size: 11, weight: .medium))
+            .font(.system(size: block.kind == .catchUp && rect.height < 14 ? 9 : 11, weight: .medium))
             .strikethrough(block.kind == .completed).foregroundStyle(textColor)
         var titleLine = titleRect
         if let badge = jumpBadge(for: block, in: rect), badge.frame.minY < titleLine.minY + 14 {
@@ -241,6 +245,7 @@ struct TimeGridCanvas: View {
         case .suggestion: "moon.stars"
         case .commitment: PlanText.commitmentSymbol
         case .projectTime: PlanText.projectSymbol
+        case .catchUp: "bookmark"
         case .event, .task: block.companions.isEmpty ? nil : PlanText.parallelSymbol
         }
     }

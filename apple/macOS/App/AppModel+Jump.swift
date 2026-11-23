@@ -116,7 +116,9 @@ extension AppModel {
         }
         let staysInPane = inPane && (focus == .tasks || !onCalendar)
         select(item, in: staysInPane ? .tasks : .calendar)
-        if selectedTask != nil || selectedEvent != nil {
+        if case .catchUp = item {
+            editSelection()
+        } else if selectedTask != nil || selectedEvent != nil {
             editSelection()
         }
     }
