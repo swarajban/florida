@@ -155,12 +155,14 @@ public struct UserSettings: Codable, Hashable, Sendable, Identifiable {
     public var id: String
     /// IANA identifier the routine blocks' hours are read in, e.g. "America/Los_Angeles".
     public var timeZone: String
+    public var catchUp: CatchUpSettings?
     public var updatedAt: Date
 
-    public init(id: String, timeZone: String, updatedAt: Date) {
+    public init(id: String, timeZone: String, updatedAt: Date, catchUp: CatchUpSettings? = nil) {
         self.id = id
         self.timeZone = timeZone
         self.updatedAt = updatedAt
+        self.catchUp = catchUp
     }
 }
 
@@ -553,10 +555,12 @@ public struct DayCapacity: Codable, Hashable, Sendable {
 public struct PlanSummary: Codable, Hashable, Sendable {
     public var missed: [MissedCommitment]
     public var capacity: [DayCapacity]
+    public var catchUpBlocks: [CatchUpBlock]
 
-    public init(missed: [MissedCommitment] = [], capacity: [DayCapacity] = []) {
+    public init(missed: [MissedCommitment] = [], capacity: [DayCapacity] = [], catchUpBlocks: [CatchUpBlock] = []) {
         self.missed = missed
         self.capacity = capacity
+        self.catchUpBlocks = catchUpBlocks
     }
 }
 
@@ -914,7 +918,7 @@ public struct UnscheduledTask: Codable, Hashable, Sendable, Identifiable {
 /// `dayOverrides`, `tasks` and `events` contain rows changed after `since`, including tombstones
 /// (`deletedAt` set). `settings` (nil before the server is seeded), `placements`,
 /// `optionalPlacements`, `unscheduled`, `projectPlacements`, `routineOccurrences`, `missed`,
-/// `capacity`, `briefs`, `accounts` and `calendars` are always complete and are meant to be
+/// `capacity`, `catchUpBlocks`, `briefs`, `accounts` and `calendars` are always complete and are meant to be
 /// replaced wholesale. Every key added after the first release decodes as empty when an older
 /// server omits it.
 public struct SyncResponse: Codable, Sendable {
@@ -942,6 +946,7 @@ public struct SyncResponse: Codable, Sendable {
     public var routineOccurrences: [RoutineOccurrence]
     public var missed: [MissedCommitment]
     public var capacity: [DayCapacity]
+    public var catchUpBlocks: [CatchUpBlock]
     /// The newest daily brief and weekly review; empty until the server has written one.
     public var briefs: [Brief]
 
@@ -952,7 +957,7 @@ public struct SyncResponse: Codable, Sendable {
         accounts: [GoogleAccount] = [], calendars: [CalendarInfo] = [], unscheduled: [UnscheduledTask] = [],
         projects: [Project] = [], dayOverrides: [DayOverride] = [], projectPlacements: [ProjectPlacement] = [],
         routineOccurrences: [RoutineOccurrence] = [], missed: [MissedCommitment] = [], capacity: [DayCapacity] = [],
-        briefs: [Brief] = [], laterItems: [LaterItem] = []
+        briefs: [Brief] = [], laterItems: [LaterItem] = [], catchUpBlocks: [CatchUpBlock] = []
     ) {
         self.cursor = cursor
         self.settings = settings
@@ -974,6 +979,7 @@ public struct SyncResponse: Codable, Sendable {
         self.missed = missed
         self.capacity = capacity
         self.briefs = briefs
+        self.catchUpBlocks = catchUpBlocks
     }
 
     public init(from decoder: any Decoder) throws {
@@ -998,9 +1004,10 @@ public struct SyncResponse: Codable, Sendable {
         missed = try container.decodeIfPresent([MissedCommitment].self, forKey: .missed) ?? []
         capacity = try container.decodeIfPresent([DayCapacity].self, forKey: .capacity) ?? []
         briefs = try container.decodeIfPresent([Brief].self, forKey: .briefs) ?? []
+        catchUpBlocks = try container.decodeIfPresent([CatchUpBlock].self, forKey: .catchUpBlocks) ?? []
     }
 
-    public var planSummary: PlanSummary { PlanSummary(missed: missed, capacity: capacity) }
+    public var planSummary: PlanSummary { PlanSummary(missed: missed, capacity: capacity, catchUpBlocks: catchUpBlocks) }
 }
 
 /// The scheduler's result as returned by every mutating API call (`scheduling`) and `POST /api/schedule/run`.
@@ -1103,11 +1110,12 @@ public struct SchedulingResult: Codable, Hashable, Sendable {
     public var missed: [MissedCommitment]
     public var capacity: [DayCapacity]
     public var projectPlacements: [ProjectPiece]
+    public var catchUpBlocks: [CatchUpBlock]
 
     public init(
         placements: [Piece] = [], unscheduled: [Unscheduled] = [], late: [Late] = [], optional: [Suggestion] = [],
         routine: [Occurrence] = [], missed: [MissedCommitment] = [], capacity: [DayCapacity] = [],
-        projectPlacements: [ProjectPiece] = []
+        projectPlacements: [ProjectPiece] = [], catchUpBlocks: [CatchUpBlock] = []
     ) {
         self.placements = placements
         self.unscheduled = unscheduled
@@ -1117,6 +1125,7 @@ public struct SchedulingResult: Codable, Hashable, Sendable {
         self.missed = missed
         self.capacity = capacity
         self.projectPlacements = projectPlacements
+        self.catchUpBlocks = catchUpBlocks
     }
 
     /// Hand-written only so the keys added after the first release default to empty when an
@@ -1131,9 +1140,10 @@ public struct SchedulingResult: Codable, Hashable, Sendable {
         missed = try c.decodeIfPresent([MissedCommitment].self, forKey: .missed) ?? []
         capacity = try c.decodeIfPresent([DayCapacity].self, forKey: .capacity) ?? []
         projectPlacements = try c.decodeIfPresent([ProjectPiece].self, forKey: .projectPlacements) ?? []
+        catchUpBlocks = try c.decodeIfPresent([CatchUpBlock].self, forKey: .catchUpBlocks) ?? []
     }
 
-    public var planSummary: PlanSummary { PlanSummary(missed: missed, capacity: capacity) }
+    public var planSummary: PlanSummary { PlanSummary(missed: missed, capacity: capacity, catchUpBlocks: catchUpBlocks) }
 
     /// The unscheduled tasks as `UnscheduledTask` rows, as `/api/sync` serves them after this run.
     public func unscheduledRows(computedAt: Date) -> [UnscheduledTask] {

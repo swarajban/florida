@@ -51,8 +51,8 @@ import Testing
             #expect(event.blocksDay == false && event.autoBlocksDay == true)
             #expect(event.blockingReason == "Company holiday")
             #expect(try GoogleAccount.fetchOne(db, id: "account")?.displayName == "Test User")
-            #expect(try AppDatabase.migrator.appliedMigrations(db).suffix(7) == [
-                "v9-task-source", "v10-automatic-day-blocking", "v11-someday-date-decision", "v12-task-tags-waiting", "v13-calendar-last-sync", "v14-task-required-day", "v15-later-items",
+            #expect(try AppDatabase.migrator.appliedMigrations(db).suffix(8) == [
+                "v9-task-source", "v10-automatic-day-blocking", "v11-someday-date-decision", "v12-task-tags-waiting", "v13-calendar-last-sync", "v14-task-required-day", "v15-later-items", "v16-catch-up",
             ])
         }
     }

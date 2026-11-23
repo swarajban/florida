@@ -29,6 +29,9 @@ export const laterPage = z.object({
   offset: z.number().int().min(0).max(2147483647).default(0),
 })
 
+export const unreadLater = and(isNull(laterItems.archivedAt), isNull(laterItems.readAt), isNull(laterItems.deletedAt))!
+export const defaultLaterMinutes = (kind: LaterItemRow['kind']): number => kind === 'video' ? 10 : 5
+
 export function listLater(db: Db, { status, limit, offset }: z.infer<typeof laterPage>) {
   const state = status === 'archived' ? isNotNull(laterItems.archivedAt)
     : status === 'all' ? undefined

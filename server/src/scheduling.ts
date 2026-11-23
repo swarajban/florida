@@ -3,13 +3,15 @@ import { DAY, MINUTE, dateFromDayNumber, dayNumber, isoDate, localDate, schedule
 import type { Attention, Interval, Placement, RoutineBlock, SchedulerInput, SchedulerResult, Task } from '@florida/scheduler'
 import { and, eq, getTableColumns, gt, gte, isNotNull, isNull, lt, sql } from 'drizzle-orm'
 import type { Config } from './config.js'
+import { DEFAULT_CATCH_UP } from './config.js'
 import type { Db } from './db/client.js'
-import { PLAN_SUMMARY_ID, defaultTimeZone } from './db/queries.js'
+import { PLAN_SUMMARY_ID, SETTINGS_ID } from './db/queries.js'
 import {
   calendars,
   categories,
   dayOverrides,
   events,
+  laterItems,
   optionalPlacements,
   placements,
   planSummary,
@@ -17,6 +19,7 @@ import {
   projects,
   routineBlocks,
   routineOccurrences,
+  settings,
   tasks,
   unscheduled,
 } from './db/schema.js'
@@ -36,6 +39,7 @@ import { parseCalendarDate } from './validation.js'
 import { scheduleChanges } from './db/schema.js'
 import { writeTimestamp } from './db/sync-clock.js'
 import { placementChanges } from './schedule-changes.js'
+import { defaultLaterMinutes, unreadLater } from './later.js'
 
 /** Smallest piece of shared work: long enough for an agent to get somewhere between check-ins. */
 export const SHARED_CHUNK_MINUTES = 60
@@ -385,7 +389,14 @@ export async function runScheduling(
     await tx.execute(sql.raw(SCHEDULER_LOCK_SQL))
     await materializeRecurringTasks(tx, now, config.HORIZON_DAYS)
 
-    const timeZone = await defaultTimeZone(tx)
+    const [preferences] = await tx.select().from(settings).where(eq(settings.id, SETTINGS_ID))
+    const timeZone = preferences?.timeZone ?? 'UTC'
+    const catchUp = preferences?.catchUp ?? DEFAULT_CATCH_UP
+    const [previousPlan] = await tx.select().from(planSummary).where(eq(planSummary.id, PLAN_SUMMARY_ID))
+    const queue = catchUp.enabled ? await tx.select({
+      id: laterItems.id, title: laterItems.title, site: laterItems.site, url: laterItems.url,
+      estMinutes: laterItems.estMinutes, kind: laterItems.kind,
+    }).from(laterItems).where(unreadLater).orderBy(laterItems.savedAt, laterItems.id) : []
     const blockRows = await tx.select().from(routineBlocks).where(isNull(routineBlocks.deletedAt))
     const categoryRows = await tx.select().from(categories).where(isNull(categories.deletedAt))
     const taskRows = await tx
@@ -409,25 +420,26 @@ export async function runScheduling(
       .from(tasks)
       .where(and(isNull(tasks.deletedAt), isNotNull(tasks.projectId), gte(tasks.completedAt, new Date(weekStart))))
 
-    const result = splitProjectTime(
-      schedule(
-        buildSchedulerInput({
-          projects: projectRows,
-          dayOverrides: overrideRows,
-          projectPlacements: projectPlacementRows,
-          completedProjectTasks,
-          now,
-          horizonDays: config.HORIZON_DAYS,
-          timeZone,
-          routineBlocks: blockRows,
-          categories: categoryRows,
-          tasks: taskRows,
-          events: eventRows,
-          previous: previousRows,
-        }),
-      ),
+    const input = buildSchedulerInput({
+      projects: projectRows,
+      dayOverrides: overrideRows,
+      projectPlacements: projectPlacementRows,
+      completedProjectTasks,
+      now,
+      horizonDays: config.HORIZON_DAYS,
       timeZone,
-    )
+      routineBlocks: blockRows,
+      categories: categoryRows,
+      tasks: taskRows,
+      events: eventRows,
+      previous: previousRows,
+    })
+    input.catchUp = {
+      settings: catchUp,
+      queue: queue.map(({ kind, estMinutes, ...item }) => ({ ...item, estMinutes: estMinutes ?? defaultLaterMinutes(kind) })),
+      previous: previousPlan?.catchUpBlocks ?? [],
+    }
+    const result = splitProjectTime(schedule(input), timeZone)
 
     const changes = placementChanges(previousRows, result.placements, { now, previousUnscheduled, unscheduled: result.unscheduled })
     await tx.delete(scheduleChanges).where(lt(scheduleChanges.updatedAt, sql`clock_timestamp() - interval '30 days'`))
@@ -473,11 +485,12 @@ export async function runScheduling(
         })),
       )
     }
-    const summary = { missed: result.missed, capacity: result.capacity, computedAt: now }
+    const summary = { missed: result.missed, capacity: result.capacity, catchUpBlocks: result.catchUpBlocks ?? [], computedAt: now }
     await tx
       .insert(planSummary)
       .values({ id: PLAN_SUMMARY_ID, ...summary })
       .onConflictDoUpdate({ target: planSummary.id, set: summary })
+      .catch(() => { throw new Error('Could not save plan summary') })
     await tx.delete(optionalPlacements)
     if (result.optional.length > 0) {
       await tx.insert(optionalPlacements).values(

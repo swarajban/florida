@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { dateFromDayNumber, dayNumber, findFreeSlots, localDate, zonedToUtc } from '@florida/scheduler'
-import type { LocalDate, SchedulerResult } from '@florida/scheduler'
+import type { CatchUpBlock, LocalDate, SchedulerResult } from '@florida/scheduler'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
@@ -32,6 +32,7 @@ import {
   routineBlocks,
   routineOccurrences,
   scheduleChanges,
+  settings,
   unscheduled,
   tasks,
 } from './db/schema.js'
@@ -72,6 +73,7 @@ export interface McpDeps {
   ai?: TaskParser
   horizonDays?: number
   publish?: () => void
+  laterChanged?: () => void
 }
 
 const SERVER_INFO = { name: 'florida', version: '0.1.0' }
@@ -148,6 +150,7 @@ const searchCondition = (query: string | undefined) => {
  */
 export function buildMcpServer(deps: McpDeps): McpServer {
   const { db, reschedule } = deps
+  const laterChanged = deps.laterChanged ?? deps.publish
   const server = new McpServer(SERVER_INFO, { instructions: INSTRUCTIONS })
 
   server.registerTool('save_later', {
@@ -156,7 +159,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   }, ({ id, ...body }) => run(async () => {
     const item = await saveLater(db, id ?? randomUUID(), { ...body, source: 'mcp' })
-    deps.publish?.()
+    laterChanged?.()
     return ok({ item })
   }))
 
@@ -176,7 +179,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     }, ({ id }) => run(async () => {
       const item = await setLaterState(db, id, { action })
-      deps.publish?.()
+      laterChanged?.()
       return ok({ item })
     }))
   }
@@ -246,7 +249,10 @@ export function buildMcpServer(deps: McpDeps): McpServer {
       routine: { timeZone, blocks: blocks.map((b) => ({ ...b, alternates: b.alternates ?? [] })) },
       dayOverrides: overrides.map((o) => ({ date: o.date, kind: o.kind })),
       busy: eventRows.flatMap((event) => { const interval = blockingEventInterval(event, timeZone); return interval === undefined ? [] : [interval] }),
-      occupied: planned.map((p) => ({ start: p.startAt.toISOString(), end: p.endAt.toISOString() })),
+      occupied: [
+        ...planned.map((p) => ({ start: p.startAt.toISOString(), end: p.endAt.toISOString() })),
+        ...(includeScheduledTasks ? (storedPlan?.catchUpBlocks ?? []).map((p) => ({ start: p.startAt, end: p.endAt })) : []),
+      ],
       ...(commitments === undefined ? {} : { commitments: commitments.map((p) => ({ start: p.startAt.toISOString(), end: p.endAt.toISOString() })) }),
       ...(storedPlan === undefined ? {} : { commitmentWindow: { start: new Date(localWeeks(storedPlan.computedAt.getTime(), timeZone, 1)[0]!.start).toISOString(), end: new Date(storedPlan.computedAt.getTime() + (deps.horizonDays ?? 30) * 86400000).toISOString() } }),
     }).slice(0, limit).map((slot) => ({ startAt: slot.start, endAt: slot.end, durationMinutes: (Date.parse(slot.end) - Date.parse(slot.start)) / 60000 })) })
@@ -636,7 +642,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
     {
       title: 'Get agenda',
       description:
-        'One calendar day: calendar events (from selected calendars, all-day first), planned task blocks (those with a lane run side by side), project time, commitments such as the gym, and the day’s override if it has one. Defaults to today in the home time zone.',
+        'One calendar day: events, planned task blocks, project time, commitments, any Catch up block with Later links, and the day’s override. Defaults to today in the home time zone.',
       inputSchema: {
         date: calendarDate.optional().describe('YYYY-MM-DD; defaults to today'),
         timeZone: timeZone.optional().describe('IANA zone the day is measured in; defaults to the routine’s zone'),
@@ -645,9 +651,9 @@ export function buildMcpServer(deps: McpDeps): McpServer {
     },
     (args) =>
       run(async () => {
-        const tz = args.timeZone ?? (await defaultTimeZone(db))
+        const { tz, catchUpBlocks } = await agendaContext(args.timeZone)
         const date = (args.date === undefined ? undefined : parseCalendarDate(args.date)) ?? localDate(Date.now(), tz)
-        return ok((await agendaDays(date, date, tz))[0]!)
+        return ok((await agendaDays(date, date, tz, catchUpBlocks))[0]!)
       }),
   )
 
@@ -661,8 +667,8 @@ export function buildMcpServer(deps: McpDeps): McpServer {
     const end = parseCalendarDate(endDate)!
     const span = dayNumber(end) - dayNumber(start) + 1
     if (span < 1 || span > 31) throw badRequest('endDate must be on or after startDate; range must contain at most 31 days')
-    const tz = await defaultTimeZone(db)
-    return ok({ startDate, endDate, timeZone: tz, days: await agendaDays(start, end, tz) })
+    const { tz, catchUpBlocks } = await agendaContext()
+    return ok({ startDate, endDate, timeZone: tz, days: await agendaDays(start, end, tz, catchUpBlocks) })
   }))
 
   server.registerTool(
@@ -756,7 +762,13 @@ export function buildMcpServer(deps: McpDeps): McpServer {
     return result!
   }
 
-  async function agendaDays(date: LocalDate, last: LocalDate, tz: string) {
+  async function agendaContext(timeZone?: string) {
+    const [row] = await db.select({ timeZone: settings.timeZone, catchUpBlocks: planSummary.catchUpBlocks })
+      .from(settings).fullJoin(planSummary, eq(settings.id, planSummary.id)).limit(1)
+    return { tz: timeZone ?? row?.timeZone ?? 'UTC', catchUpBlocks: row?.catchUpBlocks ?? [] }
+  }
+
+  async function agendaDays(date: LocalDate, last: LocalDate, tz: string, catchUpBlocks: CatchUpBlock[]) {
     const next = dateFromDayNumber(dayNumber(last) + 1)
     // Timed rows are compared against the zoned day; all-day rows are stored at UTC midnight of
     // their calendar date, so they are compared against the UTC day instead.
@@ -851,6 +863,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
         taskBlocks: blockRows.filter((row) => overlaps(row)).map((row) => ({ ...row, appUrl: `florida://tasks/${row.taskId}` })),
         projectTime: projectTime.filter((row) => overlaps(row)),
         commitments: commitments.filter((row) => overlaps(row)),
+        catchUpBlocks: catchUpBlocks.filter((block) => Date.parse(block.startAt) < end.getTime() && Date.parse(block.endAt) > start.getTime()),
         dayOverride: override === undefined ? null : { kind: override.kind, note: override.note },
       }
     })

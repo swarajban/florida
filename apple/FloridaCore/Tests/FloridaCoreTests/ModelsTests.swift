@@ -3,6 +3,19 @@ import Testing
 @testable import FloridaCore
 
 @Suite struct JSONCodingTests {
+    @Test func decodesCatchUpBlocksAndEstimatesFromSync() throws {
+        let json = #"""
+        {"cursor":"now","schedules":[],"categories":[],"tasks":[],"events":[],"placements":[],"accounts":[],"calendars":[],
+        "catchUpBlocks":[{"id":"2026-11-22","startAt":"2026-11-23T02:00:00.000Z","endAt":"2026-11-23T02:10:00.000Z",
+        "items":[{"id":"story","title":"A story","site":"Example","url":"https://example.com/story","estMinutes":6}]}]}
+        """#
+        let model = try JSONCoding.decoder.decode(SyncResponse.self, from: Data(json.utf8))
+        let catchUp = try #require(model.catchUpBlocks.first)
+        #expect(catchUp.endAt.timeIntervalSince(catchUp.startAt) == 600)
+        #expect(catchUp.items.map(\.estMinutes) == [6])
+        #expect(model.planSummary.catchUpBlocks == [catchUp])
+    }
+
     @Test func newEventCalendarPreferenceOverridesAlphabeticalAndVisibilityOrder() {
         let accounts = [
             GoogleAccount(id: "work", email: "me@sempre-health.com", label: "work", updatedAt: .distantPast),

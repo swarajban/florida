@@ -10,6 +10,7 @@ import { createDb } from './db/client.js'
 import { GoogleSync } from './google/sync.js'
 import { refreshAllDayJudgments, repairLegacyJudgmentCursors } from './google/all-day-state.js'
 import { startJobs } from './jobs.js'
+import { archiveStaleLater, enrichLaterBatch } from './later-jobs.js'
 import { runScheduling } from './scheduling.js'
 
 const config = loadConfig()
@@ -24,7 +25,8 @@ const aiDeps =
   claude === undefined || briefWriter === undefined
     ? {}
     : { ai: new ClaudeTaskParser(claude), categorySuggester: new ClaudeCategorySuggester(claude), briefWriter }
-const app = createApp({ db, config, sync, reschedule, changes, ...aiDeps })
+let laterDirty = false
+const app = createApp({ db, config, sync, reschedule, changes, laterChanged: () => { laterDirty = true }, ...aiDeps })
 if (claude === undefined) console.log('[server] ANTHROPIC_API_KEY not set; /api/ai/* disabled')
 
 const server = serve({ fetch: app.fetch, port: config.PORT }, (info) => {
@@ -34,6 +36,19 @@ const stopJobs = startJobs({
   sync,
   reschedule,
   changes,
+  archiveLater: () => archiveStaleLater(db),
+  refreshLater: async () => {
+    if (await enrichLaterBatch(db)) laterDirty = true
+    if (!laterDirty) return
+    laterDirty = false
+    try {
+      await reschedule('rescheduled due to Later queue update')
+      changes.publish()
+    } catch (error) {
+      laterDirty = true
+      throw error
+    }
+  },
   refreshAllDayJudgments: () => refreshAllDayJudgments(db),
   repairJudgmentCursors: () => repairLegacyJudgmentCursors(db),
   ...(briefWriter === undefined ? {} : { ensureBriefs: briefJob(db, briefWriter) }),

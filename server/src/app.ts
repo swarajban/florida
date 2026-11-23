@@ -84,6 +84,7 @@ export interface AppDeps {
   /** Interval between SSE keep-alive comments. Default 25 s. */
   sseHeartbeatMs?: number
   calendarPrefetchTimeoutMs?: number
+  laterChanged?: () => void
 }
 
 /** Columns of `google_accounts` that may leave the server (never the tokens). */
@@ -152,7 +153,20 @@ const briefBody = z.object({ kind: z.enum(['daily', 'weekly']) })
 
 const explainBody = z.object({ taskId: z.string().min(1) })
 
-const settingsBody = z.object({ timeZone })
+const catchUpMinutes = z.number().int().min(10).max(180)
+const catchUpWindow = z.object({
+  days: z.array(z.number().int().min(0).max(6)).min(1).max(7),
+  start: clock, end: clock, minutes: catchUpMinutes.optional(),
+}).refine((window) => window.start < window.end, 'end must be after start')
+const settingsBody = z.object({
+  timeZone,
+  catchUp: z.object({
+    enabled: z.boolean(), minutes: catchUpMinutes, windows: z.array(catchUpWindow).max(7),
+  }).refine(({ windows }) => {
+    const days = windows.flatMap((window) => window.days)
+    return new Set(days).size === days.length
+  }, 'each day can have at most one Catch up window').optional(),
+})
 
 const scheduleBody = z.object({
   name: z.string().min(1),
@@ -248,8 +262,12 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
   app.use('/mcp', requireToken)
 
   // Model Context Protocol endpoint for agents; the same token, the same store, the same scheduler.
-  mountMcp(app, { db, reschedule, sync, publish: () => changes.publish(), horizonDays: config.HORIZON_DAYS, ...(deps.ai === undefined ? {} : { ai: deps.ai }) })
-  mountLater(app, db, () => changes.publish())
+  const laterChanged = () => {
+    changes.publish()
+    deps.laterChanged?.()
+  }
+  mountMcp(app, { db, reschedule, sync, publish: () => changes.publish(), laterChanged, horizonDays: config.HORIZON_DAYS, ...(deps.ai === undefined ? {} : { ai: deps.ai }) })
+  mountLater(app, db, laterChanged)
 
   // ---- Sync -------------------------------------------------------------------------------------
 
@@ -310,6 +328,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
       routineOccurrences: routineOccurrenceRows,
       missed: summary?.missed ?? [],
       capacity: summary?.capacity ?? [],
+      catchUpBlocks: summary?.catchUpBlocks ?? [],
       briefs: briefRows,
       accounts: accountRows,
       calendars: calendarRows,
@@ -538,7 +557,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
 
   app.put('/api/settings', async (c) => {
     const body = settingsBody.parse(await c.req.json())
-    const fields = { timeZone: body.timeZone, updatedAt: writeTimestamp }
+    const fields = { timeZone: body.timeZone, updatedAt: writeTimestamp, ...(body.catchUp && { catchUp: body.catchUp }) }
     const [row] = await db
       .insert(settings)
       .values({ id: SETTINGS_ID, ...fields })

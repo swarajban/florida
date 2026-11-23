@@ -17,8 +17,10 @@
     "@florida/scheduler": "workspace:*",
     "@hono/node-server": "^2.1.6",
     "@modelcontextprotocol/sdk": "^1.32.2",
+    "cheerio": "^1.2.0",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.17",
+    "ipaddr.js": "^2.5.0",
     "postgres": "^4.1.0",
     "zod": "^4.6.7"
   },
