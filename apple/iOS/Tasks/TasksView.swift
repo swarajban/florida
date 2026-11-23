@@ -93,6 +93,20 @@ struct TasksView: View {
                 } footer: {
                     Text("Add a category for each project or area. Typing #Infosec in quick add chooses that category, or offers to create it. Tasks stay in Inbox until a category and a due date, start date, pinned time or Someday are set.")
                 }
+                Section {
+                    NavigationLink(value: TasksRoute.later) {
+                        HStack {
+                            Label("Later", systemImage: "bookmark")
+                            Spacer()
+                            Text(model.later.queue.count.formatted())
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    .accessibilityIdentifier("tasks-later-link")
+                    .accessibilityValue("\(model.later.queue.count) unread")
+                }
             }
             .listStyle(.insetGrouped)
             .accessibilityIdentifier("tasks-list")
@@ -162,6 +176,7 @@ struct TasksView: View {
                 switch route {
                 case .categories: CategoriesView()
                 case .projects: ProjectsView()
+                case .later: LaterView()
                 }
             }
             .sheet(item: $editor) { request in
@@ -217,6 +232,7 @@ struct TasksView: View {
 enum TasksRoute: Hashable {
     case categories
     case projects
+    case later
 
     /// Where the tab starts. Screenshot and UI-test runs open on Projects with `-uiSheet projects`,
     /// and with `-uiSheet project`, where `ProjectsView` then opens its editor on the first active

@@ -20,6 +20,7 @@ struct DayGridBlockView: View {
     var showsSymbol = true
     /// Project time: tall enough for the time range under "Project time".
     var showsThirdLine = false
+    var showsCompactTimeLine = false
 
     /// What UI tests find a plan block by: "grid-plan-" and the block's id, such as
     /// "grid-plan-commitment:gym@<start>". Events and task blocks carry no identifier.
@@ -34,9 +35,58 @@ struct DayGridBlockView: View {
     var body: some View {
         if let plan = block.planBlock {
             content.accessibilityIdentifier(Self.planIdentifier(plan))
+        } else if case .catchUp(let catchUp) = block.item {
+            catchUpContent
+                .accessibilityIdentifier("grid-catch-up-\(catchUp.id)")
         } else {
             content
         }
+    }
+
+    private var catchUpContent: some View {
+        let shape = RoundedRectangle(cornerRadius: 5)
+        let title = Text(block.title).fontWeight(.semibold)
+        return Group {
+            if showsCompactTimeLine {
+                VStack(alignment: .leading, spacing: 0) {
+                    if showsSymbol {
+                        Label { title } icon: { Image(systemName: "bookmark") }
+                    } else {
+                        title
+                    }
+                    Text(timeText).monospacedDigit().foregroundStyle(.secondary)
+                }
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) {
+                        title
+                        Text(timeText).monospacedDigit().foregroundStyle(.secondary)
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                    HStack(spacing: 6) {
+                        title
+                        Text(block.start, style: .time).monospacedDigit().foregroundStyle(.secondary)
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                    title
+                }
+            }
+        }
+        .font(.caption2)
+        .lineLimit(1)
+        .foregroundStyle(FloridaStyle.ink)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 1)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(block.tint.opacity(0.09), in: shape)
+        .overlay { shape.strokeBorder(block.tint.opacity(0.25), lineWidth: 1) }
+        .clipShape(shape)
+        .opacity(alpha)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(block.title)
+        .accessibilityValue(timeText)
+        .accessibilityHint("Opens Later")
+        .accessibilityAddTraits(.isButton)
     }
 
     @ViewBuilder

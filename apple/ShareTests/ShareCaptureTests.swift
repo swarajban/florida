@@ -20,6 +20,8 @@ import Testing
         let path = try file()
         defer { try? FileManager.default.removeItem(atPath: path) }
         let model = ShareCaptureModel(input: ShareInput(url: "https://example.com/a", pageTitle: title))
+        #expect(model.mode == .later)
+        model.selectMode(.task)
         await model.load(path: path)
         #expect(model.draft.title == title)
         #expect(model.draft.categoryHint == nil && model.draft.notes == nil && model.draft.dueAt == nil)
@@ -37,6 +39,7 @@ import Testing
         let path = try file()
         defer { try? FileManager.default.removeItem(atPath: path) }
         let model = ShareCaptureModel(input: ShareInput(text: "Read https://example.com/a\nKeep this note"))
+        model.selectMode(.task)
         await model.load(path: path)
         model.edit("Read #work ^someday\nKeep this note")
         #expect(model.draft.source?.url == "https://example.com/a")
@@ -97,5 +100,50 @@ import Testing
         }
         #expect(saved?.id == id.uuidString.lowercased() && saved?.categoryId == "inbox")
         #expect(try store.pendingWrites().count == 1 && model.error == nil)
+    }
+
+    @Test func laterCaptureSavesLocallyOnceWithPageTitle() async throws {
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".sqlite").path
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let store = try AppDatabase(path: path)
+        defer { try? store.writer.close() }
+        let url = "https://youtu.be/example"
+        let title = "  Watch #later // episode  "
+        let model = ShareCaptureModel(input: ShareInput(url: url, pageTitle: title))
+        await model.load(path: path)
+        #expect(model.mode == .later && model.canAdd)
+
+        model.selectMode(.task)
+        model.edit("Watch #missing")
+        #expect(!model.canAdd)
+        model.selectMode(.later)
+        #expect(model.canAdd)
+        async let first = model.addLater(path: path)
+        async let second = model.addLater(path: path)
+        let saved = await [first, second].compactMap { $0 }
+        let item = try #require(saved.first)
+        #expect(saved.count == 1 && item.id == model.captureID.uuidString.lowercased())
+        #expect(item.title == "Watch #later // episode" && item.url == url && item.kind == .video && item.source == .share)
+        #expect(try store.laterItems().map(\.id) == [item.id])
+        #expect(try store.pendingWrites().map(\.entity) == [.laterItem])
+    }
+
+    @Test func taskFirstLinksCanGoToLaterButNonWebSharesCannot() async throws {
+        let path = try file()
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let url = "https://github.com/example/project/issues/1"
+        let title = String(repeating: "😀", count: 101)
+        let link = ShareCaptureModel(input: ShareInput(url: url, pageTitle: title))
+        await link.load(path: path)
+        #expect(link.mode == .task && link.laterURL == url)
+        link.selectMode(.later)
+        let saved = try #require(await link.addLater(path: path))
+        #expect(saved.kind == .other && saved.title == String(title.prefix(100)))
+
+        for input in [ShareInput(text: "Read this"), ShareInput(url: "mailto:hello@example.com")] {
+            let nonWeb = ShareCaptureModel(input: input)
+            nonWeb.selectMode(.later)
+            #expect(nonWeb.mode == .task && nonWeb.laterURL == nil)
+        }
     }
 }

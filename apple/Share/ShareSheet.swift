@@ -19,49 +19,25 @@ struct ShareSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    TextField("Task", text: Binding(get: { model.text }, set: { model.edit($0) }), selection: $selection, axis: .vertical)
-                        .focused($focused)
-                        .lineLimit(2...5)
-                        .textFieldStyle(.roundedBorder)
-                        .accessibilityIdentifier("share-input")
-                    Text(model.literalTitle ? "Page title is literal. Editing enables Smart Add symbols." : "Smart Add: #category · ^date · ^someday · =30m · &attention · // notes")
-                        .font(.caption).foregroundStyle(.secondary)
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Task preview").font(.caption).foregroundStyle(.secondary)
-                        Text(model.draft.title).font(.headline).accessibilityIdentifier("share-preview")
-                        ForEach(QuickAddChip.chips(for: model.draft, categories: model.categories, calendar: model.calendar).filter { $0.id != "category" }) { chip in
-                            Label(chip.text, systemImage: chip.symbol).font(.callout).foregroundStyle(chip.tint)
+                    if model.laterURL != nil {
+                        Picker("Save as", selection: Binding(get: { model.mode }, set: { model.selectMode($0) })) {
+                            Text("Later").tag(ShareCaptureModel.Mode.later)
+                            Text("Task").tag(ShareCaptureModel.Mode.task)
                         }
-                        if let notes = model.draft.notes { Text(notes).font(.caption).accessibilityIdentifier("share-notes") }
-                        if let source = model.draft.source {
-                            Label(source.title, systemImage: source.symbolName)
-                                .font(.callout).accessibilityIdentifier("share-source")
-                            Text(source.url).font(.caption).foregroundStyle(.secondary)
-                        }
+                        .pickerStyle(.segmented)
+                        .accessibilityIdentifier("share-mode")
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12).background(FloridaStyle.panel, in: RoundedRectangle(cornerRadius: 12))
-                    Menu {
-                        ForEach(model.categories) { category in
-                            Button(category.name) { model.selectedCategoryID = category.id }
+                    if model.mode == .later, let url = model.laterURL {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Goes to Later").font(.caption).foregroundStyle(.secondary)
+                                .accessibilityIdentifier("share-later-destination")
+                            if let title = model.laterTitle { Text(title).font(.headline) }
+                            Text(url).font(.callout).foregroundStyle(.secondary)
                         }
-                    } label: {
-                        Label(model.category?.name ?? (model.categoryID == TaskCategory.inboxId ? "Inbox" : "Choose a category"), systemImage: "folder")
-                    }
-                    .accessibilityIdentifier("share-category")
-                    Text(model.goesToInbox ? "Goes to Inbox" : "Category and date decision set — skips Inbox")
-                        .font(.callout).accessibilityIdentifier("share-destination")
-                    if model.categoryID == nil, model.ready { Text("Choose a category before adding.").font(.caption) }
-                    if focused, !model.literalTitle {
-                        ForEach(suggestions.prefix(5)) { suggestion in
-                            Button("\(suggestion.symbol) \(suggestion.title)") {
-                                if let result = QuickAddCompletion.complete(suggestion, in: model.text) {
-                                    model.edit(result.text)
-                                    selection = TextSelection(insertionPoint: String.Index(utf16Offset: result.caretUTF16, in: result.text))
-                                    if let id = suggestion.categoryId { model.selectedCategoryID = id }
-                                }
-                            }
-                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12).background(FloridaStyle.panel, in: RoundedRectangle(cornerRadius: 12))
+                    } else {
+                        taskFields
                     }
                     if let error = model.error {
                         Text(error).foregroundStyle(.red).accessibilityIdentifier("share-error")
@@ -69,6 +45,9 @@ struct ShareSheet: View {
                 }
                 .padding(16)
                 .disabled(model.submitted)
+            }
+            .onChange(of: model.mode) { _, mode in
+                if mode == .later { focused = false }
             }
             .background(FloridaStyle.paper)
             .navigationTitle("Add to Florida")
@@ -83,6 +62,53 @@ struct ShareSheet: View {
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
                     Button("Done") { focused = false }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var taskFields: some View {
+        TextField("Task", text: Binding(get: { model.text }, set: { model.edit($0) }), selection: $selection, axis: .vertical)
+            .focused($focused)
+            .lineLimit(2...5)
+            .textFieldStyle(.roundedBorder)
+            .accessibilityIdentifier("share-input")
+        Text(model.literalTitle ? "Page title is literal. Editing enables Smart Add symbols." : "Smart Add: #category · ^date · ^someday · =30m · &attention · // notes")
+            .font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Task preview").font(.caption).foregroundStyle(.secondary)
+            Text(model.draft.title).font(.headline).accessibilityIdentifier("share-preview")
+            ForEach(QuickAddChip.chips(for: model.draft, categories: model.categories, calendar: model.calendar).filter { $0.id != "category" }) { chip in
+                Label(chip.text, systemImage: chip.symbol).font(.callout).foregroundStyle(chip.tint)
+            }
+            if let notes = model.draft.notes { Text(notes).font(.caption).accessibilityIdentifier("share-notes") }
+            if let source = model.draft.source {
+                Label(source.title, systemImage: source.symbolName)
+                    .font(.callout).accessibilityIdentifier("share-source")
+                Text(source.url).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12).background(FloridaStyle.panel, in: RoundedRectangle(cornerRadius: 12))
+        Menu {
+            ForEach(model.categories) { category in
+                Button(category.name) { model.selectedCategoryID = category.id }
+            }
+        } label: {
+            Label(model.category?.name ?? (model.categoryID == TaskCategory.inboxId ? "Inbox" : "Choose a category"), systemImage: "folder")
+        }
+        .accessibilityIdentifier("share-category")
+        Text(model.goesToInbox ? "Goes to Inbox" : "Category and date decision set — skips Inbox")
+            .font(.callout).accessibilityIdentifier("share-destination")
+        if model.categoryID == nil, model.ready { Text("Choose a category before adding.").font(.caption) }
+        if focused, !model.literalTitle {
+            ForEach(suggestions.prefix(5)) { suggestion in
+                Button("\(suggestion.symbol) \(suggestion.title)") {
+                    if let result = QuickAddCompletion.complete(suggestion, in: model.text) {
+                        model.edit(result.text)
+                        selection = TextSelection(insertionPoint: String.Index(utf16Offset: result.caretUTF16, in: result.text))
+                        if let id = suggestion.categoryId { model.selectedCategoryID = id }
+                    }
                 }
             }
         }

@@ -22,6 +22,16 @@ extension AppModel {
         lastSyncAt = now
         guard let database else { return }
         do {
+            if UserDefaults.standard.bool(forKey: "uiLaterFixture") {
+                let url = "https://example.com/blog/a-story"
+                let item = LaterItem(id: "test-story", url: url, canonicalUrl: url, title: "A story for Later",
+                    site: "example.com", kind: .article, estMinutes: 8, savedAt: now, source: .share, updatedAt: now)
+                let start = calendar.startOfDay(for: now).addingTimeInterval(18 * 3600)
+                let block = CatchUpBlock(id: "test-catch-up", startAt: start, endAt: start.addingTimeInterval(10 * 60),
+                    items: [.init(id: item.id, title: item.title, site: item.site, url: url, estMinutes: 8)])
+                try database.apply(SyncResponse(cursor: now.ISO8601Format(), laterItems: [item], catchUpBlocks: [block]))
+                return
+            }
             try database.apply(DemoData.syncResponse(now: now, calendar: calendar))
             if UserDefaults.standard.bool(forKey: "uiDeepLinkFixture") {
                 try database.apply(SyncResponse(cursor: now.ISO8601Format(), tasks: [TaskItem(

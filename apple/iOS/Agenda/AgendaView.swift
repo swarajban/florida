@@ -18,6 +18,7 @@ struct AgendaView: View {
     @State private var editingTask: TaskItem?
     @State private var selectedEvent: CalendarEvent?
     @State private var selectedOOO: AllDayPresentation.Item?
+    @State private var selectedCatchUp: CatchUpBlock?
     @State private var newEvent: CalendarEvent?
     @State private var showsDayPicker = false
     @State private var showsWeeklyReview = false
@@ -104,6 +105,18 @@ struct AgendaView: View {
         }
         .sheet(item: $selectedOOO) { item in
             CoworkerOOOSheet(events: item.events)
+        }
+        .sheet(item: $selectedCatchUp) { block in
+            NavigationStack {
+                LaterView(block: block)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { selectedCatchUp = nil }
+                        }
+                    }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(item: $newEvent) { event in
             EventCaptureSheet(event: event, onDismiss: { newEvent = nil })
@@ -292,7 +305,8 @@ struct AgendaView: View {
                 dayCount: dayCount, showTasksOnCalendar: showTasksOnCalendar,
                 onSelectEvent: { selectedEvent = $0 },
                 onEditTask: { editingTask = $0 },
-                onCreateAt: { newEvent = model.newEventTemplate(start: $0) })
+                onCreateAt: { newEvent = model.newEventTemplate(start: $0) },
+                onSelectCatchUp: { selectedCatchUp = $0 })
         } else {
             AgendaListCarousel { day, agenda in
                 ScrollViewReader { proxy in
@@ -311,9 +325,11 @@ struct AgendaView: View {
     private func timeline(on day: Date, agenda: DayAgenda?) -> some View {
         let isToday = day == model.today
         let live = Set(agenda?.placements.map(\.placement.id) ?? [])
-        let ghosts = isToday && showsGhosts
+        let ghosts = isToday && showsGhosts && agenda != nil
             ? model.ghostBlocks.filter { !live.contains($0.id) && !model.somedayTaskIDs.contains($0.taskId) } : []
-        let items = agenda.map { AgendaItem.timed(from: $0, ghosts: ghosts) } ?? []
+        let dayEnd = DayGridLayout.nextDayStart(after: day, calendar: model.calendar)
+        let catchUpBlocks = model.catchUpBlocks.filter { $0.startAt < dayEnd && $0.endAt > day }
+        let items = AgendaItem.timed(from: agenda, ghosts: ghosts, catchUpBlocks: catchUpBlocks)
         let allDayEvents = agenda.map(AgendaItem.allDay) ?? []
         let allDayItems = AllDayPresentation.items(for: allDayEvents) { id in
             model.calendars.first { $0.id == id }?.summary
@@ -409,6 +425,10 @@ struct AgendaView: View {
                         blockRow(block, beside: beside[block.placement.id], isToday: isToday)
                     case .item(.plan(let block)):
                         planRow(block, beside: beside[block.id])
+                            .timelineSeparator()
+                            .listRowBackground(FloridaStyle.paper)
+                    case .item(.catchUp(let block)):
+                        CatchUpRow(block: block, onOpen: { selectedCatchUp = block })
                             .timelineSeparator()
                             .listRowBackground(FloridaStyle.paper)
                     case .item(.ghost(let ghost)):

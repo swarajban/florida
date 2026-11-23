@@ -9,13 +9,15 @@ final class ShareViewController: UIViewController {
     private var model: ShareCaptureModel?
     private var testInput: ShareInput?
     private var testPath: String?
+    private var testMode: ShareCaptureModel.Mode?
     private var testCompletion: ((TaskItem?) -> Void)?
 
     #if DEBUG
-    convenience init(input: ShareInput, path: String, completion: @escaping (TaskItem?) -> Void) {
+    convenience init(input: ShareInput, path: String, mode: ShareCaptureModel.Mode = .task, completion: @escaping (TaskItem?) -> Void) {
         self.init()
         testInput = input
         testPath = path
+        testMode = mode
         testCompletion = completion
     }
     #endif
@@ -26,6 +28,7 @@ final class ShareViewController: UIViewController {
             do {
                 let input = try await readInput()
                 let model = ShareCaptureModel(input: input)
+                if let testMode { model.selectMode(testMode) }
                 self.model = model
                 let host = UIHostingController(rootView: ShareSheet(model: model, add: { [weak self] in
                     self?.add()
@@ -53,14 +56,20 @@ final class ShareViewController: UIViewController {
         guard let model else { return }
         let path = testPath
         Task {
-            if let saved = await model.add(write: { draft, id, category in
-                try await Task.detached {
-                    try ShareTaskWriter.save(draft, captureID: id, categoryID: category, path: path)
-                }.value
-            }) {
-                WidgetCenter.shared.reloadAllTimelines()
-                complete(saved)
+            let task: TaskItem?
+            if model.mode == .later {
+                guard await model.addLater(path: path) != nil else { return }
+                task = nil
+            } else {
+                guard let saved = await model.add(write: { draft, id, category in
+                    try await Task.detached {
+                        try ShareTaskWriter.save(draft, captureID: id, categoryID: category, path: path)
+                    }.value
+                }) else { return }
+                task = saved
             }
+            WidgetCenter.shared.reloadAllTimelines()
+            complete(task)
         }
     }
 
