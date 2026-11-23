@@ -927,6 +927,7 @@ public struct SyncResponse: Codable, Sendable {
     public var schedules: [Schedule]
     public var categories: [TaskCategory]
     public var tasks: [TaskItem]
+    public var laterItems: [LaterItem]
     public var events: [CalendarEvent]
     public var placements: [Placement]
     /// Suggestions for optional routine blocks; empty when the server predates them.
@@ -951,7 +952,7 @@ public struct SyncResponse: Codable, Sendable {
         accounts: [GoogleAccount] = [], calendars: [CalendarInfo] = [], unscheduled: [UnscheduledTask] = [],
         projects: [Project] = [], dayOverrides: [DayOverride] = [], projectPlacements: [ProjectPlacement] = [],
         routineOccurrences: [RoutineOccurrence] = [], missed: [MissedCommitment] = [], capacity: [DayCapacity] = [],
-        briefs: [Brief] = []
+        briefs: [Brief] = [], laterItems: [LaterItem] = []
     ) {
         self.cursor = cursor
         self.settings = settings
@@ -959,6 +960,7 @@ public struct SyncResponse: Codable, Sendable {
         self.schedules = schedules
         self.categories = categories
         self.tasks = tasks
+        self.laterItems = laterItems
         self.events = events
         self.placements = placements
         self.optionalPlacements = optionalPlacements
@@ -982,6 +984,7 @@ public struct SyncResponse: Codable, Sendable {
         schedules = try container.decode([Schedule].self, forKey: .schedules)
         categories = try container.decode([TaskCategory].self, forKey: .categories)
         tasks = try container.decode([TaskItem].self, forKey: .tasks)
+        laterItems = try container.decodeIfPresent([LaterItem].self, forKey: .laterItems) ?? []
         events = try container.decode([CalendarEvent].self, forKey: .events)
         placements = try container.decode([Placement].self, forKey: .placements)
         optionalPlacements = try container.decodeIfPresent([OptionalPlacement].self, forKey: .optionalPlacements) ?? []

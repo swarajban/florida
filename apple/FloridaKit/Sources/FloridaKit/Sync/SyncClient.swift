@@ -143,7 +143,9 @@ public actor SyncClient {
                 case 200..<300:
                     try applyAccepted(write, data: data)
                     diagnostics.record("write", "accepted", write.diagnosticFields)
-                    diagnostics.record("scheduler", "write-placement-refresh", write.diagnosticFields)
+                    if write.entity != .laterItem {
+                        diagnostics.record("scheduler", "write-placement-refresh", write.diagnosticFields)
+                    }
                     pushed += 1
                 case 401:
                     throw SyncError.unauthorized
@@ -275,6 +277,7 @@ public actor SyncClient {
         case .project: "api/projects"
         case .dayOverride: "api/day-overrides"
         case .calendar: "api/calendars"
+        case .laterItem: "api/later"
         }
     }
 
@@ -356,6 +359,11 @@ public actor SyncClient {
         case (.calendar, .put), (.calendar, .patch):
             let response = try api.decode(SchedulingResponse.self, from: data)
             try database.completePendingWrite(write, record: nil as CalendarInfo?, scheduling: response.scheduling, computedAt: now)
+        case (.laterItem, .put), (.laterItem, .patch):
+            let item = try api.decode(LaterItem.self, from: data)
+            try database.completePendingWrite(write, record: item)
+        case (.laterItem, .delete):
+            try database.completePendingWrite(write, record: nil as LaterItem?)
         case (_, .delete):
             let response = try api.decode(SchedulingResponse.self, from: data)
             try database.completePendingWrite(write, record: nil as TaskItem?, scheduling: response.scheduling, computedAt: now)
@@ -396,6 +404,9 @@ public actor SyncClient {
                 return row.deletedAt == nil ? .live(row) : .tombstoned
             case .calendar:
                 return .live(try api.decode(CalendarInfo.self, from: data))
+            case .laterItem:
+                let row = try api.decode(LaterItem.self, from: data)
+                return row.deletedAt == nil ? .live(row) : .tombstoned
             }
         case 404 where api.serverError(data) != nil:
             return .missing

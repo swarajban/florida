@@ -115,9 +115,20 @@ Example: `create_task({ categoryId: "work", title: "Follow up on approval", tags
 
 ---
 
-## 3. MCP Tool Reference (30 Tools)
+## 3. MCP Tool Reference
 
 Task objects returned by MCP carry a computed `appUrl`, for example `florida://tasks/<id>`; project objects carry `florida://projects/<id>`. Agenda task blocks also include the task's `appUrl`. These links do not change the HTTP sync payload. Opening them requires a compatible Florida app handler.
+
+### Later
+
+Use Later for links to read or watch rather than work to schedule as a task.
+
+| Tool | Arguments | Result |
+| --- | --- | --- |
+| `save_later` | `{ url, id?, title?, kind?, estMinutes? }` | `{ item }`. The URL must be HTTP(S). Kind is `article`, `video`, or `other`; known video hosts default to `video`. Use a stable `id` to retry without creating another item. |
+| `list_later` | `{ status?, limit?, offset? }` | `{ items }`, oldest first. Status is `queue` (default), `read`, `archived`, or `all`. Limit is 1–200, default 50. |
+| `mark_later_read` | `{ id }` | `{ item }` with its read time. |
+| `archive_later` | `{ id }` | `{ item }` moved to Archived; no deletion. |
 
 ### Reading the day & plan
 

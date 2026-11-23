@@ -6,6 +6,24 @@ import type { TaskSource } from '../task-source.js'
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' })
 
+export const laterItems = pgTable('later_items', {
+  id: text('id').primaryKey(),
+  url: text('url').notNull(),
+  canonicalUrl: text('canonical_url').notNull(),
+  title: text('title').notNull(),
+  site: text('site').notNull(),
+  kind: text('kind', { enum: ['article', 'video', 'other'] }).notNull(),
+  estMinutes: integer('est_minutes'),
+  savedAt: ts('saved_at').notNull(),
+  readAt: ts('read_at'),
+  archivedAt: ts('archived_at'),
+  source: text('source', { enum: ['share', 'mcp', 'manual'] }).notNull(),
+  updatedAt: ts('updated_at').notNull(),
+  deletedAt: ts('deleted_at'),
+}, (table) => [index('later_items_updated_idx').on(table.updatedAt)])
+
+export type LaterItemRow = typeof laterItems.$inferSelect
+
 export const scheduleChanges = pgTable('schedule_changes', {
   id: text('id').primaryKey(),
   taskId: text('task_id').notNull(),

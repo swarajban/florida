@@ -89,6 +89,8 @@ extension AppModel {
             return "Day \(id)"
         case .calendar:
             return calendars.first(where: { $0.id == id }).map { "Calendar “\($0.summary)”" } ?? "Calendar \(id.prefix(8))"
+        case .laterItem:
+            return "Later link \(id.prefix(8))"
         }
     }
 }

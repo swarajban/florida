@@ -452,6 +452,24 @@ public final class AppDatabase: Sendable {
             }
             try db.execute(sql: "DELETE FROM syncState WHERE key = 'cursor'")
         }
+        migrator.registerMigration("v15-later-items") { db in
+            try db.create(table: "laterItem") { t in
+                t.primaryKey("id", .text)
+                t.column("url", .text).notNull()
+                t.column("canonicalUrl", .text).notNull()
+                t.column("title", .text).notNull()
+                t.column("site", .text).notNull()
+                t.column("kind", .text).notNull()
+                t.column("estMinutes", .integer)
+                t.column("savedAt", .datetime).notNull()
+                t.column("readAt", .datetime)
+                t.column("archivedAt", .datetime)
+                t.column("source", .text).notNull()
+                t.column("updatedAt", .datetime).notNull()
+                t.column("deletedAt", .datetime)
+            }
+            try db.execute(sql: "DELETE FROM syncState WHERE key = 'cursor'")
+        }
         return migrator
     }
 }
