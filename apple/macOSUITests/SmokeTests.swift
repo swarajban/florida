@@ -23,18 +23,31 @@ final class SmokeTests: XCTestCase {
         XCTAssertTrue(link.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["later-mark-read"].isEnabled)
         app.typeKey("r", modifierFlags: [.command, .shift])
-        XCTAssertTrue(app.staticTexts["later-empty"].waitForExistence(timeout: 5))
+        XCTAssertTrue(link.waitForNonExistence(timeout: 5))
         app.buttons["later-close"].click()
         XCTAssertTrue(app.buttons["later-close"].waitForNonExistence(timeout: 5))
         app.typeKey("m", modifierFlags: .shift)
-        let block = app.staticTexts["month-catch-up-test-catch-up"]
-        let showsBlockTitle = block.waitForExistence(timeout: 5) && block.label == "Catch up · 1"
+        let block = app.buttons["catch-up-block"]
+        let showsBlockTitle = block.waitForExistence(timeout: 5) && block.label == "Catch up, 2 items"
         if !showsBlockTitle {
             capture(app.windows.firstMatch, "mac-later-month-assertion")
             print("Catch up month: exists=\(block.exists), label=\(block.exists ? block.label : "missing"), frame=\(block.frame)")
         }
         XCTAssertTrue(showsBlockTitle)
         block.click()
+        let second = app.buttons["later-item-test-story-two"]
+        let showsUnreadTitle = second.waitForExistence(timeout: 5) && second.label == "Another story for Later"
+        if !showsUnreadTitle {
+            capture(app.windows.firstMatch, "mac-later-popover-title-assertion")
+            print("Catch up link: exists=\(second.exists), label=\(second.exists ? second.label : "missing"), blockFrame=\(block.frame)")
+        }
+        XCTAssertTrue(showsUnreadTitle)
+        XCTAssertFalse(link.exists)
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "mac-later-popover"
+        shot.lifetime = .keepAlways
+        add(shot)
+        app.buttons["catch-up-mark-read-test-story-two"].click()
         let empty = app.staticTexts["catch-up-empty"]
         let showsEmptyPopover = empty.waitForExistence(timeout: 5)
         if !showsEmptyPopover {

@@ -130,6 +130,8 @@ struct LaterLinkRow: View {
         }
         .buttonStyle(.borderless)
         .disabled(item.openURL == nil)
+        .accessibilityLabel(item.title)
+        .accessibilityValue("\(item.kind.rawValue.capitalized), \(item.site), \(item.laterEstimateLabel)")
         .accessibilityIdentifier("later-item-\(item.id)")
     }
 }

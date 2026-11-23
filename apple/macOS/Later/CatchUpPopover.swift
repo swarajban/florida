@@ -36,6 +36,7 @@ private struct CatchUpPopover: View {
                                 .buttonStyle(.borderless)
                                 .help("Mark read")
                                 .accessibilityLabel("Mark \(item.title) read")
+                                .accessibilityIdentifier("catch-up-mark-read-\(item.id)")
                             }
                             .frame(height: 40)
                         }
@@ -53,6 +54,13 @@ private struct CatchUpPopover: View {
 }
 
 extension View {
+    func catchUpBlockAccessibility(itemCount: Int) -> some View {
+        accessibilityElement(children: .combine)
+            .accessibilityLabel(itemCount == 1 ? "Catch up, 1 item" : "Catch up, \(itemCount) items")
+            .accessibilityIdentifier("catch-up-block")
+            .accessibilityAddTraits(.isButton)
+    }
+
     func catchUpPopover(
         _ model: AppModel, id: String?, anchor: PopoverAttachmentAnchor = .rect(.bounds)
     ) -> some View {

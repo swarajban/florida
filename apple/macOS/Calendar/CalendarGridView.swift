@@ -154,16 +154,19 @@ struct CalendarGridView: View {
 
     private func catchUpAccessibility(frames: GridGeometry) -> some View {
         ForEach(model.gridLayout.blocksByDay.joined().filter { $0.kind == .catchUp }, id: \.self) { block in
-            let rect = frames.rect(for: block)
-            Button(block.title) {
-                guard model.availabilityShare == nil else { return }
-                model.select(block.item, in: .calendar)
-                model.editSelection()
+            if case .catchUp(let id) = block.item,
+               let data = model.planSummary.catchUpBlocks.first(where: { $0.id == id }) {
+                let rect = frames.rect(for: block)
+                Button(block.title) {
+                    guard model.availabilityShare == nil else { return }
+                    model.select(block.item, in: .calendar)
+                    model.editSelection()
+                }
+                .catchUpBlockAccessibility(itemCount: data.items.count)
+                .accessibilityValue(Text(DateText.timeRange(block.start, block.end)))
+                .frame(width: rect.width, height: rect.height)
+                .position(x: rect.midX, y: rect.midY)
             }
-            .frame(width: rect.width, height: rect.height)
-            .position(x: rect.midX, y: rect.midY)
-            .accessibilityValue(Text(DateText.timeRange(block.start, block.end)))
-            .accessibilityIdentifier("grid-\(block.id)")
         }
     }
 
