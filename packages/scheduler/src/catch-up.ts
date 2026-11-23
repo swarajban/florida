@@ -22,6 +22,7 @@ export function scheduleCatchUp(
     const id = isoDate(date)
     const window = settings.windows.find((window) => window.days.includes(weekdayOf(date)))
     if (window === undefined) continue
+    const limit = window.minutes ?? settings.minutes
     const windowStart = zonedToUtc(date, parseClock(window.start), timeZone)
     const end = Math.min(zonedToUtc(date, parseClock(window.end), timeZone), horizonEnd)
     const earlier = prior.get(id)
@@ -34,15 +35,24 @@ export function scheduleCatchUp(
           continue
         }
         if (!taken.some((span) => span.start < oldEnd && span.end > oldStart)) {
-          const minutes = Math.min((oldEnd - oldStart) / MINUTE, window.minutes ?? settings.minutes)
-          blocks.push({ ...earlier, items: itemsFor(minutes) })
+          const duration = (oldEnd - oldStart) / MINUTE
+          const started = earlier.items[0]
+          const continuing = started !== undefined && started.estMinutes > duration
+            ? queue.find((item) => item.id === started.id)
+            : undefined
+          blocks.push({ ...earlier, items: continuing === undefined ? itemsFor(Math.min(duration, limit)) : [continuing] })
           continue
         }
       }
     }
     if (total === 0) continue
-    const minutes = Math.max(10, Math.min(window.minutes ?? settings.minutes, total))
-    const items = itemsFor(minutes)
+    const minutes = Math.max(10, Math.min(limit, total))
+    const fitting = itemsFor(Math.min(minutes, limit))
+    const oversized = queue.filter((item) => item.estMinutes > limit)
+    const longTurn = oversized.length > 0 && (fitting.length === 0 || day % 2 === 0)
+    const longIndex = fitting.length === 0 ? day : Math.floor(day / 2)
+    const long = longTurn ? oversized[longIndex % oversized.length] : undefined
+    const items = long === undefined ? fitting : [long]
     if (items.length === 0) continue
     const start = Math.max(windowStart, Math.ceil(now / MINUTE) * MINUTE)
     const free = subtractSpans({ start, end }, taken)
