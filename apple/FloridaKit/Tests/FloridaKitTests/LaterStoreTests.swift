@@ -22,6 +22,16 @@ import Testing
         #expect(try db.laterItems() == [item])
     }
 
+    @Test func catchUpMigrationResetsCursorToBackfillExistingEnrichment() throws {
+        let queue = try DatabaseQueue()
+        try AppDatabase.migrator.migrate(queue, upTo: "v15-later-items")
+        try queue.write { db in
+            try db.execute(sql: "INSERT INTO syncState (key, value) VALUES ('cursor', 'already-synced')")
+        }
+        let db = try AppDatabase(writer: queue)
+        #expect(try db.cursor() == nil)
+    }
+
     @Test func upgradeResetsCursorSoPreviouslySavedLinksBackfill() throws {
         let queue = try DatabaseQueue()
         try AppDatabase.migrator.migrate(queue, upTo: "v14-task-required-day")

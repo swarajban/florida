@@ -251,7 +251,8 @@ export function buildMcpServer(deps: McpDeps): McpServer {
       busy: eventRows.flatMap((event) => { const interval = blockingEventInterval(event, timeZone); return interval === undefined ? [] : [interval] }),
       occupied: [
         ...planned.map((p) => ({ start: p.startAt.toISOString(), end: p.endAt.toISOString() })),
-        ...(includeScheduledTasks ? (storedPlan?.catchUpBlocks ?? []).map((p) => ({ start: p.startAt, end: p.endAt })) : []),
+        ...(includeScheduledTasks ? (storedPlan?.catchUpBlocks ?? []).filter((p) => p.items.length > 0)
+          .map((p) => ({ start: p.startAt, end: p.endAt })) : []),
       ],
       ...(commitments === undefined ? {} : { commitments: commitments.map((p) => ({ start: p.startAt.toISOString(), end: p.endAt.toISOString() })) }),
       ...(storedPlan === undefined ? {} : { commitmentWindow: { start: new Date(localWeeks(storedPlan.computedAt.getTime(), timeZone, 1)[0]!.start).toISOString(), end: new Date(storedPlan.computedAt.getTime() + (deps.horizonDays ?? 30) * 86400000).toISOString() } }),
@@ -765,7 +766,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
   async function agendaContext(timeZone?: string) {
     const [row] = await db.select({ timeZone: settings.timeZone, catchUpBlocks: planSummary.catchUpBlocks })
       .from(settings).fullJoin(planSummary, eq(settings.id, planSummary.id)).limit(1)
-    return { tz: timeZone ?? row?.timeZone ?? 'UTC', catchUpBlocks: row?.catchUpBlocks ?? [] }
+    return { tz: timeZone ?? row?.timeZone ?? 'UTC', catchUpBlocks: row?.catchUpBlocks?.filter((block) => block.items.length > 0) ?? [] }
   }
 
   async function agendaDays(date: LocalDate, last: LocalDate, tz: string, catchUpBlocks: CatchUpBlock[]) {

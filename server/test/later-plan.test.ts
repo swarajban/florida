@@ -8,7 +8,7 @@ import { FakeSync, testConfig } from './fixtures.js'
 
 it('publishes the same oldest-first Catch up block in sync and get_range', async () => {
   const { db, close } = await createTestDb()
-  const now = new Date('2026-11-22T16:00:00-08:00')
+  let now = new Date('2026-11-22T16:00:00-08:00')
   const config = { ...testConfig, HORIZON_DAYS: 2 }
   const reschedule = () => runScheduling(db, config, now)
   try {
@@ -32,16 +32,17 @@ it('publishes the same oldest-first Catch up block in sync and get_range', async
       id: '2026-11-22', startAt: '2026-11-23T02:00:00.000Z', endAt: '2026-11-23T02:10:00.000Z',
       items: ['old', 'new'].map((id) => ({ id, title: 'example.com', site: 'example.com', url: `https://example.com/${id}`, estMinutes: 5 })),
     }])
-    const range = await (await app.request('/mcp', { method: 'POST', headers, body: JSON.stringify({
+    const getRange = async () => (await app.request('/mcp', { method: 'POST', headers, body: JSON.stringify({
       jsonrpc: '2.0', id: 1, method: 'tools/call',
       params: { name: 'get_range', arguments: { startDate: '2026-11-22', endDate: '2026-11-23' } },
-    }) })).json()
-    expect(range.result.structuredContent.days.map((day: { catchUpBlocks: unknown[] }) => day.catchUpBlocks))
-      .toEqual([response.catchUpBlocks, []])
+    }) })).json().then(({ result }) => result.structuredContent.days.map((day: { catchUpBlocks: unknown[] }) => day.catchUpBlocks))
+    expect(await getRange()).toEqual([response.catchUpBlocks, []])
+    now = new Date('2026-11-22T18:11:00-08:00')
     await setLaterState(db, 'new', { action: 'read' })
     await setLaterState(db, 'old', { action: 'read' })
-    await reschedule()
+    expect((await reschedule()).catchUpBlocks).toBeUndefined()
     expect((await (await app.request('/api/sync', { headers })).json()).catchUpBlocks).toEqual([])
+    expect(await getRange()).toEqual([[], []])
   } finally {
     await close()
   }

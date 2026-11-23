@@ -439,7 +439,7 @@ export async function runScheduling(
       queue: queue.map(({ kind, estMinutes, ...item }) => ({ ...item, estMinutes: estMinutes ?? defaultLaterMinutes(kind) })),
       previous: previousPlan?.catchUpBlocks ?? [],
     }
-    const result = splitProjectTime(schedule(input), timeZone)
+    const { catchUpBlocks: storedCatchUpBlocks = [], ...result } = splitProjectTime(schedule(input), timeZone)
 
     const changes = placementChanges(previousRows, result.placements, { now, previousUnscheduled, unscheduled: result.unscheduled })
     await tx.delete(scheduleChanges).where(lt(scheduleChanges.updatedAt, sql`clock_timestamp() - interval '30 days'`))
@@ -485,7 +485,7 @@ export async function runScheduling(
         })),
       )
     }
-    const summary = { missed: result.missed, capacity: result.capacity, catchUpBlocks: result.catchUpBlocks ?? [], computedAt: now }
+    const summary = { missed: result.missed, capacity: result.capacity, catchUpBlocks: storedCatchUpBlocks, computedAt: now }
     await tx
       .insert(planSummary)
       .values({ id: PLAN_SUMMARY_ID, ...summary })
@@ -515,6 +515,7 @@ export async function runScheduling(
         })),
       )
     }
-    return result
+    const catchUpBlocks = storedCatchUpBlocks.filter((block) => block.items.length > 0)
+    return catchUpBlocks.length > 0 ? { ...result, catchUpBlocks } : result
   })
 }

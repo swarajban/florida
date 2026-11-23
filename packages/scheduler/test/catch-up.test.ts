@@ -47,10 +47,16 @@ describe('Catch up', () => {
     const queue = [article('old', 12), article('new', 18)]
     const prior = plan(queue)
     expect(plan(queue, { now: '2026-11-22T18:15:00-08:00' }, prior)[0]).toEqual(prior[0])
-    expect(plan(queue, { now: '2026-11-22T18:31:00-08:00' }, prior)[0]).toEqual(prior[0])
+    expect(plan([queue[0]!], { now: '2026-11-22T18:15:00-08:00' }, prior)[0]).toEqual({
+      ...prior[0], items: [queue[0]],
+    })
+    const ended = plan([], { now: '2026-11-22T18:31:00-08:00' }, prior)
+    expect(ended).toEqual([{ ...prior[0], items: [] }])
+    expect(plan(queue, { now: '2026-11-22T18:32:00-08:00' }, ended)[0]).toEqual(ended[0])
     const special = { ...settings, windows: [{ days: [0], start: '19:00', end: '20:00', minutes: 15 }] }
-    expect(plan(queue, { catchUp: { settings: special, queue } })[0]).toMatchObject({
+    expect(plan(queue, { now: '2026-11-22T18:32:00-08:00', catchUp: { settings: special, queue, previous: ended } })[0]).toMatchObject({
       startAt: '2026-11-23T03:00:00.000Z', endAt: '2026-11-23T03:15:00.000Z', items: [queue[0]],
     })
+    expect(plan([article('long', 31)])).toEqual([])
   })
 })

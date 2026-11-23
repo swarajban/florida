@@ -474,6 +474,7 @@ public final class AppDatabase: Sendable {
             try db.alter(table: "userSettings") { $0.add(column: "catchUp", .text) }
             try db.alter(table: "laterItem") { $0.add(column: "enrichedAt", .datetime) }
             try db.alter(table: "planSummary") { $0.add(column: "catchUpBlocks", .text).notNull().defaults(to: "[]") }
+            try db.execute(sql: "DELETE FROM syncState WHERE key = 'cursor'")
         }
         return migrator
     }

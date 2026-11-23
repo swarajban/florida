@@ -328,7 +328,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
       routineOccurrences: routineOccurrenceRows,
       missed: summary?.missed ?? [],
       capacity: summary?.capacity ?? [],
-      catchUpBlocks: summary?.catchUpBlocks ?? [],
+      catchUpBlocks: summary?.catchUpBlocks.filter((block) => block.items.length > 0) ?? [],
       briefs: briefRows,
       accounts: accountRows,
       calendars: calendarRows,

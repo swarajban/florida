@@ -291,7 +291,8 @@ export function schedule(input: SchedulerInput): SchedulerResult {
   const catchUpBlocks = input.catchUp === undefined ? undefined
     : scheduleCatchUp(input.catchUp, routine.timeZone, now, ctx.horizonEnd, taskSpans)
   const taken = catchUpBlocks === undefined ? taskSpans : mergeSpans([
-    ...taskSpans, ...catchUpBlocks.map((block) => ({ start: Date.parse(block.startAt), end: Date.parse(block.endAt) })),
+    ...taskSpans, ...catchUpBlocks.filter((block) => block.items.length > 0)
+      .map((block) => ({ start: Date.parse(block.startAt), end: Date.parse(block.endAt) })),
   ])
   const optional = suggestOptional(flexible, routine, ctx, taken, plan, input.optionalDays ?? 7)
   const routineOccurrences: RoutineOccurrence[] = committed.occurrences

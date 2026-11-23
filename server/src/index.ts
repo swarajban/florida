@@ -26,7 +26,25 @@ const aiDeps =
     ? {}
     : { ai: new ClaudeTaskParser(claude), categorySuggester: new ClaudeCategorySuggester(claude), briefWriter }
 let laterDirty = false
-const app = createApp({ db, config, sync, reschedule, changes, laterChanged: () => { laterDirty = true }, ...aiDeps })
+let laterPlanning = false
+const replanLater = async () => {
+  laterDirty = true
+  if (laterPlanning) return
+  laterPlanning = true
+  try {
+    do {
+      laterDirty = false
+      await reschedule('rescheduled due to Later queue update')
+      changes.publish()
+    } while (laterDirty)
+  } catch {
+    laterDirty = true
+    console.error('[jobs] Could not refresh the Catch up plan')
+  } finally {
+    laterPlanning = false
+  }
+}
+const app = createApp({ db, config, sync, reschedule, changes, laterChanged: () => { void replanLater() }, ...aiDeps })
 if (claude === undefined) console.log('[server] ANTHROPIC_API_KEY not set; /api/ai/* disabled')
 
 const server = serve({ fetch: app.fetch, port: config.PORT }, (info) => {
@@ -38,16 +56,7 @@ const stopJobs = startJobs({
   changes,
   archiveLater: () => archiveStaleLater(db),
   refreshLater: async () => {
-    if (await enrichLaterBatch(db)) laterDirty = true
-    if (!laterDirty) return
-    laterDirty = false
-    try {
-      await reschedule('rescheduled due to Later queue update')
-      changes.publish()
-    } catch (error) {
-      laterDirty = true
-      throw error
-    }
+    if (await enrichLaterBatch(db) || laterDirty) await replanLater()
   },
   refreshAllDayJudgments: () => refreshAllDayJudgments(db),
   repairJudgmentCursors: () => repairLegacyJudgmentCursors(db),
