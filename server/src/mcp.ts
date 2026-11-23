@@ -61,6 +61,7 @@ import {
   upsertTask,
   lockTaskRecurrences,
 } from './tasks.js'
+import { laterCapture, laterId, laterPage, listLater, saveLater, setLaterState } from './later.js'
 import { badRequest, calendarDate, formatCalendarDate, isoInstant, notFound, parseCalendarDate, timeZone } from './validation.js'
 
 export interface McpDeps {
@@ -148,6 +149,37 @@ const searchCondition = (query: string | undefined) => {
 export function buildMcpServer(deps: McpDeps): McpServer {
   const { db, reschedule } = deps
   const server = new McpServer(SERVER_INFO, { instructions: INSTRUCTIONS })
+
+  server.registerTool('save_later', {
+    description: 'Save an HTTP(S) link to Later, separate from tasks. Optionally provide a stable id for retries, a title, kind, or estimated minutes.',
+    inputSchema: { ...laterCapture.shape, id: laterId.optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  }, ({ id, ...body }) => run(async () => {
+    const item = await saveLater(db, id ?? randomUUID(), { ...body, source: 'mcp' })
+    deps.publish?.()
+    return ok({ item })
+  }))
+
+  server.registerTool('list_later', {
+    description: 'List Later items in oldest-first order. Defaults to the unread, unarchived queue.',
+    inputSchema: laterPage.shape,
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, (page) => run(async () => ok({ items: await listLater(db, page) })))
+
+  for (const [name, action, description] of [
+    ['mark_later_read', 'read', 'Mark a Later item read.'],
+    ['archive_later', 'archive', 'Move a Later item to Archived without deleting it.'],
+  ] as const) {
+    server.registerTool(name, {
+      description,
+      inputSchema: { id: laterId },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    }, ({ id }) => run(async () => {
+      const item = await setLaterState(db, id, { action })
+      deps.publish?.()
+      return ok({ item })
+    }))
+  }
 
   server.registerTool('batch_create_tasks', {
     description: 'Atomically creates 1–100 tasks, then schedules once. dryRun rolls back all writes and returns the proposed plan and placement changes.',

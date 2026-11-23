@@ -809,7 +809,8 @@ extension AppDatabase {
         if op != .delete {
             try db.execute(sql: "DELETE FROM syncState WHERE key = ?", arguments: ["creation-delete:\(entity.rawValue):\(id)"])
         }
-        if op == .delete, try PendingWrite.filter(Column("entity") == entity.rawValue && Column("entityId") == id && Column("op") == "put").fetchCount(db) > 0 {
+        if op == .delete, try (entity == .laterItem && laterCreationUnconfirmed(db, id: id)) ||
+            PendingWrite.filter(Column("entity") == entity.rawValue && Column("entityId") == id && Column("op") == "put").fetchCount(db) > 0 {
             try db.execute(sql: "INSERT OR REPLACE INTO syncState (key, value) VALUES (?, '1')", arguments: ["creation-delete:\(entity.rawValue):\(id)"])
         }
         try db.execute(
@@ -883,6 +884,14 @@ extension AppDatabase {
                     try TaskItem.deleteOne(db, id: task.id)
                 } else {
                     try task.save(db)
+                }
+            }
+            for item in response.laterItems where !pending.contains(.init(entity: .laterItem, id: item.id)) {
+                try Self.clearLaterCreation(db, id: item.id)
+                if item.deletedAt != nil {
+                    try LaterItem.deleteOne(db, id: item.id)
+                } else {
+                    try item.save(db)
                 }
             }
             for event in response.events where !pending.contains(.init(entity: .event, id: event.id)) {
@@ -1133,6 +1142,7 @@ extension AppDatabase {
             }
             switch serverCopy {
             case .live(let row):
+                if write.entity == .laterItem { try Self.clearLaterCreation(db, id: write.entityId) }
                 if write.entity == .task || write.entity == .project {
                     try Self.forgetCategoryReassignment(db, entity: write.entity, id: write.entityId)
                 }
@@ -1177,6 +1187,9 @@ extension AppDatabase {
         case .project: _ = try Project.deleteOne(db, id: id)
         case .dayOverride: _ = try DayOverride.deleteOne(db, id: id)
         case .calendar: _ = try CalendarInfo.deleteOne(db, id: id)
+        case .laterItem:
+            try Self.clearLaterCreation(db, id: id)
+            _ = try LaterItem.deleteOne(db, id: id)
         }
     }
 
@@ -1185,13 +1198,14 @@ extension AppDatabase {
     /// entity has been queued since, stores the server's copy of the row (a `put`) or removes the
     /// local tombstone (a `delete`; the server's own tombstone would remove it on the next pull anyway).
     func completePendingWrite<Record: PersistableRecord>(
-        _ write: PendingWrite, record: Record?, scheduling: SchedulingResult, computedAt: Date
+        _ write: PendingWrite, record: Record?, scheduling: SchedulingResult? = nil, computedAt: Date = Date()
     ) throws {
         try writer.write { db in
             if let seq = write.seq {
                 _ = try PendingWrite.deleteOne(db, key: seq)
             }
             let superseded = try Self.pendingEntityIds(db).contains(.init(entity: write.entity, id: write.entityId))
+            if write.entity == .laterItem { try Self.clearLaterCreation(db, id: write.entityId) }
             if write.entity == .category {
                 if write.op == .delete {
                     try Self.settleCategoryAction(db, id: write.entityId, serverCopy: .tombstoned)
@@ -1233,7 +1247,9 @@ extension AppDatabase {
                 }
             }
             try Self.keepPendingCategoryReassignments(db)
-            try Self.replaceSchedulerOutput(db, with: scheduling, computedAt: computedAt)
+            if let scheduling {
+                try Self.replaceSchedulerOutput(db, with: scheduling, computedAt: computedAt)
+            }
         }
     }
 }

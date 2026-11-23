@@ -174,6 +174,7 @@ describe('transport and auth', () => {
     const body = await rpc('tools/list')
     const tools = (body.result as { tools: { name: string; inputSchema: { type: string; properties?: object } }[] }).tools
     expect(tools.map((t) => t.name).sort()).toEqual([
+      'archive_later',
       'batch',
       'batch_create_tasks',
       'batch_update_tasks',
@@ -193,11 +194,14 @@ describe('transport and auth', () => {
       'list_calendars',
       'list_changes',
       'list_deleted_tasks',
+      'list_later',
       'list_projects',
       'list_tasks',
+      'mark_later_read',
       'parse_task',
       'restore_task',
       'run_scheduler',
+      'save_later',
       'set_day',
       'set_event_blocks_day',
       'sync_google_calendar',
@@ -219,6 +223,32 @@ describe('transport and auth', () => {
     expect(result.isError).toBe(true)
     expect(result.content[0]?.text).toContain('durationMinutes')
     expect(result.structuredContent).toBeUndefined()
+  })
+})
+
+describe('Later tools', () => {
+  it('saves, lists, reads and archives a video without creating a task', async () => {
+    const id = randomUUID()
+    const url = 'https://youtu.be/example#t=30'
+    const noticesBefore = notices
+    const saved = await data('save_later', { id, url, estMinutes: 8 })
+    expect(saved.item).toMatchObject({ id, url, source: 'mcp', kind: 'video', estMinutes: 8, readAt: null, archivedAt: null })
+    expect(await data('save_later', { id, url })).toEqual(saved)
+    expect((await data('list_later')).items).toEqual([saved.item])
+    const read = await data('mark_later_read', { id })
+    expect(read.item).toMatchObject({ id, readAt: expect.any(String), archivedAt: null })
+    expect((await data('list_later')).items).toEqual([])
+    expect((await data('list_later', { status: 'read' })).items).toEqual([read.item])
+    const archived = await data('archive_later', { id })
+    expect(archived.item).toMatchObject({ id, archivedAt: expect.any(String), deletedAt: null })
+    expect((await data('list_later', { status: 'archived' })).items).toEqual([archived.item])
+    expect(await db.select().from(tasks).where(eq(tasks.id, id))).toEqual([])
+    expect(notices - noticesBefore).toBeGreaterThanOrEqual(3)
+  })
+
+  it('rejects non-web URLs and missing item ids', async () => {
+    expect((await call('save_later', { url: 'mailto:later@example.com' })).isError).toBe(true)
+    expect((await call('archive_later', { id: 'missing-later' })).isError).toBe(true)
   })
 })
 

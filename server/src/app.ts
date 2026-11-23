@@ -24,6 +24,7 @@ import {
   dayOverrides,
   events,
   googleAccounts,
+  laterItems,
   optionalPlacements,
   placements,
   planSummary,
@@ -40,6 +41,7 @@ import type { GoogleAccountRow } from './db/schema.js'
 import { eventBlockingPatch, eventBody, setEventBlocksDay, softDeleteEvent, upsertEvent } from './events.js'
 import { GoogleApiError, GoogleTokenError, authorizationUrl, exchangeCode } from './google/client.js'
 import type { CalendarSyncService } from './google/sync.js'
+import { mountLater } from './later.js'
 import { mountMcp } from './mcp.js'
 import {
   clearDayOverride,
@@ -247,6 +249,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
 
   // Model Context Protocol endpoint for agents; the same token, the same store, the same scheduler.
   mountMcp(app, { db, reschedule, sync, publish: () => changes.publish(), horizonDays: config.HORIZON_DAYS, ...(deps.ai === undefined ? {} : { ai: deps.ai }) })
+  mountLater(app, db, () => changes.publish())
 
   // ---- Sync -------------------------------------------------------------------------------------
 
@@ -262,6 +265,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
     const projectRows = await db.select().from(projects).where(changedAfter(projects.updatedAt))
     const dayOverrideRows = await db.select().from(dayOverrides).where(changedAfter(dayOverrides.updatedAt))
     const taskRows = await db.select().from(tasks).where(changedAfter(tasks.updatedAt))
+    const laterRows = await db.select().from(laterItems).where(changedAfter(laterItems.updatedAt))
     const eventRows = await db
       .select(getTableColumns(events))
       .from(events)
@@ -297,6 +301,7 @@ ${verification === undefined ? '' : html`<meta name="google-site-verification" c
       projects: projectRows,
       dayOverrides: dayOverrideRows,
       tasks: taskRows,
+      laterItems: laterRows,
       events: eventRows,
       placements: placementRows,
       optionalPlacements: optionalPlacementRows,

@@ -73,7 +73,7 @@ public struct TaskSource: Codable, Hashable, Sendable {
         return TaskSource(url: text, title: supplied.flatMap { $0.isEmpty ? nil : $0 } ?? shortTitle, kind: kind)
     }
 
-    private static func safeURL(_ text: String) -> URL? {
+    static func safeURL(_ text: String) -> URL? {
         guard !text.isEmpty, text.utf16.count <= 4096, !text.contains("\\"),
               text.rangeOfCharacter(from: .whitespacesAndNewlines.union(.controlCharacters)) == nil,
               let decoded = text.removingPercentEncoding,
