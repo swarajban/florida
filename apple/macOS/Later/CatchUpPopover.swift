@@ -9,8 +9,14 @@ private struct CatchUpPopover: View {
     var body: some View {
         let items = model.later.items(in: block)
         VStack(alignment: .leading, spacing: 10) {
-            Label(block.laterDisplayTitle, systemImage: "bookmark")
-                .font(.headline)
+            HStack {
+                Label(block.laterDisplayTitle, systemImage: "bookmark")
+                    .font(.headline)
+                Spacer()
+                Text(DateText.timeRange(block.startAt, block.endAt))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             if items.isEmpty {
                 Text("No unread links in this block.")
                     .foregroundStyle(.secondary)

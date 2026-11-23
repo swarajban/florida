@@ -28,10 +28,20 @@ final class SmokeTests: XCTestCase {
         XCTAssertTrue(app.buttons["later-close"].waitForNonExistence(timeout: 5))
         app.typeKey("m", modifierFlags: .shift)
         let block = app.staticTexts["month-catch-up-test-catch-up"]
-        XCTAssertTrue(block.waitForExistence(timeout: 5))
-        XCTAssertTrue(block.label.contains("Catch up · 1"))
+        let showsBlockTitle = block.waitForExistence(timeout: 5) && block.label == "Catch up · 1"
+        if !showsBlockTitle {
+            capture(app.windows.firstMatch, "mac-later-month-assertion")
+            print("Catch up month: exists=\(block.exists), label=\(block.exists ? block.label : "missing"), frame=\(block.frame)")
+        }
+        XCTAssertTrue(showsBlockTitle)
         block.click()
-        XCTAssertTrue(app.staticTexts["catch-up-empty"].waitForExistence(timeout: 5))
+        let empty = app.staticTexts["catch-up-empty"]
+        let showsEmptyPopover = empty.waitForExistence(timeout: 5)
+        if !showsEmptyPopover {
+            capture(app.windows.firstMatch, "mac-later-popover-assertion")
+            print("Catch up popover: blockFrame=\(block.frame), emptyExists=\(empty.exists), windowFrame=\(app.windows.firstMatch.frame)")
+        }
+        XCTAssertTrue(showsEmptyPopover)
     }
 
     @MainActor

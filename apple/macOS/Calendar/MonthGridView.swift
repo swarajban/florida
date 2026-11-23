@@ -71,7 +71,8 @@ struct MonthCellView: View {
             }
             ForEach(timed.prefix(max(0, lineLimit - allDay.count))) { block in
                 line(
-                    item: block.item, day: day, text: "\(DateText.time(block.start)) \(block.title)",
+                    item: block.item, day: day,
+                    text: block.kind == .catchUp ? block.title : "\(DateText.time(block.start)) \(block.title)",
                     tint: block.tint, filled: block.isEvent, completed: block.kind == .completed)
             }
             if overflow > 0 {

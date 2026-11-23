@@ -96,7 +96,13 @@ final class AppModel {
         }
     }
     var isTasksPaneVisible = true
-    var showTasksOnCalendar = AppModel.viewDefaults.object(forKey: "showTasksOnCalendar") as? Bool ?? true {
+    var showTasksOnCalendar: Bool = {
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "demoData"),
+           UserDefaults.standard.bool(forKey: "uiLaterFixture") { return false }
+        #endif
+        return AppModel.viewDefaults.object(forKey: "showTasksOnCalendar") as? Bool ?? true
+    }() {
         didSet {
             guard oldValue != showTasksOnCalendar else { return }
             Self.viewDefaults.set(showTasksOnCalendar, forKey: "showTasksOnCalendar")
@@ -233,7 +239,6 @@ final class AppModel {
                 selectedDay = anchorDate
                 if UserDefaults.standard.bool(forKey: "uiLaterFixture") {
                     try database.apply(Self.laterFixture(now: now, calendar: calendar))
-                    showTasksOnCalendar = false
                 } else {
                     try database.apply(DemoData.syncResponse(now: now, calendar: calendar))
                 }
