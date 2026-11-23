@@ -50,6 +50,7 @@ struct MacKeymap: Sendable {
         ("r b", .cycleEventDayBlocking),
         ("g p", .showProjects),
         ("g b", .showBrief),
+        ("g l", .showLater),
         ("y", .explain),
         ("f", .jump),
         ("v", .joinMeeting),

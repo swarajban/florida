@@ -34,6 +34,7 @@ enum MacCommand: Hashable, Sendable {
     case showProjects
     /// `g b`: today's brief and the weekly review.
     case showBrief
+    case showLater
     case toggleCalendars, toggleTasksOnCalendar
     /// `y`: asks why the selected task is planned where it is.
     case explain
@@ -61,7 +62,7 @@ enum MacCommand: Hashable, Sendable {
             .editing
         case .newCategory, .showRoutine, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind, .shareAvailability: .actions
         case .centerOnNow, .jumpToFirst, .jumpToLast, .jump: .navigation
-        case .showProjects, .showBrief, .toggleTaskGrouping, .toggleCalendars, .toggleTasksOnCalendar, .showDiagnostics: .panels
+        case .showProjects, .showBrief, .showLater, .toggleTaskGrouping, .toggleCalendars, .toggleTasksOnCalendar, .showDiagnostics: .panels
         }
     }
 
@@ -87,6 +88,7 @@ enum MacCommand: Hashable, Sendable {
         case .respondNo: "RSVP: No"
         case .showProjects: "Projects"
         case .showBrief: "Brief"
+        case .showLater: "Later"
         case .toggleCalendars: "Calendars…"
         case .toggleTasksOnCalendar: "Show/Hide Tasks on Calendar"
         case .explain: "Why here?"
@@ -124,7 +126,7 @@ enum MacCommand: Hashable, Sendable {
         .newTaskEditor, .doNow, .doneForNow, .repeatLast, .undo, .move, .acceptSuggestion,
         .editEvent, .respondYes, .respondMaybe, .respondNo, .joinMeeting, .openEventResources, .cycleEventDayBlocking, .openTaskSource,
         .newCategory, .showRoutine, .centerOnNow, .jumpToFirst, .jumpToLast, .jump,
-        .showProjects, .showBrief, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind,
+        .showProjects, .showBrief, .showLater, .explain, .setDayHome, .setDayOffice, .setDayOff, .clearDayKind,
         .shareAvailability, .setDueDate, .someday, .toggleTaskGrouping, .toggleCalendars, .toggleTasksOnCalendar,
         .showDiagnostics,
     ]

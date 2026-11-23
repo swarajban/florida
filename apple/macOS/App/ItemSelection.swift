@@ -13,6 +13,7 @@ enum ItemID: Hashable, Sendable {
     case suggestion(String)
     /// The gym or project time on the grid (`PlanBlock.id`): on the plan, but nothing to edit.
     case plan(String)
+    case catchUp(String)
 
     var isTask: Bool {
         if case .task = self { return true }

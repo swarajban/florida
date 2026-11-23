@@ -54,6 +54,7 @@ struct AppCommands: Commands {
             Divider()
             Button("Projects") { model.run(.showProjects) }
             Button("Brief") { model.run(.showBrief) }
+            Button("Later") { model.run(.showLater) }
         }
 
         // Named "Calendar" because SwiftUI already adds a "View" menu (Enter Full Screen).

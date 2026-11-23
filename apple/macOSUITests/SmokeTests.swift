@@ -4,6 +4,37 @@ import XCTest
 /// Kept screenshots are exported from the result bundle by CI for light/dark visual review.
 final class SmokeTests: XCTestCase {
     @MainActor
+    func testLaterShortcutReadAndCatchUp() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-demoData", "YES", "-uiAppearance", "light", "-uiLaterFixture", "YES"]
+        addTeardownBlock {
+            let shot = XCTAttachment(screenshot: app.screenshot())
+            shot.name = "mac-later-catch-up"
+            shot.lifetime = .keepAlways
+            self.add(shot)
+            app.terminate()
+        }
+        app.launch()
+        XCTAssertTrue(app.staticTexts["calendar-range-title"].waitForExistence(timeout: 10))
+        app.typeKey("g", modifierFlags: [])
+        app.typeKey("l", modifierFlags: [])
+        let link = app.buttons["later-item-test-story"]
+        XCTAssertTrue(link.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["later-mark-read"].isEnabled)
+        app.typeKey("r", modifierFlags: [.command, .shift])
+        XCTAssertTrue(app.staticTexts["later-empty"].waitForExistence(timeout: 5))
+        app.buttons["later-close"].click()
+        XCTAssertTrue(app.buttons["later-close"].waitForNonExistence(timeout: 5))
+        app.typeKey("m", modifierFlags: .shift)
+        let block = app.staticTexts["month-catch-up-test-catch-up"]
+        XCTAssertTrue(block.waitForExistence(timeout: 5))
+        XCTAssertTrue(block.label.contains("Catch up · 1"))
+        block.click()
+        XCTAssertTrue(app.staticTexts["catch-up-empty"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testCalendarOpensEventComposer() {
         continueAfterFailure = false
         let app = launchEssentialFixture("mac-essential-calendar")

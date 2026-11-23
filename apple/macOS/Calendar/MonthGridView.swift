@@ -107,12 +107,14 @@ struct MonthCellView: View {
 
     private func line(item: ItemID, day: Date, text: String, tint: Color, filled: Bool, completed: Bool = false) -> some View {
         let isSelected = model.selection == item
+        let catchUpID: String? = if case .catchUp(let id) = item { id } else { nil }
         let identifier = switch item {
         case .event(let id): "month-event-\(id)"
         case .task(let id): "month-task-\(id)"
         case .plan(let id): "month-plan-\(id)"
         case .suggestion(let id): "month-suggestion-\(id)"
         case .gap(let id): "month-gap-\(id)"
+        case .catchUp(let id): "month-catch-up-\(id)"
         }
         // An event spanning several cells shows its detail from the first one.
         let detailId: String? = if case .event(let id) = item, layout.day(of: item) == day { id } else { nil }
@@ -121,6 +123,10 @@ struct MonthCellView: View {
                 // Jump mode: the label takes the dot's place.
                 JumpBadge(label: label)
                     .accessibilityIdentifier("\(identifier)-jump")
+            } else if catchUpID != nil {
+                Image(systemName: "bookmark")
+                    .font(.system(size: 8))
+                    .foregroundStyle(tint)
             } else if completed {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 8))
@@ -139,16 +145,18 @@ struct MonthCellView: View {
         }
         .padding(.horizontal, 3)
         .padding(.vertical, 1)
-        .background(isSelected ? FloridaStyle.ink.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 3))
+        .background(isSelected ? FloridaStyle.ink.opacity(0.12) : (catchUpID == nil ? .clear : tint.opacity(0.12)),
+                    in: RoundedRectangle(cornerRadius: 3))
         .contentShape(Rectangle())
         .onClick { isDouble in
             if model.jumpLabel(for: item) != nil {
                 model.selectJumped(item)
             } else {
                 model.select(item, in: .calendar)
-                if isDouble { model.editSelection() }
+                if catchUpID != nil || isDouble { model.editSelection() }
             }
         }
         .eventDetailPopover(model, eventId: detailId)
+        .catchUpPopover(model, id: layout.day(of: item) == day ? catchUpID : nil)
     }
 }

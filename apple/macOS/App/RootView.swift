@@ -15,6 +15,9 @@ private struct PlanSheets: ViewModifier {
             .sheet(isPresented: $model.isBriefOpen) {
                 BriefSheet()
             }
+            .sheet(isPresented: $model.isLaterOpen) {
+                LaterSheet()
+            }
             .sheet(item: $model.explanation) { _ in
                 ExplanationSheet()
             }

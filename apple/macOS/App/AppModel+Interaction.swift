@@ -5,6 +5,7 @@ enum MacInteraction {
     case browsing
     case jumping(JumpLabels<ItemID>)
     case eventPopover(String)
+    case catchUpPopover(String)
     case calendarsPopover
     case taskDueDate(String)
     case dragging(GridDrag)
@@ -25,11 +26,12 @@ enum MacInteraction {
         case doneForNow(DoneForNowRequest)
         case projects(editor: Project?)
         case brief
+        case later
         case explanation(PlacementExplanation)
     }
 
     enum Kind: String {
-        case browsing, jumping, eventPopover, calendarsPopover, taskDueDate, dragging, draftingEvent, palette, help, availability, sheet
+        case browsing, jumping, eventPopover, catchUpPopover, calendarsPopover, taskDueDate, dragging, draftingEvent, palette, help, availability, sheet
     }
 
     var kind: Kind {
@@ -37,6 +39,7 @@ enum MacInteraction {
         case .browsing: .browsing
         case .jumping: .jumping
         case .eventPopover: .eventPopover
+        case .catchUpPopover: .catchUpPopover
         case .calendarsPopover: .calendarsPopover
         case .taskDueDate: .taskDueDate
         case .dragging: .dragging
@@ -103,6 +106,17 @@ extension AppModel {
         set {
             if let newValue { transitionInteraction(to: .eventPopover(newValue)) }
             else if eventDetailID != nil { transitionInteraction(to: .browsing) }
+        }
+    }
+
+    var catchUpDetailID: String? {
+        get {
+            if case .catchUpPopover(let id) = interaction { return id }
+            return nil
+        }
+        set {
+            if let newValue { transitionInteraction(to: .catchUpPopover(newValue)) }
+            else if catchUpDetailID != nil { transitionInteraction(to: .browsing) }
         }
     }
 
@@ -298,6 +312,17 @@ extension AppModel {
         set {
             if newValue { transitionInteraction(to: .sheet(.brief)) }
             else if isBriefOpen { transitionInteraction(to: .browsing) }
+        }
+    }
+
+    var isLaterOpen: Bool {
+        get {
+            if case .later? = interactionSheet { return true }
+            return false
+        }
+        set {
+            if newValue { transitionInteraction(to: .sheet(.later)) }
+            else if isLaterOpen { transitionInteraction(to: .browsing) }
         }
     }
 
