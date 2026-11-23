@@ -158,6 +158,8 @@ private struct LaterBrowser: UIViewControllerRepresentable {
 
         init(dismiss: @escaping () -> Void) { self.dismiss = dismiss }
 
-        func safariViewControllerDidFinish(_ controller: SFSafariViewController) { dismiss() }
+        nonisolated func safariViewControllerDidFinish(_ controller: SFSafariViewController) {
+            Task { @MainActor in dismiss() }
+        }
     }
 }
