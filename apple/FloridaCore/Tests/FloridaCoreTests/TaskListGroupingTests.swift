@@ -331,8 +331,8 @@ import Testing
             Self.task("work", category: "work-a", someday: true),
         ]
         let sections = Self.sections(tasks, grouping: .category, categories: categories)
-        #expect(sections.map(\.id) == ["inbox", "category:work-a", "category:work-z", "category:personal", "category:other", "orphans"])
-        #expect(sections.map(\.title) == ["Inbox", "admin", "Zoo", "Personal", "Other area", "Other"])
+        #expect(sections.map(\.id) == ["inbox", "category:work-a", "category:work-z", "category:other", "category:personal", "orphans"])
+        #expect(sections.map(\.title) == ["Inbox", "admin", "Zoo", "Other area", "Personal", "Other"])
         #expect(sections[0].isInbox && sections[0].tasks.isEmpty)
         #expect(sections[1].tasks.map(\.id) == ["work"])
         #expect(sections[2...4].allSatisfy { $0.tasks.isEmpty && $0.category != nil })

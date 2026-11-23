@@ -28,7 +28,7 @@ struct QuickAddSheet: View {
     private var suggestions: [QuickAddSuggestion] {
         guard focused, !composing else { return [] }
         return completionSession.suggestions(
-            in: model.quickAddText, selection: selection, categories: model.categories)
+            in: model.quickAddText, selection: selection, categories: model.categories, includeCategoryCreation: true)
     }
 
     private var draft: QuickAddDraft {
@@ -40,13 +40,13 @@ struct QuickAddSheet: View {
     }
 
     private enum CategoryChoice: Identifiable {
-        case category(TaskCategory)
-        case create(String)
+        case category(TaskCategory, QuickAddSuggestion)
+        case create(String, QuickAddSuggestion)
         case inbox(TaskCategory)
 
         var id: String {
             switch self {
-            case .category(let category): "quick-add-category-\(category.id)"
+            case .category(let category, _): "quick-add-category-\(category.id)"
             case .create: "quick-add-create-category"
             case .inbox: "quick-add-use-inbox"
             }
@@ -54,27 +54,40 @@ struct QuickAddSheet: View {
     }
 
     private var categoryOptions: [CategoryChoice] {
-        let hint = draft.categoryHint ?? ""
-        let matches = model.categories.filter {
-            hint.isEmpty || QuickAddTaskBuilder.normalize($0.name).contains(QuickAddTaskBuilder.normalize(hint))
+        var options: [CategoryChoice] = suggestions.compactMap { suggestion in
+            if let hint = suggestion.categoryToCreate { return .create(hint, suggestion) }
+            guard let id = suggestion.categoryId, let category = model.category(id: id) else { return nil }
+            return .category(category, suggestion)
         }
-        var options = matches.map(CategoryChoice.category)
-        if matches.isEmpty, !hint.isEmpty { options.append(.create(hint)) }
-        if !hint.isEmpty, let inbox = model.inbox { options.append(.inbox(inbox)) }
+        if draft.categoryHint != nil, !options.contains(where: { $0.id == "quick-add-category-inbox" }),
+           let inbox = model.inbox {
+            options.append(.inbox(inbox))
+        }
         return options
     }
 
     private var showsCategoryChoices: Bool {
-        guard focused, !composing, selection.length == 0,
-              !completionSession.isDismissed(in: model.quickAddText, selection: selection),
-              let token = categoryToken, category == nil else { return false }
-        let range = NSRange(token, in: model.quickAddText)
-        return selection.location > range.location && selection.location <= range.upperBound
-            && (suggestions.isEmpty || suggestions.first?.symbol == "#")
+        guard suggestions.first?.symbol == "#" else { return false }
+        return category == nil || categoryToken == nil || suggestions.contains { $0.categoryToCreate != nil }
     }
 
     private var activeChoiceIDs: [String] {
         showsCategoryChoices ? categoryOptions.map(\.id) : suggestions.map(\.id)
+    }
+
+    private struct SuggestionSummary: Equatable {
+        var kind: String
+        var count: Int
+        var hasCreateRow: Bool
+    }
+
+    private var suggestionSummary: SuggestionSummary {
+        let count = activeChoiceIDs.count
+        let symbol = suggestions.first?.symbol
+        return SuggestionSummary(
+            kind: count == 0 ? "none" : symbol == "#" ? "category" : symbol ?? "none",
+            count: count,
+            hasCreateRow: showsCategoryChoices && suggestions.contains { $0.categoryToCreate != nil })
     }
 
     private var category: TaskCategory? {
@@ -171,6 +184,12 @@ struct QuickAddSheet: View {
                 DiagnosticsRecorder.shared.record("quick-add", "opened")
             }
             .onChange(of: activeChoiceIDs) { _, _ in highlightedSuggestion = 0 }
+            .onChange(of: suggestionSummary, initial: true) { _, summary in
+                DiagnosticsRecorder.shared.record("quick-add", "suggestions", [
+                    "kind": .value(summary.kind), "count": .value(String(summary.count)),
+                    "hasCreateRow": .value(String(summary.hasCreateRow)),
+                ])
+            }
             .onChange(of: model.quickAddText) { _, _ in
                 error = nil
                 parsing?.cancel()
@@ -324,19 +343,22 @@ struct QuickAddSheet: View {
             return
         }
         if inputSelection != range { inputSelection = range }
-        if model.quickAddText != text { model.quickAddText = text }
+        if model.quickAddText != text {
+            completionSession.inputChanged(to: text)
+            model.quickAddText = text
+        }
     }
 
     private func replaceInput(with text: String, caretUTF16: Int) {
         editRevision += 1
         inputSelection = NSRange(location: caretUTF16, length: 0)
+        completionSession.inputChanged(to: text)
         model.quickAddText = text
     }
 
     private func insert(_ symbol: String) {
         guard let result = QuickAddCompletion.insertTrigger(symbol, in: model.quickAddText, selection: selection) else { return }
         replaceInput(with: result.text, caretUTF16: result.caretUTF16)
-        completionSession = QuickAddCompletionSession()
         focused = true
     }
 
@@ -496,10 +518,10 @@ struct QuickAddSheet: View {
                 Button { selectCategoryOption(option) } label: {
                     HStack(spacing: 10) {
                         switch option {
-                        case .category(let category):
+                        case .category(let category, _):
                             Circle().fill(Color.category(category)).frame(width: 8, height: 8)
                             Text(category.name).lineLimit(1)
-                        case .create(let hint):
+                        case .create(let hint, _):
                             Label("Create “\(CategoryPalette.name(fromHint: hint))”", systemImage: "folder.badge.plus")
                         case .inbox:
                             Text("Use Inbox").foregroundStyle(.secondary)
@@ -524,19 +546,20 @@ struct QuickAddSheet: View {
 
     private func selectCategoryOption(_ option: CategoryChoice, completing: Bool = false) {
         switch option {
-        case .category(let category):
-            if completing, let token = categoryToken {
-                let caret = NSRange(token, in: model.quickAddText).upperBound
-                if let suggestion = QuickAddCompletion.suggestions(
-                    in: model.quickAddText, caretUTF16: caret, categories: model.categories
-                ).first(where: { $0.categoryId == category.id }) {
-                    complete(suggestion)
-                    return
-                }
+        case .category(let category, let suggestion):
+            if completing || categoryToken == nil {
+                complete(suggestion)
+            } else {
+                choose(category)
             }
-            choose(category)
-        case .create(let hint):
-            do { choose(try model.createCategory(fromHint: hint)) }
+        case .create(let hint, let suggestion):
+            do {
+                let category = try model.createCategory(fromHint: hint)
+                if draft.categoryHint != hint, let result = QuickAddCompletion.complete(suggestion, in: model.quickAddText) {
+                    replaceInput(with: result.text, caretUTF16: result.caretUTF16)
+                }
+                choose(category)
+            }
             catch {
                 DiagnosticsRecorder.shared.error("quick-add", "create-category-failed", error)
                 self.error = error.localizedDescription

@@ -6,7 +6,7 @@ import SwiftUI
 // and keeps its name; the server enforces the same and moves a deleted category's tasks to it.
 
 extension AppModel {
-    /// A new category after the existing ones, with the next free palette color. The server still
+    /// A new category with the next free palette color. The server still
     /// wants a `scheduleId` on every category though the routine replaced schedules' hours, so
     /// the new one takes Inbox's.
     @discardableResult
@@ -20,7 +20,7 @@ extension AppModel {
         let category = TaskCategory(
             id: UUID().uuidString.lowercased(), name: name,
             color: color ?? CategoryPalette.nextColor(after: categories), area: area, scheduleId: scheduleId,
-            sortOrder: (categories.map(\.sortOrder).max() ?? 0) + 1, createdAt: now, updatedAt: now)
+            createdAt: now, updatedAt: now)
         try perform { try $0.saveCategory(category) }
         return category
     }

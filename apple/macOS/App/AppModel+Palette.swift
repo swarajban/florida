@@ -66,6 +66,7 @@ extension AppModel {
 
     /// Re-parses the quick-add draft, re-filters commands, or re-runs the search.
     func paletteTextDidChange() {
+        palette.completionSession.inputChanged(to: palette.text)
         palette.textDidChange(now: Date(), calendar: taskListCalendar)
         if palette.completedCategoryHint != palette.draft.categoryHint {
             palette.completedCategoryId = nil

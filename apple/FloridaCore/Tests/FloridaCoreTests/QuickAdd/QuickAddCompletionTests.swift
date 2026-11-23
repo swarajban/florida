@@ -28,7 +28,7 @@ import Testing
     }
 
     @Test func categoryOrderFilteringAndReplacement() throws {
-        #expect(suggestions("Work #").map(\.title) == ["Inbox", "Work Engineering", "Work Infosec", "Home", "Books"])
+        #expect(suggestions("Work #").map(\.title) == ["Inbox", "Work Engineering", "Work Infosec", "Books", "Home"])
         #expect(suggestions("Work #wOrK").map(\.categoryId) == ["work1", "work2"])
         let choice = try #require(suggestions("Work #work_eng").first)
         #expect(choice.title == "Work Engineering")
@@ -40,6 +40,35 @@ import Testing
         let draft = QuickAddParser.parse(result.text, now: .distantPast, calendar: PacificTestCalendar.calendar)
         #expect(draft.categoryHint == "Work-Engineering")
         #expect(draft.title == "Work")
+    }
+
+    @Test func partialCategoryQueriesOfferFuzzyMatchesAndCreation() {
+        func choices(_ text: String) -> [QuickAddSuggestion] {
+            QuickAddCompletion.suggestions(
+                in: text, caretUTF16: text.utf16.count, categories: categories, includeCategoryCreation: true)
+        }
+        #expect(choices("#").map(\.categoryToCreate) == [nil, nil, nil, nil, nil])
+        #expect(choices("Call #wkeng").map(\.categoryId) == ["work1", nil])
+        #expect(choices("Call #wkeng").last?.categoryToCreate == "wkeng")
+        #expect(choices("Call #fam").map(\.categoryToCreate) == ["fam"])
+        #expect(choices("Call #home").map(\.categoryId) == ["personal"])
+    }
+
+    @Test func editingOutAnAttachedHashClearsDismissalAndRetypingReopens() throws {
+        var session = QuickAddCompletionSession()
+        let text = "Buy#"
+        let selection = NSRange(location: text.utf16.count, length: 0)
+        let choice = try #require(session.suggestions(in: text, selection: selection, categories: categories).first)
+        #expect(QuickAddCompletion.complete(choice, in: text)?.text == "Buy #Inbox ")
+        session.dismiss(in: text, selection: selection)
+        #expect(session.suggestions(in: text, selection: selection, categories: categories).isEmpty)
+        session.inputChanged(to: "Buy")
+        #expect(session.suggestions(in: "Buy", selection: NSRange(location: 3, length: 0), categories: categories).isEmpty)
+        session.inputChanged(to: text)
+        #expect(session.suggestions(in: text, selection: selection, categories: categories).map(\.categoryId)
+            == ["inbox", "work1", "work2", "other", "personal"])
+        #expect(suggestions("Buy#hom").map(\.categoryId) == ["personal"])
+        #expect(suggestions("Work #work Buy#").isEmpty)
     }
 
     @Test(arguments: ["#", "!", "^", "@", "*", "=", "&"])

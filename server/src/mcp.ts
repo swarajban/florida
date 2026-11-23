@@ -10,7 +10,7 @@ import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import type { Db } from './db/client.js'
 import { latestBriefs } from './briefs.js'
-import { categoriesWithExamples, defaultTimeZone, INBOX_CATEGORY_ID } from './db/queries.js'
+import { categoriesWithExamples, categoryListOrder, defaultTimeZone, INBOX_CATEGORY_ID } from './db/queries.js'
 import { writeTimestamp } from './db/sync-clock.js'
 import { syncCursor } from './db/sync-clock.js'
 import { blockingEventInterval, localWeeks, runScheduling } from './scheduling.js'
@@ -373,7 +373,7 @@ export function buildMcpServer(deps: McpDeps): McpServer {
           .select()
           .from(categories)
           .where(isNull(categories.deletedAt))
-          .orderBy(categories.sortOrder, categories.name)
+          .orderBy(...categoryListOrder)
         return ok({ categories: rows })
       }),
   )

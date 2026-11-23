@@ -62,7 +62,7 @@ extension AppModel {
         let category = TaskCategory(
             id: UUID().uuidString.lowercased(), name: trimmed,
             color: color ?? Self.categoryPalette.first { !used.contains($0) } ?? Self.categoryPalette[categories.count % Self.categoryPalette.count],
-            area: area, scheduleId: scheduleId, sortOrder: (categories.map(\.sortOrder).max() ?? 0) + 1,
+            area: area, scheduleId: scheduleId,
             createdAt: now, updatedAt: now)
         guard save(category) else { return nil }
         showGhost("Created \(trimmed)")

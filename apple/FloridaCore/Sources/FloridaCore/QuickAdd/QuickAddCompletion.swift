@@ -15,9 +15,18 @@ public struct QuickAddCompletionSession: Sendable {
         dismissedSelection = selection
     }
 
-    public func suggestions(in text: String, selection: NSRange, categories: [TaskCategory]) -> [QuickAddSuggestion] {
+    public mutating func inputChanged(to text: String) {
+        if let dismissedText, !dismissedText.utf16.elementsEqual(text.utf16) {
+            self = Self()
+        }
+    }
+
+    public func suggestions(
+        in text: String, selection: NSRange, categories: [TaskCategory], includeCategoryCreation: Bool = false
+    ) -> [QuickAddSuggestion] {
         guard selection.length == 0, !isDismissed(in: text, selection: selection) else { return [] }
-        return QuickAddCompletion.suggestions(in: text, caretUTF16: selection.location, categories: categories)
+        return QuickAddCompletion.suggestions(
+            in: text, caretUTF16: selection.location, categories: categories, includeCategoryCreation: includeCategoryCreation)
     }
 }
 
@@ -28,6 +37,7 @@ public struct QuickAddSuggestion: Hashable, Sendable, Identifiable {
     public let replacement: String
     public let replacementRange: NSRange
     public let categoryId: String?
+    public internal(set) var categoryToCreate: String? = nil
     let sourceText: String
 }
 
@@ -91,7 +101,7 @@ public enum QuickAddCompletion {
     }
 
     public static func suggestions(
-        in text: String, caretUTF16: Int, categories: [TaskCategory]
+        in text: String, caretUTF16: Int, categories: [TaskCategory], includeCategoryCreation: Bool = false
     ) -> [QuickAddSuggestion] {
         guard caretUTF16 >= 0,
               let caret = Range(NSRange(location: caretUTF16, length: 0), in: text)?.lowerBound
@@ -101,15 +111,14 @@ public enum QuickAddCompletion {
             let boundary = notes.hasPrefix("//") ? text.index(notes.startIndex, offsetBy: 2) : notes.endIndex
             if caret > boundary { return [] }
         }
-        guard let index = tokens.lastIndex(where: { token in
-            token.startIndex < caret && token.first.map { "#@^!*=~/&".contains($0) } == true
-        }) else { return [] }
+        guard let index = tokens.lastIndex(where: { trigger(in: $0, before: caret) != nil }) else { return [] }
         let token = tokens[index]
-        let symbol = String(token.prefix(1))
+        guard let start = trigger(in: token, before: caret) else { return [] }
+        let symbol = String(text[start])
         if symbol == "#", tokens[..<index].contains(where: { $0.hasPrefix("#") }) { return [] }
         if "#@!/&".contains(symbol), caret > token.endIndex { return [] }
         if symbol == "/", token != "/", token != "//" { return [] }
-        let queryStart = symbol == "/" ? token.endIndex : text.index(after: token.startIndex)
+        let queryStart = symbol == "/" ? token.endIndex : text.index(after: start)
         guard queryStart <= caret else { return [] }
         var queryEnd = caret
         var end = token.endIndex
@@ -127,9 +136,10 @@ public enum QuickAddCompletion {
                 queryEnd = max(caret, end)
             }
         }
-        let query = normalize(String(text[queryStart..<queryEnd]))
+        let rawQuery = String(text[queryStart..<(symbol == "#" && queryEnd == queryStart ? end : queryEnd)])
+        let query = normalize(rawQuery)
         if caret > token.endIndex, query.isEmpty { return [] }
-        let range = NSRange(token.startIndex..<end, in: text)
+        let range = NSRange(start..<end, in: text)
         let choices: [(id: String, title: String, value: String, aliases: [String], categoryId: String?)]
         switch symbol {
         case "#":
@@ -179,21 +189,35 @@ public enum QuickAddCompletion {
         default:
             return []
         }
-        return choices.filter { choice in
+        var results = choices.filter { choice in
             query.isEmpty || ([choice.title, String(choice.value.dropFirst())] + choice.aliases)
-                .contains { normalize($0).hasPrefix(query) }
+                .contains { symbol == "#" ? categoryMatches(query, in: normalize($0)) : normalize($0).hasPrefix(query) }
         }.map { choice in
             QuickAddSuggestion(
                 id: symbol + choice.id, symbol: symbol == "/" ? "//" : symbol,
                 title: choice.title, replacement: choice.value, replacementRange: range,
                 categoryId: choice.categoryId, sourceText: text)
         }
+        if symbol == "#", includeCategoryCreation, !query.isEmpty,
+           let slug = QuickAddScanner.categorySlug("#" + rawQuery), !choices.contains(where: {
+            normalize($0.title) == query || normalize(String($0.value.dropFirst())) == query
+        }) {
+            results.append(QuickAddSuggestion(
+                id: "create-category", symbol: "#", title: slug,
+                replacement: "#" + slug, replacementRange: range, categoryId: nil,
+                categoryToCreate: slug, sourceText: text))
+        }
+        return results
     }
 
     public static func complete(_ suggestion: QuickAddSuggestion, in text: String) -> Result? {
         guard suggestion.sourceText.utf16.elementsEqual(text.utf16),
               let range = Range(suggestion.replacementRange, in: text) else { return nil }
         var replacement = suggestion.replacement
+        if suggestion.symbol == "#", range.lowerBound > text.startIndex,
+           !text[text.index(before: range.lowerBound)].isWhitespace {
+            replacement = " " + replacement
+        }
         var caret = suggestion.replacementRange.location + replacement.utf16.count
         if range.upperBound < text.endIndex, text[range.upperBound].isWhitespace {
             caret += String(text[range.upperBound]).utf16.count
@@ -202,6 +226,26 @@ public enum QuickAddCompletion {
             caret += 1
         }
         return Result(text: text.replacingCharacters(in: range, with: replacement), caretUTF16: caret)
+    }
+
+    private static func trigger(in token: Substring, before caret: String.Index) -> String.Index? {
+        guard token.startIndex < caret else { return nil }
+        if let first = token.first, "#@^!*=~/&".contains(first) { return token.startIndex }
+        guard caret <= token.endIndex, let hash = token.firstIndex(of: "#"), hash < caret,
+              token[..<hash].count >= 2, token[..<hash].allSatisfy({ $0.isLetter || $0.isNumber }),
+              token[token.index(after: hash)...].allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" })
+        else { return nil }
+        return hash
+    }
+
+    private static func categoryMatches(_ query: String, in name: String) -> Bool {
+        var remaining = query.filter { !$0.isWhitespace }[...]
+        guard !remaining.isEmpty else { return true }
+        for character in name where character == remaining.first {
+            remaining = remaining.dropFirst()
+            if remaining.isEmpty { return true }
+        }
+        return false
     }
 
     private static func normalize(_ value: String) -> String {

@@ -6,15 +6,15 @@ import Testing
     @Test func appReadsAndObservationsShareTheCoreOrder() async throws {
         let db = try AppDatabase.inMemory()
         let categories = [
-            TaskCategory(id: "personal", name: "Accounts", area: .personal, scheduleId: "work", sortOrder: -20, createdAt: Fixtures.t0, updatedAt: Fixtures.t0),
+            TaskCategory(id: "personal", name: "Budget", area: .personal, scheduleId: "work", sortOrder: -20, createdAt: Fixtures.t0, updatedAt: Fixtures.t0),
             TaskCategory(id: "z", name: "Zoo", area: .work, scheduleId: "work", sortOrder: -10, createdAt: Fixtures.t0, updatedAt: Fixtures.t0),
             TaskCategory(id: "a", name: "admin", area: .work, scheduleId: "work", sortOrder: 50, createdAt: Fixtures.t0, updatedAt: Fixtures.t0),
-            TaskCategory(id: "legacy", name: "Archive", scheduleId: "work", sortOrder: -30, createdAt: Fixtures.t0, updatedAt: Fixtures.t0),
+            TaskCategory(id: "legacy", name: "Archive", scheduleId: "work", sortOrder: 99, createdAt: Fixtures.t0, updatedAt: Fixtures.t0),
             Fixtures.category(sortOrder: 100),
         ]
         try db.apply(SyncResponse(cursor: "c1", categories: categories))
         var observation = db.observeCategories().makeAsyncIterator()
-        let expected = ["inbox", "a", "z", "personal", "legacy"]
+        let expected = ["inbox", "a", "z", "legacy", "personal"]
         #expect(try db.categories().map(\.id) == expected)
         #expect(try await observation.next()?.map(\.id) == expected)
 
