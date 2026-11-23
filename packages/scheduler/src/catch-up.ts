@@ -8,7 +8,6 @@ export function scheduleCatchUp(
 ): CatchUpBlock[] {
   if (!settings.enabled) return []
   const prior = new Map(previous?.map((block) => [block.id, block]))
-  const total = queue.reduce((sum, item) => sum + item.estMinutes, 0)
   const blocks: CatchUpBlock[] = []
   const first = dayNumber(localDate(now, timeZone))
   const last = dayNumber(localDate(horizonEnd - 1, timeZone))
@@ -45,15 +44,14 @@ export function scheduleCatchUp(
         }
       }
     }
-    if (total === 0) continue
-    const minutes = Math.max(10, Math.min(limit, total))
-    const fitting = itemsFor(Math.min(minutes, limit))
+    const fitting = itemsFor(limit)
     const oversized = queue.filter((item) => item.estMinutes > limit)
     const longTurn = oversized.length > 0 && (fitting.length === 0 || day % 2 === 0)
     const longIndex = fitting.length === 0 ? day : Math.floor(day / 2)
     const long = longTurn ? oversized[longIndex % oversized.length] : undefined
     const items = long === undefined ? fitting : [long]
     if (items.length === 0) continue
+    const minutes = long === undefined ? Math.max(10, items.reduce((sum, item) => sum + item.estMinutes, 0)) : limit
     const start = Math.max(windowStart, Math.ceil(now / MINUTE) * MINUTE)
     const free = subtractSpans({ start, end }, taken)
       .find((span) => span.end - span.start >= minutes * MINUTE)?.start

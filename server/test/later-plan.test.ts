@@ -14,7 +14,10 @@ it('publishes the same oldest-first Catch up block in sync and get_range', async
   try {
     await seed(db)
     for (const [id, savedAt] of [['new', '2026-11-22'], ['old', '2026-11-21'], ['read', '2026-11-20'], ['archived', '2026-11-19']] as const) {
-      await saveLater(db, id, { url: `https://example.com/${id}`, source: 'manual', savedAt: `${savedAt}T00:00:00Z` })
+      await saveLater(db, id, {
+        url: `https://example.com/${id}`, source: 'manual', savedAt: `${savedAt}T00:00:00Z`,
+        ...(id === 'old' ? { estMinutes: 3 } : {}),
+      })
     }
     await setLaterState(db, 'read', { action: 'read' })
     await setLaterState(db, 'archived', { action: 'archive' })
@@ -30,7 +33,9 @@ it('publishes the same oldest-first Catch up block in sync and get_range', async
     expect(response.settings.catchUp).toEqual(preferences)
     expect(response.catchUpBlocks).toEqual([{
       id: '2026-11-22', startAt: '2026-11-23T02:00:00.000Z', endAt: '2026-11-23T02:10:00.000Z',
-      items: ['old', 'new'].map((id) => ({ id, title: 'example.com', site: 'example.com', url: `https://example.com/${id}`, estMinutes: 5 })),
+      items: ['old', 'new'].map((id) => ({
+        id, title: 'example.com', site: 'example.com', url: `https://example.com/${id}`, estMinutes: id === 'old' ? 3 : 5,
+      })),
     }])
     const getRange = async () => (await app.request('/mcp', { method: 'POST', headers, body: JSON.stringify({
       jsonrpc: '2.0', id: 1, method: 'tools/call',
@@ -48,7 +53,11 @@ it('publishes the same oldest-first Catch up block in sync and get_range', async
   }
 })
 
-it.each([false, true])('publishes a full block for a long unread item (short items: %s)', async (withShorts) => {
+it.each([
+  { shortMinutes: [], shortTurnEnd: '02:30' },
+  { shortMinutes: [1], shortTurnEnd: '02:10' },
+  { shortMinutes: [18, 10], shortTurnEnd: '02:28' },
+])('publishes a full long turn and sizes the alternate turn (short estimates: $shortMinutes)', async ({ shortMinutes, shortTurnEnd }) => {
   const { db, close } = await createTestDb()
   const now = new Date('2026-11-23T16:00:00-08:00')
   const config = { ...testConfig, HORIZON_DAYS: 3 }
@@ -56,7 +65,8 @@ it.each([false, true])('publishes a full block for a long unread item (short ite
   try {
     await seed(db)
     const entries: [string, number, string][] = [['long', 44, '19']]
-    if (withShorts) entries.push(['new', 10, '21'], ['old', 18, '20'])
+    const shortIds = shortMinutes.map((_, i) => i === 0 ? 'old' : 'new')
+    shortMinutes.forEach((minutes, i) => entries.push([shortIds[i]!, minutes, String(20 + i)]))
     for (const [id, estMinutes, day] of entries) {
       await saveLater(db, id, {
         url: `https://example.com/${id}`, source: 'manual', savedAt: `2026-11-${day}T00:00:00Z`, estMinutes,
@@ -71,7 +81,9 @@ it.each([false, true])('publishes a full block for a long unread item (short ite
       items: [{ id: 'long', title: 'example.com', site: 'example.com', url: 'https://example.com/long', estMinutes: 44 }],
     })
     expect(response.catchUpBlocks.map((block: { items: { id: string }[] }) => block.items.map((item) => item.id)))
-      .toEqual([['long'], withShorts ? ['old', 'new'] : ['long'], ['long']])
+      .toEqual([['long'], shortIds.length ? shortIds : ['long'], ['long']])
+    expect(response.catchUpBlocks.map((block: { endAt: string }) => block.endAt))
+      .toEqual(['2026-11-24T02:30:00.000Z', `2026-11-25T${shortTurnEnd}:00.000Z`, '2026-11-26T02:30:00.000Z'])
     const range = await (await app.request('/mcp', { method: 'POST', headers, body: JSON.stringify({
       jsonrpc: '2.0', id: 1, method: 'tools/call',
       params: { name: 'get_range', arguments: { startDate: '2026-11-23', endDate: '2026-11-25' } },
@@ -82,7 +94,7 @@ it.each([false, true])('publishes a full block for a long unread item (short ite
     await setLaterState(db, 'long', { action: 'read' })
     const after = await reschedule()
     expect(after.catchUpBlocks?.flatMap((block) => block.items).map((item) => item.id) ?? [])
-      .toEqual(withShorts ? ['old', 'new', 'old', 'new', 'old', 'new'] : [])
+      .toEqual([...shortIds, ...shortIds, ...shortIds])
   } finally {
     await close()
   }
