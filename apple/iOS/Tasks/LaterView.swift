@@ -96,7 +96,12 @@ struct LaterView: View {
     }
 
     private func row(_ item: LaterItem) -> some View {
-        Button {
+        let symbol = switch item.kind {
+        case .article: "doc.text"
+        case .video: "play.rectangle"
+        case .other: "link"
+        }
+        return Button {
             guard let url = item.openURL else { return }
             visit.open(item)
             browser = BrowserLink(url: url, readerMode: item.kind == .article)
@@ -110,13 +115,9 @@ struct LaterView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             } icon: {
-                Image(systemName: switch item.kind {
-                case .article: "doc.text"
-                case .video: "play.rectangle"
-                case .other: "link"
-                })
-                .foregroundStyle(.secondary)
-                .accessibilityLabel(item.kind.rawValue.capitalized)
+                Image(systemName: symbol)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel(item.kind.rawValue.capitalized)
             }
             .contentShape(Rectangle())
         }
