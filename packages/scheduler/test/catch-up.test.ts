@@ -38,7 +38,7 @@ describe('Catch up', () => {
     ]
     const queue = [article('old', 18), article('long', 31), article('new', 10)]
     expect(plan(queue, { busy })).toEqual([{
-      id: '2026-11-22', startAt: '2026-11-23T03:00:00.000Z', endAt: '2026-11-23T03:30:00.000Z',
+      id: '2026-11-22', startAt: '2026-11-23T03:00:00.000Z', endAt: '2026-11-23T03:28:00.000Z',
       items: [queue[0], queue[2]],
     }])
   })
@@ -77,11 +77,24 @@ describe('Catch up', () => {
   it('alternates long items with oldest-first short items without shifting the rotation on replan', () => {
     const queue = [article('old long', 44), article('old short', 18), article('new long', 50), article('new short', 10)]
     const prior = plan(queue, { horizonDays: 4 })
-    expect(prior.map(({ items }) => items.map(({ id }) => id))).toEqual([
-      ['old short', 'new short'], ['old long'], ['old short', 'new short'], ['new long'],
+    expect(prior.map(({ endAt, items }) => [endAt, items.map(({ id }) => id)])).toEqual([
+      ['2026-11-23T02:28:00.000Z', ['old short', 'new short']],
+      ['2026-11-24T02:30:00.000Z', ['old long']],
+      ['2026-11-25T02:28:00.000Z', ['old short', 'new short']],
+      ['2026-11-26T02:30:00.000Z', ['new long']],
     ])
     expect(plan(queue, { now: '2026-11-23T17:00:00-08:00', horizonDays: 3 }, prior)).toEqual(prior.slice(1))
     expect(new Set(plan([queue[0]!, queue[2]!]).flatMap(({ items }) => items.map(({ id }) => id))))
       .toEqual(new Set(['old long', 'new long']))
+  })
+
+  it('fits a short turn into a gap that cannot hold a full block', () => {
+    const short = article('short', 1)
+    const busy = [{ start: '2026-11-25T02:10:00Z', end: '2026-11-25T05:00:00Z' }]
+    expect(plan([article('long', 44), short], {
+      now: '2026-11-24T17:00:00-08:00', horizonDays: 1, busy,
+    })).toEqual([{
+      id: '2026-11-24', startAt: '2026-11-25T02:00:00.000Z', endAt: '2026-11-25T02:10:00.000Z', items: [short],
+    }])
   })
 })
