@@ -34,7 +34,7 @@ extension AppDatabase {
     ) throws -> LaterItem {
         let id = captureID.uuidString.lowercased()
         let url = url.trimmingCharacters(in: .whitespacesAndNewlines)
-        let title = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = title.map(TitleText.trimmingWhitespace)
         guard let parsed = LaterItem.webURL(url),
               var canonical = URLComponents(url: parsed, resolvingAgainstBaseURL: false),
               let host = canonical.host?.lowercased(), (title?.utf16.count ?? 0) <= 200

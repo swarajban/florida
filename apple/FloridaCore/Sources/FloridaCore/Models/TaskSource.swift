@@ -29,7 +29,7 @@ public struct TaskSource: Codable, Hashable, Sendable {
 
     public static func from(url: String, title: String? = nil) -> TaskSource? {
         let text = url.trimmingCharacters(in: .whitespacesAndNewlines)
-        let supplied = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let supplied = title.map(TitleText.trimmingWhitespace)
         guard (supplied?.utf16.count ?? 0) <= 200, let parsed = safeURL(text) else { return nil }
         let hostname = parsed.host?.lowercased() ?? ""
         let host = hostname.contains(":") && !hostname.hasPrefix("[") ? "[\(hostname)]" : hostname

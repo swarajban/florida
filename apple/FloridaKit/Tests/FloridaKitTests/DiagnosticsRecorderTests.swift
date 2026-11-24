@@ -128,6 +128,37 @@ import Testing
         #expect(tags[0] == tags[1] && tags[0] == tags[4] && tags[4] != tags[5] && tags[5] == tags[6])
     }
 
+    @Test func eventWireTitleMatchesTheRedactedParserTag() async throws {
+        let db = try AppDatabase.inMemory()
+        try db.apply(SyncResponse(cursor: "initial", calendars: [Fixtures.calendar()]))
+        var event = Fixtures.event(id: "new-event", start: "2026-12-16T17:00:00Z", end: "2026-12-16T17:30:00Z")
+        event.googleId = ""
+        let title = "Quivella s"
+        event.summary = title
+        let recorder = DiagnosticsRecorder()
+        recorder.start()
+        recorder.record("event-quick-add", "parser", [
+            "input": .redactedText(title + " on 12/16"),
+            "title": .redactedText(title),
+        ])
+        try db.saveEvent(event, now: Fixtures.t0)
+        event.googleId = "google-event"
+        let transport = FakeTransport([.ok(try Fixtures.putResponse("event", event))])
+        let config = ServerConfig(baseURL: URL(string: "https://florida.test")!, token: "fixture-token")
+        let client = SyncClient(database: db, config: config, transport: transport, diagnostics: recorder)
+        #expect(try await client.push() == 1)
+
+        let report = try #require(recorder.report(metadata))
+        let lines = report.split(separator: "\n")
+        let parser = try #require(lines.first { $0.contains("event-quick-add.parser") })
+        let sent = try #require(lines.first { $0.contains("http.write-send") && $0.contains("/api/events/:id") })
+        let accepted = try #require(lines.first { $0.contains("write.accepted-title") })
+        let tag = try #require(parser.firstMatch(of: /title="tag=([a-f0-9]+)/)?.1)
+        #expect(sent.contains("title=\"tag=\(tag)"))
+        #expect(accepted.contains("title=\"tag=\(tag)"))
+        #expect(!report.contains(title))
+    }
+
     @Test func rejectedAndDeferredWritesRecordStatusWithoutErrorBodies() async throws {
         let db = try AppDatabase.inMemory()
         let recorder = DiagnosticsRecorder()

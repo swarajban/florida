@@ -29,7 +29,7 @@ final class ShareCaptureModel {
         self.now = now
         let parsed = ShareDraftParser.parse(input, now: now, calendar: .current) ?? QuickAddDraft()
         source = parsed.source
-        let pageTitle = input.pageTitle?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        let pageTitle = input.pageTitle.flatMap { TitleText.trimmingWhitespace($0).nilIfEmpty }
         var shortTitle = pageTitle.map { String($0.prefix(200)) }
         while let title = shortTitle, title.utf16.count > 200 { shortTitle?.removeLast() }
         laterTitle = shortTitle?.nilIfEmpty
@@ -41,9 +41,9 @@ final class ShareCaptureModel {
             mode = .task
             laterKind = .other
         }
-        let text = pageTitle
-            ?? input.text?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? parsed.title
-        let literalTitle = pageTitle != nil || input.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
+        let sharedText = input.text.flatMap { TitleText.trimmingWhitespace($0).nilIfEmpty }
+        let text = pageTitle ?? sharedText ?? parsed.title
+        let literalTitle = pageTitle != nil || sharedText == nil
         self.text = text
         self.literalTitle = literalTitle
         draft = literalTitle ? QuickAddDraft(title: String(text.prefix(120)), source: parsed.source) : parsed

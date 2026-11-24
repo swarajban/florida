@@ -2,6 +2,7 @@ import FloridaKit
 import SwiftUI
 #if os(macOS)
 import AppKit
+import Combine
 #endif
 
 struct EventQuickAddComposer: View {
@@ -125,17 +126,20 @@ struct EventQuickAddComposer: View {
             #if os(iOS)
             EventComposerTextField(
                 placeholder: "Lunch tomorrow 12-1 at Blue Bottle #work",
-                text: Binding(get: { session.text }, set: { session.updateText($0); error = nil }),
+                text: Binding(get: { session.text }, set: { updateText($0) }),
                 focused: $inputFocused, identifier: "event-quick-add-input",
-                onSubmit: { if activeField == nil { save() } })
+                onSubmit: { save(trigger: "input-return") })
             #else
             TextField("Lunch tomorrow 12-1 at Blue Bottle #work", text: Binding(
                 get: { session.text },
-                set: { session.updateText($0); error = nil }))
+                set: { updateText($0) }))
                 .font(.body)
                 .textFieldStyle(.plain)
                 .focused($inputFocused)
-                .onSubmit { if activeField == nil { save() } }
+                .onSubmit { save(trigger: "input-return") }
+                .onReceive(NotificationCenter.default.publisher(for: NSControl.textDidChangeNotification)) { change in
+                    recordNativeEdit(change)
+                }
                 .accessibilityIdentifier("event-quick-add-input")
             #endif
             Text("Dates use month/day. Times use \(calendar.timeZone.identifier).")
@@ -162,7 +166,11 @@ struct EventQuickAddComposer: View {
             .accessibilityIdentifier("event-quick-add-title")
             previewChips
             if session.hasCorrections {
-                Button("Reset corrections") { session.resetCorrections(); error = nil }
+                Button("Reset corrections") {
+                    session.resetCorrections()
+                    recordParse()
+                    error = nil
+                }
                     .font(.caption)
                     .accessibilityIdentifier("event-quick-add-reset")
                 Text("Corrections stay as you type until reset.")
@@ -260,7 +268,7 @@ struct EventQuickAddComposer: View {
             .keyboardShortcut("e", modifiers: .command)
             .disabled(session.event(in: calendars, accounts: accounts, allowUntitled: true) == nil)
             .accessibilityIdentifier("event-quick-add-details")
-            Button(action: save) {
+            Button { save(trigger: "add-action") } label: {
                 Label("Add event", systemImage: "plus")
                     .frame(maxWidth: .infinity)
                     .foregroundStyle(FloridaStyle.paper)
@@ -417,12 +425,61 @@ struct EventQuickAddComposer: View {
         onOpenEditor(event, session.draft.recurrence)
     }
 
-    private func save() {
+    private func save(trigger: String) {
         guard canSave, activeField == nil, let event = session.event(in: calendars, accounts: accounts) else { return }
+        #if os(macOS)
+        let recorder = DiagnosticsRecorder.shared
+        if recorder.isRecording {
+            let activation: String = switch NSApp.currentEvent?.type {
+            case .keyDown, .keyUp: "keyboard"
+            case .leftMouseDown, .leftMouseUp: "pointer"
+            default: "other"
+            }
+            var fields: [String: DiagnosticsRecorder.Field] = [
+                "trigger": .value(trigger), "activation": .value(activation),
+                "mirror": .redactedText(session.text), "parsed": .redactedText(session.draft.title),
+                "title": .redactedText(event.summary ?? ""),
+            ]
+            if let editor = focusedMacEditor { fields["buffer"] = .redactedText(editor.string) }
+            recorder.record("event-quick-add", "submit", fields)
+        }
+        #endif
         if !onSave(event, session.draft.recurrence, guests.write(isNew: true, parsed: session.draft.attendees)) {
             error = "Could not save locally. Your draft is still here; check the app’s error and try again."
         }
     }
+
+    private func updateText(_ text: String) {
+        session.updateText(text)
+        recordParse()
+        error = nil
+    }
+
+    private func recordParse() {
+        DiagnosticsRecorder.shared.record("event-quick-add", "parser", [
+            "input": .redactedText(session.text),
+            "title": .redactedText(session.draft.title),
+        ])
+    }
+
+    #if os(macOS)
+    private var focusedMacEditor: NSTextView? {
+        guard inputFocused, activeField == nil,
+              let editor = NSApp.keyWindow?.firstResponder as? NSTextView, editor.isFieldEditor else { return nil }
+        return editor
+    }
+
+    private func recordNativeEdit(_ change: Notification) {
+        let recorder = DiagnosticsRecorder.shared
+        guard recorder.isRecording, let field = change.object as? NSTextField,
+              let editor = focusedMacEditor, field.currentEditor() === editor else { return }
+        let selection = editor.selectedRange()
+        recorder.record("event-quick-add", "buffer", [
+            "buffer": .redactedText(editor.string), "marked": .value(String(editor.hasMarkedText())),
+            "selection": .value("\(selection.location):\(selection.length)"),
+        ])
+    }
+    #endif
 }
 
 struct EventGuestsInput: View {

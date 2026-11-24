@@ -139,19 +139,20 @@ public struct EventQuickAddSession: Sendable {
         guard accounts.contains(where: { $0.id == destination.accountId }) else {
             return "The calendar’s account is unavailable. Sync your accounts before saving."
         }
-        if draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "Give this event a title." }
+        if TitleText.trimmingWhitespace(draft.title).isEmpty { return "Give this event a title." }
         if draft.endAt <= draft.startAt { return "The end must be after the start." }
         return nil
     }
 
     public func event(in calendars: [CalendarInfo], accounts: [GoogleAccount], allowUntitled: Bool = false) -> CalendarEvent? {
-        guard (allowUntitled || !draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty),
+        let title = TitleText.trimmingWhitespace(draft.title)
+        guard (allowUntitled || !title.isEmpty),
               draft.endAt > draft.startAt,
               let destination = destination(in: calendars, accounts: accounts),
               accounts.contains(where: { $0.id == destination.accountId }) else { return nil }
         return CalendarEvent(
             id: template.id, calendarId: destination.id, googleId: "", status: "confirmed",
-            summary: draft.title.trimmingCharacters(in: .whitespacesAndNewlines),
+            summary: title,
             location: draft.location?.trimmingCharacters(in: .whitespacesAndNewlines),
             startAt: draft.startAt, endAt: draft.endAt, allDay: draft.allDay,
             description: draft.notes, updatedAt: now)
