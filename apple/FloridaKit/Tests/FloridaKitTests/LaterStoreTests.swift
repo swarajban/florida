@@ -4,6 +4,18 @@ import Testing
 @testable import FloridaKit
 
 @Suite struct LaterStoreTests {
+    @Test(arguments: ["Q", "Quivella", "Quivella s", "Quivella screening"])
+    func laterKeepsTheWholeQueuedTitle(_ title: String) throws {
+        let db = try AppDatabase.inMemory()
+        let input = NSMutableString(string: "\t\(title)\u{00A0}\n") as String
+        let item = try db.saveLater(url: "https://example.com/story", title: input, kind: .article)
+        let write = try #require(try db.pendingWrites().first)
+        let body = try #require(write.body)
+        let fields = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(item.title == title)
+        #expect(fields["title"] as? String == title)
+    }
+
     @Test func storesAndReplacesCatchUpBlocksWhileKeepingLaterRows() throws {
         let db = try AppDatabase.inMemory()
         let now = Fixtures.t0

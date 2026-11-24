@@ -125,13 +125,13 @@ struct EventQuickAddComposer: View {
             #if os(iOS)
             EventComposerTextField(
                 placeholder: "Lunch tomorrow 12-1 at Blue Bottle #work",
-                text: Binding(get: { session.text }, set: { session.updateText($0); error = nil }),
+                text: Binding(get: { session.text }, set: updateText),
                 focused: $inputFocused, identifier: "event-quick-add-input",
                 onSubmit: { if activeField == nil { save() } })
             #else
             TextField("Lunch tomorrow 12-1 at Blue Bottle #work", text: Binding(
                 get: { session.text },
-                set: { session.updateText($0); error = nil }))
+                set: updateText))
                 .font(.body)
                 .textFieldStyle(.plain)
                 .focused($inputFocused)
@@ -162,7 +162,11 @@ struct EventQuickAddComposer: View {
             .accessibilityIdentifier("event-quick-add-title")
             previewChips
             if session.hasCorrections {
-                Button("Reset corrections") { session.resetCorrections(); error = nil }
+                Button("Reset corrections") {
+                    session.resetCorrections()
+                    recordParse()
+                    error = nil
+                }
                     .font(.caption)
                     .accessibilityIdentifier("event-quick-add-reset")
                 Text("Corrections stay as you type until reset.")
@@ -422,6 +426,19 @@ struct EventQuickAddComposer: View {
         if !onSave(event, session.draft.recurrence, guests.write(isNew: true, parsed: session.draft.attendees)) {
             error = "Could not save locally. Your draft is still here; check the app’s error and try again."
         }
+    }
+
+    private func updateText(_ text: String) {
+        session.updateText(text)
+        recordParse()
+        error = nil
+    }
+
+    private func recordParse() {
+        DiagnosticsRecorder.shared.record("event-quick-add", "parser", [
+            "input": .redactedText(session.text),
+            "title": .redactedText(session.draft.title),
+        ])
     }
 }
 

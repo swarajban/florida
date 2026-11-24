@@ -14,8 +14,8 @@ public struct ShareInput: Hashable, Sendable {
 
 public enum ShareDraftParser {
     public static func parse(_ input: ShareInput, now: Date, calendar: Calendar) -> QuickAddDraft? {
-        let text = input.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let pageTitle = input.pageTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let text = input.text.map(TitleText.trimmingWhitespace) ?? ""
+        let pageTitle = input.pageTitle.map(TitleText.trimmingWhitespace) ?? ""
         var source = input.url.flatMap { TaskSource.from(url: $0) }
             ?? text.split(whereSeparator: \.isWhitespace).lazy.compactMap { TaskSource.from(url: String($0)) }.first
         guard source != nil || !text.isEmpty else { return nil }

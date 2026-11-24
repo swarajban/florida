@@ -128,6 +128,18 @@ import Testing
         #expect(try store.pendingWrites().map(\.entity) == [.laterItem])
     }
 
+    @Test(arguments: ["Q", "Quivella", "Quivella s", "Quivella screening"])
+    func laterKeepsTheWholeSharedTitle(_ title: String) async throws {
+        let path = try file()
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let pageTitle = NSMutableString(string: "\t\(title) — /~\u{00A0}\n") as String
+        let model = ShareCaptureModel(input: ShareInput(url: "https://youtu.be/example", pageTitle: pageTitle))
+        await model.load(path: path)
+        #expect(model.mode == .later)
+        let item = try #require(await model.addLater(path: path))
+        #expect(item.title == "\(title) — /~")
+    }
+
     @Test func taskFirstLinksCanGoToLaterButNonWebSharesCannot() async throws {
         let path = try file()
         defer { try? FileManager.default.removeItem(atPath: path) }
