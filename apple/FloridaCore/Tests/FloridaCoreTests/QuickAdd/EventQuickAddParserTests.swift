@@ -25,6 +25,24 @@ private func eventParse(
 }
 
 @Suite struct EventQuickAddParserTests {
+    @Test(arguments: ["SB", "ET", "PT", "CL", "SB/CL"])
+    func keepsLeadingInitialsWhenParsingEventMetadata(_ initials: String) {
+        let title = "\(initials) out - Bowling with Friends"
+        let start = eventDate(2026, 12, 16, 18)
+        let raw = NSMutableString(string: "\(title) on 12/16 at 6pm #sb with guest@example.com") as String
+        let parsed = eventParse(raw)
+        #expect(parsed.title == title)
+        #expect(parsed.startAt == start)
+        #expect(parsed.calendarHint == "sb")
+        #expect(parsed.attendees == ["guest@example.com"])
+
+        let plain = eventParse("\(initials) 1x1", defaultStart: start)
+        #expect(plain.title == "\(initials) 1x1")
+        #expect(plain.startAt == start)
+        #expect(plain.calendarHint == nil)
+        #expect(plain.attendees.isEmpty)
+    }
+
     @Test func lunchRangeAndDentistDuration() {
         let lunch = eventParse("lunch with Dana tomorrow 12-1")
         #expect(lunch.title == "lunch with Dana")
