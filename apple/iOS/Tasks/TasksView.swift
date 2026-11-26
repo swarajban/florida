@@ -171,6 +171,30 @@ struct TasksView: View {
                     }
                     .accessibilityLabel("Categories")
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    let unreadCount = model.later.queue.count
+                    Button {
+                        path = [.later]
+                    } label: {
+                        Image(systemName: "bookmark")
+                            .overlay(alignment: .topTrailing) {
+                                if unreadCount > 0 {
+                                    Text(unreadCount > 99 ? "99+" : unreadCount.formatted())
+                                        .font(.system(size: 9, weight: .bold).monospacedDigit())
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 3)
+                                        .frame(minWidth: 14, minHeight: 14)
+                                        .background(.red, in: Capsule())
+                                        .fixedSize()
+                                        .offset(x: 8, y: -5)
+                                        .accessibilityHidden(true)
+                                }
+                            }
+                    }
+                    .accessibilityLabel("Later, \(unreadCount) unread")
+                    .accessibilityIdentifier("tasks-later-toolbar")
+                    .accessibilityAddTraits(.isButton)
+                }
             }
             .navigationDestination(for: TasksRoute.self) { route in
                 switch route {
