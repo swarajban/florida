@@ -2,6 +2,32 @@ import XCTest
 
 final class LaterSmokeTests: XCTestCase {
     @MainActor
+    func testLaterToolbarOpensQueue() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-demoData", "YES", "-uiLaterFixture", "YES",
+            "-uiTab", "tasks", "-uiAppearance", "light"]
+        app.launch()
+        addTeardownBlock { @MainActor in
+            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            screenshot.name = "Later toolbar result"
+            screenshot.lifetime = .keepAlways
+            self.add(screenshot)
+        }
+
+        let later = app.buttons["tasks-later-toolbar"]
+        assertVisible(later, in: app)
+        let header = XCTAttachment(screenshot: app.screenshot())
+        header.name = "Tasks header with Later badge"
+        header.lifetime = .keepAlways
+        add(header)
+        XCTAssertEqual(later.label, "Later, 1 unread")
+        assertVisible(app.buttons["tasks-view-options"], in: app)
+        later.tap()
+        assertVisible(element("later-item-test-story", in: app), in: app)
+    }
+
+    @MainActor
     func testLaterQueueAndCatchUp() {
         continueAfterFailure = false
         let app = XCUIApplication()
